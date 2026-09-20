@@ -110,7 +110,9 @@ export class BuildEngine {
       // 自定义命令文件（ram.ld/app.xm 等）或标准源文件才编译
       if (!isCustom && !this.isCompilable(file.relativeFilename)) continue;
 
+      // 绝对对象路径用于增量判断，相对对象路径用于命令行（避免含空格路径）
       const object = this.objectPathFor(target, file);
+      const objectRel = this.objectPathRelative(target, file);
       const deps = this.depsPathFor(target, file);
 
       // 增量编译：源文件未变更且对象文件存在时跳过（rebuild 强制重编译）
@@ -121,14 +123,14 @@ export class BuildEngine {
       let command: string;
       if (isCustom) {
         // 自定义编译命令：直接展开 $compiler/$file 等内置宏 + $(...) 变量
-        command = this.expandCustomCommand(customCmd, generator, target, file, object);
+        command = this.expandCustomCommand(customCmd, generator, target, file, objectRel);
       } else {
         command = generator.generate(CommandType.CompileObjectCmd, {
           target,
           pf: file,
           file: file.absolutePath,
-          object,
-          flatObject: object,
+          object: objectRel,
+          flatObject: objectRel,
           deps,
           hasCppFilesToLink: hasCpp,
         });
@@ -158,7 +160,7 @@ export class BuildEngine {
       // 链接对象只含「标准源文件」编译出的对象，排除自定义 buildCommand 文件
       // （ram.ld → ram.o 是链接脚本、app.xm → appxm.o 是资源，均不参与链接）
       const linkUnits = units.filter((u) => !this.isCustomFile(u.file, target));
-      const linkObjects = linkUnits.map((u) => this.objectPathFor(u.target, u.file));
+      const linkObjects = linkUnits.map((u) => this.objectPathRelative(u.target, u.file));
       const linkCommand = generator.generate(this.linkCommandType(target), {
         target,
         pf: null,
@@ -178,7 +180,7 @@ export class BuildEngine {
       }
     } else if (target.targetType === TargetType.StaticLib) {
       // 静态库用 ar 打包
-      const objects = units.map((u) => this.objectPathFor(u.target, u.file));
+      const objects = units.map((u) => this.objectPathRelative(u.target, u.file));
       const staticOut = path.join(
         path.dirname(target.outputFilename),
         path.parse(target.outputFilename).name + '.' + this.compiler.switches.libExtension,
@@ -271,6 +273,14 @@ export class BuildEngine {
     const relObj = path.join(objDir, path.dirname(file.relativeFilename));
     const name = path.parse(file.relativeFilename).name;
     return path.join(this.project.basePath, relObj, name + '.' + this.compiler.switches.objectExtension);
+  }
+
+  /** 相对项目根的对象路径（用于命令行，与 CodeBlocks 一致，避免绝对路径含空格） */
+  private objectPathRelative(target: BuildTarget, file: ProjectFile): string {
+    const objDir = target.objectOutput || 'obj';
+    const relObj = path.join(objDir, path.dirname(file.relativeFilename));
+    const name = path.parse(file.relativeFilename).name;
+    return path.join(relObj, name + '.' + this.compiler.switches.objectExtension);
   }
 
   private depsPathFor(target: BuildTarget, file: ProjectFile): string {

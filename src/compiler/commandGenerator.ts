@@ -333,11 +333,11 @@ export class CommandGenerator {
 
     let macro = template;
 
-    // 1. 编译器/链接器程序
-    macro = macro.replace(/\$compiler/g, picked.comp);
-    macro = macro.replace(/\$linker/g, linkerProgram);
-    macro = macro.replace(/\$lib_linker/g, prog.LIB);
-    macro = macro.replace(/\$rescomp/g, prog.WINDRES);
+    // 1. 编译器/链接器程序（含空格的路径需加引号，避免 shell 把 "C:\Program" 当命令）
+    macro = macro.replace(/\$compiler/g, quoteIfNeeded(picked.comp));
+    macro = macro.replace(/\$linker/g, quoteIfNeeded(linkerProgram));
+    macro = macro.replace(/\$lib_linker/g, quoteIfNeeded(prog.LIB));
+    macro = macro.replace(/\$rescomp/g, quoteIfNeeded(prog.WINDRES));
     // 2. 选项
     macro = macro.replace(/\$options/g, cFlags);
     macro = macro.replace(/\$res_options/g, rcFlags);
@@ -351,16 +351,16 @@ export class CommandGenerator {
     macro = macro.replace(/\$file_name/g, baseName);
     macro = macro.replace(/\$file_dir/g, dirName);
     macro = macro.replace(/\$file_ext/g, fileExt);
-    macro = macro.replace(/\$file/g, file);
-    macro = macro.replace(/\$dep_object/g, deps);
+    macro = macro.replace(/\$file/g, quoteIfNeeded(file));
+    macro = macro.replace(/\$dep_object/g, quoteIfNeeded(deps));
 
     // 4. objects_output_dir 必须在 $object 之前
     if (params.target) {
       macro = macro.replace(/\$objects_output_dir/g, toUnix(params.target.objectOutput));
     }
     // 5. object / resource_output
-    macro = macro.replace(/\$object/g, object);
-    macro = macro.replace(/\$resource_output/g, object);
+    macro = macro.replace(/\$object/g, quoteIfNeeded(object));
+    macro = macro.replace(/\$resource_output/g, quoteIfNeeded(object));
     // 6. exe 输出
     if (params.target) {
       macro = macro.replace(/\$exe_output/g, cache?.output ?? '');
