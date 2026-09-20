@@ -64,6 +64,8 @@ export enum CompilerLineType {
 export interface ProjectFile {
   /** 相对项目根目录的路径（Unix 分隔符） */
   relativeFilename: string;
+  /** 相对公共顶层路径（无 ..，用于生成对象文件名，对应 projectfile.h relativeToCommonTopLevelPath） */
+  relativeToCommonTopLevelPath: string;
   /** 绝对路径（加载后计算） */
   absolutePath: string;
   /** 该文件所属的构建目标标题列表 */
@@ -138,6 +140,8 @@ export interface Project {
   title: string;
   /** 项目根目录（绝对路径） */
   basePath: string;
+  /** 所有文件的公共顶层路径（绝对路径，用于生成对象文件，对应 cbproject.cpp CalculateCommonTopLevelPath） */
+  commonTopLevelPath: string;
   /** .cbp 文件绝对路径 */
   filename: string;
   /** 默认编译器 ID */

@@ -277,17 +277,17 @@ export class BuildEngine {
 
   private objectPathFor(target: BuildTarget, file: ProjectFile): string {
     const objDir = target.objectOutput || 'obj';
-    const relObj = path.join(objDir, path.dirname(file.relativeFilename));
-    const name = path.parse(file.relativeFilename).name;
-    return path.join(this.project.basePath, relObj, name + '.' + this.compiler.switches.objectExtension);
+    const rel = file.relativeToCommonTopLevelPath || file.relativeFilename;
+    const name = path.parse(rel).name;
+    return path.join(this.project.basePath, objDir, path.dirname(rel), name + '.' + this.compiler.switches.objectExtension);
   }
 
   /** 相对项目根的对象路径（用于命令行，与 CodeBlocks 一致，避免绝对路径含空格） */
   private objectPathRelative(target: BuildTarget, file: ProjectFile): string {
     const objDir = target.objectOutput || 'obj';
-    const relObj = path.join(objDir, path.dirname(file.relativeFilename));
-    const name = path.parse(file.relativeFilename).name;
-    return path.join(relObj, name + '.' + this.compiler.switches.objectExtension);
+    const rel = file.relativeToCommonTopLevelPath || file.relativeFilename;
+    const name = path.parse(rel).name;
+    return path.join(objDir, path.dirname(rel), name + '.' + this.compiler.switches.objectExtension);
   }
 
   /** 为所有待编译单元递归创建对象目录（对应 CreateDirRecursively） */

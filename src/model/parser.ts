@@ -38,9 +38,16 @@ function defaultRelations(): Record<OptionsRelationType, OptionsRelation> {
   };
 }
 
-/** 解析 TargetType 字符串 */
+/** 解析 TargetType 字符串或数字（.cbp 中 type 既可能是 "console" 也可能是数字 "1"） */
 function parseTargetType(s: string | undefined): TargetType {
-  switch ((s ?? '').toLowerCase()) {
+  const v = (s ?? '').trim();
+  // 数字形式：ttExecutable=0, ttConsoleOnly=1, ttStaticLib=2, ttDynamicLib=3, ttCommandsOnly=4, ttNative=5
+  if (/^\d+$/.test(v)) {
+    const n = Number(v);
+    if (n >= 0 && n <= 5) return n as TargetType;
+    return TargetType.Executable;
+  }
+  switch (v.toLowerCase()) {
     case 'console': return TargetType.ConsoleOnly;
     case 'static library': case 'staticlibrary': return TargetType.StaticLib;
     case 'dynamic library': case 'dynamiclibrary': return TargetType.DynamicLib;
@@ -118,6 +125,7 @@ export class ProjectParser {
     const project: Project = {
       title: String(root.Project?.['@_title'] ?? path.basename(filename, '.cbp')),
       basePath,
+      commonTopLevelPath: basePath,
       filename,
       compilerId: '',
       compilerOptions: [],
@@ -156,7 +164,55 @@ export class ProjectParser {
       this.parseUnits(root.Project, project);
     }
 
+    // 计算公共顶层路径并设置 relativeToCommonTopLevelPath（对应 CalculateCommonTopLevelPath）
+    project.commonTopLevelPath = this.calculateCommonTopLevelPath(project);
+    for (const f of project.files) {
+      f.relativeToCommonTopLevelPath = this.relativeToCommonTopLevel(f.absolutePath, project.commonTopLevelPath);
+    }
+
     return project;
+  }
+
+  /** 计算所有文件的公共顶层路径（移植 CalculateCommonTopLevelPath） */
+  private calculateCommonTopLevelPath(project: Project): string {
+    const sep = path.sep;
+    let base = project.basePath + sep;
+    const vol = path.parse(base).root;
+
+    for (const f of project.files) {
+      if (!f.absolutePath) continue;
+      // 跨卷文件不参与（简化：仅同卷）
+      if (path.parse(f.absolutePath).root !== vol) continue;
+
+      const tmp = f.relativeFilename;
+      // 跳过开头的 '.' '/' '\' 字符，得到相对公共前缀（如 "../../"）
+      let pos = 0;
+      while (pos < tmp.length && (tmp[pos] === '.' || tmp[pos] === '/' || tmp[pos] === '\\')) pos++;
+      if (pos > 0 && pos < tmp.length) {
+        const tmpbase = project.basePath + sep + tmp.slice(0, pos) + sep;
+        const norm = path.normalize(tmpbase);
+        // 若规范化的 tmpbase 目录层级少于 base，且 base 以其为前缀，则提升 base
+        if (norm.split(/[\\/]/).filter(Boolean).length < base.split(/[\\/]/).filter(Boolean).length
+            && this.startsWithPath(base, norm)) {
+          base = norm;
+        }
+      }
+    }
+
+    // 确保以分隔符结尾（Code::Blocks 返回带尾分隔符的目录）
+    return base.endsWith(sep) ? base : base + sep;
+  }
+
+  private startsWithPath(base: string, prefix: string): boolean {
+    const b = path.resolve(base);
+    const p = path.resolve(prefix);
+    return b === p || b.startsWith(p + path.sep);
+  }
+
+  /** 计算文件相对公共顶层路径的路径（对应 MakeRelativeTo(m_CommonTopLevelPath)） */
+  private relativeToCommonTopLevel(fileAbs: string, commonTopLevelPath: string): string {
+    const rel = path.relative(commonTopLevelPath, fileAbs);
+    return rel.replace(/\\/g, '/');
   }
 
   private parseProjectOptions(optNodes: any, project: Project): void {
@@ -336,6 +392,7 @@ export class ProjectParser {
       const rel = toUnix(filename);
       const file: ProjectFile = {
         relativeFilename: rel,
+        relativeToCommonTopLevelPath: rel,
         absolutePath: unixJoin(project.basePath, rel),
         buildTargets: [],
         compilerVar: '',
