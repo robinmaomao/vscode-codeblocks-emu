@@ -98,6 +98,8 @@ export class BuildEngine {
 
     // 1. 编译所有文件（增量：跳过未变更文件）
     const units: CompileUnit[] = [];
+    // 参与链接的文件列表（无论本次是否重编译，只要编译产出对象就参与链接）
+    const linkFiles: ProjectFile[] = [];
     const files = target.files.length ? target.files : this.project.files;
     const hasCpp = files.some((f) => /\.(cpp|cc|cxx|C)$/.test(f.relativeFilename));
 
@@ -114,6 +116,11 @@ export class BuildEngine {
       const object = this.objectPathFor(target, file);
       const objectRel = this.objectPathRelative(target, file);
       const deps = this.depsPathFor(target, file);
+
+      // 标准源文件（非自定义命令）参与链接
+      if (!isCustom && file.link !== false) {
+        linkFiles.push(file);
+      }
 
       // 增量编译：源文件未变更且对象文件存在时跳过（rebuild 强制重编译）
       if (!options.rebuild && !isCustom && this.isUpToDate(file.absolutePath, object)) {
@@ -144,10 +151,14 @@ export class BuildEngine {
     // 否则 GCC 无法创建 Output\obj\plugin\xxx.o 等子目录下的对象文件
     this.ensureObjectDirs(units);
 
-    // 无需要编译的文件
+    // 无需要编译的文件（且输出已存在）→ 跳过
     if (units.length === 0) {
-      this.output.appendLine(`[Code::Blocks] 目标 "${target.title}" 已是最新`);
-      return true;
+      const outAbs = path.join(this.project.basePath, target.outputFilename);
+      if (fs.existsSync(outAbs)) {
+        this.output.appendLine(`[Code::Blocks] 目标 "${target.title}" 已是最新`);
+        return true;
+      }
+      // 输出缺失但无新编译：仍尝试链接（对象可能已存在）
     }
 
     // 并行编译（受配置限制）
@@ -164,10 +175,9 @@ export class BuildEngine {
       // 创建输出目录（如 Output\bin），否则链接器无法写 app.rv32
       this.ensureDir(path.join(this.project.basePath, path.dirname(target.outputFilename)));
 
-      // 链接对象只含「标准源文件」编译出的对象，排除自定义 buildCommand 文件
+      // 链接对象 = 所有参与链接的标准源文件对象（不论本次是否重编译）
       // （ram.ld → ram.o 是链接脚本、app.xm → appxm.o 是资源，均不参与链接）
-      const linkUnits = units.filter((u) => !this.isCustomFile(u.file, target));
-      const linkObjects = linkUnits.map((u) => this.objectPathRelative(u.target, u.file));
+      const linkObjects = linkFiles.map((f) => this.objectPathRelative(target, f));
       const linkCommand = generator.generate(this.linkCommandType(target), {
         target,
         pf: null,
@@ -186,8 +196,8 @@ export class BuildEngine {
         }
       }
     } else if (target.targetType === TargetType.StaticLib) {
-      // 静态库用 ar 打包
-      const objects = units.map((u) => this.objectPathRelative(u.target, u.file));
+      // 静态库用 ar 打包（用所有参与链接的对象，而非仅本次编译的）
+      const objects = linkFiles.map((f) => this.objectPathRelative(target, f));
       const staticOut = path.join(
         path.dirname(target.outputFilename),
         path.parse(target.outputFilename).name + '.' + this.compiler.switches.libExtension,
