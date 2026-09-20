@@ -5,6 +5,10 @@
   "version": "0.1.0",
   "publisher": "codeblocks",
   "license": "SEE LICENSE IN LICENSE.md",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/robinmaomao/vscode-codeblocks-emu.git"
+  },
   "engines": {
     "vscode": "^1.85.0"
   },
@@ -24,20 +28,6 @@
   "activationEvents": [
     "onLanguage:c",
     "onLanguage:cpp",
-    "onView:codeblocks.projectTree",
-    "onCommand:codeblocks.openProject",
-    "onCommand:codeblocks.build",
-    "onCommand:codeblocks.rebuild",
-    "onCommand:codeblocks.buildAndRun",
-    "onCommand:codeblocks.clean",
-    "onCommand:codeblocks.run",
-    "onCommand:codeblocks.debug",
-    "onCommand:codeblocks.selectTarget",
-    "onCommand:codeblocks.detectCompilers",
-    "onCommand:codeblocks.compilerOptions",
-    "onCommand:codeblocks.codeStats",
-    "onCommand:codeblocks.todoList",
-    "onCommand:codeblocks.format",
     "workspaceContains:**/*.cbp",
     "workspaceContains:**/*.workspace"
   ],
