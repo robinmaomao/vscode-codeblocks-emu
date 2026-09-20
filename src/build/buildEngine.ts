@@ -9,17 +9,38 @@ import * as path from 'path';
 import * as fs from 'fs';
 import * as os from 'os';
 import { spawn } from 'child_process';
-import { Project, BuildTarget, ProjectFile, TargetType, CommandType } from '../model/types';
+import { Project, BuildTarget, ProjectFile, TargetType, CommandType, CompilerLineType } from '../model/types';
 import { Compiler } from '../compiler/compiler';
 import { CommandGenerator } from '../compiler/commandGenerator';
 import { OutputParser } from './outputParser';
 import { runScriptCommands, buildMacroVars } from './scriptRunner';
 
+/** 结构化的诊断信息（供 Build Log 视图展示，文件为绝对路径） */
+export interface StructuredDiagnostic {
+  severity: 'error' | 'warning';
+  message: string;
+  file?: string;
+  line?: number;
+  column?: number;
+}
+
 export interface BuildOptions {
   rebuild?: boolean;
   clean?: boolean;
   onLine?: (line: string) => void;
-  onDiagnostic?: (diag: vscode.Diagnostic) => void;
+  onDiagnostic?: (diag: vscode.Diagnostic, fileUri?: vscode.Uri) => void;
+  /** 结构化诊断回调（Build Log 视图收集错误/警告） */
+  onStructuredDiagnostic?: (d: StructuredDiagnostic) => void;
+}
+
+/** 单次构建目标级统计（供 Build Log 视图展示） */
+export interface BuildTargetStats {
+  compiledCount: number;  // 本次实际编译的文件数
+  skippedCount: number;   // 增量跳过数
+  failedCount: number;    // 编译失败文件数
+  linkSuccess: boolean;
+  linkSkipped: boolean;   // static lib 无链接步骤
+  outputFilename?: string;
 }
 
 /** 编译单元：一个文件的一条编译命令 */
@@ -32,6 +53,8 @@ interface CompileUnit {
 
 export class BuildEngine {
   private parser: OutputParser;
+  /** 最近一次 build() 的累计统计（供 Build Log 视图读取） */
+  lastStats: BuildTargetStats | undefined;
 
   constructor(
     private project: Project,
@@ -53,16 +76,36 @@ export class BuildEngine {
       return false;
     }
 
+    // 累计各目标的统计结果（供 Build Log 视图）
+    let compiledCount = 0;
+    let skippedCount = 0;
+    let failedCount = 0;
+    let linkSuccess = true;
+    let linkSkipped = true;
+    let outputFilename: string | undefined;
+
     let ok = true;
     for (const target of targets) {
-      const targetOk = await this.buildTarget(target, options);
-      if (!targetOk) ok = false;
+      const result = await this.buildTarget(target, options);
+      if (result) {
+        compiledCount += result.compiledCount;
+        skippedCount += result.skippedCount;
+        failedCount += result.failedCount;
+        linkSuccess = linkSuccess && result.linkSuccess;
+        linkSkipped = linkSkipped && result.linkSkipped;
+        if (result.outputFilename) outputFilename = result.outputFilename;
+      } else {
+        ok = false;
+        break;
+      }
     }
+
+    this.lastStats = { compiledCount, skippedCount, failedCount, linkSuccess, linkSkipped, outputFilename };
     return ok;
   }
 
-  /** 构建单个目标 */
-  private async buildTarget(target: BuildTarget, options: BuildOptions): Promise<boolean> {
+  /** 构建单个目标（返回统计；失败返回 false） */
+  private async buildTarget(target: BuildTarget, options: BuildOptions): Promise<BuildTargetStats | false> {
     const macroVars = buildMacroVars(this.project.basePath, target.outputFilename, target.title, target.objectOutput);
 
     if (target.targetType === TargetType.CommandsOnly) {
@@ -71,13 +114,15 @@ export class BuildEngine {
         ...this.project.commandsBeforeBuild, ...target.commandsBeforeBuild,
         ...this.project.commandsAfterBuild, ...target.commandsAfterBuild,
       ];
-      return runScriptCommands(
+      const ok = await runScriptCommands(
         cmds,
         this.project.basePath,
         macroVars,
         (l) => this.output.appendLine(l),
         this.compilerBinPath(),
       );
+      if (!ok) return false;
+      return { compiledCount: 0, skippedCount: 0, failedCount: 0, linkSuccess: true, linkSkipped: true };
     }
 
     const generator = new CommandGenerator(this.project, this.compiler);
@@ -103,6 +148,9 @@ export class BuildEngine {
     const files = target.files.length ? target.files : this.project.files;
     const hasCpp = files.some((f) => /\.(cpp|cc|cxx|C)$/.test(f.relativeFilename));
 
+    // 统计：增量跳过 / 实际编译
+    let skippedCount = 0;
+
     for (const file of files) {
       // 跳过不参与编译的文件（<Option compile="0"/>）
       if (file.compile === false) continue;
@@ -124,6 +172,7 @@ export class BuildEngine {
 
       // 增量编译：源文件未变更且对象文件存在时跳过（rebuild 强制重编译）
       if (!options.rebuild && !isCustom && this.isUpToDate(file.absolutePath, object)) {
+        skippedCount++;
         continue;
       }
 
@@ -156,7 +205,11 @@ export class BuildEngine {
       const outAbs = path.join(this.project.basePath, target.outputFilename);
       if (fs.existsSync(outAbs)) {
         this.output.appendLine(`[Code::Blocks] 目标 "${target.title}" 已是最新`);
-        return true;
+        return {
+          compiledCount: 0, skippedCount, failedCount: 0,
+          linkSuccess: true, linkSkipped: target.targetType === TargetType.StaticLib,
+          outputFilename: target.outputFilename,
+        };
       }
       // 输出缺失但无新编译：仍尝试链接（对象可能已存在）
     }
@@ -165,12 +218,14 @@ export class BuildEngine {
     const maxJobs = this.maxJobs();
     const results = await this.runInParallel(units, maxJobs, options);
 
-    if (!results.every(Boolean)) {
+    const failedCount = results.filter((r) => !r).length;
+    if (failedCount > 0) {
       this.output.appendLine(`[Code::Blocks] 目标 "${target.title}" 编译失败`);
       return false;
     }
 
     // 2. 链接（非 static lib 需要链接步骤；CommandsOnly 已在上面 return）
+    let linkSuccess = true;
     if (target.targetType !== TargetType.StaticLib) {
       // 创建输出目录（如 Output\bin），否则链接器无法写 app.rv32
       this.ensureDir(path.join(this.project.basePath, path.dirname(target.outputFilename)));
@@ -218,7 +273,14 @@ export class BuildEngine {
       }
     }
 
-    return true;
+    return {
+      compiledCount: units.length,
+      skippedCount,
+      failedCount: 0,
+      linkSuccess,
+      linkSkipped: target.targetType === TargetType.StaticLib,
+      outputFilename: target.outputFilename,
+    };
   }
 
   private linkCommandType(target: BuildTarget): CommandType {
@@ -392,7 +454,10 @@ export class BuildEngine {
           if (!line) continue;
           options.onLine?.(line);
           const diag = parser.toDiagnostic(line, cwd);
-          if (diag) options.onDiagnostic?.(diag);
+          if (diag) {
+            options.onDiagnostic?.(diag, parser.resolveFileUri(line, cwd));
+            this.emitStructuredDiagnostic(line, cwd, options);
+          }
         }
       };
 
@@ -407,12 +472,18 @@ export class BuildEngine {
         if (stdoutTailRef.value) {
           options.onLine?.(stdoutTailRef.value);
           const diag = parser.toDiagnostic(stdoutTailRef.value, cwd);
-          if (diag) options.onDiagnostic?.(diag);
+          if (diag) {
+            options.onDiagnostic?.(diag, parser.resolveFileUri(stdoutTailRef.value, cwd));
+            this.emitStructuredDiagnostic(stdoutTailRef.value, cwd, options);
+          }
         }
         if (stderrTailRef.value) {
           options.onLine?.(stderrTailRef.value);
           const diag = parser.toDiagnostic(stderrTailRef.value, cwd);
-          if (diag) options.onDiagnostic?.(diag);
+          if (diag) {
+            options.onDiagnostic?.(diag, parser.resolveFileUri(stderrTailRef.value, cwd));
+            this.emitStructuredDiagnostic(stderrTailRef.value, cwd, options);
+          }
         }
         const success = code !== null && code <= this.compiler.switches.statusSuccess;
         resolve(success);
@@ -421,6 +492,31 @@ export class BuildEngine {
         this.output.appendLine(`[Code::Blocks] 无法执行: ${err.message}`);
         resolve(false);
       });
+    });
+  }
+
+  /** 解析一行输出，若为 error/warning 则通过 onStructuredDiagnostic 上报（文件解析为绝对路径） */
+  private emitStructuredDiagnostic(line: string, cwd: string, options: BuildOptions): void {
+    if (!options.onStructuredDiagnostic) return;
+    const parsed = this.parser.parseLine(line);
+    if (!parsed) return;
+    if (parsed.type !== CompilerLineType.Error && parsed.type !== CompilerLineType.Warning) return;
+
+    // 去掉 message 前缀（error:/warning:/note:/fatal error:），图标已表达严重级别，前缀冗余
+    const message = stripMessagePrefix(parsed.message);
+    // note 行（如 "note: candidate function"）是错误上下文说明，不作为可导航的独立错误
+    if (/^note\b/i.test(message)) return;
+
+    let absFile: string | undefined;
+    if (parsed.file) {
+      absFile = path.isAbsolute(parsed.file) ? parsed.file : path.join(cwd, parsed.file);
+    }
+    options.onStructuredDiagnostic({
+      severity: parsed.type === CompilerLineType.Error ? 'error' : 'warning',
+      message,
+      file: absFile,
+      line: parsed.line,
+      column: parsed.column,
     });
   }
 
@@ -433,4 +529,14 @@ export class BuildEngine {
     }
     return ok;
   }
+}
+
+/** 去掉诊断消息开头的严重级别前缀（error:/warning:/note:/fatal error: 等），图标已表达级别 */
+function stripMessagePrefix(message: string): string {
+  return message
+    .replace(/^error:\s*/i, '')
+    .replace(/^warning:\s*/i, '')
+    .replace(/^note:\s*/i, '')
+    .replace(/^fatal error:\s*/i, '')
+    .trim();
 }

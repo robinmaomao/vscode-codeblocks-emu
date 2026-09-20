@@ -6,6 +6,7 @@
  */
 import * as vscode from 'vscode';
 import * as path from 'path';
+import * as fs from 'fs';
 import { Project, ProjectFile } from '../model/types';
 
 /** 树节点 */
@@ -17,6 +18,7 @@ class TreeNode extends vscode.TreeItem {
     public readonly project?: Project,
     public readonly resourceUri?: vscode.Uri,
     public readonly children: TreeNode[] = [],
+    public readonly file?: ProjectFile,
   ) {
     super(label, collapsibleState);
     if (kind === 'file') {
@@ -25,7 +27,11 @@ class TreeNode extends vscode.TreeItem {
         title: '打开文件',
         arguments: [resourceUri],
       };
-      this.contextValue = 'file';
+      // contextValue 编码 compile/link 状态，供右键菜单区分勾选状态
+      // 组合：file | file-nocompile | file-nolink | file-nocompile-nolink
+      const c = file?.compile !== false;
+      const l = file?.link !== false;
+      this.contextValue = 'file' + (c ? '' : '-nocompile') + (l ? '' : '-nolink');
     } else if (kind === 'project') {
       this.contextValue = 'project';
       this.command = {
@@ -66,10 +72,28 @@ export class ProjectTreeProvider implements vscode.TreeDataProvider<TreeNode> {
   readonly onDidChangeTreeData = this._onDidChangeTreeData.event;
 
   private projects: Project[] = [];
+  /** 当前活动项目（用于高亮标识） */
+  private activeProject: Project | undefined;
   readonly dragAndDropController = new ProjectDragAndDropController();
+
+  /** 活动/非活动项目图标（自定义 SVG，保证颜色可靠渲染） */
+  private activeIconPath?: vscode.Uri;
+  private inactiveIconPath?: vscode.Uri;
+
+  /** 设置资源根目录（用于加载图标） */
+  setResourcesDir(dir: string): void {
+    this.activeIconPath = vscode.Uri.joinPath(vscode.Uri.file(dir), 'project-active.svg');
+    this.inactiveIconPath = vscode.Uri.joinPath(vscode.Uri.file(dir), 'project-inactive.svg');
+  }
 
   setProjects(projects: Project[]): void {
     this.projects = projects;
+    this._onDidChangeTreeData.fire(undefined);
+  }
+
+  /** 设置活动项目（树中高亮） */
+  setActiveProject(project: Project | undefined): void {
+    this.activeProject = project;
     this._onDidChangeTreeData.fire(undefined);
   }
 
@@ -93,6 +117,12 @@ export class ProjectTreeProvider implements vscode.TreeDataProvider<TreeNode> {
         );
         node.description = path.basename(p.filename);
         node.tooltip = p.filename;
+        // 活动项目高亮：实心绿点；非活动：空心灰点（自定义 SVG，颜色可靠）
+        if (p.filename === this.activeProject?.filename) {
+          node.iconPath = this.activeIconPath ?? new vscode.ThemeIcon('circle-filled');
+        } else {
+          node.iconPath = this.inactiveIconPath ?? new vscode.ThemeIcon('circle-outline');
+        }
         return node;
       });
     }
@@ -129,36 +159,104 @@ export class ProjectTreeProvider implements vscode.TreeDataProvider<TreeNode> {
     return [];
   }
 
-  /** 构建文件树节点（含虚拟文件夹分组） */
+  /** 构建文件树节点（逐层嵌套目录树，参考 VSCode Explorer） */
   private buildFileNodes(project: Project): TreeNode[] {
-    const files = project.files;
+    const dirNodes = new Map<string, TreeNode>(); // key: 目录完整相对路径（无 ../），value: 节点
+    const rootDirs: TreeNode[] = [];
     const rootFiles: TreeNode[] = [];
-    const dirMap = new Map<string, TreeNode>();
 
-    for (const f of files) {
-      const dir = path.dirname(f.relativeFilename);
-      if (dir === '.') {
-        rootFiles.push(this.fileToNode(project, f));
-      } else {
-        if (!dirMap.has(dir)) {
-          const dirNode = new TreeNode(dir, vscode.TreeItemCollapsibleState.Collapsed, 'folder', project);
-          dirMap.set(dir, dirNode);
-        }
-        dirMap.get(dir)!.children.push(this.fileToNode(project, f));
+    for (const f of project.files) {
+      // 折叠 ../ 前缀，得到干净的相对路径（如 ../../platform/bsp/x.c → platform/bsp/x.c）
+      const clean = cleanRelativePath(f.relativeFilename);
+      const segs = clean.split('/');
+      const fileNode = this.fileToNode(project, f);
+
+      // 无目录段 → 根级文件
+      if (segs.length === 1) {
+        rootFiles.push(fileNode);
+        continue;
       }
+
+      // 逐层构建目录节点
+      let parentNode: TreeNode | undefined;
+      let parentKey = '';
+      for (let i = 0; i < segs.length - 1; i++) {
+        const key = parentKey ? `${parentKey}/${segs[i]}` : segs[i];
+        let dirNode = dirNodes.get(key);
+        if (!dirNode) {
+          dirNode = new TreeNode(segs[i], vscode.TreeItemCollapsibleState.Collapsed, 'folder', project);
+          dirNode.iconPath = new vscode.ThemeIcon('folder');
+          dirNode.tooltip = key;
+          dirNodes.set(key, dirNode);
+          if (parentNode) {
+            parentNode.children.push(dirNode);
+          } else {
+            rootDirs.push(dirNode);
+          }
+        }
+        parentNode = dirNode;
+        parentKey = key;
+      }
+      parentNode!.children.push(fileNode);
     }
 
-    return [...rootFiles, ...Array.from(dirMap.values())];
+    // 每层目录内：子目录在前、文件在后，各自按名称排序（对齐 Explorer）
+    for (const d of dirNodes.values()) {
+      d.children.sort((a, b) => {
+        const aIsDir = a.kind === 'folder' ? 0 : 1;
+        const bIsDir = b.kind === 'folder' ? 0 : 1;
+        if (aIsDir !== bIsDir) return aIsDir - bIsDir;
+        return a.label.localeCompare(b.label);
+      });
+    }
+    rootDirs.sort((a, b) => a.label.localeCompare(b.label));
+    rootFiles.sort((a, b) => a.label.localeCompare(b.label));
+    return [...rootDirs, ...rootFiles];
   }
 
   private fileToNode(project: Project, f: ProjectFile): TreeNode {
     const uri = vscode.Uri.file(f.absolutePath);
-    return new TreeNode(
+    const node = new TreeNode(
       path.basename(f.relativeFilename),
       vscode.TreeItemCollapsibleState.None,
       'file',
       project,
       uri,
+      undefined,
+      f,
     );
+    // 文件图标按扩展名区分（对应 cbProjectTreeImages）
+    const ext = path.extname(f.relativeFilename).toLowerCase();
+    node.iconPath = this.fileIcon(ext);
+    // 文件状态：缺失文件标记（对应 ProjectFile::fvsMissing）
+    if (!fs.existsSync(f.absolutePath)) {
+      node.description = '缺失';
+    }
+    return node;
   }
+
+  /** 按扩展名返回文件图标 */
+  private fileIcon(ext: string): vscode.ThemeIcon {
+    switch (ext) {
+      case '.c': return new vscode.ThemeIcon('symbol-field');
+      case '.h':
+      case '.hpp':
+      case '.hh': return new vscode.ThemeIcon('symbol-namespace');
+      case '.cpp':
+      case '.cc':
+      case '.cxx': return new vscode.ThemeIcon('symbol-method');
+      case '.rc': return new vscode.ThemeIcon('symbol-ruler');
+      case '.s':
+      case '.S': return new vscode.ThemeIcon('symbol-key');
+      default: return new vscode.ThemeIcon('file');
+    }
+  }
+}
+
+/** 折叠相对路径开头的 ../ 前缀（../../platform/bsp → platform/bsp；message/a.c → message/a.c） */
+function cleanRelativePath(rel: string): string {
+  const norm = rel.replace(/\\/g, '/');
+  // 去掉所有开头的 ../（或 ./）
+  const stripped = norm.replace(/^(\.\.\/)+|^(\.\/)+/, '');
+  return stripped;
 }
