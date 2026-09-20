@@ -22,12 +22,17 @@ import { scanTodos } from './tools/todoScanner';
 import { countFiles, isSourceFile } from './tools/codeStats';
 import { formatActiveDocument } from './tools/astyle';
 
-let currentProject: Project | undefined;
+/** 已打开的项目列表（顺序即编译顺序） */
+let openProjects: Project[] = [];
+/** 当前活动项目（状态栏 Target/Compiler 针对的对象） */
+let activeProject: Project | undefined;
 let outputChannel: vscode.OutputChannel;
 let diagnosticCollection: vscode.DiagnosticCollection;
 let compilerLoader: CompilerOptionsLoader | undefined;
 let codeBlocksConfig: CodeBlocksConfig | undefined;
 let projectTreeProvider: ProjectTreeProvider | undefined;
+let projectTreeView: vscode.TreeView<any> | undefined;
+let extContext: vscode.ExtensionContext | undefined;
 
 /** 底部状态栏构建目标项 */
 let targetStatusBar: vscode.StatusBarItem | undefined;
@@ -41,6 +46,7 @@ let rebuildStatusBar: vscode.StatusBarItem | undefined;
 let compilerStatusBar: vscode.StatusBarItem | undefined;
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
+  extContext = context;
   outputChannel = vscode.window.createOutputChannel('Code::Blocks');
   diagnosticCollection = vscode.languages.createDiagnosticCollection('codeblocks');
 
@@ -59,11 +65,17 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     }),
   );
 
-  // 注册项目树视图
+  // 注册项目树视图（支持多项目 + 拖拽排序）
   projectTreeProvider = new ProjectTreeProvider();
-  context.subscriptions.push(
-    vscode.window.registerTreeDataProvider('codeblocks.projectTree', projectTreeProvider),
-  );
+  projectTreeView = vscode.window.createTreeView('codeblocks.projectTree', {
+    treeDataProvider: projectTreeProvider,
+    showCollapseAll: true,
+    dragAndDropController: projectTreeProvider.dragAndDropController,
+  });
+  projectTreeProvider.dragAndDropController.onReorder = (src, target) => {
+    reorderProjects(src, target);
+  };
+  context.subscriptions.push(projectTreeView);
 
   // 注册菜单树视图（File/Edit/View/Build 等，模拟 Code::Blocks 菜单栏）
   context.subscriptions.push(
@@ -100,19 +112,34 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   context.subscriptions.push(compilerStatusBar);
   updateCompilerStatusBar();
 
+  // 设置活动项目（点击项目树中的项目节点时触发）
+  context.subscriptions.push(
+    vscode.commands.registerCommand('codeblocks.setActiveProject', (filename?: string) => {
+      if (!filename) return;
+      const p = openProjects.find((x) => x.filename === filename);
+      if (p) {
+        activeProject = p;
+        updateTargetStatusBar();
+        updateCompilerStatusBar();
+      }
+    }),
+  );
+
   // 打开项目
   context.subscriptions.push(
     vscode.commands.registerCommand('codeblocks.openProject', async () => {
       const uris = await vscode.window.showOpenDialog({
         canSelectFiles: true,
-        canSelectMany: false,
+        canSelectMany: true,
         filters: {
           'Code::Blocks 项目': ['cbp'],
           'Code::Blocks 工作区': ['workspace'],
         },
       });
       if (!uris || uris.length === 0) return;
-      await openProject(uris[0].fsPath);
+      for (const uri of uris) {
+        await openProject(uri.fsPath);
+      }
     }),
   );
 
@@ -229,13 +256,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   return;
 }
 
-/** 自动检测 .cbp：0 个引导、1 个自动开、多个弹选择 */
+/** 自动检测 .cbp：扫描目录下所有 .cbp，由用户多选打开 */
 async function autoDetectAndOpenProject(): Promise<void> {
   const folders = vscode.workspace.workspaceFolders;
   if (!folders || folders.length === 0) {
     // 无工作区：若已配置了上次项目则尝试恢复
     const active = vscode.workspace.getConfiguration('codeblocks').get<string>('activeProject', '');
-    if (active && fs.existsSync(active) && !currentProject) {
+    if (active && fs.existsSync(active) && openProjects.length === 0) {
       await openProject(active);
     }
     return;
@@ -244,29 +271,41 @@ async function autoDetectAndOpenProject(): Promise<void> {
   const cbpFiles = await findCbpFiles(folders.map((f) => f.uri.fsPath));
 
   if (cbpFiles.length === 0) {
-    // 无 .cbp：不报错，静默等待用户通过菜单/命令打开
     return;
   }
 
-  if (cbpFiles.length === 1) {
-    await openProject(cbpFiles[0]);
+  // 已打开的项目不重复列在可选列表里（但标记）
+  const alreadyOpen = new Set(openProjects.map((p) => p.filename));
+  const notOpen = cbpFiles.filter((f) => !alreadyOpen.has(f));
+  if (notOpen.length === 0) return;
+
+  // 单文件直接打开；多文件让用户多选
+  if (notOpen.length === 1) {
+    await openProject(notOpen[0]);
     return;
   }
 
-  // 多个：弹选择
   const picked = await vscode.window.showQuickPick(
-    cbpFiles.map((f) => ({ label: path.basename(f), description: f })),
-    { placeHolder: '检测到多个 Code::Blocks 项目，请选择要打开的 .cbp' },
+    notOpen.map((f) => ({ label: path.basename(f), description: f })),
+    {
+      placeHolder: '检测到多个 Code::Blocks 项目，请选择要打开的 .cbp（可多选）',
+      canPickMany: true,
+    },
   );
-  if (picked) {
-    await openProject(picked.description!);
+  if (picked && picked.length) {
+    for (const p of picked) {
+      await openProject(p.description!);
+    }
   }
+
+  // 打开完成后按持久化顺序排列
+  applyPersistedOrder();
 }
 
 async function findCbpFiles(folders: string[]): Promise<string[]> {
   const results: string[] = [];
   for (const folder of folders) {
-    results.push(...(await vscode.workspace.findFiles('**/*.cbp', '**/node_modules/**', 5))
+    results.push(...(await vscode.workspace.findFiles('**/*.cbp', '**/node_modules/**', 500))
       .map((u) => u.fsPath));
   }
   return results;
@@ -283,13 +322,19 @@ async function openProject(filename: string): Promise<void> {
       return;
     }
 
+    // 已打开则跳过
+    if (openProjects.some((p) => p.filename === filename)) return;
+
     const project = new ProjectParser().parse(filename);
-    currentProject = project;
+    openProjects.push(project);
+    if (!activeProject) {
+      activeProject = project;
+    }
     outputChannel.appendLine(`[Code::Blocks] 已打开项目: ${project.title}`);
     outputChannel.appendLine(`  目标: ${project.buildTargets.map((t) => t.title).join(', ')}`);
 
     // 刷新项目树
-    projectTreeProvider?.setProject(project);
+    projectTreeProvider?.setProjects(openProjects);
 
     // 默认选中第一个构建目标（若之前选中的目标仍存在则保留）
     const titles = project.buildTargets.map((t) => t.title);
@@ -298,6 +343,9 @@ async function openProject(filename: string): Promise<void> {
     }
     updateTargetStatusBar();
     updateCompilerStatusBar();
+
+    // 持久化打开的项目顺序
+    await persistProjectOrder();
 
     // 记录活动项目路径（用于重启后恢复）
     await vscode.workspace.getConfiguration('codeblocks').update(
@@ -319,11 +367,64 @@ async function saveAllBeforeBuild(): Promise<void> {
 }
 
 function requireProject(): Project | undefined {
-  if (!currentProject) {
+  if (!activeProject) {
     vscode.window.showWarningMessage('请先打开一个 Code::Blocks 项目 (.cbp)');
     return undefined;
   }
-  return currentProject;
+  return activeProject;
+}
+
+/** 持久化项目打开顺序到 workspaceState */
+async function persistProjectOrder(): Promise<void> {
+  if (!extContext) return;
+  await extContext.workspaceState.update(
+    'codeblocks.projectOrder',
+    openProjects.map((p) => p.filename),
+  );
+}
+
+/** 从 workspaceState 恢复项目顺序 */
+function restoreProjectOrder(): string[] {
+  return extContext?.workspaceState.get<string[]>('codeblocks.projectOrder') ?? [];
+}
+
+/** 拖拽重排：把 src 移到 target 之前（target 为空则移到最后） */
+function reorderProjects(srcFilename: string, targetFilename: string | undefined): void {
+  const srcIdx = openProjects.findIndex((p) => p.filename === srcFilename);
+  if (srcIdx === -1) return;
+
+  const [moved] = openProjects.splice(srcIdx, 1);
+  if (!targetFilename) {
+    openProjects.push(moved);
+  } else {
+    const targetIdx = openProjects.findIndex((p) => p.filename === targetFilename);
+    if (targetIdx === -1) {
+      openProjects.push(moved);
+    } else {
+      openProjects.splice(targetIdx, 0, moved);
+    }
+  }
+  projectTreeProvider?.setProjects(openProjects);
+  persistProjectOrder();
+}
+
+/** 按持久化顺序重排已打开的项目（恢复上次会话的编译顺序） */
+function applyPersistedOrder(): void {
+  const order = restoreProjectOrder();
+  if (!order.length) return;
+  const byFilename = new Map(openProjects.map((p) => [p.filename, p]));
+  const reordered: Project[] = [];
+  for (const fn of order) {
+    const p = byFilename.get(fn);
+    if (p) {
+      reordered.push(p);
+      byFilename.delete(fn);
+    }
+  }
+  // 剩余（未在持久化顺序中的新项目）追加到末尾
+  for (const p of byFilename.values()) reordered.push(p);
+  openProjects = reordered;
+  projectTreeProvider?.setProjects(openProjects);
 }
 
 function getCompiler(compilerId?: string): Compiler {
@@ -456,10 +557,10 @@ async function showTodoList(): Promise<void> {
 /** 更新底部状态栏的构建目标显示 */
 function updateTargetStatusBar(): void {
   if (!targetStatusBar) return;
-  if (currentProject && selectedTargetTitle) {
+  if (activeProject && selectedTargetTitle) {
     targetStatusBar.text = `$(symbol-method) Target: ${selectedTargetTitle}`;
     targetStatusBar.show();
-  } else if (currentProject) {
+  } else if (activeProject) {
     targetStatusBar.text = '$(symbol-method) Target: —';
     targetStatusBar.show();
   } else {
@@ -512,7 +613,7 @@ function updateCompilerStatusBar(): void {
   compilerStatusBar.show();
 }
 
-/** 返回当前选中的构建目标标题；未选中时弹出选择（构建/运行/调试的兜底入口） */
+/** 返回当前选中的构建目标标题；未选中时默认选第一个（构建/运行/调试的兜底入口） */
 async function selectTarget(): Promise<string | undefined> {
   const project = requireProject();
   if (!project) return undefined;
@@ -552,44 +653,62 @@ async function promptSelectTarget(): Promise<void> {
 }
 
 async function build(rebuild: boolean): Promise<boolean> {
-  const project = requireProject();
-  if (!project) return false;
+  if (openProjects.length === 0) {
+    vscode.window.showWarningMessage('请先打开一个 Code::Blocks 项目 (.cbp)');
+    return false;
+  }
 
   // 构建前自动保存工作区未保存文件
   await saveAllBeforeBuild();
 
+  // 确定统一的目标名（状态栏当前目标，跨项目按名称匹配）
   const targetTitle = await selectTarget();
   if (targetTitle === undefined) return false;
-
-  // 用目标自身的编译器 ID（如 riscv32-v2），而非全局默认
-  const target = project.buildTargets.find((t) => t.title === targetTitle);
-  const compiler = getCompiler(target?.compilerId || project.compilerId);
 
   diagnosticCollection.clear();
   outputChannel.clear();
   outputChannel.show(true);
+  outputChannel.appendLine(`[Code::Blocks] 开始构建 ${rebuild ? '(重新构建)' : ''}...（共 ${openProjects.length} 个项目）`);
 
-  const engine = new BuildEngine(project, compiler, outputChannel);
-  outputChannel.appendLine(`[Code::Blocks] 开始构建 ${rebuild ? '(重新构建)' : ''}...`);
-  outputChannel.appendLine(`  目标 "${targetTitle}" 使用编译器: ${compiler.programs.C}`);
+  let allOk = true;
+  for (const project of openProjects) {
+    // 按名称匹配目标；找不到则跳过该项目
+    const target = project.buildTargets.find((t) => t.title === targetTitle);
+    if (!target) {
+      outputChannel.appendLine(`[Code::Blocks] 项目 "${project.title}" 无目标 "${targetTitle}"，跳过`);
+      continue;
+    }
 
-  const ok = await engine.build(targetTitle, {
-    rebuild,
-    onLine: (line) => outputChannel.appendLine(line),
-    onDiagnostic: (diag) => {
-      const diags = diagnosticCollection.get(vscode.Uri.file('')) ?? [];
-      diagnosticCollection.set(vscode.Uri.file(project!.basePath), [...diags, diag]);
-    },
-  });
+    const compiler = getCompiler(target.compilerId || project.compilerId);
+    outputChannel.appendLine('');
+    outputChannel.appendLine(`=== 构建项目: ${project.title} / 目标: ${targetTitle} ===`);
+    outputChannel.appendLine(`  使用编译器: ${compiler.programs.C}`);
 
-  if (ok) {
+    const engine = new BuildEngine(project, compiler, outputChannel);
+    const ok = await engine.build(targetTitle, {
+      rebuild,
+      onLine: (line) => outputChannel.appendLine(line),
+      onDiagnostic: (diag) => {
+        const diags = diagnosticCollection.get(vscode.Uri.file('')) ?? [];
+        diagnosticCollection.set(vscode.Uri.file(project.basePath), [...diags, diag]);
+      },
+    });
+    if (!ok) {
+      allOk = false;
+      // 有工程编译失败：立即停止，不再编译后续项目
+      outputChannel.appendLine(`[Code::Blocks] 项目 "${project.title}" 编译失败，停止后续构建`);
+      break;
+    }
+  }
+
+  if (allOk) {
     outputChannel.appendLine('[Code::Blocks] 构建成功');
     vscode.window.showInformationMessage('构建成功');
   } else {
     outputChannel.appendLine('[Code::Blocks] 构建失败');
     vscode.window.showErrorMessage('构建失败，请查看输出');
   }
-  return ok;
+  return allOk;
 }
 
 async function clean(): Promise<void> {
