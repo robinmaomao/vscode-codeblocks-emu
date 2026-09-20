@@ -66,11 +66,21 @@ export class CompilerOptionsLoader {
       cppOnlyFlags: [],
     };
 
-    this.loadFile(`options_${compilerId}`, compiler, new Set());
+    // 交叉编译器（如 riscv）无独立 XML，复用 GCC 的命令模板/选项/正则
+    let loadName = compilerId;
+    if (!this.resolveFile(`options_${loadName}`) && loadName !== 'gcc') {
+      // 探测回退：riscv/arm 等交叉编译器复用 gcc
+      if (this.resolveFile('options_gcc')) {
+        loadName = 'gcc';
+      }
+    }
+
+    this.loadFile(`options_${loadName}`, compiler, new Set());
     // 若 programs 为空（文件不存在），回退内置 GCC
     if (!compiler.programs.C && !compiler.programs.CPP) {
       this.applyBuiltinGcc(compiler);
     }
+    // 交叉编译器：programs 由外部探测写入完整路径，这里仅确保 C/CPP 有兜底名
     return compiler;
   }
 

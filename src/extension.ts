@@ -272,6 +272,11 @@ function getCompiler(): Compiler {
   if (compilerLoader) {
     const compiler = compilerLoader.load(compilerId);
     compiler.masterPath = masterPath;
+    // 应用探测到的完整程序路径（交叉编译器如 RISC-V）
+    const programs = cfg.get<Record<string, string>>('compilerPrograms', {});
+    if (programs && programs.C) {
+      compiler.programs = { ...compiler.programs, ...programs } as any;
+    }
     return compiler;
   }
   // 回退：内置 GCC
@@ -285,7 +290,7 @@ async function detectCompilers(): Promise<void> {
   const detected = detectAllCompilers(masterPath);
 
   if (detected.length === 0) {
-    vscode.window.showWarningMessage('未探测到可用的编译器（GCC/Clang/MSVC）');
+    vscode.window.showWarningMessage('未探测到可用的编译器（GCC/Clang/MSVC/RISC-V）');
     return;
   }
 
@@ -303,6 +308,12 @@ async function detectCompilers(): Promise<void> {
     await cfg.update('compilerId', picked.compiler.id, vscode.ConfigurationTarget.Global);
     if (picked.compiler.masterPath) {
       await cfg.update('masterPath', picked.compiler.masterPath, vscode.ConfigurationTarget.Global);
+    }
+    // 交叉编译器：持久化完整程序路径；标准编译器：清空以回退到 PATH 查找
+    if (picked.compiler.programs) {
+      await cfg.update('compilerPrograms', picked.compiler.programs, vscode.ConfigurationTarget.Global);
+    } else {
+      await cfg.update('compilerPrograms', {}, vscode.ConfigurationTarget.Global);
     }
     vscode.window.showInformationMessage(`已选择编译器: ${picked.compiler.name}`);
   }

@@ -15,6 +15,15 @@ export interface DetectedCompiler {
   /** 编译器可执行（C）完整路径 */
   cCompilerPath: string;
   version?: string;
+  /** 完整程序路径映射（交叉编译器如 RISC-V 时提供，标准编译器省略） */
+  programs?: {
+    C: string;
+    CPP: string;
+    LD: string;
+    LIB: string;
+    WINDRES: string;
+    MAKE: string;
+  };
 }
 
 /** 在 PATH 中查找可执行文件 */
@@ -164,6 +173,174 @@ function findClInVs(vsPath: string): string | null {
   return null;
 }
 
+/** RISC-V 工具链前缀（gcc 交叉编译器） */
+const RISCV_PREFIXES = [
+  'riscv32-unknown-elf',
+  'riscv64-unknown-elf',
+  'riscv32-unknown-linux-gnu',
+  'riscv64-unknown-linux-gnu',
+  'riscv64-linux-gnu',
+  'riscv32-none-elf',
+  'riscv64-none-elf',
+  'riscv-none-embed',
+  'riscv-none-elf',
+  'riscv32-elf',
+  'riscv64-elf',
+  'riscv32-esp-elf',   // ESP32-C2/C3
+  'riscv32-esp-elf-gcc', // 某些 ESP-IDF 版本前缀
+];
+
+/** 在 PATH 中查找 RISC-V 交叉编译器（返回所有命中的前缀与 gcc 路径） */
+function detectRiscvInPath(): { prefix: string; gccPath: string }[] {
+  const win = process.platform === 'win32';
+  const pathVar = process.env.PATH ?? '';
+  const out: { prefix: string; gccPath: string }[] = [];
+  const seen = new Set<string>();
+  for (const prefix of RISCV_PREFIXES) {
+    const gcc = findInPath(prefix + (win ? '-gcc.exe' : '-gcc'), pathVar);
+    if (gcc && !seen.has(gcc)) {
+      seen.add(gcc);
+      out.push({ prefix, gccPath: gcc });
+    }
+  }
+  return out;
+}
+
+/** 在常见安装目录递归扫描 RISC-V 工具链 bin（如 RV32-Toolchain / Espressif），返回所有命中 */
+function scanRiscvDirs(): { prefix: string; gccPath: string }[] {
+  const win = process.platform === 'win32';
+  const gccSuffix = win ? '-gcc.exe' : '-gcc';
+  const roots: string[] = [];
+  // Windows 常见目录
+  const pf86 = process.env['ProgramFiles(x86)'] ?? 'C:\\Program Files (x86)';
+  const pf = process.env['ProgramFiles'] ?? 'C:\\Program Files';
+  roots.push(pf86, pf);
+  const results: { prefix: string; gccPath: string }[] = [];
+  const seen = new Set<string>();
+  // 覆盖 RV32-Toolchain\RV32-V2\bin 这类结构
+  const depth = 4;
+  const visited = new Set<string>();
+  const scan = (dir: string, level: number): void => {
+    if (level > depth || visited.has(dir)) return;
+    visited.add(dir);
+    let entries: string[] = [];
+    try {
+      entries = fs.readdirSync(dir);
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      const full = path.join(dir, entry);
+      let isDir = false;
+      try {
+        isDir = fs.statSync(full).isDirectory();
+      } catch {
+        continue;
+      }
+      if (!isDir) continue;
+      if (entry.toLowerCase() === 'bin') {
+        // 检查该 bin 下是否有 riscv 前缀的 gcc
+        for (const found of findRiscvGccInDir(full, gccSuffix)) {
+          if (!seen.has(found.gccPath)) {
+            seen.add(found.gccPath);
+            results.push(found);
+          }
+        }
+      } else if (level < depth) {
+        scan(full, level + 1);
+      }
+    }
+  };
+  for (const root of roots) {
+    if (!fs.existsSync(root)) continue;
+    scan(root, 1);
+  }
+  return results;
+}
+
+function findRiscvGccInDir(binDir: string, gccSuffix: string): { prefix: string; gccPath: string }[] {
+  let entries: string[] = [];
+  try {
+    entries = fs.readdirSync(binDir);
+  } catch {
+    return [];
+  }
+  const out: { prefix: string; gccPath: string }[] = [];
+  for (const entry of entries) {
+    if (!entry.startsWith('riscv') || !entry.endsWith(gccSuffix)) continue;
+    // 提取前缀：riscv32-elf-gcc.exe → riscv32-elf
+    const prefix = entry.slice(0, entry.length - gccSuffix.length);
+    out.push({ prefix, gccPath: path.join(binDir, entry) });
+  }
+  return out;
+}
+
+/** 构建 RISC-V 编译器结果（含完整程序路径映射） */
+function buildRiscvResult(prefix: string, gccPath: string): DetectedCompiler {
+  const win = process.platform === 'win32';
+  const binDir = path.dirname(gccPath);
+  const exe = (name: string) => (win ? name + '.exe' : name);
+  const full = (name: string) => path.join(binDir, prefix + '-' + name + (win ? '.exe' : ''));
+  const existsOr = (name: string, fallback: string) => {
+    const p = full(name);
+    return fs.existsSync(p) ? p : fallback;
+  };
+  const version = spawnSync(gccPath, ['--version'], { encoding: 'utf8' }).stdout?.split(/\r?\n/)[0]?.trim();
+
+  // 纯 C 工具链可能没有 g++，此时 CPP/LD 回退到 gcc（支持纯 C 工程）
+  const cpp = existsOr('g++', gccPath);
+  const ld = existsOr('g++', cpp);
+  const lib = existsOr('ar', '');
+  const windres = existsOr('windres', '');
+
+  // masterPath = bin 的上一级（保持与 GCC 探测一致的约定）
+  const masterPath = path.dirname(binDir);
+
+  // 从 version 提取版本号（如 "10.2.0"），便于同名工具链区分
+  const verMatch = version?.match(/\b(\d+\.\d+(?:\.\d+)?)\b/);
+  const shortVer = verMatch ? verMatch[1] : '';
+
+  return {
+    id: 'riscv',
+    name: `RISC-V GCC (${prefix}${shortVer ? ' ' + shortVer : ''})`,
+    masterPath,
+    cCompilerPath: gccPath,
+    version,
+    programs: {
+      C: gccPath,
+      CPP: cpp,
+      LD: ld,
+      LIB: lib,
+      WINDRES: windres,
+      MAKE: win ? 'mingw32-make.exe' : 'make',
+    },
+  };
+}
+
+/** 探测 RISC-V 交叉编译器（返回所有命中的工具链） */
+export function detectRiscv(): DetectedCompiler[] {
+  const results: DetectedCompiler[] = [];
+  const seen = new Set<string>();
+
+  // 1. PATH 环境变量
+  for (const item of detectRiscvInPath()) {
+    if (!seen.has(item.gccPath)) {
+      seen.add(item.gccPath);
+      results.push(buildRiscvResult(item.prefix, item.gccPath));
+    }
+  }
+
+  // 2. 常见安装目录扫描
+  for (const item of scanRiscvDirs()) {
+    if (!seen.has(item.gccPath)) {
+      seen.add(item.gccPath);
+      results.push(buildRiscvResult(item.prefix, item.gccPath));
+    }
+  }
+
+  return results;
+}
+
 /** 统一探测所有可用编译器 */
 export function detectAllCompilers(masterPath = ''): DetectedCompiler[] {
   const result: DetectedCompiler[] = [];
@@ -173,5 +350,6 @@ export function detectAllCompilers(masterPath = ''): DetectedCompiler[] {
   if (clang) result.push(clang);
   const msvc = detectMsvc();
   if (msvc) result.push(msvc);
+  result.push(...detectRiscv());
   return result;
 }

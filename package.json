@@ -133,6 +133,19 @@
           "default": "",
           "description": "上次打开的项目路径（用于工作区重载后恢复）"
         },
+        "codeblocks.compilerPrograms": {
+          "type": "object",
+          "default": {},
+          "description": "编译器程序完整路径（交叉编译器如 RISC-V 由「探测编译器」自动写入，普通编译器留空）",
+          "properties": {
+            "C": { "type": "string" },
+            "CPP": { "type": "string" },
+            "LD": { "type": "string" },
+            "LIB": { "type": "string" },
+            "WINDRES": { "type": "string" },
+            "MAKE": { "type": "string" }
+          }
+        },
         "codeblocks.astyleOptions": {
           "type": "array",
           "items": {
