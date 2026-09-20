@@ -1,0 +1,106 @@
+/**
+ * 错误/警告行解析 —— 对应 compiler.h RegExStruct + options_common_re.xml
+ *
+ * 移植自 codeblocks-src/src/plugins/compilergcc/resources/compilers/options_common_re.xml（GPL v3）。
+ * 将 POSIX 字符类 [[:blank:]] 等转换为 JS 正则等价，并映射为 VS Code Diagnostic。
+ */
+import * as vscode from 'vscode';
+import { CompilerLineType } from '../model/types';
+import { RegExStruct } from '../compiler/compiler';
+
+/** GCC 默认错误正则（options_common_re.xml 核心条目） */
+export function getDefaultRegexes(): RegExStruct[] {
+  // 将 wxRegEx 的 POSIX 字符类转成 JS
+  const FILE = '([][{}()#%$~A-Za-z0-9!&_:+/\\\\.,-]+)';
+  const BLANK = '[ \\t]';
+  const COL = ':';
+  return [
+    { desc: 'Fatal error', lt: 'error', msg: [1], filename: 0, line: 0, regex: `FATAL:${BLANK}*(.*)` },
+    { desc: 'Preprocessor error', lt: 'error', msg: [3], filename: 1, line: 2, regex: `${FILE}${COL}([0-9]+)${COL}[0-9]+${COL}${BLANK}(.*)` },
+    { desc: 'Compiler warning', lt: 'warning', msg: [3], filename: 1, line: 2, regex: `${FILE}${COL}([0-9]+)${COL}[0-9]+${COL}${BLANK}([Ww]arning:${BLANK}.*)` },
+    { desc: 'Compiler error', lt: 'error', msg: [3], filename: 1, line: 2, regex: `${FILE}${COL}([0-9]+)${COL}[0-9]+${COL}${BLANK}(.*)` },
+    { desc: 'Undefined reference', lt: 'error', msg: [3], filename: 1, line: 2, regex: `[][{}()#%$~A-Za-z0-9!&_:+/\\\\.,-]+\\.o:([][{}()#%$~A-Za-z0-9!&_:+/\\\\.,-]+):([0-9]+):${BLANK}(undefined reference.*)` },
+    { desc: 'Linker error', lt: 'error', msg: [3], filename: 1, line: 2, regex: `${FILE}${COL}([0-9]+)${COL}[0-9]+${COL}${BLANK}(.*)` },
+    { desc: 'Linker error (lib not found)', lt: 'error', msg: [2], filename: 1, line: 0, regex: `.*(ld.*):${BLANK}(cannot find.*)` },
+    { desc: 'Linker error (cannot open output file)', lt: 'error', msg: [2, 3], filename: 1, line: 0, regex: `.*(ld.*):${BLANK}(cannot open output file.*):${BLANK}(.*)` },
+    { desc: 'Linker error (unrecognized option)', lt: 'error', msg: [2], filename: 1, line: 0, regex: `.*(ld.*):${BLANK}(unrecognized option.*)` },
+    { desc: 'No such file or directory', lt: 'error', msg: [2], filename: 1, line: 0, regex: `.*:(.*):${BLANK}(No such file or directory.*)` },
+    { desc: 'Undefined reference (plain)', lt: 'error', msg: [2], filename: 1, line: 0, regex: `${FILE}${COL}${BLANK}(undefined reference.*)` },
+    { desc: 'General error', lt: 'error', msg: [1], filename: 0, line: 0, regex: `([Ee]rror:${BLANK}.*)` },
+    { desc: 'General warning', lt: 'warning', msg: [1], filename: 0, line: 0, regex: `([Ww]arning:${BLANK}.*)` },
+  ];
+}
+
+/** 解析结果 */
+export interface ParsedLine {
+  type: CompilerLineType;
+  message: string;
+  file?: string;
+  line?: number;
+}
+
+/** 编译输出解析器 */
+export class OutputParser {
+  private regexes: { re: RegExp; struct: RegExStruct }[];
+
+  constructor(regexes: RegExStruct[] = getDefaultRegexes()) {
+    this.regexes = regexes
+      .map((struct) => {
+        try {
+          return { re: new RegExp(struct.regex), struct };
+        } catch {
+          return null;
+        }
+      })
+      .filter((x): x is { re: RegExp; struct: RegExStruct } => x !== null);
+  }
+
+  /** 解析一行编译输出 */
+  parseLine(line: string): ParsedLine | null {
+    for (const { re, struct } of this.regexes) {
+      const m = line.match(re);
+      if (!m) continue;
+
+      // 收集消息（msg[0..2] 子表达式拼接，空格分隔）
+      const msgParts = struct.msg
+        .map((idx) => m[idx])
+        .filter((x) => x !== undefined)
+        .join(' ');
+      const file = struct.filename ? m[struct.filename] : undefined;
+      const lineNum = struct.line ? Number(m[struct.line]) : undefined;
+
+      return {
+        type: (struct.lt as any) as CompilerLineType,
+        message: msgParts || line,
+        file,
+        line: lineNum && !Number.isNaN(lineNum) ? lineNum : undefined,
+      };
+    }
+    return null;
+  }
+
+  /** 将一行输出转换为 VS Code Diagnostic */
+  toDiagnostic(line: string, cwd: string): vscode.Diagnostic | null {
+    const parsed = this.parseLine(line);
+    if (!parsed) return null;
+
+    const sev = parsed.type === CompilerLineType.Error
+      ? vscode.DiagnosticSeverity.Error
+      : parsed.type === CompilerLineType.Warning
+        ? vscode.DiagnosticSeverity.Warning
+        : parsed.type === CompilerLineType.Info
+          ? vscode.DiagnosticSeverity.Information
+          : vscode.DiagnosticSeverity.Hint;
+
+    const range = parsed.line
+      ? new vscode.Range(parsed.line - 1, 0, parsed.line - 1, Number.MAX_SAFE_INTEGER)
+      : new vscode.Range(0, 0, 0, 0);
+
+    const diag = new vscode.Diagnostic(range, parsed.message, sev);
+    if (parsed.file) {
+      const vscodeUri = vscode.Uri.file(parsed.file);
+      diag.source = 'Code::Blocks';
+    }
+    return diag;
+  }
+}

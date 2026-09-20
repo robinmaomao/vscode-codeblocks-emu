@@ -1,0 +1,214 @@
+{
+  "name": "codeblocks-vscode",
+  "displayName": "Code::Blocks for VS Code",
+  "description": "原生移植 Code::Blocks 核心功能到 VS Code：项目模型、构建引擎、编译器管理与调试引擎",
+  "version": "0.1.0",
+  "publisher": "codeblocks",
+  "license": "SEE LICENSE IN LICENSE.md",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Other"
+  ],
+  "keywords": [
+    "codeblocks",
+    "c++",
+    "c",
+    "build",
+    "compiler",
+    "gcc",
+    "gdb"
+  ],
+  "activationEvents": [
+    "onLanguage:c",
+    "onLanguage:cpp",
+    "onView:codeblocks.projectTree",
+    "onCommand:codeblocks.openProject",
+    "onCommand:codeblocks.build",
+    "onCommand:codeblocks.rebuild",
+    "onCommand:codeblocks.buildAndRun",
+    "onCommand:codeblocks.clean",
+    "onCommand:codeblocks.run",
+    "onCommand:codeblocks.debug",
+    "onCommand:codeblocks.selectTarget",
+    "onCommand:codeblocks.detectCompilers",
+    "onCommand:codeblocks.compilerOptions",
+    "onCommand:codeblocks.codeStats",
+    "onCommand:codeblocks.todoList",
+    "onCommand:codeblocks.format",
+    "workspaceContains:**/*.cbp",
+    "workspaceContains:**/*.workspace"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "codeblocks.openProject",
+        "title": "Code::Blocks: Open Project (.cbp)"
+      },
+      {
+        "command": "codeblocks.build",
+        "title": "Code::Blocks: Build"
+      },
+      {
+        "command": "codeblocks.rebuild",
+        "title": "Code::Blocks: Rebuild"
+      },
+      {
+        "command": "codeblocks.buildAndRun",
+        "title": "Code::Blocks: Build and Run"
+      },
+      {
+        "command": "codeblocks.clean",
+        "title": "Code::Blocks: Clean"
+      },
+      {
+        "command": "codeblocks.run",
+        "title": "Code::Blocks: Run"
+      },
+      {
+        "command": "codeblocks.selectTarget",
+        "title": "Code::Blocks: Select Build Target"
+      },
+      {
+        "command": "codeblocks.detectCompilers",
+        "title": "Code::Blocks: Detect Compilers"
+      },
+      {
+        "command": "codeblocks.compilerOptions",
+        "title": "Code::Blocks: Compiler Options"
+      },
+      {
+        "command": "codeblocks.debug",
+        "title": "Code::Blocks: Debug"
+      },
+      {
+        "command": "codeblocks.codeStats",
+        "title": "Code::Blocks: Code Statistics"
+      },
+      {
+        "command": "codeblocks.todoList",
+        "title": "Code::Blocks: TODO List"
+      },
+      {
+        "command": "codeblocks.format",
+        "title": "Code::Blocks: Format with AStyle"
+      }
+    ],
+    "configuration": {
+      "title": "Code::Blocks",
+      "properties": {
+        "codeblocks.compilerId": {
+          "type": "string",
+          "default": "gcc",
+          "description": "默认编译器 ID（对应 options_<id>.xml）"
+        },
+        "codeblocks.masterPath": {
+          "type": "string",
+          "default": "",
+          "description": "编译器安装根目录（留空则从 PATH 探测）"
+        },
+        "codeblocks.parallelJobs": {
+          "type": "number",
+          "default": 0,
+          "description": "并行编译任务数（0 = 自动，取 CPU 核数）"
+        },
+        "codeblocks.astyleOptions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [
+            "--style=allman",
+            "--indent=spaces=4"
+          ],
+          "description": "AStyle 格式化选项"
+        }
+      }
+    },
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "codeblocks",
+          "title": "Code::Blocks",
+          "icon": "resources/codeblocks.svg"
+        }
+      ]
+    },
+    "views": {
+      "codeblocks": [
+        {
+          "id": "codeblocks.projectTree",
+          "name": "Project"
+        },
+        {
+          "id": "codeblocks.buildLog",
+          "name": "Build Log"
+        }
+      ]
+    },
+    "debuggers": [
+      {
+        "type": "codeblocks",
+        "label": "Code::Blocks GDB",
+        "languages": [
+          "c",
+          "cpp"
+        ]
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "codeblocks.build",
+        "key": "ctrl+f9",
+        "mac": "cmd+f9",
+        "when": "editorTextFocus"
+      },
+      {
+        "command": "codeblocks.buildAndRun",
+        "key": "f9",
+        "when": "editorTextFocus && !inDebugMode"
+      },
+      {
+        "command": "codeblocks.run",
+        "key": "ctrl+f10",
+        "mac": "cmd+f10",
+        "when": "editorTextFocus"
+      },
+      {
+        "command": "codeblocks.rebuild",
+        "key": "ctrl+f11",
+        "mac": "cmd+f11",
+        "when": "editorTextFocus"
+      },
+      {
+        "command": "codeblocks.clean",
+        "key": "ctrl+shift+f9",
+        "mac": "cmd+shift+f9",
+        "when": "editorTextFocus"
+      },
+      {
+        "command": "codeblocks.debug",
+        "key": "f8",
+        "when": "editorTextFocus && !inDebugMode"
+      }
+    ]
+  },
+  "scripts": {
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "package": "vsce package",
+    "pretest": "npm run compile"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "@types/vscode": "^1.85.0",
+    "@vscode/vsce": "^4.0.0",
+    "typescript": "^5.4.0"
+  },
+  "dependencies": {
+    "fast-xml-parser": "^4.3.6"
+  }
+}

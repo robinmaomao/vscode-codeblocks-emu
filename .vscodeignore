@@ -1,0 +1,11 @@
+.vscode/**
+codeblocks-src/**
+docs/**
+test-project/**
+src/**
+tsconfig.json
+node_modules/.cache/**
+**/*.map
+.gitignore
+CodeBlocks2VSCode-解耦扩展提示词.md
+package-lock.json
