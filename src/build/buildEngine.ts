@@ -245,24 +245,62 @@ export class BuildEngine {
       });
       const parser = this.parser;
 
-      proc.stdout?.on('data', (data: Buffer) => {
-        for (const line of data.toString().split(/\r?\n/)) {
+      // 编译器输出解码器：优先 GBK（中文 Windows 下 GCC/MinGW 中文错误信息为 GBK），
+      // 失败时回退 UTF-8；使用 { stream: true } 避免多字节字符被 chunk 边界截断。
+      const makeDecoder = () => {
+        try {
+          const td = new TextDecoder('gbk', { fatal: false });
+          return {
+            push: (buf: Buffer) => td.decode(buf, { stream: true }),
+            flush: () => td.decode(),
+          };
+        } catch {
+          const td = new TextDecoder('utf-8', { fatal: false });
+          return {
+            push: (buf: Buffer) => td.decode(buf, { stream: true }),
+            flush: () => td.decode(),
+          };
+        }
+      };
+
+      const stdoutDecoder = makeDecoder();
+      const stderrDecoder = makeDecoder();
+      // 残留缓冲：保存上次未以换行结尾的部分，与下次拼接，避免行被截断
+      let stdoutTail = '';
+      let stderrTail = '';
+
+      const handleChunk = (decoder: ReturnType<typeof makeDecoder>, tailRef: { value: string }, data: Buffer, streamName: string) => {
+        const text = decoder.push(data);
+        const combined = tailRef.value + text;
+        const lines = combined.split(/\r?\n/);
+        // 最后一段可能是不完整行，保留到 tail
+        tailRef.value = lines.pop() ?? '';
+        for (const line of lines) {
           if (!line) continue;
           options.onLine?.(line);
           const diag = parser.toDiagnostic(line, cwd);
           if (diag) options.onDiagnostic?.(diag);
         }
-      });
-      proc.stderr?.on('data', (data: Buffer) => {
-        for (const line of data.toString().split(/\r?\n/)) {
-          if (!line) continue;
-          options.onLine?.(line);
-          const diag = parser.toDiagnostic(line, cwd);
-          if (diag) options.onDiagnostic?.(diag);
-        }
-      });
+      };
+
+      const stdoutTailRef = { value: '' };
+      const stderrTailRef = { value: '' };
+
+      proc.stdout?.on('data', (data: Buffer) => handleChunk(stdoutDecoder, stdoutTailRef, data, 'stdout'));
+      proc.stderr?.on('data', (data: Buffer) => handleChunk(stderrDecoder, stderrTailRef, data, 'stderr'));
 
       proc.on('close', (code) => {
+        // 刷新残留尾行
+        if (stdoutTailRef.value) {
+          options.onLine?.(stdoutTailRef.value);
+          const diag = parser.toDiagnostic(stdoutTailRef.value, cwd);
+          if (diag) options.onDiagnostic?.(diag);
+        }
+        if (stderrTailRef.value) {
+          options.onLine?.(stderrTailRef.value);
+          const diag = parser.toDiagnostic(stderrTailRef.value, cwd);
+          if (diag) options.onDiagnostic?.(diag);
+        }
         const success = code !== null && code <= this.compiler.switches.statusSuccess;
         resolve(success);
       });

@@ -58,8 +58,8 @@ export class GdbMiSession {
         env: { ...process.env, ...opts.env },
       });
 
-      this.proc.stdout?.on('data', (d: Buffer) => this.feed(d.toString()));
-      this.proc.stderr?.on('data', (d: Buffer) => this.feed(d.toString()));
+      this.proc.stdout?.on('data', (d: Buffer) => this.feed(this.decodeChunk(d)));
+      this.proc.stderr?.on('data', (d: Buffer) => this.feed(this.decodeChunk(d)));
       this.proc.on('error', (err) => reject(err));
       this.proc.on('exit', (code) => {
         this.onExit?.(code);
@@ -131,6 +131,15 @@ export class GdbMiSession {
       const line = this.buffer.slice(0, idx).replace(/\r$/, '');
       this.buffer = this.buffer.slice(idx + 1);
       if (line.trim()) this.parseLine(line);
+    }
+  }
+
+  /** 解码子进程输出：优先 GBK（中文 Windows），失败回退 UTF-8 */
+  private decodeChunk(buf: Buffer): string {
+    try {
+      return new TextDecoder('gbk', { fatal: false }).decode(buf);
+    } catch {
+      return buf.toString('utf-8');
     }
   }
 

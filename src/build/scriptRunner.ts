@@ -29,6 +29,15 @@ export interface ScriptResult {
   output: string;
 }
 
+/** 解码子进程输出：优先 GBK（中文 Windows），失败回退 UTF-8 */
+function decodeOutput(buf: Buffer): string {
+  try {
+    return new TextDecoder('gbk', { fatal: false }).decode(buf);
+  } catch {
+    return buf.toString('utf-8');
+  }
+}
+
 /** 执行单条脚本命令 */
 export function runScriptCommand(
   command: string,
@@ -42,8 +51,8 @@ export function runScriptCommand(
       shell: true,
     });
     let output = '';
-    proc.stdout?.on('data', (d: Buffer) => (output += d.toString()));
-    proc.stderr?.on('data', (d: Buffer) => (output += d.toString()));
+    proc.stdout?.on('data', (d: Buffer) => (output += decodeOutput(d)));
+    proc.stderr?.on('data', (d: Buffer) => (output += decodeOutput(d)));
     proc.on('close', (code) => {
       resolve({ success: code === 0, output });
     });
