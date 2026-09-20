@@ -80,14 +80,21 @@ export class ProjectTreeProvider implements vscode.TreeDataProvider<TreeNode> {
   getChildren(element?: TreeNode): TreeNode[] {
     if (!element) {
       // 根：所有项目节点（顺序即编译顺序）
-      return this.projects.map((p) =>
-        new TreeNode(
-          p.title,
+      // 参考 Code::Blocks 的 project->GetTitle() 语义取「项目名」，
+      // 但当 .cbp 的 <Option title> 不足以区分（如多个 app.cbp）时，
+      // 用 .cbp 所在目录名（如 earphone / esop8）作为项目显示名。
+      return this.projects.map((p) => {
+        const dirName = path.basename(path.dirname(p.filename));
+        const node = new TreeNode(
+          dirName || p.title,
           vscode.TreeItemCollapsibleState.Expanded,
           'project',
           p,
-        ),
-      );
+        );
+        node.description = path.basename(p.filename);
+        node.tooltip = p.filename;
+        return node;
+      });
     }
 
     if (element.kind === 'project') {

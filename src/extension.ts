@@ -125,6 +125,68 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     }),
   );
 
+  // 向上移动项目
+  context.subscriptions.push(
+    vscode.commands.registerCommand('codeblocks.moveProjectUp', (node?: any) => {
+      const filename = resolveProjectFilename(node);
+      if (!filename) return;
+      moveProject(filename, -1);
+    }),
+  );
+
+  // 向下移动项目
+  context.subscriptions.push(
+    vscode.commands.registerCommand('codeblocks.moveProjectDown', (node?: any) => {
+      const filename = resolveProjectFilename(node);
+      if (!filename) return;
+      moveProject(filename, 1);
+    }),
+  );
+
+  // 移除项目
+  context.subscriptions.push(
+    vscode.commands.registerCommand('codeblocks.removeProject', async (node?: any) => {
+      const filename = resolveProjectFilename(node);
+      if (!filename) return;
+      const project = openProjects.find((p) => p.filename === filename);
+      if (!project) return;
+      const confirm = await vscode.window.showWarningMessage(
+        `确定从侧边栏移除项目 "${path.basename(path.dirname(filename))}"？（不会删除磁盘文件）`,
+        { modal: true },
+        'Remove',
+      );
+      if (confirm !== 'Remove') return;
+      removeProject(filename);
+    }),
+  );
+
+  // 增量编译单个项目（右键）
+  context.subscriptions.push(
+    vscode.commands.registerCommand('codeblocks.buildProject', async (node?: any) => {
+      const filename = resolveProjectFilename(node);
+      if (!filename) return;
+      await buildSingleProject(filename, false);
+    }),
+  );
+
+  // 全量编译单个项目（右键）
+  context.subscriptions.push(
+    vscode.commands.registerCommand('codeblocks.rebuildProject', async (node?: any) => {
+      const filename = resolveProjectFilename(node);
+      if (!filename) return;
+      await buildSingleProject(filename, true);
+    }),
+  );
+
+  // 添加文件到项目（右键）
+  context.subscriptions.push(
+    vscode.commands.registerCommand('codeblocks.addFile', async (node?: any) => {
+      const filename = resolveProjectFilename(node);
+      if (!filename) return;
+      await addFilesToProject(filename);
+    }),
+  );
+
   // 打开项目
   context.subscriptions.push(
     vscode.commands.registerCommand('codeblocks.openProject', async () => {
@@ -427,6 +489,137 @@ function applyPersistedOrder(): void {
   projectTreeProvider?.setProjects(openProjects);
 }
 
+/** 从右键菜单传入的节点参数中解析项目 filename */
+function resolveProjectFilename(node: any): string | undefined {
+  if (!node) return undefined;
+  // 右键菜单传入的可能是 TreeNode，也可能是 { project: { filename } }
+  const filename = node?.project?.filename;
+  return typeof filename === 'string' ? filename : undefined;
+}
+
+/** 上移/下移项目（delta: -1 上移，1 下移） */
+function moveProject(filename: string, delta: number): void {
+  const idx = openProjects.findIndex((p) => p.filename === filename);
+  if (idx === -1) return;
+  const targetIdx = idx + delta;
+  if (targetIdx < 0 || targetIdx >= openProjects.length) return;
+  const [moved] = openProjects.splice(idx, 1);
+  openProjects.splice(targetIdx, 0, moved);
+  projectTreeProvider?.setProjects(openProjects);
+  persistProjectOrder();
+}
+
+/** 移除项目（仅从侧边栏移除，不删除磁盘文件） */
+function removeProject(filename: string): void {
+  const idx = openProjects.findIndex((p) => p.filename === filename);
+  if (idx === -1) return;
+  const [removed] = openProjects.splice(idx, 1);
+  if (activeProject?.filename === filename) {
+    activeProject = openProjects[0];
+  }
+  projectTreeProvider?.setProjects(openProjects);
+  updateTargetStatusBar();
+  updateCompilerStatusBar();
+  persistProjectOrder();
+  outputChannel.appendLine(`[Code::Blocks] 已移除项目: ${removed.title}`);
+}
+
+/** 添加文件到项目（参考 Code::Blocks cbProject::AddFile） */
+async function addFilesToProject(filename: string): Promise<void> {
+  const project = openProjects.find((p) => p.filename === filename);
+  if (!project) {
+    vscode.window.showWarningMessage('项目未找到');
+    return;
+  }
+
+  const uris = await vscode.window.showOpenDialog({
+    canSelectFiles: true,
+    canSelectMany: true,
+    canSelectFolders: false,
+    openLabel: '添加文件',
+    filters: {
+      '源文件': ['c', 'cpp', 'cc', 'cxx', 'h', 'hpp', 'hh', 'rc', 's', 'S'],
+      '所有文件': ['*'],
+    },
+  });
+  if (!uris || uris.length === 0) return;
+
+  const basePath = project.basePath;
+  const existing = new Set(project.files.map((f) => f.relativeFilename));
+  const addedUnits: string[] = [];
+  const addedCount = { value: 0 };
+
+  for (const uri of uris) {
+    const abs = uri.fsPath;
+    // 计算相对项目根的 Unix 路径（对应 Code::Blocks 的 relativeFilename，可能含 ../）
+    const rel = path.relative(basePath, abs).replace(/\\/g, '/');
+    if (!rel) continue;
+    if (existing.has(rel)) {
+      continue; // 已存在，跳过
+    }
+    existing.add(rel);
+
+    // 按扩展名决定 compilerVar（对应 Code::Blocks 的 C_EXT/RESOURCE_EXT/CPP）
+    const ext = path.extname(abs).toLowerCase();
+    const unit = buildUnitXml(rel, ext);
+    addedUnits.push(unit);
+    addedCount.value++;
+  }
+
+  if (addedUnits.length === 0) {
+    vscode.window.showInformationMessage('没有新文件需要添加（可能已存在）');
+    return;
+  }
+
+  // 写回 .cbp：在 </Project> 之前插入 <Unit> 节点
+  try {
+    writeUnitsToCbp(project.filename, addedUnits);
+    outputChannel.appendLine(`[Code::Blocks] 已向 ${path.basename(project.filename)} 添加 ${addedCount.value} 个文件`);
+    // 重新解析项目以刷新树（移除旧的再重新打开）
+    const idx = openProjects.findIndex((p) => p.filename === project.filename);
+    if (idx !== -1) openProjects.splice(idx, 1);
+    const wasActive = activeProject?.filename === project.filename;
+    await openProject(project.filename);
+    if (wasActive) {
+      activeProject = openProjects.find((p) => p.filename === project.filename);
+      updateTargetStatusBar();
+      updateCompilerStatusBar();
+    }
+  } catch (err) {
+    vscode.window.showErrorMessage(`添加文件失败: ${(err as Error).message}`);
+  }
+}
+
+/** 根据扩展名生成 <Unit> 节点文本（对应 cbProject::AddFile 的 compilerVar 判定）
+ *  Code::Blocks 规则（cbproject.cpp AddFile / projectloader.cpp SaveUnit）：
+ *    - 仅 ".c" → compilerVar="CC"
+ *    - 仅 Windows 平台 ".rc" → compilerVar="WINDRES"
+ *    - 其余（.cpp/.cc/.cxx/.h/.hpp/.s/.S 等）→ 默认 CPP，保存时省略 compilerVar 属性
+ */
+function buildUnitXml(rel: string, ext: string): string {
+  let compilerVar = 'CPP';
+  if (ext === '.c') compilerVar = 'CC';
+  else if (ext === '.rc' && process.platform === 'win32') compilerVar = 'WINDRES';
+
+  if (compilerVar === 'CPP') {
+    // 默认 CPP 不写 compilerVar（Code::Blocks 对默认情况省略，自闭合）
+    return `\t\t<Unit filename="${rel}" />`;
+  }
+  return `\t\t<Unit filename="${rel}">\n\t\t\t<Option compilerVar="${compilerVar}" />\n\t\t</Unit>`;
+}
+
+/** 在 </Project> 之前插入 <Unit> 节点（保留原文件格式） */
+function writeUnitsToCbp(cbpPath: string, units: string[]): void {
+  let raw = fs.readFileSync(cbpPath, 'utf-8');
+  // 找到 </Project> 前的缩进；简单做法：在 </Project> 前插入
+  const marker = '</Project>';
+  const idx = raw.lastIndexOf(marker);
+  if (idx === -1) throw new Error('找不到 </Project> 节点');
+  const insert = units.join('\n') + '\n';
+  raw = raw.slice(0, idx) + insert + raw.slice(idx);
+  fs.writeFileSync(cbpPath, raw, 'utf-8');
+}
+
 function getCompiler(compilerId?: string): Compiler {
   const cfg = vscode.workspace.getConfiguration('codeblocks');
   const id = compilerId ?? cfg.get<string>('compilerId', 'gcc');
@@ -672,31 +865,9 @@ async function build(rebuild: boolean): Promise<boolean> {
 
   let allOk = true;
   for (const project of openProjects) {
-    // 按名称匹配目标；找不到则跳过该项目
-    const target = project.buildTargets.find((t) => t.title === targetTitle);
-    if (!target) {
-      outputChannel.appendLine(`[Code::Blocks] 项目 "${project.title}" 无目标 "${targetTitle}"，跳过`);
-      continue;
-    }
-
-    const compiler = getCompiler(target.compilerId || project.compilerId);
-    outputChannel.appendLine('');
-    outputChannel.appendLine(`=== 构建项目: ${project.title} / 目标: ${targetTitle} ===`);
-    outputChannel.appendLine(`  使用编译器: ${compiler.programs.C}`);
-
-    const engine = new BuildEngine(project, compiler, outputChannel);
-    const ok = await engine.build(targetTitle, {
-      rebuild,
-      onLine: (line) => outputChannel.appendLine(line),
-      onDiagnostic: (diag) => {
-        const diags = diagnosticCollection.get(vscode.Uri.file('')) ?? [];
-        diagnosticCollection.set(vscode.Uri.file(project.basePath), [...diags, diag]);
-      },
-    });
+    const ok = await buildOneProject(project, targetTitle, rebuild);
     if (!ok) {
       allOk = false;
-      // 有工程编译失败：立即停止，不再编译后续项目
-      outputChannel.appendLine(`[Code::Blocks] 项目 "${project.title}" 编译失败，停止后续构建`);
       break;
     }
   }
@@ -709,6 +880,61 @@ async function build(rebuild: boolean): Promise<boolean> {
     vscode.window.showErrorMessage('构建失败，请查看输出');
   }
   return allOk;
+}
+
+/** 构建单个项目（右键菜单的 Build/Rebuild 使用） */
+async function buildSingleProject(filename: string, rebuild: boolean): Promise<void> {
+  const project = openProjects.find((p) => p.filename === filename);
+  if (!project) {
+    vscode.window.showWarningMessage('项目未找到');
+    return;
+  }
+  await saveAllBeforeBuild();
+
+  const targetTitle = await selectTarget();
+  if (targetTitle === undefined) return;
+
+  diagnosticCollection.clear();
+  outputChannel.clear();
+  outputChannel.show(true);
+  outputChannel.appendLine(`[Code::Blocks] 开始构建 ${rebuild ? '(重新构建)' : ''}...（单项目）`);
+
+  const ok = await buildOneProject(project, targetTitle, rebuild);
+  if (ok) {
+    outputChannel.appendLine('[Code::Blocks] 构建成功');
+    vscode.window.showInformationMessage('构建成功');
+  } else {
+    outputChannel.appendLine('[Code::Blocks] 构建失败');
+    vscode.window.showErrorMessage('构建失败，请查看输出');
+  }
+}
+
+/** 构建单个项目的一个目标（被 build / buildSingleProject 复用） */
+async function buildOneProject(project: Project, targetTitle: string, rebuild: boolean): Promise<boolean> {
+  const target = project.buildTargets.find((t) => t.title === targetTitle);
+  if (!target) {
+    outputChannel.appendLine(`[Code::Blocks] 项目 "${project.title}" 无目标 "${targetTitle}"，跳过`);
+    return true;
+  }
+
+  const compiler = getCompiler(target.compilerId || project.compilerId);
+  outputChannel.appendLine('');
+  outputChannel.appendLine(`=== 构建项目: ${project.title} / 目标: ${targetTitle} ===`);
+  outputChannel.appendLine(`  使用编译器: ${compiler.programs.C}`);
+
+  const engine = new BuildEngine(project, compiler, outputChannel);
+  const ok = await engine.build(targetTitle, {
+    rebuild,
+    onLine: (line) => outputChannel.appendLine(line),
+    onDiagnostic: (diag) => {
+      const diags = diagnosticCollection.get(vscode.Uri.file('')) ?? [];
+      diagnosticCollection.set(vscode.Uri.file(project.basePath), [...diags, diag]);
+    },
+  });
+  if (!ok) {
+    outputChannel.appendLine(`[Code::Blocks] 项目 "${project.title}" 编译失败`);
+  }
+  return ok;
 }
 
 async function clean(): Promise<void> {

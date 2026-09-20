@@ -93,6 +93,36 @@
       {
         "command": "codeblocks.format",
         "title": "Code::Blocks: Format with AStyle"
+      },
+      {
+        "command": "codeblocks.moveProjectUp",
+        "title": "Move Up",
+        "icon": "$(arrow-up)"
+      },
+      {
+        "command": "codeblocks.moveProjectDown",
+        "title": "Move Down",
+        "icon": "$(arrow-down)"
+      },
+      {
+        "command": "codeblocks.removeProject",
+        "title": "Remove Project",
+        "icon": "$(close)"
+      },
+      {
+        "command": "codeblocks.buildProject",
+        "title": "Build",
+        "icon": "$(package)"
+      },
+      {
+        "command": "codeblocks.rebuildProject",
+        "title": "Rebuild",
+        "icon": "$(sync)"
+      },
+      {
+        "command": "codeblocks.addFile",
+        "title": "Add Files...",
+        "icon": "$(add)"
       }
     ],
     "configuration": {
@@ -225,6 +255,38 @@
           "command": "codeblocks.codeStats",
           "when": "view == codeblocks.projectTree",
           "group": "navigation@8"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "codeblocks.moveProjectUp",
+          "when": "view == codeblocks.projectTree && viewItem == project",
+          "group": "1_move@1"
+        },
+        {
+          "command": "codeblocks.moveProjectDown",
+          "when": "view == codeblocks.projectTree && viewItem == project",
+          "group": "1_move@2"
+        },
+        {
+          "command": "codeblocks.removeProject",
+          "when": "view == codeblocks.projectTree && viewItem == project",
+          "group": "1_move@3"
+        },
+        {
+          "command": "codeblocks.buildProject",
+          "when": "view == codeblocks.projectTree && viewItem == project",
+          "group": "2_build@1"
+        },
+        {
+          "command": "codeblocks.rebuildProject",
+          "when": "view == codeblocks.projectTree && viewItem == project",
+          "group": "2_build@2"
+        },
+        {
+          "command": "codeblocks.addFile",
+          "when": "view == codeblocks.projectTree && viewItem == project",
+          "group": "3_add@1"
         }
       ]
     },
