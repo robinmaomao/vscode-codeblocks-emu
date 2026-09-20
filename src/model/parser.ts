@@ -64,6 +64,34 @@ function collectAddOptions(parent: any): string[] {
   return out;
 }
 
+/** 从 <Compiler>/<Linker> 的 <Add directory="..."/> 提取目录（对应 DoCompilerOptions/DoLinkerOptions） */
+function collectAddDirectories(parent: any): string[] {
+  const out: string[] = [];
+  if (!parent) return out;
+  let node = parent.Add;
+  if (node === undefined) return out;
+  if (!Array.isArray(node)) node = [node];
+  for (const n of node) {
+    const dir = n['@_directory'];
+    if (dir !== undefined && dir !== '') out.push(toUnix(String(dir)));
+  }
+  return out;
+}
+
+/** 从 <Linker> 的 <Add library="..."/> 提取库名（对应 DoLinkerOptions） */
+function collectAddLibraries(parent: any): string[] {
+  const out: string[] = [];
+  if (!parent) return out;
+  let node = parent.Add;
+  if (node === undefined) return out;
+  if (!Array.isArray(node)) node = [node];
+  for (const n of node) {
+    const lib = n['@_library'];
+    if (lib !== undefined && lib !== '') out.push(toUnix(String(lib)));
+  }
+  return out;
+}
+
 export class ProjectParser {
   private parser: XMLParser;
 
@@ -102,6 +130,8 @@ export class ProjectParser {
       buildTargets: [],
       virtualTargets: [],
       virtualFolders: [],
+      commandsBeforeBuild: [],
+      commandsAfterBuild: [],
       files: [],
       extensions: root.Extensions ?? null,
     };
@@ -115,6 +145,9 @@ export class ProjectParser {
       this.parseIncludeDirs(projNode.IncludeDirs, project);
       this.parseLibDirs(projNode.LibDirs, project);
       this.parseResourceCompilerOptions(projNode.ResourceCompiler, project);
+      // 项目级 pre/post build 命令（<ExtraCommands>）
+      this.parseExtraCommands(projNode.ExtraCommands, project);
+      this.parseExtraCommands(projNode.MakeCommands, project);
       // 虚拟目标
       this.parseVirtualTargets(projNode.VirtualTargets, project);
       // 构建目标
@@ -138,12 +171,17 @@ export class ProjectParser {
     }
   }
 
-  private parseCompilerOptions(node: any, sink: { compilerOptions: string[] }): void {
+  private parseCompilerOptions(node: any, sink: { compilerOptions: string[]; includeDirs: string[] }): void {
     sink.compilerOptions.push(...collectAddOptions(node));
+    // <Compiler><Add directory=...> 同时归属 includeDirs（DoCompilerOptions）
+    sink.includeDirs.push(...collectAddDirectories(node));
   }
 
-  private parseLinkerOptions(node: any, sink: { linkerOptions: string[] }): void {
+  private parseLinkerOptions(node: any, sink: { linkerOptions: string[]; libDirs: string[]; linkLibs: string[] }): void {
     sink.linkerOptions.push(...collectAddOptions(node));
+    // <Linker><Add library=...> → linkLibs，<Add directory=...> → libDirs（DoLinkerOptions）
+    sink.libDirs.push(...collectAddDirectories(node));
+    sink.linkLibs.push(...collectAddLibraries(node));
   }
 
   private parseResourceCompilerOptions(node: any, sink: Project | BuildTarget): void {
@@ -213,8 +251,9 @@ export class ProjectParser {
       this.parseIncludeDirs(tnode.IncludeDirs, target);
       this.parseLibDirs(tnode.LibDirs, target);
 
-      // pre/post build steps
-      this.parseMakeCommands(tnode.MakeCommands, target);
+      // pre/post build steps（.cbp 用 <ExtraCommands>，早期版本可能用 <MakeCommands>）
+      this.parseExtraCommands(tnode.ExtraCommands, target);
+      this.parseExtraCommands(tnode.MakeCommands, target);
 
       project.buildTargets.push(target);
     }
@@ -249,10 +288,20 @@ export class ProjectParser {
     }
   }
 
-  private parseMakeCommands(node: any, target: BuildTarget): void {
+  /** 解析 pre/post build/clean 命令（DoExtraCommands + DoMakeCommands） */
+  private parseExtraCommands(node: any, sink: { commandsBeforeBuild: string[]; commandsAfterBuild: string[] }): void {
     if (!node) return;
-    let items = node.Build ?? node.Clean;
-    // .cbp 里 MakeCommands 结构：<MakeCommands><Build><Option before=".."/></Build>...
+    // <ExtraCommands><Add before=".." after=".."/></ExtraCommands>
+    let adds = node.Add;
+    if (adds === undefined) return;
+    if (!Array.isArray(adds)) adds = [adds];
+    for (const add of adds) {
+      const before = String(add['@_before'] ?? '');
+      const after = String(add['@_after'] ?? '');
+      if (before) sink.commandsBeforeBuild.push(before);
+      if (after) sink.commandsAfterBuild.push(after);
+    }
+    // 兼容 <MakeCommands><Build><Option before=".."/></Build>...
     for (const phase of ['Build', 'Clean']) {
       const phaseNode = node[phase];
       if (!phaseNode) continue;
@@ -264,9 +313,11 @@ export class ProjectParser {
         if (!cmd) continue;
         const before = o['@_before'];
         if (phase === 'Build') {
-          if (before) target.commandsBeforeBuild.push(cmd); else target.commandsAfterBuild.push(cmd);
+          if (before) sink.commandsBeforeBuild.push(cmd); else sink.commandsAfterBuild.push(cmd);
         } else {
-          if (before) target.commandsBeforeClean.push(cmd); else target.commandsAfterClean.push(cmd);
+          // clean 命令仅 BuildTarget 支持
+          const bt = sink as unknown as BuildTarget;
+          if (before) bt.commandsBeforeClean.push(cmd); else bt.commandsAfterClean.push(cmd);
         }
       }
     }
@@ -288,7 +339,13 @@ export class ProjectParser {
         absolutePath: unixJoin(project.basePath, rel),
         buildTargets: [],
         compilerVar: '',
+        compile: true,
+        link: true,
+        customBuildCommands: {},
       };
+
+      let foundTarget = false;
+      let noTarget = false;
 
       // 解析该文件归属的构建目标
       let opts = unit.Option;
@@ -297,17 +354,34 @@ export class ProjectParser {
         for (const o of opts) {
           const targets = o['@_target'];
           if (targets !== undefined) {
-            file.buildTargets.push(...String(targets).split(';').filter(Boolean));
+            const list = String(targets).split(';').filter(Boolean);
+            if (list.length) {
+              file.buildTargets.push(...list);
+              foundTarget = true;
+            } else {
+              noTarget = true; // <{~None~}>
+            }
           }
           if (o['@_compilerVar'] !== undefined) file.compilerVar = String(o['@_compilerVar']);
-          if (o['@_build'] !== undefined) {
-            file.useCustomBuildCommand = true;
-            file.customBuildCommand = String(o['@_build']);
+          if (o['@_compile'] !== undefined) file.compile = String(o['@_compile']) !== '0';
+          if (o['@_link'] !== undefined) file.link = String(o['@_link']) !== '0';
+          // custom build command：<Option compiler="id" use="1" buildCommand="..."/>
+          if (o['@_buildCommand'] !== undefined && o['@_compiler'] !== undefined) {
+            const cmp = String(o['@_compiler']);
+            const cmd = String(o['@_buildCommand']).replace(/\\n/g, '\n');
+            if (cmp && cmd) file.customBuildCommands[cmp] = cmd;
           }
         }
       }
 
       project.files.push(file);
+
+      // 无 target 属性的文件归属所有目标（Code::Blocks pre-1.6 兼容）
+      if (!foundTarget && !noTarget) {
+        for (const t of project.buildTargets) {
+          file.buildTargets.push(t.title);
+        }
+      }
 
       // 归属到对应构建目标的 files 列表
       for (const bt of file.buildTargets) {

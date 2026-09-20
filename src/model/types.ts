@@ -70,9 +70,12 @@ export interface ProjectFile {
   buildTargets: string[];
   /** 编译变量：CPP / CC / WINDRES */
   compilerVar: string;
-  /** 自定义编译命令（可选） */
-  customBuildCommand?: string;
-  useCustomBuildCommand?: boolean;
+  /** 是否参与编译（<Option compile="1"/>） */
+  compile: boolean;
+  /** 是否参与链接（<Option link="1"/>） */
+  link: boolean;
+  /** 自定义编译命令（按编译器 ID 映射：compilerId → buildCommand） */
+  customBuildCommands: Record<string, string>;
 }
 
 /** 构建目标 —— projectbuildtarget.h ProjectBuildTarget（继承 CompileTargetBase） */
@@ -155,6 +158,10 @@ export interface Project {
   virtualTargets: VirtualBuildTarget[];
   /** 虚拟文件夹 */
   virtualFolders: string[];
+
+  /** 项目级 pre/post build 命令（<ExtraCommands>，对所有目标生效） */
+  commandsBeforeBuild: string[];
+  commandsAfterBuild: string[];
 
   /** 所有文件（含未归属具体目标的） */
   files: ProjectFile[];

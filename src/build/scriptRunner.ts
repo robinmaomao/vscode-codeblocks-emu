@@ -83,18 +83,33 @@ export async function runScriptCommands(
   return ok;
 }
 
-/** 为构建目标构造宏变量（对应 Code::Blocks 构建变量） */
+/** 为构建目标构造宏变量（对应 Code::Blocks macrosmanager.cpp 的构建变量） */
 export function buildMacroVars(
   basePath: string,
   outputFilename: string,
   targetTitle: string,
+  objectOutput = 'obj/',
 ): Record<string, string> {
+  const toUnix = (s: string) => s.replace(/\\/g, '/');
+  const out = toUnix(outputFilename);
+  // 去掉文件名，保留目录（含结尾斜杠）；无目录则为空
+  const outDir = out.includes('/') ? out.slice(0, out.lastIndexOf('/') + 1) : '';
+  const baseName = out.includes('/') ? out.slice(out.lastIndexOf('/') + 1) : out;
+  const stem = baseName.replace(/\.[^.]+$/, '');
+
   return {
-    TARGET_OUTPUT_FILE: outputFilename,
-    TARGET_OUTPUT_BASENAME: outputFilename.replace(/\.[^.]+$/, ''),
-    TARGET_OUTPUT_DIR: outputFilename.replace(/[\\/][^\\/]*$/, ''),
+    // 目标相关（macrosmanager.cpp）
+    TARGET_OUTPUT_FILE: out,
+    TARGET_OUTPUT_FILENAME: baseName,
+    TARGET_OUTPUT_BASENAME: stem,
+    TARGET_OUTPUT_DIR: outDir,
     TARGET_NAME: targetTitle,
+    TARGET_OBJECT_DIR: toUnix(objectOutput),
+    // 项目相关
     PROJECT_DIR: basePath,
+    PROJECT_DIRECTORY: basePath,
+    PROJECT_NAME: targetTitle,
     PROJECTNAME: targetTitle,
+    PROJECT_FILENAME: out,
   };
 }

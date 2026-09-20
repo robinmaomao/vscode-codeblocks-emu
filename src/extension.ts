@@ -10,6 +10,7 @@ import { ProjectParser, WorkspaceParser } from './model/parser';
 import { Project, BuildTarget } from './model/types';
 import { Compiler } from './compiler/compiler';
 import { CompilerOptionsLoader } from './compiler/optionsLoader';
+import { CodeBlocksConfig } from './compiler/codeblocksConfig';
 import { detectAllCompilers } from './compiler/detector';
 import { CompilerOptionsPanel } from './ui/compilerOptionsPanel';
 import { ProjectTreeProvider } from './ui/projectTreeProvider';
@@ -24,6 +25,7 @@ let currentProject: Project | undefined;
 let outputChannel: vscode.OutputChannel;
 let diagnosticCollection: vscode.DiagnosticCollection;
 let compilerLoader: CompilerOptionsLoader | undefined;
+let codeBlocksConfig: CodeBlocksConfig | undefined;
 let projectTreeProvider: ProjectTreeProvider | undefined;
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
@@ -33,6 +35,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   // 初始化编译器选项加载器（resources/compilers 目录）
   const resourcesDir = path.join(context.extensionPath, 'resources', 'compilers');
   compilerLoader = new CompilerOptionsLoader(resourcesDir);
+
+  // 读取 CodeBlocks 用户自定义编译器配置（如 riscv32-v2）
+  codeBlocksConfig = new CodeBlocksConfig();
+  codeBlocksConfig.load();
 
   // 注册 DAP 调试器（内联实现，直接驱动 GDB）
   context.subscriptions.push(
@@ -265,14 +271,32 @@ function requireProject(): Project | undefined {
   return currentProject;
 }
 
-function getCompiler(): Compiler {
+function getCompiler(compilerId?: string): Compiler {
   const cfg = vscode.workspace.getConfiguration('codeblocks');
-  const compilerId = cfg.get<string>('compilerId', 'gcc');
+  const id = compilerId ?? cfg.get<string>('compilerId', 'gcc');
   const masterPath = cfg.get<string>('masterPath', '');
   if (compilerLoader) {
-    const compiler = compilerLoader.load(compilerId);
+    const compiler = compilerLoader.load(id);
     compiler.masterPath = masterPath;
-    // 应用探测到的完整程序路径（交叉编译器如 RISC-V）
+
+    // 优先：CodeBlocks 用户自定义编译器（如 riscv32-v2）——从 default.conf 解析程序路径
+    const userPrograms = codeBlocksConfig?.resolvePrograms(id);
+    if (userPrograms) {
+      compiler.programs = {
+        ...compiler.programs,
+        C: userPrograms.C,
+        CPP: userPrograms.CPP,
+        LD: userPrograms.LD,
+        LIB: userPrograms.LIB,
+        WINDRES: compiler.programs.WINDRES || '',
+        MAKE: compiler.programs.MAKE || '',
+        DBGconfig: compiler.programs.DBGconfig || 'gdb_debugger:Default',
+      };
+      compiler.masterPath = userPrograms.masterPath;
+      return compiler;
+    }
+
+    // 次优：探测到的完整程序路径（交叉编译器如 RISC-V）
     const programs = cfg.get<Record<string, string>>('compilerPrograms', {});
     if (programs && programs.C) {
       compiler.programs = { ...compiler.programs, ...programs } as any;
@@ -394,12 +418,17 @@ async function build(rebuild: boolean): Promise<boolean> {
   const targetTitle = await selectTarget();
   if (targetTitle === undefined) return false;
 
+  // 用目标自身的编译器 ID（如 riscv32-v2），而非全局默认
+  const target = project.buildTargets.find((t) => t.title === targetTitle);
+  const compiler = getCompiler(target?.compilerId || project.compilerId);
+
   diagnosticCollection.clear();
   outputChannel.clear();
   outputChannel.show(true);
 
-  const engine = new BuildEngine(project, getCompiler(), outputChannel);
+  const engine = new BuildEngine(project, compiler, outputChannel);
   outputChannel.appendLine(`[Code::Blocks] 开始构建 ${rebuild ? '(重新构建)' : ''}...`);
+  outputChannel.appendLine(`  目标 "${targetTitle}" 使用编译器: ${compiler.programs.C}`);
 
   const ok = await engine.build(targetTitle, {
     rebuild,

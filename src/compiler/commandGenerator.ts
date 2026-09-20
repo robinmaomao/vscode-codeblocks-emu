@@ -273,6 +273,18 @@ export class CommandGenerator {
     const template = this.getCommandTemplate(commandType, path.extname(unquote(params.file)).replace('.', ''));
     if (!template) return '';
 
+    return this.renderTemplate(template, params);
+  }
+
+  /** 用任意模板字符串展开宏（供自定义 buildCommand 使用） */
+  generateFromTemplate(template: string, params: GenerateParams): string {
+    return this.renderTemplate(template, params);
+  }
+
+  /** 核心：将命令模板展开为最终命令行 */
+  private renderTemplate(template: string, params: GenerateParams): string {
+    const cache = params.target ? this.cache.get(params.target.title) : undefined;
+
     const prog = this.compiler.programs;
     const picked = this.pickCompilerProgram(params);
     const linkerProgram = this.pickLinkerProgram(params);
@@ -397,6 +409,10 @@ export class CommandGenerator {
       }
     }
 
+    // 9. 展开 Code::Blocks 构建变量宏（$(TARGET_OBJECT_DIR)、$(PROJECT_NAME) 等）
+    if (params.target) {
+      macro = expandBuildVars(macro, this.project.basePath, params.target);
+    }
     return macro;
   }
 
@@ -422,4 +438,34 @@ export class CommandGenerator {
     const removeSet = new Set(toRemove);
     return parts.filter((p) => !removeSet.has(p)).join(' ');
   }
+}
+
+/** 展开 Code::Blocks 构建变量宏（$(TARGET_OBJECT_DIR)、$(PROJECT_NAME) 等） */
+export function expandBuildVars(cmd: string, basePath: string, target: BuildTarget): string {
+  const u = (s: string) => s.replace(/\\/g, '/');
+  const out = u(target.outputFilename);
+  const outDir = out.includes('/') ? out.slice(0, out.lastIndexOf('/') + 1) : '';
+  const baseName = out.includes('/') ? out.slice(out.lastIndexOf('/') + 1) : out;
+  const stem = baseName.replace(/\.[^.]+$/, '');
+
+  const vars: Record<string, string> = {
+    TARGET_OUTPUT_FILE: out,
+    TARGET_OUTPUT_FILENAME: baseName,
+    TARGET_OUTPUT_BASENAME: stem,
+    TARGET_OUTPUT_DIR: outDir,
+    TARGET_NAME: target.title,
+    TARGET_OBJECT_DIR: u(target.objectOutput || 'obj/'),
+    PROJECT_DIR: basePath,
+    PROJECT_DIRECTORY: basePath,
+    PROJECT_NAME: target.title,
+    PROJECTNAME: target.title,
+    PROJECT_FILENAME: out,
+  };
+
+  let result = cmd;
+  for (const [key, value] of Object.entries(vars)) {
+    result = result.replace(new RegExp('\\$\\(' + key + '\\)', 'g'), value);
+    result = result.replace(new RegExp('\\$' + key + '(?![A-Za-z0-9_])', 'g'), value);
+  }
+  return result;
 }

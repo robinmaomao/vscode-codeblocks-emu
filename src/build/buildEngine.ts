@@ -63,12 +63,16 @@ export class BuildEngine {
 
   /** 构建单个目标 */
   private async buildTarget(target: BuildTarget, options: BuildOptions): Promise<boolean> {
-    const macroVars = buildMacroVars(this.project.basePath, target.outputFilename, target.title);
+    const macroVars = buildMacroVars(this.project.basePath, target.outputFilename, target.title, target.objectOutput);
 
     if (target.targetType === TargetType.CommandsOnly) {
-      // 仅执行 pre/post build 命令
+      // 仅执行 pre/post build 命令（项目级 + 目标级）
+      const cmds = [
+        ...this.project.commandsBeforeBuild, ...target.commandsBeforeBuild,
+        ...this.project.commandsAfterBuild, ...target.commandsAfterBuild,
+      ];
       return runScriptCommands(
-        target.commandsBeforeBuild.concat(target.commandsAfterBuild),
+        cmds,
         this.project.basePath,
         macroVars,
         (l) => this.output.appendLine(l),
@@ -77,10 +81,14 @@ export class BuildEngine {
 
     const generator = new CommandGenerator(this.project, this.compiler);
 
+    // 项目级 + 目标级 pre-build 脚本（项目级先执行）
+    const preCommands = [...this.project.commandsBeforeBuild, ...target.commandsBeforeBuild];
+    const postCommands = [...this.project.commandsAfterBuild, ...target.commandsAfterBuild];
+
     // 0. pre-build 脚本
-    if (target.commandsBeforeBuild.length) {
+    if (preCommands.length) {
       this.output.appendLine(`[Code::Blocks] 执行 pre-build 脚本 (${target.title})...`);
-      const preOk = await runScriptCommands(target.commandsBeforeBuild, this.project.basePath, macroVars, (l) => this.output.appendLine(l));
+      const preOk = await runScriptCommands(preCommands, this.project.basePath, macroVars, (l) => this.output.appendLine(l));
       if (!preOk) {
         this.output.appendLine(`[Code::Blocks] 目标 "${target.title}" pre-build 脚本失败`);
         return false;
@@ -93,24 +101,37 @@ export class BuildEngine {
     const hasCpp = files.some((f) => /\.(cpp|cc|cxx|C)$/.test(f.relativeFilename));
 
     for (const file of files) {
-      if (!this.isCompilable(file.relativeFilename)) continue;
+      // 跳过不参与编译的文件（<Option compile="0"/>）
+      if (file.compile === false) continue;
+
+      const customCmd = file.customBuildCommands?.[target.compilerId]?.trim();
+      const isCustom = customCmd !== undefined && customCmd !== '';
+      // 自定义命令文件（ram.ld/app.xm 等）或标准源文件才编译
+      if (!isCustom && !this.isCompilable(file.relativeFilename)) continue;
+
       const object = this.objectPathFor(target, file);
       const deps = this.depsPathFor(target, file);
 
       // 增量编译：源文件未变更且对象文件存在时跳过（rebuild 强制重编译）
-      if (!options.rebuild && this.isUpToDate(file.absolutePath, object)) {
+      if (!options.rebuild && !isCustom && this.isUpToDate(file.absolutePath, object)) {
         continue;
       }
 
-      const command = generator.generate(CommandType.CompileObjectCmd, {
-        target,
-        pf: file,
-        file: file.absolutePath,
-        object,
-        flatObject: object,
-        deps,
-        hasCppFilesToLink: hasCpp,
-      });
+      let command: string;
+      if (isCustom) {
+        // 自定义编译命令：直接展开 $compiler/$file 等内置宏 + $(...) 变量
+        command = this.expandCustomCommand(customCmd, generator, target, file, object);
+      } else {
+        command = generator.generate(CommandType.CompileObjectCmd, {
+          target,
+          pf: file,
+          file: file.absolutePath,
+          object,
+          flatObject: object,
+          deps,
+          hasCppFilesToLink: hasCpp,
+        });
+      }
       if (command) {
         units.push({ target, file, command, cwd: this.project.basePath });
       }
@@ -133,7 +154,10 @@ export class BuildEngine {
 
     // 2. 链接（非 static lib 需要链接步骤；CommandsOnly 已在上面 return）
     if (target.targetType !== TargetType.StaticLib) {
-      const linkObjects = units.map((u) => this.objectPathFor(u.target, u.file));
+      // 链接对象只含「标准源文件」编译出的对象，排除自定义 buildCommand 文件
+      // （ram.ld → ram.o 是链接脚本、app.xm → appxm.o 是资源，均不参与链接）
+      const linkUnits = units.filter((u) => !this.isCustomFile(u.file, target));
+      const linkObjects = linkUnits.map((u) => this.objectPathFor(u.target, u.file));
       const linkCommand = generator.generate(this.linkCommandType(target), {
         target,
         pf: null,
@@ -165,9 +189,9 @@ export class BuildEngine {
     }
 
     // 3. post-build 脚本
-    if (target.commandsAfterBuild.length) {
+    if (postCommands.length) {
       this.output.appendLine(`[Code::Blocks] 执行 post-build 脚本 (${target.title})...`);
-      const postOk = await runScriptCommands(target.commandsAfterBuild, this.project.basePath, macroVars, (l) => this.output.appendLine(l));
+      const postOk = await runScriptCommands(postCommands, this.project.basePath, macroVars, (l) => this.output.appendLine(l));
       if (!postOk) {
         this.output.appendLine(`[Code::Blocks] 目标 "${target.title}" post-build 脚本失败`);
         return false;
@@ -188,6 +212,31 @@ export class BuildEngine {
 
   private isCompilable(rel: string): boolean {
     return /\.(c|cpp|cc|cxx|C)$/.test(rel) || /\.rc$/.test(rel);
+  }
+
+  /** 判断文件是否为自定义 buildCommand 文件（不参与链接） */
+  private isCustomFile(file: ProjectFile, target: BuildTarget): boolean {
+    const cmd = file.customBuildCommands?.[target.compilerId]?.trim();
+    return cmd !== undefined && cmd !== '';
+  }
+
+  /** 展开自定义编译命令（ram.ld/app.xm 等 <Option buildCommand>） */
+  private expandCustomCommand(
+    cmd: string,
+    generator: CommandGenerator,
+    target: BuildTarget,
+    file: ProjectFile,
+    object: string,
+  ): string {
+    return generator.generateFromTemplate(cmd, {
+      target,
+      pf: file,
+      file: file.absolutePath,
+      object,
+      flatObject: object,
+      deps: this.depsPathFor(target, file),
+      hasCppFilesToLink: false,
+    });
   }
 
   /** 增量编译判断：对象文件存在且 mtime 晚于源文件，则无需重编译 */
