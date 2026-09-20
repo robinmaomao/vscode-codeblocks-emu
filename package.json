@@ -46,15 +46,18 @@
     "commands": [
       {
         "command": "codeblocks.openProject",
-        "title": "Code::Blocks: Open Project (.cbp)"
+        "title": "Code::Blocks: Open Project (.cbp)",
+        "icon": "$(folder-opened)"
       },
       {
         "command": "codeblocks.build",
-        "title": "Code::Blocks: Build"
+        "title": "Code::Blocks: Build",
+        "icon": "$(package)"
       },
       {
         "command": "codeblocks.rebuild",
-        "title": "Code::Blocks: Rebuild"
+        "title": "Code::Blocks: Rebuild",
+        "icon": "$(sync)"
       },
       {
         "command": "codeblocks.buildAndRun",
@@ -62,11 +65,13 @@
       },
       {
         "command": "codeblocks.clean",
-        "title": "Code::Blocks: Clean"
+        "title": "Code::Blocks: Clean",
+        "icon": "$(trash)"
       },
       {
         "command": "codeblocks.run",
-        "title": "Code::Blocks: Run"
+        "title": "Code::Blocks: Run",
+        "icon": "$(play)"
       },
       {
         "command": "codeblocks.selectTarget",
@@ -78,15 +83,18 @@
       },
       {
         "command": "codeblocks.compilerOptions",
-        "title": "Code::Blocks: Compiler Options"
+        "title": "Code::Blocks: Compiler Options",
+        "icon": "$(settings-gear)"
       },
       {
         "command": "codeblocks.debug",
-        "title": "Code::Blocks: Debug"
+        "title": "Code::Blocks: Debug",
+        "icon": "$(debug-alt)"
       },
       {
         "command": "codeblocks.codeStats",
-        "title": "Code::Blocks: Code Statistics"
+        "title": "Code::Blocks: Code Statistics",
+        "icon": "$(graph)"
       },
       {
         "command": "codeblocks.todoList",
@@ -114,6 +122,16 @@
           "type": "number",
           "default": 0,
           "description": "并行编译任务数（0 = 自动，取 CPU 核数）"
+        },
+        "codeblocks.saveBeforeBuild": {
+          "type": "boolean",
+          "default": true,
+          "description": "构建/运行/清理前自动保存工作区中未保存的文件（对齐 Code::Blocks 的 Save all files before build）"
+        },
+        "codeblocks.activeProject": {
+          "type": "string",
+          "default": "",
+          "description": "上次打开的项目路径（用于工作区重载后恢复）"
         },
         "codeblocks.astyleOptions": {
           "type": "array",
@@ -159,6 +177,50 @@
         ]
       }
     ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "codeblocks.openProject",
+          "when": "view == codeblocks.projectTree",
+          "group": "navigation@1"
+        },
+        {
+          "command": "codeblocks.compilerOptions",
+          "when": "view == codeblocks.projectTree",
+          "group": "navigation@2"
+        },
+        {
+          "command": "codeblocks.build",
+          "when": "view == codeblocks.projectTree",
+          "group": "navigation@3"
+        },
+        {
+          "command": "codeblocks.rebuild",
+          "when": "view == codeblocks.projectTree",
+          "group": "navigation@4"
+        },
+        {
+          "command": "codeblocks.run",
+          "when": "view == codeblocks.projectTree",
+          "group": "navigation@5"
+        },
+        {
+          "command": "codeblocks.debug",
+          "when": "view == codeblocks.projectTree",
+          "group": "navigation@6"
+        },
+        {
+          "command": "codeblocks.clean",
+          "when": "view == codeblocks.projectTree",
+          "group": "navigation@7"
+        },
+        {
+          "command": "codeblocks.codeStats",
+          "when": "view == codeblocks.projectTree",
+          "group": "navigation@8"
+        }
+      ]
+    },
     "keybindings": [
       {
         "command": "codeblocks.build",

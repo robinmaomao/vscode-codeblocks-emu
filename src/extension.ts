@@ -152,14 +152,62 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     }),
   );
 
-  // 自动打开工作区中的 .cbp
-  const cbpFiles = vscode.workspace.workspaceFolders
-    ? await findCbpFiles(vscode.workspace.workspaceFolders.map((f) => f.uri.fsPath))
-    : [];
+  // 自动检测并打开工作区中的 .cbp
+  await autoDetectAndOpenProject();
+
+  // 监听工作区文件夹变化，重新检测
+  context.subscriptions.push(
+    vscode.workspace.onDidChangeWorkspaceFolders(() => {
+      autoDetectAndOpenProject();
+    }),
+  );
+
+  // 监听 .cbp 文件的新增/删除（延迟去抖）
+  let cbpWatcherTimer: NodeJS.Timeout | undefined;
+  const cbpWatcher = vscode.workspace.createFileSystemWatcher('**/*.cbp');
+  const scheduleRescan = () => {
+    if (cbpWatcherTimer) clearTimeout(cbpWatcherTimer);
+    cbpWatcherTimer = setTimeout(() => autoDetectAndOpenProject(), 800);
+  };
+  cbpWatcher.onDidCreate(scheduleRescan);
+  cbpWatcher.onDidDelete(scheduleRescan);
+  context.subscriptions.push(cbpWatcher);
+
+  return;
+}
+
+/** 自动检测 .cbp：0 个引导、1 个自动开、多个弹选择 */
+async function autoDetectAndOpenProject(): Promise<void> {
+  const folders = vscode.workspace.workspaceFolders;
+  if (!folders || folders.length === 0) {
+    // 无工作区：若已配置了上次项目则尝试恢复
+    const active = vscode.workspace.getConfiguration('codeblocks').get<string>('activeProject', '');
+    if (active && fs.existsSync(active) && !currentProject) {
+      await openProject(active);
+    }
+    return;
+  }
+
+  const cbpFiles = await findCbpFiles(folders.map((f) => f.uri.fsPath));
+
+  if (cbpFiles.length === 0) {
+    // 无 .cbp：不报错，静默等待用户通过菜单/命令打开
+    return;
+  }
+
   if (cbpFiles.length === 1) {
     await openProject(cbpFiles[0]);
+    return;
   }
-  return;
+
+  // 多个：弹选择
+  const picked = await vscode.window.showQuickPick(
+    cbpFiles.map((f) => ({ label: path.basename(f), description: f })),
+    { placeHolder: '检测到多个 Code::Blocks 项目，请选择要打开的 .cbp' },
+  );
+  if (picked) {
+    await openProject(picked.description!);
+  }
 }
 
 async function findCbpFiles(folders: string[]): Promise<string[]> {
@@ -189,9 +237,23 @@ async function openProject(filename: string): Promise<void> {
 
     // 刷新项目树
     projectTreeProvider?.setProject(project);
+
+    // 记录活动项目路径（用于重启后恢复）
+    await vscode.workspace.getConfiguration('codeblocks').update(
+      'activeProject', filename, vscode.ConfigurationTarget.Workspace,
+    );
+
     vscode.window.showInformationMessage(`已打开 Code::Blocks 项目: ${project.title}`);
   } catch (err) {
     vscode.window.showErrorMessage(`打开项目失败: ${(err as Error).message}`);
+  }
+}
+
+/** 构建前自动保存（对齐 Code::Blocks 的 Save all files before build） */
+async function saveAllBeforeBuild(): Promise<void> {
+  const cfg = vscode.workspace.getConfiguration('codeblocks');
+  if (cfg.get<boolean>('saveBeforeBuild', true)) {
+    await vscode.workspace.saveAll(false);
   }
 }
 
@@ -315,6 +377,9 @@ async function build(rebuild: boolean): Promise<boolean> {
   const project = requireProject();
   if (!project) return false;
 
+  // 构建前自动保存工作区未保存文件
+  await saveAllBeforeBuild();
+
   const targetTitle = await selectTarget();
   if (targetTitle === undefined) return false;
 
@@ -347,6 +412,8 @@ async function build(rebuild: boolean): Promise<boolean> {
 async function clean(): Promise<void> {
   const project = requireProject();
   if (!project) return;
+  // 清理前自动保存
+  await saveAllBeforeBuild();
   // 简化清理：删除对象输出目录
   for (const target of project.buildTargets) {
     const objDir = target.objectOutput ? path.join(project.basePath, target.objectOutput) : '';
@@ -360,6 +427,9 @@ async function clean(): Promise<void> {
 async function run(): Promise<void> {
   const project = requireProject();
   if (!project) return;
+
+  // 运行前自动保存
+  await saveAllBeforeBuild();
 
   const selectedTitle = await selectTarget();
   const target = project.buildTargets.find((t) => t.title === selectedTitle);
@@ -382,6 +452,9 @@ async function run(): Promise<void> {
 async function debug(): Promise<void> {
   const project = requireProject();
   if (!project) return;
+
+  // 调试前自动保存
+  await saveAllBeforeBuild();
 
   const selectedTitle = await selectTarget();
   const target = project.buildTargets.find((t) => t.title === selectedTitle);
