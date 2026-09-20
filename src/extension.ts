@@ -14,6 +14,7 @@ import { CodeBlocksConfig } from './compiler/codeblocksConfig';
 import { detectAllCompilers } from './compiler/detector';
 import { CompilerOptionsPanel } from './ui/compilerOptionsPanel';
 import { ProjectTreeProvider } from './ui/projectTreeProvider';
+import { MenuTreeProvider } from './ui/menuTreeProvider';
 import { BuildEngine } from './build/buildEngine';
 import { OutputParser } from './build/outputParser';
 import { GdbDebugAdapter } from './debug/gdbDebugAdapter';
@@ -51,6 +52,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   projectTreeProvider = new ProjectTreeProvider();
   context.subscriptions.push(
     vscode.window.registerTreeDataProvider('codeblocks.projectTree', projectTreeProvider),
+  );
+
+  // 注册菜单树视图（File/Edit/View/Build 等，模拟 Code::Blocks 菜单栏）
+  context.subscriptions.push(
+    vscode.window.registerTreeDataProvider('codeblocks.menu', new MenuTreeProvider()),
   );
 
   // 打开项目

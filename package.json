@@ -161,6 +161,10 @@
     "views": {
       "codeblocks": [
         {
+          "id": "codeblocks.menu",
+          "name": "Menu"
+        },
+        {
           "id": "codeblocks.projectTree",
           "name": "Project"
         },
