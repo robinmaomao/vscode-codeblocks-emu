@@ -84,6 +84,18 @@ export class CodeBlocksConfig {
     return this.userCompilers.get(lower);
   }
 
+  /** 按 masterPath（安装目录）查找用户编译器，用于区分同名工具链的不同版本（如 RV32-V1 / RV32-V2） */
+  findByMasterPath(masterPath: string): UserCompilerConfig | undefined {
+    if (!masterPath) return undefined;
+    const normalized = path.normalize(masterPath).toLowerCase();
+    for (const cfg of this.userCompilers.values()) {
+      if (cfg.masterPath && path.normalize(cfg.masterPath).toLowerCase() === normalized) {
+        return cfg;
+      }
+    }
+    return undefined;
+  }
+
   /** 若 compilerId 是用户自定义编译器，返回其完整程序路径映射 */
   resolvePrograms(compilerId: string): { C: string; CPP: string; LD: string; LIB: string; masterPath: string } | undefined {
     const cfg = this.find(compilerId);

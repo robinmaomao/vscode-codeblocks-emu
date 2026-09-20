@@ -29,6 +29,17 @@ let compilerLoader: CompilerOptionsLoader | undefined;
 let codeBlocksConfig: CodeBlocksConfig | undefined;
 let projectTreeProvider: ProjectTreeProvider | undefined;
 
+/** 底部状态栏构建目标项 */
+let targetStatusBar: vscode.StatusBarItem | undefined;
+/** 当前选中的构建目标标题（构建/运行/调试直接使用，不再弹窗） */
+let selectedTargetTitle: string | undefined;
+/** 底部状态栏：增量编译 */
+let buildStatusBar: vscode.StatusBarItem | undefined;
+/** 底部状态栏：全量编译 */
+let rebuildStatusBar: vscode.StatusBarItem | undefined;
+/** 底部状态栏：编译器选择 */
+let compilerStatusBar: vscode.StatusBarItem | undefined;
+
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
   outputChannel = vscode.window.createOutputChannel('Code::Blocks');
   diagnosticCollection = vscode.languages.createDiagnosticCollection('codeblocks');
@@ -58,6 +69,36 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   context.subscriptions.push(
     vscode.window.registerTreeDataProvider('codeblocks.menu', new MenuTreeProvider()),
   );
+
+  // 底部状态栏：构建目标切换项
+  targetStatusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
+  targetStatusBar.command = 'codeblocks.selectTarget';
+  targetStatusBar.tooltip = '点击切换构建目标';
+  context.subscriptions.push(targetStatusBar);
+  updateTargetStatusBar();
+
+  // 底部状态栏：增量编译
+  buildStatusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 90);
+  buildStatusBar.text = '$(package) Build';
+  buildStatusBar.command = 'codeblocks.build';
+  buildStatusBar.tooltip = '增量编译（Ctrl+F9）';
+  context.subscriptions.push(buildStatusBar);
+  buildStatusBar.show();
+
+  // 底部状态栏：全量编译
+  rebuildStatusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 80);
+  rebuildStatusBar.text = '$(sync) Rebuild';
+  rebuildStatusBar.command = 'codeblocks.rebuild';
+  rebuildStatusBar.tooltip = '全量编译（Ctrl+F11）';
+  context.subscriptions.push(rebuildStatusBar);
+  rebuildStatusBar.show();
+
+  // 底部状态栏：编译器选择
+  compilerStatusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 70);
+  compilerStatusBar.command = 'codeblocks.detectCompilers';
+  compilerStatusBar.tooltip = '点击选择编译器';
+  context.subscriptions.push(compilerStatusBar);
+  updateCompilerStatusBar();
 
   // 打开项目
   context.subscriptions.push(
@@ -121,7 +162,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   // 选择目标
   context.subscriptions.push(
     vscode.commands.registerCommand('codeblocks.selectTarget', async () => {
-      await selectTarget();
+      await promptSelectTarget();
     }),
   );
 
@@ -250,6 +291,14 @@ async function openProject(filename: string): Promise<void> {
     // 刷新项目树
     projectTreeProvider?.setProject(project);
 
+    // 默认选中第一个构建目标（若之前选中的目标仍存在则保留）
+    const titles = project.buildTargets.map((t) => t.title);
+    if (!selectedTargetTitle || !titles.includes(selectedTargetTitle)) {
+      selectedTargetTitle = titles[0];
+    }
+    updateTargetStatusBar();
+    updateCompilerStatusBar();
+
     // 记录活动项目路径（用于重启后恢复）
     await vscode.workspace.getConfiguration('codeblocks').update(
       'activeProject', filename, vscode.ConfigurationTarget.Workspace,
@@ -346,6 +395,7 @@ async function detectCompilers(): Promise<void> {
       await cfg.update('compilerPrograms', {}, vscode.ConfigurationTarget.Global);
     }
     vscode.window.showInformationMessage(`已选择编译器: ${picked.compiler.name}`);
+    updateCompilerStatusBar();
   }
 }
 
@@ -403,6 +453,66 @@ async function showTodoList(): Promise<void> {
   outputChannel.show(true);
 }
 
+/** 更新底部状态栏的构建目标显示 */
+function updateTargetStatusBar(): void {
+  if (!targetStatusBar) return;
+  if (currentProject && selectedTargetTitle) {
+    targetStatusBar.text = `$(symbol-method) Target: ${selectedTargetTitle}`;
+    targetStatusBar.show();
+  } else if (currentProject) {
+    targetStatusBar.text = '$(symbol-method) Target: —';
+    targetStatusBar.show();
+  } else {
+    targetStatusBar.hide();
+  }
+}
+
+/** 获取当前编译器友好显示名（优先用户自定义编译器名，回退 ID） */
+function currentCompilerName(): string {
+  const cfg = vscode.workspace.getConfiguration('codeblocks');
+  const id = cfg.get<string>('compilerId', 'gcc');
+  const masterPath = cfg.get<string>('masterPath', '');
+
+  // 优先：按 ID 查找（default.conf 的 user_sets，如 riscv32 / riscv32_v2）
+  let userCfg = codeBlocksConfig?.find(id);
+  // 探测到的 RISC-V 统一 id="riscv" 找不到时，按 masterPath 区分 V1/V2
+  if (!userCfg && masterPath) {
+    userCfg = codeBlocksConfig?.findByMasterPath(masterPath);
+  }
+
+  if (userCfg) {
+    // 用户自定义编译器：优先 NAME；若 NAME 缺少「-Vx」版本后缀，
+    // 从 masterPath 末尾目录名（如 RV32-V1 / RV32-V2）提取，以区分同系列不同版本
+    const name = userCfg.name || userCfg.id;
+    const refPath = userCfg.masterPath || masterPath;
+    if (refPath && !/-v\d/i.test(name)) {
+      const ver = path.basename(refPath).trim();
+      const m = ver.match(/-v(\d+)/i);
+      if (m) {
+        return `${name}-V${m[1]}`;
+      }
+    }
+    return name;
+  }
+
+  // 兜底：从 masterPath 提取版本（如 ...\RV32-V2 → RV32-V2）
+  if (masterPath) {
+    const ver = path.basename(masterPath).trim();
+    if (/rv32|riscv/i.test(ver) || /v\d/i.test(ver)) {
+      return ver;
+    }
+  }
+  return id;
+}
+
+/** 更新底部状态栏的编译器显示 */
+function updateCompilerStatusBar(): void {
+  if (!compilerStatusBar) return;
+  compilerStatusBar.text = `$(tools) Compiler: ${currentCompilerName()}`;
+  compilerStatusBar.show();
+}
+
+/** 返回当前选中的构建目标标题；未选中时弹出选择（构建/运行/调试的兜底入口） */
 async function selectTarget(): Promise<string | undefined> {
   const project = requireProject();
   if (!project) return undefined;
@@ -411,7 +521,34 @@ async function selectTarget(): Promise<string | undefined> {
     vscode.window.showWarningMessage('项目没有构建目标');
     return undefined;
   }
-  return vscode.window.showQuickPick(titles, { placeHolder: '选择构建目标' });
+  // 已选中且仍存在则直接返回，不弹窗
+  if (selectedTargetTitle && titles.includes(selectedTargetTitle)) {
+    return selectedTargetTitle;
+  }
+  // 未选中：默认选中第一个目标，不弹窗
+  selectedTargetTitle = titles[0];
+  updateTargetStatusBar();
+  return selectedTargetTitle;
+}
+
+/** 强制弹出选择框切换构建目标（点击状态栏项 / 菜单「选择目标」时调用） */
+async function promptSelectTarget(): Promise<void> {
+  const project = requireProject();
+  if (!project) return;
+  const titles = project.buildTargets.map((t) => t.title);
+  if (titles.length === 0) {
+    vscode.window.showWarningMessage('项目没有构建目标');
+    return;
+  }
+  const picked = await vscode.window.showQuickPick(
+    titles.map((t) => ({ label: t, description: t === selectedTargetTitle ? '当前' : undefined })),
+    { placeHolder: '选择构建目标' },
+  );
+  if (picked) {
+    selectedTargetTitle = picked.label;
+    updateTargetStatusBar();
+    vscode.window.showInformationMessage(`已切换到构建目标: ${selectedTargetTitle}`);
+  }
 }
 
 async function build(rebuild: boolean): Promise<boolean> {
