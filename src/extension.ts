@@ -7,7 +7,7 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
 import { ProjectParser, WorkspaceParser } from './model/parser';
-import { Project, BuildTarget } from './model/types';
+import { Project, BuildTarget, ProjectFile } from './model/types';
 import { Compiler } from './compiler/compiler';
 import { CompilerOptionsLoader } from './compiler/optionsLoader';
 import { CodeBlocksConfig } from './compiler/codeblocksConfig';
@@ -15,6 +15,7 @@ import { detectAllCompilers } from './compiler/detector';
 import { CompilerOptionsPanel } from './ui/compilerOptionsPanel';
 import { ProjectTreeProvider } from './ui/projectTreeProvider';
 import { MenuTreeProvider } from './ui/menuTreeProvider';
+import { BuildLogTreeProvider, BuildLogProject, BuildLogDiagnostic } from './ui/buildLogTreeProvider';
 import { BuildEngine } from './build/buildEngine';
 import { OutputParser } from './build/outputParser';
 import { GdbDebugAdapter } from './debug/gdbDebugAdapter';
@@ -32,7 +33,14 @@ let compilerLoader: CompilerOptionsLoader | undefined;
 let codeBlocksConfig: CodeBlocksConfig | undefined;
 let projectTreeProvider: ProjectTreeProvider | undefined;
 let projectTreeView: vscode.TreeView<any> | undefined;
+let buildLogTreeProvider: BuildLogTreeProvider | undefined;
 let extContext: vscode.ExtensionContext | undefined;
+/** 当前一次构建累积的项目摘要（供 Build Log 视图） */
+const currentBuildProjects: BuildLogProject[] = [];
+/** 本次构建已收集的错误总数（用于 maxReportedErrors 截断判断） */
+let currentBuildErrorCount = 0;
+/** 本次构建是否因达到 maxReportedErrors 上限而被截断 */
+let maxErrorsReached = false;
 
 /** 底部状态栏构建目标项 */
 let targetStatusBar: vscode.StatusBarItem | undefined;
@@ -67,6 +75,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   // 注册项目树视图（支持多项目 + 拖拽排序）
   projectTreeProvider = new ProjectTreeProvider();
+  projectTreeProvider.setResourcesDir(path.join(context.extensionPath, 'resources'));
   projectTreeView = vscode.window.createTreeView('codeblocks.projectTree', {
     treeDataProvider: projectTreeProvider,
     showCollapseAll: true,
@@ -77,9 +86,52 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   };
   context.subscriptions.push(projectTreeView);
 
+  // 注册构建日志树视图（结构化构建摘要）
+  buildLogTreeProvider = new BuildLogTreeProvider();
+  const buildLogTreeView = vscode.window.createTreeView('codeblocks.buildLog', {
+    treeDataProvider: buildLogTreeProvider,
+  });
+  context.subscriptions.push(buildLogTreeView);
+
   // 注册菜单树视图（File/Edit/View/Build 等，模拟 Code::Blocks 菜单栏）
   context.subscriptions.push(
     vscode.window.registerTreeDataProvider('codeblocks.menu', new MenuTreeProvider()),
+  );
+
+  // 聚焦 Build Log 视图（菜单项 / 构建完成后引导）
+  context.subscriptions.push(
+    vscode.commands.registerCommand('codeblocks.buildLog.focus', () => {
+      vscode.commands.executeCommand('workbench.view.extension.codeblocks');
+    }),
+  );
+
+  // 聚焦 Project 视图（菜单 View → Project）
+  context.subscriptions.push(
+    vscode.commands.registerCommand('codeblocks.projectTree.focus', () => {
+      projectTreeView?.reveal(undefined, { focus: true });
+    }),
+  );
+
+  // 下一个错误（F4）
+  context.subscriptions.push(
+    vscode.commands.registerCommand('codeblocks.nextError', () => {
+      if (!buildLogTreeProvider?.hasErrors()) {
+        vscode.window.showInformationMessage('没有可导航的编译错误');
+        return;
+      }
+      buildLogTreeProvider.gotoNextError();
+    }),
+  );
+
+  // 上一个错误（Shift+F4）
+  context.subscriptions.push(
+    vscode.commands.registerCommand('codeblocks.prevError', () => {
+      if (!buildLogTreeProvider?.hasErrors()) {
+        vscode.window.showInformationMessage('没有可导航的编译错误');
+        return;
+      }
+      buildLogTreeProvider.gotoPreviousError();
+    }),
   );
 
   // 底部状态栏：构建目标切换项
@@ -119,6 +171,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       const p = openProjects.find((x) => x.filename === filename);
       if (p) {
         activeProject = p;
+        projectTreeProvider?.setActiveProject(p);
         updateTargetStatusBar();
         updateCompilerStatusBar();
       }
@@ -184,6 +237,43 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       const filename = resolveProjectFilename(node);
       if (!filename) return;
       await addFilesToProject(filename);
+    }),
+  );
+
+  // 从项目移除文件（保留磁盘文件，写回 .cbp）
+  context.subscriptions.push(
+    vscode.commands.registerCommand('codeblocks.removeFile', async (node?: any) => {
+      const { project, file } = resolveFileNode(node);
+      if (!project || !file) return;
+      await removeFileFromProject(project, file);
+    }),
+  );
+
+  // 打开文件所在目录（资源管理器）
+  context.subscriptions.push(
+    vscode.commands.registerCommand('codeblocks.openContainingFolder', (node?: any) => {
+      const { project, file } = resolveFileNode(node);
+      if (!project || !file) return;
+      const abs = file.absolutePath;
+      vscode.commands.executeCommand('revealFileInOS', vscode.Uri.file(abs));
+    }),
+  );
+
+  // 切换 compile 开关（写回 .cbp <Option compile="0/1">）
+  context.subscriptions.push(
+    vscode.commands.registerCommand('codeblocks.toggleCompile', async (node?: any) => {
+      const { project, file } = resolveFileNode(node);
+      if (!project || !file) return;
+      await toggleFileOption(project, file, 'compile', file.compile === false ? true : false);
+    }),
+  );
+
+  // 切换 link 开关（写回 .cbp <Option link="0/1">）
+  context.subscriptions.push(
+    vscode.commands.registerCommand('codeblocks.toggleLink', async (node?: any) => {
+      const { project, file } = resolveFileNode(node);
+      if (!project || !file) return;
+      await toggleFileOption(project, file, 'link', file.link === false ? true : false);
     }),
   );
 
@@ -322,8 +412,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 async function autoDetectAndOpenProject(): Promise<void> {
   const folders = vscode.workspace.workspaceFolders;
   if (!folders || folders.length === 0) {
-    // 无工作区：若已配置了上次项目则尝试恢复
-    const active = vscode.workspace.getConfiguration('codeblocks').get<string>('activeProject', '');
+    // 无工作区：若已记录了上次项目则尝试恢复（workspaceState 存储）
+    const active = extContext?.workspaceState.get<string>('codeblocks.activeProject', '');
     if (active && fs.existsSync(active) && openProjects.length === 0) {
       await openProject(active);
     }
@@ -409,10 +499,8 @@ async function openProject(filename: string): Promise<void> {
     // 持久化打开的项目顺序
     await persistProjectOrder();
 
-    // 记录活动项目路径（用于重启后恢复）
-    await vscode.workspace.getConfiguration('codeblocks').update(
-      'activeProject', filename, vscode.ConfigurationTarget.Workspace,
-    );
+    // 记录活动项目路径（存 workspaceState，避免在工作区下生成 .vscode 目录）
+    await extContext?.workspaceState.update('codeblocks.activeProject', filename);
 
     vscode.window.showInformationMessage(`已打开 Code::Blocks 项目: ${project.title}`);
   } catch (err) {
@@ -497,6 +585,14 @@ function resolveProjectFilename(node: any): string | undefined {
   return typeof filename === 'string' ? filename : undefined;
 }
 
+/** 从右键菜单传入的文件节点解析出 project + file */
+function resolveFileNode(node: any): { project?: Project; file?: ProjectFile } {
+  if (!node) return {};
+  const project: Project | undefined = node?.project;
+  const file: ProjectFile | undefined = node?.file;
+  return { project, file };
+}
+
 /** 上移/下移项目（delta: -1 上移，1 下移） */
 function moveProject(filename: string, delta: number): void {
   const idx = openProjects.findIndex((p) => p.filename === filename);
@@ -522,6 +618,108 @@ function removeProject(filename: string): void {
   updateCompilerStatusBar();
   persistProjectOrder();
   outputChannel.appendLine(`[Code::Blocks] 已移除项目: ${removed.title}`);
+}
+
+/** 从项目移除文件（保留磁盘文件，写回 .cbp 删除对应 <Unit> 节点） */
+async function removeFileFromProject(project: Project, file: ProjectFile): Promise<void> {
+  const confirm = await vscode.window.showWarningMessage(
+    `从项目 "${path.basename(path.dirname(project.filename))}" 中移除文件 "${path.basename(file.relativeFilename)}"？（磁盘文件保留）`,
+    { modal: true },
+    'Remove',
+  );
+  if (confirm !== 'Remove') return;
+
+  try {
+    removeUnitFromCbp(project.filename, file.relativeFilename);
+    outputChannel.appendLine(`[Code::Blocks] 已从项目移除文件: ${file.relativeFilename}`);
+    // 重新解析项目刷新树
+    const idx = openProjects.findIndex((p) => p.filename === project.filename);
+    if (idx !== -1) openProjects.splice(idx, 1);
+    const wasActive = activeProject?.filename === project.filename;
+    await openProject(project.filename);
+    if (wasActive) {
+      activeProject = openProjects.find((p) => p.filename === project.filename);
+      projectTreeProvider?.setActiveProject(activeProject);
+      updateTargetStatusBar();
+      updateCompilerStatusBar();
+    }
+  } catch (err) {
+    vscode.window.showErrorMessage(`移除文件失败: ${(err as Error).message}`);
+  }
+}
+
+/** 切换文件 compile/link 选项（写回 .cbp） */
+async function toggleFileOption(project: Project, file: ProjectFile, opt: 'compile' | 'link', enable: boolean): Promise<void> {
+  try {
+    setUnitOptionInCbp(project.filename, file.relativeFilename, opt, enable);
+    const name = opt === 'compile' ? '编译' : '链接';
+    outputChannel.appendLine(`[Code::Blocks] 文件 ${file.relativeFilename} ${name} = ${enable}`);
+    // 重新解析项目刷新树
+    const idx = openProjects.findIndex((p) => p.filename === project.filename);
+    if (idx !== -1) openProjects.splice(idx, 1);
+    const wasActive = activeProject?.filename === project.filename;
+    await openProject(project.filename);
+    if (wasActive) {
+      activeProject = openProjects.find((p) => p.filename === project.filename);
+      projectTreeProvider?.setActiveProject(activeProject);
+      updateTargetStatusBar();
+      updateCompilerStatusBar();
+    }
+  } catch (err) {
+    vscode.window.showErrorMessage(`切换${opt === 'compile' ? '编译' : '链接'}选项失败: ${(err as Error).message}`);
+  }
+}
+
+/** 从 .cbp 删除指定文件的 <Unit> 节点（按 filename 精确匹配） */
+function removeUnitFromCbp(cbpPath: string, relativeFilename: string): void {
+  const raw = fs.readFileSync(cbpPath, 'utf-8');
+  const escaped = relativeFilename.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  // 匹配自闭合 <Unit filename="..." /> 或成对 <Unit filename="...">...</Unit>
+  const selfClose = new RegExp(`<Unit filename="${escaped}"\\s*/>`, 'g');
+  const paired = new RegExp(`<Unit filename="${escaped}"\\s*>[\\s\\S]*?</Unit>`, 'g');
+  let out = raw.replace(selfClose, '').replace(paired, '');
+  if (out === raw) throw new Error(`未在 .cbp 中找到文件 "${relativeFilename}"`);
+  fs.writeFileSync(cbpPath, out, 'utf-8');
+}
+
+/** 设置 .cbp 中指定文件的 <Option compile/link> 值（无则新增） */
+function setUnitOptionInCbp(cbpPath: string, relativeFilename: string, opt: 'compile' | 'link', enable: boolean): void {
+  const raw = fs.readFileSync(cbpPath, 'utf-8');
+  const escaped = relativeFilename.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const val = enable ? '1' : '0';
+
+  // 定位该 <Unit> 节点（自闭合或成对）
+  const selfCloseRe = new RegExp(`<Unit filename="${escaped}"\\s*/>`, 'g');
+  const pairedRe = new RegExp(`<Unit filename="${escaped}"\\s*>([\\s\\S]*?)</Unit>`, 'g');
+
+  let m = pairedRe.exec(raw);
+  if (m) {
+    // 成对节点：更新或新增 <Option compile/link>
+    const inner = m[1];
+    const optRe = new RegExp(`<Option ${opt}="[01]"\\s*/>`, 'g');
+    let newInner: string;
+    if (optRe.test(inner)) {
+      newInner = inner.replace(new RegExp(`<Option ${opt}="[01]"\\s*/>`, 'g'), `<Option ${opt}="${val}" />`);
+    } else {
+      newInner = `\n\t\t\t<Option ${opt}="${val}" />${inner}`;
+    }
+    const newUnit = `<Unit filename="${relativeFilename}">${newInner}</Unit>`;
+    const out = raw.replace(pairedRe, newUnit);
+    if (out === raw) throw new Error(`未在 .cbp 中找到文件 "${relativeFilename}"`);
+    fs.writeFileSync(cbpPath, out, 'utf-8');
+    return;
+  }
+
+  // 自闭合节点：展开为成对节点
+  selfCloseRe.lastIndex = 0;
+  if (selfCloseRe.test(raw)) {
+    const newUnit = `<Unit filename="${relativeFilename}">\n\t\t\t<Option ${opt}="${val}" />\n\t\t</Unit>`;
+    const out = raw.replace(selfCloseRe, newUnit);
+    fs.writeFileSync(cbpPath, out, 'utf-8');
+    return;
+  }
+
+  throw new Error(`未在 .cbp 中找到文件 "${relativeFilename}"`);
 }
 
 /** 添加文件到项目（参考 Code::Blocks cbProject::AddFile） */
@@ -863,6 +1061,11 @@ async function build(rebuild: boolean): Promise<boolean> {
   outputChannel.show(true);
   outputChannel.appendLine(`[Code::Blocks] 开始构建 ${rebuild ? '(重新构建)' : ''}...（共 ${openProjects.length} 个项目）`);
 
+  const buildStartMs = Date.now();
+  currentBuildProjects.length = 0;
+  currentBuildErrorCount = 0;
+  maxErrorsReached = false;
+
   let allOk = true;
   for (const project of openProjects) {
     const ok = await buildOneProject(project, targetTitle, rebuild);
@@ -879,6 +1082,7 @@ async function build(rebuild: boolean): Promise<boolean> {
     outputChannel.appendLine('[Code::Blocks] 构建失败');
     vscode.window.showErrorMessage('构建失败，请查看输出');
   }
+  finishBuildSummary(allOk, buildStartMs);
   return allOk;
 }
 
@@ -899,6 +1103,11 @@ async function buildSingleProject(filename: string, rebuild: boolean): Promise<v
   outputChannel.show(true);
   outputChannel.appendLine(`[Code::Blocks] 开始构建 ${rebuild ? '(重新构建)' : ''}...（单项目）`);
 
+  const buildStartMs = Date.now();
+  currentBuildProjects.length = 0;
+  currentBuildErrorCount = 0;
+  maxErrorsReached = false;
+
   const ok = await buildOneProject(project, targetTitle, rebuild);
   if (ok) {
     outputChannel.appendLine('[Code::Blocks] 构建成功');
@@ -907,6 +1116,7 @@ async function buildSingleProject(filename: string, rebuild: boolean): Promise<v
     outputChannel.appendLine('[Code::Blocks] 构建失败');
     vscode.window.showErrorMessage('构建失败，请查看输出');
   }
+  finishBuildSummary(ok, buildStartMs);
 }
 
 /** 构建单个项目的一个目标（被 build / buildSingleProject 复用） */
@@ -922,19 +1132,78 @@ async function buildOneProject(project: Project, targetTitle: string, rebuild: b
   outputChannel.appendLine(`=== 构建项目: ${project.title} / 目标: ${targetTitle} ===`);
   outputChannel.appendLine(`  使用编译器: ${compiler.programs.C}`);
 
+  // 本次项目构建的摘要数据（供 Build Log 视图）
+  const diagnostics: BuildLogDiagnostic[] = [];
+  const startMs = Date.now();
+
   const engine = new BuildEngine(project, compiler, outputChannel);
   const ok = await engine.build(targetTitle, {
     rebuild,
     onLine: (line) => outputChannel.appendLine(line),
-    onDiagnostic: (diag) => {
-      const diags = diagnosticCollection.get(vscode.Uri.file('')) ?? [];
-      diagnosticCollection.set(vscode.Uri.file(project.basePath), [...diags, diag]);
+    onDiagnostic: (diag, fileUri) => {
+      // 按具体文件 URI 分组挂到 Problems 面板；无文件则回退到项目根
+      const uri = fileUri ?? vscode.Uri.file(project.basePath);
+      const diags = diagnosticCollection.get(uri) ?? [];
+      diagnosticCollection.set(uri, [...diags, diag]);
+    },
+    onStructuredDiagnostic: (d) => {
+      // maxReportedErrors 截断：达到上限后停止收集（CodeBlocks max_reported_errors）
+      const maxErrors = vscode.workspace.getConfiguration('codeblocks').get<number>('maxReportedErrors', 50);
+      if (d.severity === 'error') {
+        if (maxErrors > 0 && currentBuildErrorCount >= maxErrors) {
+          maxErrorsReached = true;
+          return;
+        }
+        currentBuildErrorCount++;
+      }
+      diagnostics.push(d);
     },
   });
+
+  const durationMs = Date.now() - startMs;
+  const stats = engine.lastStats ?? { compiledCount: 0, skippedCount: 0, failedCount: 0, linkSuccess: ok, linkSkipped: true, outputFilename: undefined };
+  const projectName = path.basename(path.dirname(project.filename));
+
+  currentBuildProjects.push({
+    projectName,
+    targetName: targetTitle,
+    compilerPath: compiler.programs.C || compiler.name,
+    success: ok,
+    compiledCount: stats.compiledCount,
+    skippedCount: stats.skippedCount,
+    failedCount: stats.failedCount,
+    linkSuccess: stats.linkSuccess,
+    linkSkipped: stats.linkSkipped,
+    outputFilename: stats.outputFilename,
+    diagnostics,
+    durationMs,
+  });
+
   if (!ok) {
     outputChannel.appendLine(`[Code::Blocks] 项目 "${project.title}" 编译失败`);
   }
   return ok;
+}
+
+/** 构建结束：汇总所有项目摘要，写入 Build Log 树视图 */
+function finishBuildSummary(allOk: boolean, buildStartMs: number): void {
+  if (!buildLogTreeProvider) return;
+  const errorCount = currentBuildProjects.reduce((n, p) => n + p.diagnostics.filter((d) => d.severity === 'error').length, 0);
+  const warningCount = currentBuildProjects.reduce((n, p) => n + p.diagnostics.filter((d) => d.severity === 'warning').length, 0);
+  buildLogTreeProvider.setSummary({
+    success: allOk,
+    durationMs: Date.now() - buildStartMs,
+    projects: [...currentBuildProjects],
+    errorCount,
+    warningCount,
+    truncated: maxErrorsReached,
+  });
+  // 达到上限时提示（CodeBlocks "More errors follow but not being shown"）
+  if (maxErrorsReached) {
+    outputChannel.appendLine('[Code::Blocks] 错误数达到上限，后续错误不再显示（可在设置 codeblocks.maxReportedErrors 调整）');
+  }
+  // 引导用户查看结构化摘要（不强制弹出）
+  vscode.commands.executeCommand('codeblocks.buildLog.focus');
 }
 
 async function clean(): Promise<void> {

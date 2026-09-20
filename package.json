@@ -2,8 +2,11 @@
   "name": "codeblocks-vscode",
   "displayName": "Code::Blocks for VS Code",
   "description": "原生移植 Code::Blocks 核心功能到 VS Code：项目模型、构建引擎、编译器管理与调试引擎",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "publisher": "codeblocks",
+  "author": {
+    "name": "Robinmaomao"
+  },
   "license": "SEE LICENSE IN LICENSE.md",
   "repository": {
     "type": "git",
@@ -123,6 +126,32 @@
         "command": "codeblocks.addFile",
         "title": "Add Files...",
         "icon": "$(add)"
+      },
+      {
+        "command": "codeblocks.removeFile",
+        "title": "Remove File from Project",
+        "icon": "$(close)"
+      },
+      {
+        "command": "codeblocks.openContainingFolder",
+        "title": "Open Containing Folder",
+        "icon": "$(folder-opened)"
+      },
+      {
+        "command": "codeblocks.toggleCompile",
+        "title": "Compile File"
+      },
+      {
+        "command": "codeblocks.toggleLink",
+        "title": "Link File"
+      },
+      {
+        "command": "codeblocks.nextError",
+        "title": "Code::Blocks: Next Error"
+      },
+      {
+        "command": "codeblocks.prevError",
+        "title": "Code::Blocks: Previous Error"
       }
     ],
     "configuration": {
@@ -148,11 +177,6 @@
           "default": true,
           "description": "构建/运行/清理前自动保存工作区中未保存的文件（对齐 Code::Blocks 的 Save all files before build）"
         },
-        "codeblocks.activeProject": {
-          "type": "string",
-          "default": "",
-          "description": "上次打开的项目路径（用于工作区重载后恢复）"
-        },
         "codeblocks.compilerPrograms": {
           "type": "object",
           "default": {},
@@ -176,6 +200,11 @@
             "--indent=spaces=4"
           ],
           "description": "AStyle 格式化选项"
+        },
+        "codeblocks.maxReportedErrors": {
+          "type": "number",
+          "default": 50,
+          "description": "单次构建最多收集的错误数（0 = 不限制）。对齐 Code::Blocks 的 max_reported_errors，防止错误过多导致 Build Log 卡顿"
         }
       }
     },
@@ -192,15 +221,18 @@
       "codeblocks": [
         {
           "id": "codeblocks.menu",
-          "name": "Menu"
+          "name": "Menu",
+          "icon": "resources/menu.svg"
         },
         {
           "id": "codeblocks.projectTree",
-          "name": "Project"
+          "name": "Project",
+          "icon": "resources/project.svg"
         },
         {
           "id": "codeblocks.buildLog",
-          "name": "Build Log"
+          "name": "Build Log",
+          "icon": "resources/buildlog.svg"
         }
       ]
     },
@@ -287,6 +319,26 @@
           "command": "codeblocks.addFile",
           "when": "view == codeblocks.projectTree && viewItem == project",
           "group": "3_add@1"
+        },
+        {
+          "command": "codeblocks.toggleCompile",
+          "when": "view == codeblocks.projectTree && viewItem =~ /^file/",
+          "group": "1_file@1"
+        },
+        {
+          "command": "codeblocks.toggleLink",
+          "when": "view == codeblocks.projectTree && viewItem =~ /^file/",
+          "group": "1_file@2"
+        },
+        {
+          "command": "codeblocks.removeFile",
+          "when": "view == codeblocks.projectTree && viewItem =~ /^file/",
+          "group": "2_file@1"
+        },
+        {
+          "command": "codeblocks.openContainingFolder",
+          "when": "view == codeblocks.projectTree && viewItem =~ /^file/",
+          "group": "3_file@1"
         }
       ]
     },
@@ -324,6 +376,16 @@
         "command": "codeblocks.debug",
         "key": "f8",
         "when": "editorTextFocus && !inDebugMode"
+      },
+      {
+        "command": "codeblocks.nextError",
+        "key": "f4",
+        "when": "editorTextFocus"
+      },
+      {
+        "command": "codeblocks.prevError",
+        "key": "shift+f4",
+        "when": "editorTextFocus"
       }
     ]
   },

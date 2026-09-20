@@ -4,6 +4,8 @@
 
 直接在 VS Code 中打开 `.cbp` / `.workspace` 工程，即可获得与 Code::Blocks 对齐的构建、调试与工程浏览体验。
 
+> **作者**：Robinmaomao ｜ **版本**：0.2.0
+
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE.md)
 
 ## 特性
@@ -12,6 +14,10 @@
 - 🔨 **真实构建引擎**：不依赖 `tasks.json`。内置 Code::Blocks 的命令模板 + 宏展开（`$compiler $options $includes ...`），直接 `spawn` 编译/链接进程。
 - ⚙️ **编译器管理**：完整解析 `options_<id>.xml`（含 `extends` 继承、`<if platform>` 平台分支、`<Common>` 引用），自动探测 GCC / MinGW / Clang / MSVC；支持从 Code::Blocks 的 `default.conf` 读取**用户自定义交叉编译器**（如 RISC-V）。
 - 🐞 **GDB 调试**：自研内联 DAP 调试适配器，直接驱动 `gdb -i=mi`，支持断点、单步、变量、调用栈与表达式求值。
+- �️ **多项目管理**：同时打开多个 `.cbp`，工程树支持拖拽排序（即编译顺序）、上移/下移、移除项目、活动项目高亮。
+- 📂 **工程树浏览**：多层嵌套目录树（自动折叠 `../` 前缀）、文件类型图标、缺失文件标记、目录优先排序（对齐 VS Code Explorer）。
+- 🧩 **右键菜单**：项目节点支持增量编译/全量编译/添加文件；文件节点支持从项目移除、打开所在目录、切换编译/链接开关（写回 `.cbp`）。
+- 📋 **结构化构建日志**：构建摘要树（编译器/编译统计/链接结果/错误警告列表），点击诊断节点精确定位到行列；`F4`/`Shift+F4` 循环跳转错误。
 - 🚀 **对齐 Code::Blocks 细节**：
   - 增量编译（mtime 比对）、`rebuild` 强制重编译
   - pre/post build 脚本（`.bat` / 命令）
@@ -19,6 +25,7 @@
   - `GetCommonTopLevelPath` 对象路径布局（`Output/obj/<公共顶层>/...`）
   - GBK 输出解码（中文 Windows 下 GCC 报错不乱码）
   - 目标类型数字映射（`type="1"` = 控制台应用，正确区分 `-mwindows`）
+  - `max_reported_errors` 错误数截断（防构建日志卡顿）
 - 📊 **辅助工具**：代码统计、TODO 扫描、AStyle 格式化。
 
 ## 安装
@@ -36,7 +43,7 @@ npx tsc -p ./
 npx vsce package --allow-missing-repository
 
 # 4. 安装
-code --install-extension codeblocks-vscode-0.1.0.vsix --force
+code --install-extension codeblocks-vscode-0.2.0.vsix --force
 ```
 
 > Windows 下建议使用 `npm.cmd` / `npx.cmd`（PSReadLine 执行策略）。
@@ -49,9 +56,44 @@ code --extensionDevelopmentPath="." --disable-extensions --new-window
 
 ## 使用
 
-1. 打开包含 `.cbp` / `.workspace` 的文件夹，或执行 **`Code::Blocks: Open Project (.cbp)`** 命令。
-2. 左侧活动栏的 **Code::Blocks** 面板会显示工程树与构建日志。
-3. 用面板工具栏或快捷键触发构建。
+### 快速开始
+
+1. 打开包含 `.cbp` / `.workspace` 的文件夹（自动检测并提示选择要打开的工程），或执行命令面板的 **`Code::Blocks: Open Project (.cbp)`**。
+2. 左侧活动栏点击 **Code::Blocks** 图标，展开面板：
+   - **Menu**：模拟 Code::Blocks 菜单栏（File / Build / Debug / Tools…）
+   - **Project**：工程树（多项目 + 嵌套目录 + 文件浏览）
+   - **Build Log**：结构化构建摘要
+3. 底部状态栏显示当前 **构建目标（Target）**、**编译器（Compiler）**，并提供 **Build / Rebuild** 快捷按钮。
+
+### 构建
+
+- **构建**：状态栏 `Build` 按钮、`Ctrl+F9`，或菜单 `Build → Build`
+- **全量编译**：状态栏 `Rebuild` 按钮、`Ctrl+F11`，或菜单 `Build → Rebuild`
+- **清理**：`Ctrl+Shift+F9`，或菜单 `Build → Clean`
+- **构建并运行**：`F9`
+- **运行**：`Ctrl+F10`
+
+> 构建为**增量编译**（按 mtime 比对跳过未变更文件）；`Rebuild` 强制全量重编译。
+
+### 多项目管理
+
+- 打开多个 `.cbp` 后，**Project** 视图按顺序列出各工程（顺序即编译顺序）
+- 拖动工程节点可调整编译顺序；右键工程节点可 **上移/下移/移除**
+- 点击工程节点将其设为**活动项目**（绿点标识），状态栏 Target/Compiler 针对它
+- 右键工程节点：**增量编译 / 全量编译 / 添加文件**
+
+### 文件操作（右键工程树文件节点）
+
+- **打开文件**：单击文件节点
+- **Compile File / Link File**：切换该文件是否参与编译/链接（写回 `.cbp`）
+- **Remove File from Project**：从工程移除文件（保留磁盘文件，写回 `.cbp`）
+- **Open Containing Folder**：在系统文件管理器中打开所在目录
+
+### 错误定位与导航
+
+- 构建失败后，**Build Log** 视图以树形展示错误/警告，点击节点精确定位到 `文件:行:列`
+- **`F4`** 跳转下一个错误，**`Shift+F4`** 跳转上一个错误（循环）
+- 错误数超过上限（默认 50，可在设置 `codeblocks.maxReportedErrors` 调整）时自动截断
 
 ### 快捷键（与 Code::Blocks 对齐）
 
@@ -63,6 +105,8 @@ code --extensionDevelopmentPath="." --disable-extensions --new-window
 | Rebuild | `Ctrl+F11` |
 | Clean | `Ctrl+Shift+F9` |
 | Debug / Continue | `F8` |
+| Next Error | `F4` |
+| Previous Error | `Shift+F4` |
 
 ### 命令
 
@@ -72,6 +116,7 @@ code --extensionDevelopmentPath="." --disable-extensions --new-window
 - `Code::Blocks: Detect Compilers`
 - `Code::Blocks: Compiler Options`
 - `Code::Blocks: Debug`
+- `Code::Blocks: Next Error` / `Previous Error`
 - `Code::Blocks: Code Statistics` / `TODO List` / `Format with AStyle`
 
 ## 配置
@@ -84,6 +129,7 @@ code --extensionDevelopmentPath="." --disable-extensions --new-window
 | `codeblocks.saveBeforeBuild` | `true` | 构建前自动保存 |
 | `codeblocks.compilerPrograms` | `{}` | 编译器程序完整路径（交叉编译器由探测自动写入） |
 | `codeblocks.astyleOptions` | `["--style=allman", "--indent=spaces=4"]` | AStyle 格式化选项 |
+| `codeblocks.maxReportedErrors` | `50` | 单次构建最多收集的错误数（0 = 不限制） |
 
 ## 架构
 

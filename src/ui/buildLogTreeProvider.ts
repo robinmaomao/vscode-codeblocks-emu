@@ -1,0 +1,230 @@
+/**
+ * 构建日志树视图 —— 结构化构建摘要（对应 Code::Blocks 的 Build log 面板）
+ *
+ * 每次构建生成一棵摘要树：根 = 构建结果，项目分支下挂
+ * 编译器 / 编译统计 / 链接结果 / 诊断（可点击跳转）/ 失败命令。
+ * 原始编译输出仍保留在 OutputChannel「Code::Blocks」中用于排障。
+ */
+import * as vscode from 'vscode';
+import * as path from 'path';
+
+/** 诊断严重程度（仅收集 error/warning，info 噪音大不展示） */
+export type BuildLogSeverity = 'error' | 'warning';
+
+/** 单条诊断（对应 OutputParser 解析结果，file 已解析为绝对路径） */
+export interface BuildLogDiagnostic {
+  severity: BuildLogSeverity;
+  message: string;
+  file?: string;
+  line?: number;
+  column?: number;
+}
+
+/** 单个项目的构建摘要 */
+export interface BuildLogProject {
+  projectName: string;      // 显示名（.cbp 所在目录名）
+  targetName: string;
+  compilerPath: string;
+  success: boolean;
+  compiledCount: number;    // 本次实际编译的文件数
+  skippedCount: number;     // 增量跳过数
+  failedCount: number;      // 编译失败数
+  linkSuccess: boolean;
+  linkSkipped: boolean;     // static lib 无链接步骤
+  outputFilename?: string;
+  diagnostics: BuildLogDiagnostic[];
+  durationMs: number;
+}
+
+/** 一次构建的整体摘要 */
+export interface BuildLogSummary {
+  success: boolean;
+  durationMs: number;
+  projects: BuildLogProject[];
+  errorCount: number;
+  warningCount: number;
+  /** 是否因达到 maxReportedErrors 上限而被截断 */
+  truncated?: boolean;
+}
+
+type BuildLogKind = 'root' | 'project' | 'info' | 'diagnostic';
+
+class BuildLogNode extends vscode.TreeItem {
+  /** 子节点（覆盖默认，允许后续赋值） */
+  declare children: BuildLogNode[];
+
+  constructor(
+    public readonly kind: BuildLogKind,
+    label: string,
+    collapsible: vscode.TreeItemCollapsibleState,
+    iconId?: string,
+  ) {
+    super(label, collapsible);
+    if (iconId) this.iconPath = new vscode.ThemeIcon(iconId);
+    this.children = [];
+  }
+}
+
+export class BuildLogTreeProvider implements vscode.TreeDataProvider<BuildLogNode> {
+  private _onDidChangeTreeData = new vscode.EventEmitter<BuildLogNode | undefined>();
+  readonly onDidChangeTreeData = this._onDidChangeTreeData.event;
+
+  private summary: BuildLogSummary | undefined;
+  /** 扁平化的错误列表（只含 error，供 next/prev 导航） */
+  private errorList: BuildLogDiagnostic[] = [];
+  /** 当前错误索引（-1 = 未定位） */
+  private currentErrorIndex = -1;
+
+  setSummary(summary: BuildLogSummary | undefined): void {
+    this.summary = summary;
+    this.errorList = [];
+    this.currentErrorIndex = -1;
+    if (summary) {
+      for (const p of summary.projects) {
+        for (const d of p.diagnostics) {
+          if (d.severity === 'error' && d.file) {
+            this.errorList.push(d);
+          }
+        }
+      }
+    }
+    this._onDidChangeTreeData.fire(undefined);
+  }
+
+  /** 是否有可导航的错误 */
+  hasErrors(): boolean {
+    return this.errorList.length > 0;
+  }
+
+  /** 跳转到下一个错误（循环），返回是否成功 */
+  gotoNextError(): boolean {
+    if (this.errorList.length === 0) return false;
+    this.currentErrorIndex = (this.currentErrorIndex + 1) % this.errorList.length;
+    return this.gotoError(this.errorList[this.currentErrorIndex]);
+  }
+
+  /** 跳转到上一个错误（循环），返回是否成功 */
+  gotoPreviousError(): boolean {
+    if (this.errorList.length === 0) return false;
+    this.currentErrorIndex = this.currentErrorIndex <= 0
+      ? this.errorList.length - 1
+      : this.currentErrorIndex - 1;
+    return this.gotoError(this.errorList[this.currentErrorIndex]);
+  }
+
+  /** 打开错误所在文件并定位 */
+  private gotoError(d: BuildLogDiagnostic): boolean {
+    if (!d.file) return false;
+    const line0 = d.line && d.line > 0 ? d.line - 1 : 0;
+    const col0 = d.column && d.column > 0 ? d.column - 1 : 0;
+    const range = new vscode.Range(line0, col0, line0, col0);
+    vscode.commands.executeCommand('vscode.open', vscode.Uri.file(d.file), { selection: range, preview: true });
+    return true;
+  }
+
+  getTreeItem(element: BuildLogNode): vscode.TreeItem {
+    return element;
+  }
+
+  getChildren(element?: BuildLogNode): BuildLogNode[] {
+    if (!this.summary) return [];
+    if (!element) return [this.buildRootNode(this.summary)];
+    return element.children;
+  }
+
+  private buildRootNode(s: BuildLogSummary): BuildLogNode {
+    const node = new BuildLogNode(
+      'root',
+      s.success ? '构建成功' : '构建失败',
+      vscode.TreeItemCollapsibleState.Expanded,
+      s.success ? 'check' : 'error',
+    );
+    node.description = `用时 ${(s.durationMs / 1000).toFixed(1)}s · ${s.errorCount} 错误 · ${s.warningCount} 警告${s.truncated ? '（已截断）' : ''}`;
+    node.tooltip = node.description;
+    node.children = s.projects.map((p) => this.buildProjectNode(p));
+    return node;
+  }
+
+  private buildProjectNode(p: BuildLogProject): BuildLogNode {
+    const node = new BuildLogNode(
+      'project',
+      p.projectName,
+      vscode.TreeItemCollapsibleState.Expanded,
+      p.success ? 'package' : 'error',
+    );
+    node.description = `${p.targetName} · ${p.success ? '成功' : '失败'}`;
+    node.tooltip = `${p.projectName} · 目标 ${p.targetName}`;
+
+    const children: BuildLogNode[] = [];
+
+    // 编译器
+    const compilerNode = new BuildLogNode('info', p.compilerPath, vscode.TreeItemCollapsibleState.None, 'tools');
+    children.push(compilerNode);
+
+    // 编译统计
+    const statsNode = new BuildLogNode(
+      'info',
+      `编译 ${p.compiledCount} · 跳过 ${p.skippedCount} · 失败 ${p.failedCount}`,
+      vscode.TreeItemCollapsibleState.None,
+      'file-code',
+    );
+    children.push(statsNode);
+
+    // 链接结果
+    if (!p.linkSkipped) {
+      const linkNode = new BuildLogNode(
+        'info',
+        p.linkSuccess ? '链接成功' : '链接失败',
+        vscode.TreeItemCollapsibleState.None,
+        p.linkSuccess ? 'link' : 'error',
+      );
+      linkNode.description = p.outputFilename;
+      children.push(linkNode);
+    }
+
+    // 诊断（错误/警告，可点击跳转）
+    for (const d of p.diagnostics) {
+      children.push(this.buildDiagnosticNode(d));
+    }
+
+    node.children = children;
+    return node;
+  }
+
+  private buildDiagnosticNode(d: BuildLogDiagnostic): BuildLogNode {
+    const isError = d.severity === 'error';
+    // label 显示「文件名:行:列」，description 显示完整错误信息（Code::Blocks 习惯，易扫读）
+    let label: string;
+    if (d.file) {
+      const parts = [path.basename(d.file)];
+      if (d.line) parts.push(String(d.line));
+      if (d.column) parts.push(String(d.column));
+      label = parts.join(':');
+    } else {
+      label = d.message;
+    }
+
+    const node = new BuildLogNode(
+      'diagnostic',
+      label,
+      vscode.TreeItemCollapsibleState.None,
+      isError ? 'error' : 'warning',
+    );
+    node.description = d.file ? d.message : undefined;
+    node.tooltip = d.file
+      ? `${d.file}${d.line ? `:${d.line}` : ''}${d.column ? `:${d.column}` : ''} — ${d.message}`
+      : d.message;
+
+    if (d.file) {
+      const line0 = d.line && d.line > 0 ? d.line - 1 : 0;
+      const col0 = d.column && d.column > 0 ? d.column - 1 : 0;
+      const range = new vscode.Range(line0, col0, line0, col0);
+      node.command = {
+        command: 'vscode.open',
+        title: '打开文件',
+        arguments: [vscode.Uri.file(d.file), { selection: range, preview: true }],
+      };
+    }
+    return node;
+  }
+}
