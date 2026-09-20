@@ -76,6 +76,7 @@ export class BuildEngine {
         this.project.basePath,
         macroVars,
         (l) => this.output.appendLine(l),
+        this.compilerBinPath(),
       );
     }
 
@@ -88,7 +89,7 @@ export class BuildEngine {
     // 0. pre-build 脚本
     if (preCommands.length) {
       this.output.appendLine(`[Code::Blocks] 执行 pre-build 脚本 (${target.title})...`);
-      const preOk = await runScriptCommands(preCommands, this.project.basePath, macroVars, (l) => this.output.appendLine(l));
+      const preOk = await runScriptCommands(preCommands, this.project.basePath, macroVars, (l) => this.output.appendLine(l), this.compilerBinPath());
       if (!preOk) {
         this.output.appendLine(`[Code::Blocks] 目标 "${target.title}" pre-build 脚本失败`);
         return false;
@@ -191,7 +192,7 @@ export class BuildEngine {
     // 3. post-build 脚本
     if (postCommands.length) {
       this.output.appendLine(`[Code::Blocks] 执行 post-build 脚本 (${target.title})...`);
-      const postOk = await runScriptCommands(postCommands, this.project.basePath, macroVars, (l) => this.output.appendLine(l));
+      const postOk = await runScriptCommands(postCommands, this.project.basePath, macroVars, (l) => this.output.appendLine(l), this.compilerBinPath());
       if (!postOk) {
         this.output.appendLine(`[Code::Blocks] 目标 "${target.title}" post-build 脚本失败`);
         return false;
@@ -212,6 +213,20 @@ export class BuildEngine {
 
   private isCompilable(rel: string): boolean {
     return /\.(c|cpp|cc|cxx|C)$/.test(rel) || /\.rc$/.test(rel);
+  }
+
+  /** 编译器 bin 目录（用于把交叉编译器工具加入脚本执行的 PATH） */
+  private compilerBinPath(): string {
+    // 优先从完整程序路径推导（如 .../RV32-V2/bin/riscv32-elf-gcc.exe → .../RV32-V2/bin）
+    const c = this.compiler.programs.C;
+    if (c && (c.includes('/') || c.includes('\\'))) {
+      return path.dirname(c);
+    }
+    // 回退：masterPath + bin
+    if (this.compiler.masterPath) {
+      return path.join(this.compiler.masterPath, 'bin');
+    }
+    return '';
   }
 
   /** 判断文件是否为自定义 buildCommand 文件（不参与链接） */

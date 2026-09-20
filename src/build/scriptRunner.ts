@@ -38,17 +38,24 @@ function decodeOutput(buf: Buffer): string {
   }
 }
 
-/** 执行单条脚本命令 */
+/** 执行单条脚本命令（可附加环境变量，如编译器 bin 目录加入 PATH） */
 export function runScriptCommand(
   command: string,
   cwd: string,
   vars: Record<string, string>,
+  extraPath?: string,
 ): Promise<ScriptResult> {
   return new Promise((resolve) => {
     const expanded = expandMacros(command, vars);
+    const env: Record<string, string> = { ...(process.env as Record<string, string>) };
+    if (extraPath) {
+      const sep = process.platform === 'win32' ? ';' : ':';
+      env.PATH = extraPath + sep + (env.PATH ?? '');
+    }
     const proc = spawn(expanded, {
       cwd,
       shell: true,
+      env,
     });
     let output = '';
     proc.stdout?.on('data', (d: Buffer) => (output += decodeOutput(d)));
@@ -62,17 +69,18 @@ export function runScriptCommand(
   });
 }
 
-/** 依次执行多条脚本命令 */
+/** 依次执行多条脚本命令（可附加编译器 bin 目录到 PATH） */
 export async function runScriptCommands(
   commands: string[],
   cwd: string,
   vars: Record<string, string>,
   onLog?: (line: string) => void,
+  extraPath?: string,
 ): Promise<boolean> {
   let ok = true;
   for (const cmd of commands) {
     if (onLog) onLog(`[script] ${cmd}`);
-    const r = await runScriptCommand(cmd, cwd, vars);
+    const r = await runScriptCommand(cmd, cwd, vars, extraPath);
     if (r.output) {
       for (const line of r.output.split(/\r?\n/)) {
         if (line) onLog?.(line);
