@@ -140,6 +140,10 @@ export class BuildEngine {
       }
     }
 
+    // 创建所有对象文件的父目录（对应 CodeBlocks 的 CreateDirRecursively）
+    // 否则 GCC 无法创建 Output\obj\plugin\xxx.o 等子目录下的对象文件
+    this.ensureObjectDirs(units);
+
     // 无需要编译的文件
     if (units.length === 0) {
       this.output.appendLine(`[Code::Blocks] 目标 "${target.title}" 已是最新`);
@@ -157,6 +161,9 @@ export class BuildEngine {
 
     // 2. 链接（非 static lib 需要链接步骤；CommandsOnly 已在上面 return）
     if (target.targetType !== TargetType.StaticLib) {
+      // 创建输出目录（如 Output\bin），否则链接器无法写 app.rv32
+      this.ensureDir(path.join(this.project.basePath, path.dirname(target.outputFilename)));
+
       // 链接对象只含「标准源文件」编译出的对象，排除自定义 buildCommand 文件
       // （ram.ld → ram.o 是链接脚本、app.xm → appxm.o 是资源，均不参与链接）
       const linkUnits = units.filter((u) => !this.isCustomFile(u.file, target));
@@ -281,6 +288,28 @@ export class BuildEngine {
     const relObj = path.join(objDir, path.dirname(file.relativeFilename));
     const name = path.parse(file.relativeFilename).name;
     return path.join(relObj, name + '.' + this.compiler.switches.objectExtension);
+  }
+
+  /** 为所有待编译单元递归创建对象目录（对应 CreateDirRecursively） */
+  private ensureObjectDirs(units: CompileUnit[]): void {
+    const dirs = new Set<string>();
+    for (const u of units) {
+      const objDir = path.dirname(this.objectPathFor(u.target, u.file));
+      dirs.add(objDir);
+    }
+    for (const dir of dirs) {
+      this.ensureDir(dir);
+    }
+  }
+
+  /** 递归创建目录（静默失败） */
+  private ensureDir(dir: string): void {
+    if (!dir) return;
+    try {
+      fs.mkdirSync(dir, { recursive: true });
+    } catch (e) {
+      this.output.appendLine(`[Code::Blocks] 无法创建目录 ${dir}: ${(e as Error).message}`);
+    }
   }
 
   private depsPathFor(target: BuildTarget, file: ProjectFile): string {
