@@ -79,11 +79,27 @@ export class ProjectTreeProvider implements vscode.TreeDataProvider<TreeNode> {
   /** 活动/非活动项目图标（自定义 SVG，保证颜色可靠渲染） */
   private activeIconPath?: vscode.Uri;
   private inactiveIconPath?: vscode.Uri;
+  /** 资源根目录（用于加载彩色树节点图标） */
+  private resourcesDir?: vscode.Uri;
+  /** 彩色图标缓存：key = icons/ 下文件名，value = URI */
+  private iconCache = new Map<string, vscode.Uri>();
 
   /** 设置资源根目录（用于加载图标） */
   setResourcesDir(dir: string): void {
-    this.activeIconPath = vscode.Uri.joinPath(vscode.Uri.file(dir), 'project-active.svg');
-    this.inactiveIconPath = vscode.Uri.joinPath(vscode.Uri.file(dir), 'project-inactive.svg');
+    this.resourcesDir = vscode.Uri.file(dir);
+    this.activeIconPath = vscode.Uri.joinPath(this.resourcesDir, 'project-active.svg');
+    this.inactiveIconPath = vscode.Uri.joinPath(this.resourcesDir, 'project-inactive.svg');
+  }
+
+  /** 取彩色图标 URI（缓存，未命中则回退 ThemeIcon 交给调用方处理） */
+  private iconUri(name: string): vscode.Uri | undefined {
+    if (!this.resourcesDir) return undefined;
+    let uri = this.iconCache.get(name);
+    if (!uri) {
+      uri = vscode.Uri.joinPath(this.resourcesDir, 'icons', name);
+      this.iconCache.set(name, uri);
+    }
+    return uri;
   }
 
   setProjects(projects: Project[]): void {
@@ -167,7 +183,7 @@ export class ProjectTreeProvider implements vscode.TreeDataProvider<TreeNode> {
         let dirNode = dirNodes.get(key);
         if (!dirNode) {
           dirNode = new TreeNode(segs[i], vscode.TreeItemCollapsibleState.Collapsed, 'folder', project);
-          dirNode.iconPath = new vscode.ThemeIcon('folder');
+          dirNode.iconPath = this.iconUri('folder.svg') ?? new vscode.ThemeIcon('folder');
           dirNode.tooltip = key;
           dirNodes.set(key, dirNode);
           if (parentNode) {
@@ -207,31 +223,13 @@ export class ProjectTreeProvider implements vscode.TreeDataProvider<TreeNode> {
       undefined,
       f,
     );
-    // 文件图标按扩展名区分（对应 cbProjectTreeImages）
-    const ext = path.extname(f.relativeFilename).toLowerCase();
-    node.iconPath = this.fileIcon(ext);
+    // 文件图标：不显式设置 iconPath，交由 VS Code 依据 resourceUri
+    // 使用当前文件图标主题（默认 Seti）渲染，与资源管理器保持一致。
     // 文件状态：缺失文件标记（对应 ProjectFile::fvsMissing）
     if (!fs.existsSync(f.absolutePath)) {
       node.description = '缺失';
     }
     return node;
-  }
-
-  /** 按扩展名返回文件图标 */
-  private fileIcon(ext: string): vscode.ThemeIcon {
-    switch (ext) {
-      case '.c': return new vscode.ThemeIcon('symbol-field');
-      case '.h':
-      case '.hpp':
-      case '.hh': return new vscode.ThemeIcon('symbol-namespace');
-      case '.cpp':
-      case '.cc':
-      case '.cxx': return new vscode.ThemeIcon('symbol-method');
-      case '.rc': return new vscode.ThemeIcon('symbol-ruler');
-      case '.s':
-      case '.S': return new vscode.ThemeIcon('symbol-key');
-      default: return new vscode.ThemeIcon('file');
-    }
   }
 }
 
