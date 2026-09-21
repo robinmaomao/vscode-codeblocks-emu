@@ -47,7 +47,7 @@ export interface BuildLogSummary {
   truncated?: boolean;
 }
 
-type BuildLogKind = 'root' | 'project' | 'info' | 'diagnostic';
+type BuildLogKind = 'root' | 'project' | 'info' | 'group' | 'diagnostic';
 
 class BuildLogNode extends vscode.TreeItem {
   /** 子节点（覆盖默认，允许后续赋值） */
@@ -202,10 +202,27 @@ export class BuildLogTreeProvider implements vscode.TreeDataProvider<BuildLogNod
       children.push(linkNode);
     }
 
-    // 诊断（错误/警告，可点击跳转）
-    for (const d of p.diagnostics) {
-      children.push(this.buildDiagnosticNode(d));
-    }
+    // 诊断分组：错误 / 警告 各一个分组节点，数量写进 label，具体诊断挂下一层级
+    const errors = p.diagnostics.filter((d) => d.severity === 'error');
+    const warnings = p.diagnostics.filter((d) => d.severity === 'warning');
+
+    const errorGroup = new BuildLogNode(
+      'group',
+      `错误 (${errors.length})`,
+      errors.length > 0 ? vscode.TreeItemCollapsibleState.Expanded : vscode.TreeItemCollapsibleState.None,
+      this.icon('log-error.svg', 'error'),
+    );
+    errorGroup.children = errors.map((d) => this.buildDiagnosticNode(d));
+    children.push(errorGroup);
+
+    const warningGroup = new BuildLogNode(
+      'group',
+      `警告 (${warnings.length})`,
+      warnings.length > 0 ? vscode.TreeItemCollapsibleState.Collapsed : vscode.TreeItemCollapsibleState.None,
+      this.icon('log-warning.svg', 'warning'),
+    );
+    warningGroup.children = warnings.map((d) => this.buildDiagnosticNode(d));
+    children.push(warningGroup);
 
     node.children = children;
     return node;
