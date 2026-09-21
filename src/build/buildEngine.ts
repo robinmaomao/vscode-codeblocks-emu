@@ -180,7 +180,8 @@ export class BuildEngine {
       }
 
       // 增量编译：源/头文件未变更且对象文件存在时跳过（rebuild 强制重编译）
-      if (!options.rebuild && !isCustom && this.isUpToDate(file.absolutePath, object, includeDirs, depsCache)) {
+      // （Code::Blocks 对自定义 buildCommand 文件同样执行 IsObjectOutdated 判断）
+      if (!options.rebuild && this.isUpToDate(file.absolutePath, object, includeDirs, depsCache)) {
         skippedCount++;
         continue;
       }
@@ -211,7 +212,7 @@ export class BuildEngine {
 
     // 无需要编译的文件（且输出已存在）→ 跳过
     if (units.length === 0) {
-      const outAbs = path.join(this.project.basePath, target.outputFilename);
+      const outAbs = this.resolveOutputFile(target);
       if (fs.existsSync(outAbs)) {
         this.output.appendLine(`[Code::Blocks] 目标 "${target.title}" 已是最新`);
         return {
@@ -236,28 +237,36 @@ export class BuildEngine {
     // 2. 链接（非 static lib 需要链接步骤；CommandsOnly 已在上面 return）
     let linkSuccess = true;
     if (target.targetType !== TargetType.StaticLib) {
-      // 创建输出目录（如 Output\bin），否则链接器无法写 app.rv32
-      this.ensureDir(path.join(this.project.basePath, path.dirname(target.outputFilename)));
-
       // 链接对象 = 所有参与链接的标准源文件对象（不论本次是否重编译）
       // （ram.ld → ram.o 是链接脚本、app.xm → appxm.o 是资源，均不参与链接）
       const linkObjects = linkFiles.map((f) => this.objectPathRelative(target, f));
-      const linkCommand = generator.generate(this.linkCommandType(target), {
-        target,
-        pf: null,
-        file: '',
-        object: linkObjects.join(this.compiler.switches.objectSeparator),
-        flatObject: linkObjects.join(this.compiler.switches.objectSeparator),
-        deps: '',
-        hasCppFilesToLink: hasCpp,
-      });
-      if (linkCommand) {
-        this.output.appendLine(linkCommand);
-        const linkOk = await this.runCommand(linkCommand, this.project.basePath, options);
-        if (!linkOk) {
-          this.output.appendLine(`[Code::Blocks] 目标 "${target.title}" 链接失败`);
-          return false;
+      const linkObjectsAbs = linkFiles.map((f) => this.objectPathFor(target, f));
+
+      // 增量：输出已存在且比所有链接对象新 → 跳过链接（对应 GetTargetLinkCommands 时间戳检查）
+      const outputAbs = this.resolveOutputFile(target);
+      if (options.rebuild || !this.linkObjectsUpToDate(outputAbs, linkObjectsAbs)) {
+        // 创建输出目录（如 Output\bin），否则链接器无法写 app.rv32
+        this.ensureDir(path.join(this.project.basePath, path.dirname(target.outputFilename)));
+
+        const linkCommand = generator.generate(this.linkCommandType(target), {
+          target,
+          pf: null,
+          file: '',
+          object: linkObjects.join(this.compiler.switches.objectSeparator),
+          flatObject: linkObjects.join(this.compiler.switches.objectSeparator),
+          deps: '',
+          hasCppFilesToLink: hasCpp,
+        });
+        if (linkCommand) {
+          this.output.appendLine(linkCommand);
+          const linkOk = await this.runCommand(linkCommand, this.project.basePath, options);
+          if (!linkOk) {
+            this.output.appendLine(`[Code::Blocks] 目标 "${target.title}" 链接失败`);
+            return false;
+          }
         }
+      } else {
+        this.output.appendLine(`[Code::Blocks] 目标 "${target.title}" 链接已是最新，跳过链接`);
       }
     } else if (target.targetType === TargetType.StaticLib) {
       // 静态库用 ar 打包（用所有参与链接的对象，而非仅本次编译的）
@@ -266,10 +275,17 @@ export class BuildEngine {
         path.dirname(target.outputFilename),
         path.parse(target.outputFilename).name + '.' + this.compiler.switches.libExtension,
       );
-      const arCmd = `${this.compiler.programs.LIB} -r -s ${staticOut} ${objects.join(' ')}`;
-      this.output.appendLine(arCmd);
-      const ok = await this.runCommand(arCmd, this.project.basePath, options);
-      if (!ok) return false;
+      const staticOutAbs = path.join(this.project.basePath, staticOut);
+      const linkObjectsAbs = linkFiles.map((f) => this.objectPathFor(target, f));
+      // 增量：静态库已存在且比所有对象新 → 跳过打包
+      if (options.rebuild || !this.linkObjectsUpToDate(staticOutAbs, linkObjectsAbs)) {
+        const arCmd = `${this.compiler.programs.LIB} -r -s ${staticOut} ${objects.join(' ')}`;
+        this.output.appendLine(arCmd);
+        const ok = await this.runCommand(arCmd, this.project.basePath, options);
+        if (!ok) return false;
+      } else {
+        this.output.appendLine(`[Code::Blocks] 目标 "${target.title}" 静态库已是最新，跳过打包`);
+      }
     }
 
     // 3. post-build 脚本
@@ -363,6 +379,43 @@ export class BuildEngine {
       return newestDep <= objStat.mtimeMs;
     } catch {
       // 对象文件不存在 → 需要编译
+      return false;
+    }
+  }
+
+  /**
+   * 解析目标实际输出文件路径。
+   * Windows 下 MinGW 链接器会为无扩展名的 `-o` 输出自动追加 `.exe`
+   * （如 .cbp 的 output="bin/Debug/hello"，实际产出 bin/Debug/hello.exe），
+   * 因此时间戳判断需先解析出真实存在的文件。
+   */
+  private resolveOutputFile(target: BuildTarget): string {
+    const out = path.join(this.project.basePath, target.outputFilename);
+    if (fs.existsSync(out)) return out;
+    if (process.platform === 'win32') {
+      const isExeType =
+        target.targetType === TargetType.ConsoleOnly ||
+        target.targetType === TargetType.Executable ||
+        target.targetType === TargetType.Native;
+      if (isExeType && fs.existsSync(out + '.exe')) return out + '.exe';
+    }
+    return out;
+  }
+
+  /**
+   * 链接增量判断 —— 对应 CodeBlocks DirectCommands::GetTargetLinkCommands 的时间戳检查：
+   * 输出文件存在且 mtime 不早于所有链接对象，才认为无需重新链接。
+   */
+  private linkObjectsUpToDate(outputAbs: string, objectPaths: string[]): boolean {
+    try {
+      const outStat = fs.statSync(outputAbs);
+      for (const o of objectPaths) {
+        const objStat = fs.statSync(o);
+        if (objStat.mtimeMs > outStat.mtimeMs) return false; // 对象比输出新 → 需链接
+      }
+      return true;
+    } catch {
+      // 输出或任一对象不存在 → 需要链接
       return false;
     }
   }
