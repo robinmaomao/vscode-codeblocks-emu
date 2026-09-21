@@ -2,7 +2,7 @@
   "name": "codeblocks-vscode",
   "displayName": "Code::Blocks for VS Code",
   "description": "原生移植 Code::Blocks 核心功能到 VS Code：项目模型、构建引擎、编译器管理与调试引擎",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "publisher": "codeblocks",
   "author": {
     "name": "Robinmaomao"
@@ -78,6 +78,11 @@
         "command": "codeblocks.compilerOptions",
         "title": "Code::Blocks: Compiler Options",
         "icon": "$(settings-gear)"
+      },
+      {
+        "command": "codeblocks.generateCompileCommands",
+        "title": "Code::Blocks: Generate compile_commands.json (IntelliSense)",
+        "icon": "$(code)"
       },
       {
         "command": "codeblocks.debug",
@@ -205,6 +210,17 @@
           "type": "number",
           "default": 50,
           "description": "单次构建最多收集的错误数（0 = 不限制）。对齐 Code::Blocks 的 max_reported_errors，防止错误过多导致 Build Log 卡顿"
+        },
+        "codeblocks.clangd.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "是否启用 clangd 集成（自动生成 compile_commands.json 并更新 clangd 用户配置）。需安装 clangd 扩展后补全/跳转才生效"
+        },
+        "codeblocks.clangd.buildLogDiagnostics": {
+          "type": "string",
+          "enum": ["build", "clangd"],
+          "default": "build",
+          "description": "检测到 clangd 时 Build Log 视图的诊断来源：build = 构建引擎完整诊断（默认，覆盖所有编译文件）；clangd = 使用 clangd 诊断（仅打开过的文件，可能不完整）。无论哪种，Problems 面板都由 clangd 产出"
         }
       }
     },
@@ -233,6 +249,11 @@
           "id": "codeblocks.buildLog",
           "name": "Build Log",
           "icon": "resources/buildlog.svg"
+        },
+        {
+          "id": "codeblocks.symbols",
+          "name": "Symbols",
+          "icon": "resources/project.svg"
         }
       ]
     },

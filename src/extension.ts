@@ -6,6 +6,7 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
+import * as crypto from 'crypto';
 import { ProjectParser, WorkspaceParser } from './model/parser';
 import { Project, BuildTarget, ProjectFile } from './model/types';
 import { Compiler } from './compiler/compiler';
@@ -16,8 +17,12 @@ import { CompilerOptionsPanel } from './ui/compilerOptionsPanel';
 import { ProjectTreeProvider } from './ui/projectTreeProvider';
 import { MenuTreeProvider } from './ui/menuTreeProvider';
 import { BuildLogTreeProvider, BuildLogProject, BuildLogDiagnostic } from './ui/buildLogTreeProvider';
+import { SymbolTreeProvider } from './ui/symbolTreeProvider';
 import { BuildEngine } from './build/buildEngine';
 import { OutputParser } from './build/outputParser';
+import { collectClangdEntries, writeClangdDatabase, CompileCommandEntry } from './build/compileCommands';
+import { detectClangd, queryCompilerSystemIncludes, queryCompilerTarget, updateClangdUserConfig, clangdUserConfigPath } from './tools/clangd';
+import { SymbolIndex, registerFallbackIntelliSense } from './tools/codeCompletion';
 import { GdbDebugAdapter } from './debug/gdbDebugAdapter';
 import { scanTodos } from './tools/todoScanner';
 import { countFiles, isSourceFile } from './tools/codeStats';
@@ -34,6 +39,7 @@ let codeBlocksConfig: CodeBlocksConfig | undefined;
 let projectTreeProvider: ProjectTreeProvider | undefined;
 let projectTreeView: vscode.TreeView<any> | undefined;
 let buildLogTreeProvider: BuildLogTreeProvider | undefined;
+let symbolTreeProvider: SymbolTreeProvider | undefined;
 let extContext: vscode.ExtensionContext | undefined;
 /** 当前一次构建累积的项目摘要（供 Build Log 视图） */
 const currentBuildProjects: BuildLogProject[] = [];
@@ -52,6 +58,13 @@ let buildStatusBar: vscode.StatusBarItem | undefined;
 let rebuildStatusBar: vscode.StatusBarItem | undefined;
 /** 底部状态栏：编译器选择 */
 let compilerStatusBar: vscode.StatusBarItem | undefined;
+
+/** 兜底 IntelliSense 符号索引（clangd 不可用时启用） */
+const fallbackIndex = new SymbolIndex();
+/** 兜底是否生效（检测到 clangd 后置为 false） */
+let fallbackEnabled = true;
+/** clangd 是否接管诊断（检测到 clangd 后置为 true：构建引擎不再写 Problems 面板） */
+let clangdDiagnosticsEnabled = false;
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
   extContext = context;
@@ -94,10 +107,22 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   });
   context.subscriptions.push(buildLogTreeView);
 
+  // 注册符号浏览视图（对应 Code::Blocks Symbols 面板）
+  symbolTreeProvider = new SymbolTreeProvider();
+  symbolTreeProvider.setIndex(fallbackIndex);
+  const symbolsTreeView = vscode.window.createTreeView('codeblocks.symbols', {
+    treeDataProvider: symbolTreeProvider,
+    showCollapseAll: true,
+  });
+  context.subscriptions.push(symbolsTreeView);
+
   // 注册菜单树视图（File/Edit/View/Build 等，模拟 Code::Blocks 菜单栏）
   context.subscriptions.push(
     vscode.window.registerTreeDataProvider('codeblocks.menu', new MenuTreeProvider()),
   );
+
+  // 兜底 IntelliSense（补全 / 悬停 / 跳转定义）：仅在 clangd 不可用时生效
+  context.subscriptions.push(...registerFallbackIntelliSense(fallbackIndex, () => fallbackEnabled));
 
   // 聚焦 Build Log 视图（菜单项 / 构建完成后引导）
   context.subscriptions.push(
@@ -110,6 +135,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   context.subscriptions.push(
     vscode.commands.registerCommand('codeblocks.projectTree.focus', () => {
       projectTreeView?.reveal(undefined, { focus: true });
+    }),
+  );
+
+  // 生成 compile_commands.json（供 clangd IntelliSense）
+  context.subscriptions.push(
+    vscode.commands.registerCommand('codeblocks.generateCompileCommands', async () => {
+      await generateClangdForWorkspace(true);
     }),
   );
 
@@ -175,6 +207,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         projectTreeProvider?.setActiveProject(p);
         updateTargetStatusBar();
         updateCompilerStatusBar();
+        // 切换活动项目时重新生成 compile_commands.json（IntelliSense 随活动项目更新）
+        void generateClangdForWorkspace();
       }
     }),
   );
@@ -489,6 +523,9 @@ async function openProject(filename: string): Promise<void> {
     // 刷新项目树
     projectTreeProvider?.setProjects(openProjects);
 
+    // 重建兜底符号索引（clangd 不可用时提供项目内补全）
+    rebuildFallbackIndex();
+
     // 默认选中第一个构建目标（若之前选中的目标仍存在则保留）
     const titles = project.buildTargets.map((t) => t.title);
     if (!selectedTargetTitle || !titles.includes(selectedTargetTitle)) {
@@ -504,6 +541,9 @@ async function openProject(filename: string): Promise<void> {
     await extContext?.workspaceState.update('codeblocks.activeProject', filename);
 
     vscode.window.showInformationMessage(`已打开 Code::Blocks 项目: ${project.title}`);
+
+    // 生成 compile_commands.json（clangd 补全，写到工作区外缓存），失败不阻塞
+    void generateClangdForWorkspace();
   } catch (err) {
     vscode.window.showErrorMessage(`打开项目失败: ${(err as Error).message}`);
   }
@@ -523,6 +563,155 @@ function requireProject(): Project | undefined {
     return undefined;
   }
   return activeProject;
+}
+
+/** 计算多个目录的公共祖先目录（Windows 大小写不敏感比较，返回带尾分隔符） */
+function commonAncestor(dirs: string[]): string {
+  if (!dirs.length) return '';
+  const norm = dirs.map((d) => path.resolve(d).split(path.sep));
+  const first = norm[0];
+  let prefix: string[] = [];
+  for (let i = 0; i < first.length; i++) {
+    const seg = first[i].toLowerCase();
+    if (norm.every((p) => (p[i] ?? '').toLowerCase() === seg)) {
+      prefix.push(first[i]);
+    } else {
+      break;
+    }
+  }
+  let dir = prefix.join(path.sep);
+  if (!dir.endsWith(path.sep)) dir += path.sep;
+  return dir;
+}
+
+/** 路径短哈希（用于缓存目录命名） */
+function hashPath(p: string): string {
+  return crypto.createHash('md5').update(p.replace(/\\/g, '/').toLowerCase()).digest('hex').slice(0, 12);
+}
+
+/** 从烘焙后的编译命令中提取 -I 目录并解析为绝对路径（供头文件回退 flag 使用） */
+function extractAbsoluteIncludeDirs(entries: CompileCommandEntry[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const e of entries) {
+    const re = /-I([^\s"]+)/g;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(e.command)) !== null) {
+      const abs = path.resolve(e.directory, m[1]);
+      const norm = path.normalize(abs);
+      if (!seen.has(norm)) {
+        seen.add(norm);
+        out.push(abs);
+      }
+    }
+  }
+  return out;
+}
+
+/**
+ * 为整个工作区生成 clangd 所需的 compile_commands.json（写到工作区外的缓存目录），
+ * 并更新用户级 clangd 配置（config.yaml，If.PathMatch 按工程树作用域指向缓存目录）。
+ * 不生成/修改工作区内的 .clangd 或 compile_commands.json，不影响用户自有文件。
+ */
+async function generateClangdForWorkspace(interactive = false): Promise<void> {
+  try {
+    if (!extContext) return;
+    const cfg = vscode.workspace.getConfiguration('codeblocks');
+    const clangdEnabled = cfg.get<boolean>('clangd.enabled', true);
+    if (!clangdEnabled) {
+      fallbackEnabled = true; // clangd 集成禁用，启用兜底补全
+      clangdDiagnosticsEnabled = false;
+      outputChannel.appendLine('[Code::Blocks] clangd 集成已禁用（codeblocks.clangd.enabled = false）');
+      return;
+    }
+
+    const clangd = detectClangd();
+    fallbackEnabled = !clangd; // 检测到 clangd 则禁用兜底补全，避免重复提示
+    clangdDiagnosticsEnabled = !!clangd; // 检测到 clangd 则构建引擎停止向 Problems 面板报错
+
+    if (!openProjects.length) return;
+
+    // 收集所有打开项目的编译单元（每项目用其编译器 + 该系统 include 路径）
+    const entries: CompileCommandEntry[] = [];
+    const scopePaths: string[] = [];
+    const includeCache = new Map<string, string[]>();
+    const systemIncludesAll = new Set<string>();
+    let targetTriple: string | undefined;
+    for (const p of openProjects) {
+      const targetCompilerId = p.buildTargets[0]?.compilerId ?? p.compilerId;
+      const compiler = getCompiler(targetCompilerId);
+      const cacheKey = compiler.programs.C || compiler.name;
+      let systemIncludes = includeCache.get(cacheKey);
+      if (!systemIncludes && clangd) {
+        systemIncludes = queryCompilerSystemIncludes(compiler.programs.C, compiler.programs.CPP);
+        includeCache.set(cacheKey, systemIncludes);
+        if (!targetTriple) targetTriple = queryCompilerTarget(compiler.programs.C);
+      }
+      if (systemIncludes) {
+        for (const d of systemIncludes) systemIncludesAll.add(path.normalize(d));
+      }
+      entries.push(...collectClangdEntries(p, compiler, outputChannel, systemIncludes ?? []));
+      scopePaths.push(p.commonTopLevelPath || p.basePath);
+    }
+
+    // 缓存目录：<globalStorage>/clangd/<公共祖先哈希>
+    const scope = commonAncestor(scopePaths) || (activeProject?.basePath ?? '');
+    const cacheDir = path.join(extContext.globalStorageUri.fsPath, 'clangd', hashPath(scope));
+    const { outPath, count } = writeClangdDatabase(entries, cacheDir);
+    outputChannel.appendLine(`[Code::Blocks] 已生成 compile_commands.json（${count} 条编译命令）→ ${outPath}`);
+
+    if (clangd) {
+      // 头文件回退 flag：编译数据库里只有 .c 条目，头文件需靠 Add 提供 -I/-isystem/--target
+      const includeDirs = extractAbsoluteIncludeDirs(entries);
+      const headerFlags: string[] = [];
+      if (targetTriple) headerFlags.push(`--target=${targetTriple}`);
+      for (const d of includeDirs) headerFlags.push(`-I${d}`);
+      // SDK 主头文件 include.h 存在时强制预包含：头文件单独分析时缺类型上下文（unknown type name u8/u16 等）
+      if (includeDirs.some((d) => fs.existsSync(path.join(d, 'include.h')))) {
+        headerFlags.push('-include', 'include.h');
+      }
+      for (const d of systemIncludesAll) {
+        headerFlags.push('-isystem', d);
+      }
+
+      // 更新用户级 clangd 配置（工作区外，If.PathMatch 作用域到本工程树）
+      updateClangdUserConfig([{ dir: scope, databaseDir: cacheDir, headerFlags }]);
+      outputChannel.appendLine(`[Code::Blocks] 已更新 clangd 用户配置 → ${clangdUserConfigPath()}`);
+      outputChannel.appendLine(`[Code::Blocks] 检测到 clangd: ${clangd}`);
+      if (interactive) {
+        vscode.window.showInformationMessage(`已生成 compile_commands.json（${count} 条）并检测到 clangd，补全 / 跳转已就绪`);
+      }
+    } else {
+      outputChannel.appendLine('[Code::Blocks] 未检测到 clangd，补全 / 跳转暂不可用。安装方式见下方提示。');
+      if (interactive) {
+        const pick = await vscode.window.showWarningMessage(
+          '未检测到 clangd。请安装 VS Code 扩展 "clangd" 并执行其 "Download language server" 命令，或安装 LLVM 工具链。',
+          '打开扩展市场',
+          '了解安装方法',
+        );
+        if (pick === '打开扩展市场') {
+          vscode.commands.executeCommand('workbench.extensions.search', 'llvm-vs-code-extensions.vscode-clangd');
+        } else if (pick === '了解安装方法') {
+          vscode.env.openExternal(vscode.Uri.parse('https://clangd.llvm.org/installation.html'));
+        }
+      }
+    }
+  } catch (err) {
+    vscode.window.showErrorMessage(`生成 compile_commands.json 失败: ${(err as Error).message}`);
+  }
+}
+
+/** 重建兜底符号索引（收集所有已打开项目及其目标的源文件） */
+function rebuildFallbackIndex(): void {
+  const files = new Set<string>();
+  for (const p of openProjects) {
+    for (const f of p.files) files.add(f.absolutePath);
+    for (const t of p.buildTargets) {
+      for (const f of t.files) files.add(f.absolutePath);
+    }
+  }
+  fallbackIndex.rebuild([...files]);
+  symbolTreeProvider?.refresh();
 }
 
 /** 持久化项目打开顺序到 workspaceState */
@@ -618,6 +807,7 @@ function removeProject(filename: string): void {
   updateTargetStatusBar();
   updateCompilerStatusBar();
   persistProjectOrder();
+  rebuildFallbackIndex();
   outputChannel.appendLine(`[Code::Blocks] 已移除项目: ${removed.title}`);
 }
 
@@ -1142,12 +1332,16 @@ async function buildOneProject(project: Project, targetTitle: string, rebuild: b
     rebuild,
     onLine: (line) => outputChannel.appendLine(line),
     onDiagnostic: (diag, fileUri) => {
+      // clangd 接管诊断时，Problems 面板由 clangd 产出，构建引擎不再写入（避免重复）
+      if (clangdDiagnosticsEnabled) return;
       // 按具体文件 URI 分组挂到 Problems 面板；无文件则回退到项目根
       const uri = fileUri ?? vscode.Uri.file(project.basePath);
       const diags = diagnosticCollection.get(uri) ?? [];
       diagnosticCollection.set(uri, [...diags, diag]);
     },
     onStructuredDiagnostic: (d) => {
+      // Build Log 使用 clangd 诊断时，不再收集构建引擎的结构化诊断
+      if (clangdDiagnosticsEnabled && buildLogUsesClangdDiagnostics()) return;
       // maxReportedErrors 截断：达到上限后停止收集（CodeBlocks max_reported_errors）
       const maxErrors = vscode.workspace.getConfiguration('codeblocks').get<number>('maxReportedErrors', 50);
       if (d.severity === 'error') {
@@ -1165,6 +1359,13 @@ async function buildOneProject(project: Project, targetTitle: string, rebuild: b
   const stats = engine.lastStats ?? { success: ok, compiledCount: 0, skippedCount: 0, failedCount: 0, linkSuccess: ok, linkSkipped: true, outputFilename: undefined };
   const projectName = path.basename(path.dirname(project.filename));
 
+  // 项目源文件绝对路径（供「Build Log 使用 clangd 诊断」模式收集诊断）
+  const projectFiles = new Set<string>();
+  for (const f of project.files) projectFiles.add(f.absolutePath);
+  for (const t of project.buildTargets) {
+    for (const f of t.files) projectFiles.add(f.absolutePath);
+  }
+
   currentBuildProjects.push({
     projectName,
     targetName: targetTitle,
@@ -1177,6 +1378,7 @@ async function buildOneProject(project: Project, targetTitle: string, rebuild: b
     linkSkipped: stats.linkSkipped,
     outputFilename: stats.outputFilename,
     diagnostics,
+    files: [...projectFiles],
     durationMs,
   });
 
@@ -1186,9 +1388,45 @@ async function buildOneProject(project: Project, targetTitle: string, rebuild: b
   return ok;
 }
 
+/** Build Log 是否使用 clangd 诊断（否则用构建引擎完整诊断） */
+function buildLogUsesClangdDiagnostics(): boolean {
+  const cfg = vscode.workspace.getConfiguration('codeblocks');
+  return cfg.get<string>('clangd.buildLogDiagnostics', 'build') === 'clangd';
+}
+
+/** 从 VS Code 收集 clangd 发布的诊断（只对打开过/正在分析的文件有效） */
+function collectClangdDiagnostics(files: string[]): BuildLogDiagnostic[] {
+  const out: BuildLogDiagnostic[] = [];
+  for (const f of files) {
+    const diags = vscode.languages.getDiagnostics(vscode.Uri.file(f));
+    for (const d of diags) {
+      const sev = d.severity === vscode.DiagnosticSeverity.Error
+        ? 'error'
+        : d.severity === vscode.DiagnosticSeverity.Warning ? 'warning' : undefined;
+      if (!sev) continue;
+      out.push({
+        severity: sev,
+        message: d.message,
+        file: f,
+        line: d.range.start.line + 1,
+        column: d.range.start.character + 1,
+      });
+    }
+  }
+  return out;
+}
+
 /** 构建结束：汇总所有项目摘要，写入 Build Log 树视图 */
 function finishBuildSummary(allOk: boolean, buildStartMs: number): void {
   if (!buildLogTreeProvider) return;
+
+  // clangd 接管诊断且配置为 clangd 来源时，用 clangd 的诊断填充 Build Log
+  if (clangdDiagnosticsEnabled && buildLogUsesClangdDiagnostics()) {
+    for (const p of currentBuildProjects) {
+      p.diagnostics = collectClangdDiagnostics(p.files ?? []);
+    }
+  }
+
   const errorCount = currentBuildProjects.reduce((n, p) => n + p.diagnostics.filter((d) => d.severity === 'error').length, 0);
   const warningCount = currentBuildProjects.reduce((n, p) => n + p.diagnostics.filter((d) => d.severity === 'warning').length, 0);
   buildLogTreeProvider.setSummary({
