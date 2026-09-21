@@ -122,21 +122,23 @@ export class CommandGenerator {
   }
 
   private setupOutputFilenames(target: BuildTarget): string {
-    return quoteIfNeeded(toUnix(target.outputFilename));
+    // 对齐 CodeBlocks SetupOutputFilenames：保留原生分隔符
+    // （FixPathSeparators 仅在 forceFwdSlashes=true 时转正斜杠，默认保持反斜杠）
+    return quoteIfNeeded(target.outputFilename);
   }
 
   private setupStaticOutput(target: BuildTarget): string {
     const out = target.outputFilename;
     const ext = path.extname(out);
     const base = out.slice(0, out.length - ext.length);
-    return quoteIfNeeded(toUnix(base + '.' + this.compiler.switches.libExtension));
+    return quoteIfNeeded(base + '.' + this.compiler.switches.libExtension);
   }
 
   private setupDefOutput(target: BuildTarget): string {
     const out = target.outputFilename;
     const ext = path.extname(out);
     const base = out.slice(0, out.length - ext.length);
-    return quoteIfNeeded(toUnix(base + '.def'));
+    return quoteIfNeeded(base + '.def');
   }
 
   private setupIncludeDirs(target: BuildTarget): string {
