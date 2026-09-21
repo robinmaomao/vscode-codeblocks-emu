@@ -14,7 +14,7 @@ export function getDefaultRegexes(): RegExStruct[] {
   // 将 wxRegEx 的 POSIX 字符类转成 JS：
   //   - [\\] 表示字面 ']'（wxRegEx 字符类开头的 ']' 是字面字符）
   //   - 含 " \\t" 空白以匹配带空格的路径（如 "VSCode Workstation"）
-  const FILE = '([\\][{}() \\t#%$~A-Za-z0-9!&_:+/\\\\.,-]+)';
+  const FILE = '([\\][{}() \\t#%$~A-Za-z0-9\\u0080-\\uFFFF!&_:+/\\\\.,-]+)';
   const BLANK = '[ \\t]';
   const COL = ':';
   return [
@@ -22,7 +22,7 @@ export function getDefaultRegexes(): RegExStruct[] {
     { desc: 'Preprocessor error', lt: 'error', msg: [3], filename: 1, line: 2, regex: `${FILE}${COL}([0-9]+)${COL}[0-9]+${COL}${BLANK}(.*)` },
     { desc: 'Compiler warning', lt: 'warning', msg: [3], filename: 1, line: 2, regex: `${FILE}${COL}([0-9]+)${COL}[0-9]+${COL}${BLANK}([Ww]arning:${BLANK}.*)` },
     { desc: 'Compiler error', lt: 'error', msg: [3], filename: 1, line: 2, regex: `${FILE}${COL}([0-9]+)${COL}[0-9]+${COL}${BLANK}(.*)` },
-    { desc: 'Undefined reference', lt: 'error', msg: [3], filename: 1, line: 2, regex: `[\\][{}() \\t#%$~A-Za-z0-9!&_:+/\\\\.,-]+\\.o:([\\][{}() \\t#%$~A-Za-z0-9!&_:+/\\\\.,-]+):([0-9]+):${BLANK}(undefined reference.*)` },
+    { desc: 'Undefined reference', lt: 'error', msg: [3], filename: 1, line: 2, regex: `[\\][{}() \\t#%$~A-Za-z0-9\\u0080-\\uFFFF!&_:+/\\\\.,-]+\\.o:([\\][{}() \\t#%$~A-Za-z0-9\\u0080-\\uFFFF!&_:+/\\\\.,-]+):([0-9]+):${BLANK}(undefined reference.*)` },
     { desc: 'Linker error', lt: 'error', msg: [3], filename: 1, line: 2, regex: `${FILE}${COL}([0-9]+)${COL}[0-9]+${COL}${BLANK}(.*)` },
     { desc: 'Linker error (lib not found)', lt: 'error', msg: [2], filename: 1, line: 0, regex: `.*(ld.*):${BLANK}(cannot find.*)` },
     { desc: 'Linker error (cannot open output file)', lt: 'error', msg: [2, 3], filename: 1, line: 0, regex: `.*(ld.*):${BLANK}(cannot open output file.*):${BLANK}(.*)` },
