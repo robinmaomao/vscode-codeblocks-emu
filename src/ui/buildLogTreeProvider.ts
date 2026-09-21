@@ -33,6 +33,8 @@ export interface BuildLogProject {
   linkSkipped: boolean;     // static lib 无链接步骤
   outputFilename?: string;
   diagnostics: BuildLogDiagnostic[];
+  /** 项目源文件绝对路径（供「Build Log 使用 clangd 诊断」模式收集诊断） */
+  files?: string[];
   durationMs: number;
 }
 

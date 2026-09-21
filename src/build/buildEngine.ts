@@ -105,6 +105,56 @@ export class BuildEngine {
     return ok;
   }
 
+  /**
+   * 收集所有目标的编译单元命令（不执行、不做增量判断），
+   * 供 clangd / cpptools 的 compile_commands.json 使用。
+   * 返回标准 LSP compile_commands 条目：{ directory, command, file }。
+   */
+  collectCompileCommands(targetTitle?: string): { directory: string; command: string; file: string }[] {
+    const targets = targetTitle
+      ? this.project.buildTargets.filter((t) => t.title === targetTitle)
+      : this.project.buildTargets;
+
+    const generator = new CommandGenerator(this.project, this.compiler);
+    const entries: { directory: string; command: string; file: string }[] = [];
+
+    for (const target of targets) {
+      const files = target.files.length ? target.files : this.project.files;
+      const hasCpp = files.some((f) => /\.(cpp|cc|cxx|C)$/.test(f.relativeFilename));
+
+      for (const file of files) {
+        // 跳过不参与编译的文件（<Option compile="0"/>）
+        if (file.compile === false) continue;
+
+        const customCmd = file.customBuildCommands?.[target.compilerId]?.trim();
+        const isCustom = customCmd !== undefined && customCmd !== '';
+        // 自定义命令文件（ram.ld/app.xm 等）或标准源文件才编译
+        if (!isCustom && !this.isCompilable(file.relativeFilename)) continue;
+
+        const objectRel = this.objectPathRelative(target, file);
+
+        let command: string;
+        if (isCustom) {
+          command = this.expandCustomCommand(customCmd, generator, target, file, objectRel);
+        } else {
+          command = generator.generate(CommandType.CompileObjectCmd, {
+            target,
+            pf: file,
+            file: file.absolutePath,
+            object: objectRel,
+            flatObject: objectRel,
+            deps: this.depsPathFor(target, file),
+            hasCppFilesToLink: hasCpp,
+          });
+        }
+        if (command) {
+          entries.push({ directory: this.project.basePath, command, file: file.absolutePath });
+        }
+      }
+    }
+    return entries;
+  }
+
   /** 构建单个目标（始终返回统计对象，用 success 标记成败） */
   private async buildTarget(target: BuildTarget, options: BuildOptions): Promise<BuildTargetStats> {
     const macroVars = buildMacroVars(this.project.basePath, target.outputFilename, target.title, target.objectOutput);
