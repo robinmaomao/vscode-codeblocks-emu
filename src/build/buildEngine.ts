@@ -35,6 +35,7 @@ export interface BuildOptions {
 
 /** 单次构建目标级统计（供 Build Log 视图展示） */
 export interface BuildTargetStats {
+  success: boolean;       // 本目标构建是否成功（含编译/链接/脚本）
   compiledCount: number;  // 本次实际编译的文件数
   skippedCount: number;   // 增量跳过数
   failedCount: number;    // 编译失败文件数
@@ -87,25 +88,25 @@ export class BuildEngine {
     let ok = true;
     for (const target of targets) {
       const result = await this.buildTarget(target, options);
-      if (result) {
-        compiledCount += result.compiledCount;
-        skippedCount += result.skippedCount;
-        failedCount += result.failedCount;
-        linkSuccess = linkSuccess && result.linkSuccess;
-        linkSkipped = linkSkipped && result.linkSkipped;
-        if (result.outputFilename) outputFilename = result.outputFilename;
-      } else {
+      // 无论成功失败都累加统计（失败时统计已累计的部分）
+      compiledCount += result.compiledCount;
+      skippedCount += result.skippedCount;
+      failedCount += result.failedCount;
+      linkSuccess = linkSuccess && result.linkSuccess;
+      linkSkipped = linkSkipped && result.linkSkipped;
+      if (result.outputFilename) outputFilename = result.outputFilename;
+      if (!result.success) {
         ok = false;
         break;
       }
     }
 
-    this.lastStats = { compiledCount, skippedCount, failedCount, linkSuccess, linkSkipped, outputFilename };
+    this.lastStats = { success: ok, compiledCount, skippedCount, failedCount, linkSuccess, linkSkipped, outputFilename };
     return ok;
   }
 
-  /** 构建单个目标（返回统计；失败返回 false） */
-  private async buildTarget(target: BuildTarget, options: BuildOptions): Promise<BuildTargetStats | false> {
+  /** 构建单个目标（始终返回统计对象，用 success 标记成败） */
+  private async buildTarget(target: BuildTarget, options: BuildOptions): Promise<BuildTargetStats> {
     const macroVars = buildMacroVars(this.project.basePath, target.outputFilename, target.title, target.objectOutput);
 
     if (target.targetType === TargetType.CommandsOnly) {
@@ -121,8 +122,10 @@ export class BuildEngine {
         (l) => this.output.appendLine(l),
         this.compilerBinPath(),
       );
-      if (!ok) return false;
-      return { compiledCount: 0, skippedCount: 0, failedCount: 0, linkSuccess: true, linkSkipped: true };
+      if (!ok) {
+        return { success: false, compiledCount: 0, skippedCount: 0, failedCount: 1, linkSuccess: false, linkSkipped: true, outputFilename: target.outputFilename };
+      }
+      return { success: true, compiledCount: 0, skippedCount: 0, failedCount: 0, linkSuccess: true, linkSkipped: true };
     }
 
     const generator = new CommandGenerator(this.project, this.compiler);
@@ -142,7 +145,7 @@ export class BuildEngine {
       const preOk = await runScriptCommands(preCommands, this.project.basePath, macroVars, (l) => this.output.appendLine(l), this.compilerBinPath());
       if (!preOk) {
         this.output.appendLine(`[Code::Blocks] 目标 "${target.title}" pre-build 脚本失败`);
-        return false;
+        return { success: false, compiledCount: 0, skippedCount: 0, failedCount: 0, linkSuccess: false, linkSkipped: target.targetType === TargetType.StaticLib, outputFilename: target.outputFilename };
       }
     }
 
@@ -216,7 +219,7 @@ export class BuildEngine {
       if (fs.existsSync(outAbs)) {
         this.output.appendLine(`[Code::Blocks] 目标 "${target.title}" 已是最新`);
         return {
-          compiledCount: 0, skippedCount, failedCount: 0,
+          success: true, compiledCount: 0, skippedCount, failedCount: 0,
           linkSuccess: true, linkSkipped: target.targetType === TargetType.StaticLib,
           outputFilename: target.outputFilename,
         };
@@ -231,7 +234,15 @@ export class BuildEngine {
     const failedCount = results.filter((r) => !r).length;
     if (failedCount > 0) {
       this.output.appendLine(`[Code::Blocks] 目标 "${target.title}" 编译失败`);
-      return false;
+      return {
+        success: false,
+        compiledCount: units.length - failedCount, // 编译成功的文件数
+        skippedCount,
+        failedCount,
+        linkSuccess: false,
+        linkSkipped: target.targetType === TargetType.StaticLib,
+        outputFilename: target.outputFilename,
+      };
     }
 
     // 2. 链接（非 static lib 需要链接步骤；CommandsOnly 已在上面 return）
@@ -262,7 +273,15 @@ export class BuildEngine {
           const linkOk = await this.runCommand(linkCommand, this.project.basePath, options);
           if (!linkOk) {
             this.output.appendLine(`[Code::Blocks] 目标 "${target.title}" 链接失败`);
-            return false;
+            return {
+              success: false,
+              compiledCount: units.length,
+              skippedCount,
+              failedCount: 0,
+              linkSuccess: false,
+              linkSkipped: false,
+              outputFilename: target.outputFilename,
+            };
           }
         }
       } else {
@@ -282,7 +301,17 @@ export class BuildEngine {
         const arCmd = `${this.compiler.programs.LIB} -r -s ${staticOut} ${objects.join(' ')}`;
         this.output.appendLine(arCmd);
         const ok = await this.runCommand(arCmd, this.project.basePath, options);
-        if (!ok) return false;
+        if (!ok) {
+          return {
+            success: false,
+            compiledCount: units.length,
+            skippedCount,
+            failedCount: 0,
+            linkSuccess: false,
+            linkSkipped: true,
+            outputFilename: target.outputFilename,
+          };
+        }
       } else {
         this.output.appendLine(`[Code::Blocks] 目标 "${target.title}" 静态库已是最新，跳过打包`);
       }
@@ -294,11 +323,20 @@ export class BuildEngine {
       const postOk = await runScriptCommands(postCommands, this.project.basePath, macroVars, (l) => this.output.appendLine(l), this.compilerBinPath());
       if (!postOk) {
         this.output.appendLine(`[Code::Blocks] 目标 "${target.title}" post-build 脚本失败`);
-        return false;
+        return {
+          success: false,
+          compiledCount: units.length,
+          skippedCount,
+          failedCount: 0,
+          linkSuccess,
+          linkSkipped: target.targetType === TargetType.StaticLib,
+          outputFilename: target.outputFilename,
+        };
       }
     }
 
     return {
+      success: true,
       compiledCount: units.length,
       skippedCount,
       failedCount: 0,
