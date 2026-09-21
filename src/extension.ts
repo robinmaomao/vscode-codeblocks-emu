@@ -1162,7 +1162,7 @@ async function buildOneProject(project: Project, targetTitle: string, rebuild: b
   });
 
   const durationMs = Date.now() - startMs;
-  const stats = engine.lastStats ?? { compiledCount: 0, skippedCount: 0, failedCount: 0, linkSuccess: ok, linkSkipped: true, outputFilename: undefined };
+  const stats = engine.lastStats ?? { success: ok, compiledCount: 0, skippedCount: 0, failedCount: 0, linkSuccess: ok, linkSkipped: true, outputFilename: undefined };
   const projectName = path.basename(path.dirname(project.filename));
 
   currentBuildProjects.push({
