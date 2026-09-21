@@ -23,6 +23,16 @@ function toUnix(p: string): string {
   return p.replace(/\\/g, '/');
 }
 
+/**
+ * 对齐 CodeBlocks 的 UnixFilename(filename, wxPATH_NATIVE)：
+ * Windows 转反斜杠，其余平台转正斜杠。
+ * <Add directory>/<Add library> 路径在 Windows 上必须用反斜杠，否则链接器把 -L 目录
+ * 原样写入 map.txt 时斜杠会与 CodeBlocks 不一致。
+ */
+function toNativeSeparator(p: string): string {
+  return process.platform === 'win32' ? p.replace(/\//g, '\\') : p.replace(/\\/g, '/');
+}
+
 function unixJoin(base: string, rel: string): string {
   return toUnix(path.join(base, rel));
 }
@@ -80,7 +90,7 @@ function collectAddDirectories(parent: any): string[] {
   if (!Array.isArray(node)) node = [node];
   for (const n of node) {
     const dir = n['@_directory'];
-    if (dir !== undefined && dir !== '') out.push(toUnix(String(dir)));
+    if (dir !== undefined && dir !== '') out.push(toNativeSeparator(String(dir)));
   }
   return out;
 }
@@ -94,7 +104,7 @@ function collectAddLibraries(parent: any): string[] {
   if (!Array.isArray(node)) node = [node];
   for (const n of node) {
     const lib = n['@_library'];
-    if (lib !== undefined && lib !== '') out.push(toUnix(String(lib)));
+    if (lib !== undefined && lib !== '') out.push(toNativeSeparator(String(lib)));
   }
   return out;
 }
@@ -249,11 +259,11 @@ export class ProjectParser {
   }
 
   private parseIncludeDirs(node: any, sink: { includeDirs: string[] }): void {
-    sink.includeDirs.push(...collectAddOptions(node).map(toUnix));
+    sink.includeDirs.push(...collectAddOptions(node).map(toNativeSeparator));
   }
 
   private parseLibDirs(node: any, sink: { libDirs: string[] }): void {
-    sink.libDirs.push(...collectAddOptions(node).map(toUnix));
+    sink.libDirs.push(...collectAddOptions(node).map(toNativeSeparator));
   }
 
   private parseVirtualTargets(node: any, project: Project): void {
@@ -325,7 +335,7 @@ export class ProjectParser {
       if (node['@_title'] !== undefined) target.title = String(node['@_title']);
       if (node['@_type'] !== undefined) target.targetType = parseTargetType(node['@_type']);
       if (node['@_compiler'] !== undefined) target.compilerId = String(node['@_compiler']);
-      if (node['@_output'] !== undefined) target.outputFilename = String(node['@_output']);
+      if (node['@_output'] !== undefined) target.outputFilename = toNativeSeparator(String(node['@_output']));
       if (node['@_object_output'] !== undefined) target.objectOutput = toUnix(String(node['@_object_output']));
       if (node['@_createDefFile'] !== undefined) target.createDefFile = node['@_createDefFile'] === '1' || node['@_createDefFile'] === 'true';
       if (node['@_createStaticLib'] !== undefined) target.createStaticLib = node['@_createStaticLib'] === '1' || node['@_createStaticLib'] === 'true';

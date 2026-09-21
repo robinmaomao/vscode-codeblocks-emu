@@ -15,17 +15,18 @@
 - ⚙️ **编译器管理**：完整解析 `options_<id>.xml`（含 `extends` 继承、`<if platform>` 平台分支、`<Common>` 引用），自动探测 GCC / MinGW / Clang / MSVC；支持从 Code::Blocks 的 `default.conf` 读取**用户自定义交叉编译器**（如 RISC-V）。
 - 🐞 **GDB 调试**：自研内联 DAP 调试适配器，直接驱动 `gdb -i=mi`，支持断点、单步、变量、调用栈与表达式求值。
 - �️ **多项目管理**：同时打开多个 `.cbp`，工程树支持拖拽排序（即编译顺序）、上移/下移、移除项目、活动项目高亮。
-- 📂 **工程树浏览**：多层嵌套目录树（自动折叠 `../` 前缀）、文件类型图标、缺失文件标记、目录优先排序（对齐 VS Code Explorer）。
+- 📂 **工程树浏览**：按公共顶层目录（`relativeToCommonTopLevelPath`）展开的多层嵌套目录树、文件类型图标、缺失文件标记、目录优先排序（对齐 VS Code Explorer）。
 - 🧩 **右键菜单**：项目节点支持增量编译/全量编译/添加文件；文件节点支持从项目移除、打开所在目录、切换编译/链接开关（写回 `.cbp`）。
 - 📋 **结构化构建日志**：构建摘要树（编译器/编译统计/链接结果/错误警告列表），点击诊断节点精确定位到行列；`F4`/`Shift+F4` 循环跳转错误。
 - 🚀 **对齐 Code::Blocks 细节**：
-  - 增量编译（mtime 比对）、`rebuild` 强制重编译
+  - 增量编译（源文件 + `#include` 头文件依赖 mtime 比对）、`rebuild` 对齐 Code::Blocks（先 Clean 再 Build）
   - pre/post build 脚本（`.bat` / 命令）
   - 对象目录 `CreateDirRecursively` 自动创建
   - `GetCommonTopLevelPath` 对象路径布局（`Output/obj/<公共顶层>/...`）
   - GBK 输出解码（中文 Windows 下 GCC 报错不乱码）
   - 目标类型数字映射（`type="1"` = 控制台应用，正确区分 `-mwindows`）
   - `max_reported_errors` 错误数截断（防构建日志卡顿）
+  - 路径分隔符对齐 Code::Blocks（`UnixFilename(wxPATH_NATIVE)`）：Windows 下 `directory`/`library`/`output` 属性用反斜杠，保证 `map.txt` 等构建产物与 Code::Blocks 一致
 - 📊 **辅助工具**：代码统计、TODO 扫描、AStyle 格式化。
 
 ## 安装
@@ -73,7 +74,7 @@ code --extensionDevelopmentPath="." --disable-extensions --new-window
 - **构建并运行**：`F9`
 - **运行**：`Ctrl+F10`
 
-> 构建为**增量编译**（按 mtime 比对跳过未变更文件）；`Rebuild` 强制全量重编译。
+> 构建为**增量编译**（源文件与 `#include` 头文件 mtime 比对，头文件更新也触发重编译）；`Rebuild` 对齐 Code::Blocks，先清理对象目录再全量重编译。
 
 ### 多项目管理
 
