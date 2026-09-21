@@ -127,6 +127,11 @@ export class BuildEngine {
 
     const generator = new CommandGenerator(this.project, this.compiler);
 
+    // 全量编译（rebuild）对齐 CodeBlocks Rebuild：先删除对象输出目录，再全量编译
+    if (options.rebuild) {
+      this.cleanTarget(target);
+    }
+
     // 项目级 + 目标级 pre-build 脚本（项目级先执行）
     const preCommands = [...this.project.commandsBeforeBuild, ...target.commandsBeforeBuild];
     const postCommands = [...this.project.commandsAfterBuild, ...target.commandsAfterBuild];
@@ -147,6 +152,10 @@ export class BuildEngine {
     const linkFiles: ProjectFile[] = [];
     const files = target.files.length ? target.files : this.project.files;
     const hasCpp = files.some((f) => /\.(cpp|cc|cxx|C)$/.test(f.relativeFilename));
+
+    // 头文件依赖扫描（增量编译）：收集 include 搜索目录与依赖 mtime 缓存（跨文件复用）
+    const includeDirs = this.getIncludeDirs(target);
+    const depsCache = new Map<string, number>();
 
     // 统计：增量跳过 / 实际编译
     let skippedCount = 0;
@@ -170,8 +179,8 @@ export class BuildEngine {
         linkFiles.push(file);
       }
 
-      // 增量编译：源文件未变更且对象文件存在时跳过（rebuild 强制重编译）
-      if (!options.rebuild && !isCustom && this.isUpToDate(file.absolutePath, object)) {
+      // 增量编译：源/头文件未变更且对象文件存在时跳过（rebuild 强制重编译）
+      if (!options.rebuild && !isCustom && this.isUpToDate(file.absolutePath, object, includeDirs, depsCache)) {
         skippedCount++;
         continue;
       }
@@ -335,15 +344,94 @@ export class BuildEngine {
     });
   }
 
-  /** 增量编译判断：对象文件存在且 mtime 晚于源文件，则无需重编译 */
-  private isUpToDate(sourceFile: string, objectFile: string): boolean {
+  /**
+   * 增量编译判断 —— 对应 CodeBlocks DirectCommands::IsObjectOutdated：
+   * 源文件 mtime 与 #include 依赖头文件 mtime 均不晚于对象文件，才认为无需重编译。
+   */
+  private isUpToDate(
+    sourceFile: string,
+    objectFile: string,
+    includeDirs: string[],
+    depsCache: Map<string, number>,
+  ): boolean {
     try {
       const srcStat = fs.statSync(sourceFile);
       const objStat = fs.statSync(objectFile);
-      return objStat.mtimeMs >= srcStat.mtimeMs;
+      if (objStat.mtimeMs < srcStat.mtimeMs) return false; // 源文件比对象新 → 需编译
+      // 扫描 #include 依赖，头文件更新也触发重编译（对应 depsScanForHeaders + depsGetNewest）
+      const newestDep = this.depsNewestMtime(sourceFile, includeDirs, depsCache);
+      return newestDep <= objStat.mtimeMs;
     } catch {
       // 对象文件不存在 → 需要编译
       return false;
+    }
+  }
+
+  /** 收集目标的 include 搜索目录（项目级 + 目标级，默认 Append 关系） */
+  private getIncludeDirs(target: BuildTarget): string[] {
+    return [...this.project.includeDirs, ...target.includeDirs];
+  }
+
+  /** 递归扫描 #include "..." 依赖树，返回依赖头文件的最大 mtime（毫秒，不含文件自身） */
+  private depsNewestMtime(
+    fileAbs: string,
+    includeDirs: string[],
+    cache: Map<string, number>,
+    inProgress?: Set<string>,
+  ): number {
+    const key = path.resolve(fileAbs);
+    const cached = cache.get(key);
+    if (cached !== undefined) return cached;
+    const inProg = inProgress ?? new Set<string>();
+    if (inProg.has(key)) return 0; // 循环 include，中断递归
+    inProg.add(key);
+
+    let newest = 0;
+    try {
+      const content = fs.readFileSync(key, 'utf-8');
+      const re = /^\s*#\s*include\s*"([^"]+)"/gm;
+      let m: RegExpExecArray | null;
+      while ((m = re.exec(content)) !== null) {
+        const resolved = this.resolveInclude(m[1], key, includeDirs);
+        if (!resolved) continue;
+        try {
+          newest = Math.max(newest, fs.statSync(resolved).mtimeMs);
+        } catch {
+          continue;
+        }
+        newest = Math.max(newest, this.depsNewestMtime(resolved, includeDirs, cache, inProg));
+      }
+    } catch {
+      // 文件读取失败（如二进制/无权限），忽略其依赖
+    }
+    inProg.delete(key);
+    cache.set(key, newest);
+    return newest;
+  }
+
+  /** 解析 #include 头文件的实际路径（先查当前文件目录，再查 include 搜索目录） */
+  private resolveInclude(inc: string, fromFile: string, includeDirs: string[]): string | undefined {
+    // 1. 相对当前源文件所在目录（C 编译器默认行为）
+    let cand = path.resolve(path.dirname(fromFile), inc);
+    if (fs.existsSync(cand)) return cand;
+    // 2. 相对项目 include 目录（相对路径基于项目根目录解析）
+    for (const dir of includeDirs) {
+      const base = path.isAbsolute(dir) ? dir : path.join(this.project.basePath, dir);
+      cand = path.resolve(base, inc);
+      if (fs.existsSync(cand)) return cand;
+    }
+    return undefined;
+  }
+
+  /** 删除目标的对象输出目录（对应 Clean，供 rebuild 对齐「先 Clean 再 Build」） */
+  private cleanTarget(target: BuildTarget): void {
+    const objDir = path.join(this.project.basePath, target.objectOutput || 'obj');
+    if (!objDir || !fs.existsSync(objDir)) return;
+    try {
+      fs.rmSync(objDir, { recursive: true, force: true });
+      this.output.appendLine(`[Code::Blocks] 清理对象目录: ${objDir}`);
+    } catch (e) {
+      this.output.appendLine(`[Code::Blocks] 清理对象目录失败: ${(e as Error).message}`);
     }
   }
 
