@@ -177,12 +177,15 @@ export class ProjectParser {
   private calculateCommonTopLevelPath(project: Project): string {
     const sep = path.sep;
     let base = project.basePath + sep;
-    const vol = path.parse(base).root;
+    // 卷名比较需归一化：basePath 用反斜杠、absolutePath 由 unixJoin 用正斜杠生成，
+    // 二者 root 分别为 "E:\" 与 "E:/"，直接比较会误判为跨卷而跳过所有文件，
+    // 导致公共顶层目录无法提升（对象文件落位错误）。
+    const vol = path.parse(base).root.replace(/[\\/]/g, '').toLowerCase();
 
     for (const f of project.files) {
       if (!f.absolutePath) continue;
       // 跨卷文件不参与（简化：仅同卷）
-      if (path.parse(f.absolutePath).root !== vol) continue;
+      if (path.parse(f.absolutePath).root.replace(/[\\/]/g, '').toLowerCase() !== vol) continue;
 
       const tmp = f.relativeFilename;
       // 跳过开头的 '.' '/' '\' 字符，得到相对公共前缀（如 "../../"）

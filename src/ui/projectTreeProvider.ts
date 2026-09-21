@@ -14,7 +14,7 @@ class TreeNode extends vscode.TreeItem {
   constructor(
     public readonly label: string,
     public readonly collapsibleState: vscode.TreeItemCollapsibleState,
-    public readonly kind: 'project' | 'target' | 'folder' | 'file',
+    public readonly kind: 'project' | 'folder' | 'file',
     public readonly project?: Project,
     public readonly resourceUri?: vscode.Uri,
     public readonly children: TreeNode[] = [],
@@ -128,28 +128,9 @@ export class ProjectTreeProvider implements vscode.TreeDataProvider<TreeNode> {
     }
 
     if (element.kind === 'project') {
-      const project = element.project!;
-      const nodes: TreeNode[] = [];
-      for (const target of project.buildTargets) {
-        nodes.push(
-          new TreeNode(
-            `▶ ${target.title}`,
-            vscode.TreeItemCollapsibleState.Collapsed,
-            'target',
-            project,
-          ),
-        );
-      }
-      nodes.push(...this.buildFileNodes(project));
-      return nodes;
-    }
-
-    if (element.kind === 'target') {
-      const targetName = element.label.replace(/^▶ /, '');
-      const project = element.project!;
-      const target = project.buildTargets.find((t) => t.title === targetName);
-      if (!target) return [];
-      return target.files.map((f) => this.fileToNode(project, f));
+      // 参考 Code::Blocks BuildProjectTree()：项目节点下直接挂文件目录树，
+      // 不含构建目标（Debug/Release）节点。
+      return this.buildFileNodes(element.project!);
     }
 
     if (element.kind === 'folder') {
@@ -166,8 +147,9 @@ export class ProjectTreeProvider implements vscode.TreeDataProvider<TreeNode> {
     const rootFiles: TreeNode[] = [];
 
     for (const f of project.files) {
-      // 折叠 ../ 前缀，得到干净的相对路径（如 ../../platform/bsp/x.c → platform/bsp/x.c）
-      const clean = cleanRelativePath(f.relativeFilename);
+      // 使用相对「公共顶层目录」的路径（对应 Code::Blocks 的 relativeToCommonTopLevelPath），
+      // 按实际工程目录层级展开；为空时回退 relativeFilename（与 buildEngine.ts 一致）。
+      const clean = cleanRelativePath(f.relativeToCommonTopLevelPath || f.relativeFilename);
       const segs = clean.split('/');
       const fileNode = this.fileToNode(project, f);
 
