@@ -57,10 +57,10 @@ class BuildLogNode extends vscode.TreeItem {
     public readonly kind: BuildLogKind,
     label: string,
     collapsible: vscode.TreeItemCollapsibleState,
-    iconId?: string,
+    icon?: string | vscode.ThemeIcon | vscode.Uri,
   ) {
     super(label, collapsible);
-    if (iconId) this.iconPath = new vscode.ThemeIcon(iconId);
+    if (icon) this.iconPath = typeof icon === 'string' ? new vscode.ThemeIcon(icon) : icon;
     this.children = [];
   }
 }
@@ -70,6 +70,26 @@ export class BuildLogTreeProvider implements vscode.TreeDataProvider<BuildLogNod
   readonly onDidChangeTreeData = this._onDidChangeTreeData.event;
 
   private summary: BuildLogSummary | undefined;
+  /** 资源根目录（用于加载彩色图标） */
+  private resourcesDir?: vscode.Uri;
+  /** 彩色图标缓存：key = icons/ 下文件名，value = URI */
+  private iconCache = new Map<string, vscode.Uri>();
+
+  /** 设置资源根目录（用于加载彩色树节点图标） */
+  setResourcesDir(dir: string): void {
+    this.resourcesDir = vscode.Uri.file(dir);
+  }
+
+  /** 取彩色图标 URI（缓存；未设置资源目录则回退 ThemeIcon） */
+  private icon(name: string, fallback: string): string | vscode.ThemeIcon | vscode.Uri {
+    if (!this.resourcesDir) return new vscode.ThemeIcon(fallback);
+    let uri = this.iconCache.get(name);
+    if (!uri) {
+      uri = vscode.Uri.joinPath(this.resourcesDir, 'icons', name);
+      this.iconCache.set(name, uri);
+    }
+    return uri;
+  }
   /** 扁平化的错误列表（只含 error，供 next/prev 导航） */
   private errorList: BuildLogDiagnostic[] = [];
   /** 当前错误索引（-1 = 未定位） */
@@ -137,7 +157,7 @@ export class BuildLogTreeProvider implements vscode.TreeDataProvider<BuildLogNod
       'root',
       s.success ? '构建成功' : '构建失败',
       vscode.TreeItemCollapsibleState.Expanded,
-      s.success ? 'check' : 'error',
+      s.success ? this.icon('log-success.svg', 'check') : this.icon('log-error.svg', 'error'),
     );
     node.description = `用时 ${(s.durationMs / 1000).toFixed(1)}s · ${s.errorCount} 错误 · ${s.warningCount} 警告${s.truncated ? '（已截断）' : ''}`;
     node.tooltip = node.description;
@@ -150,7 +170,7 @@ export class BuildLogTreeProvider implements vscode.TreeDataProvider<BuildLogNod
       'project',
       p.projectName,
       vscode.TreeItemCollapsibleState.Expanded,
-      p.success ? 'package' : 'error',
+      p.success ? this.icon('log-project.svg', 'package') : this.icon('log-error.svg', 'error'),
     );
     node.description = `${p.targetName} · ${p.success ? '成功' : '失败'}`;
     node.tooltip = `${p.projectName} · 目标 ${p.targetName}`;
@@ -158,7 +178,7 @@ export class BuildLogTreeProvider implements vscode.TreeDataProvider<BuildLogNod
     const children: BuildLogNode[] = [];
 
     // 编译器
-    const compilerNode = new BuildLogNode('info', p.compilerPath, vscode.TreeItemCollapsibleState.None, 'tools');
+    const compilerNode = new BuildLogNode('info', p.compilerPath, vscode.TreeItemCollapsibleState.None, this.icon('log-compiler.svg', 'tools'));
     children.push(compilerNode);
 
     // 编译统计
@@ -166,7 +186,7 @@ export class BuildLogTreeProvider implements vscode.TreeDataProvider<BuildLogNod
       'info',
       `编译 ${p.compiledCount} · 跳过 ${p.skippedCount} · 失败 ${p.failedCount}`,
       vscode.TreeItemCollapsibleState.None,
-      'file-code',
+      this.icon('log-stats.svg', 'file-code'),
     );
     children.push(statsNode);
 
@@ -176,7 +196,7 @@ export class BuildLogTreeProvider implements vscode.TreeDataProvider<BuildLogNod
         'info',
         p.linkSuccess ? '链接成功' : '链接失败',
         vscode.TreeItemCollapsibleState.None,
-        p.linkSuccess ? 'link' : 'error',
+        p.linkSuccess ? this.icon('log-link.svg', 'link') : this.icon('log-error.svg', 'error'),
       );
       linkNode.description = p.outputFilename;
       children.push(linkNode);
@@ -208,7 +228,7 @@ export class BuildLogTreeProvider implements vscode.TreeDataProvider<BuildLogNod
       'diagnostic',
       label,
       vscode.TreeItemCollapsibleState.None,
-      isError ? 'error' : 'warning',
+      isError ? this.icon('log-error.svg', 'error') : this.icon('log-warning.svg', 'warning'),
     );
     node.description = d.file ? d.message : undefined;
     node.tooltip = d.file

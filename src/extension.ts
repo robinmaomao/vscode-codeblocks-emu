@@ -88,6 +88,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   // 注册构建日志树视图（结构化构建摘要）
   buildLogTreeProvider = new BuildLogTreeProvider();
+  buildLogTreeProvider.setResourcesDir(path.join(context.extensionPath, 'resources'));
   const buildLogTreeView = vscode.window.createTreeView('codeblocks.buildLog', {
     treeDataProvider: buildLogTreeProvider,
   });
