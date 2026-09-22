@@ -207,15 +207,16 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       if (!filename) return;
       const p = openProjects.find((x) => x.filename === filename);
       if (p) {
-        activeProject = p;
-        projectTreeProvider?.setActiveProject(p);
-        updateTargetStatusBar();
-        updateCompilerStatusBar();
-        // 切换活动项目时重新生成 compile_commands.json（IntelliSense 随活动项目更新）
-        void generateClangdForWorkspace();
+        setActiveProject(p, { persist: true });
       }
     }),
   );
+
+  // 活动工程跟随当前编辑器：编辑某工程的文件时自动切换活动工程
+  context.subscriptions.push(
+    vscode.window.onDidChangeActiveTextEditor(() => syncActiveProjectToEditor()),
+  );
+  syncActiveProjectToEditor();
 
   // 向上移动项目
   context.subscriptions.push(
@@ -522,13 +523,16 @@ async function openProject(filename: string): Promise<void> {
     const project = new ProjectParser().parse(filename);
     openProjects.push(project);
     if (!activeProject) {
-      activeProject = project;
+      // 优先恢复上次持久化的活动工程；否则默认第一个打开的工程
+      const persisted = extContext?.workspaceState.get<string>('codeblocks.activeProject', '');
+      activeProject = (persisted && openProjects.find((p) => p.filename === persisted)) || project;
     }
     outputChannel.appendLine(`[Code::Blocks] 已打开项目: ${project.title}`);
     outputChannel.appendLine(`  目标: ${project.buildTargets.map((t) => t.title).join(', ')}`);
 
-    // 刷新项目树
+    // 刷新项目树（活动项目高亮随 activeProject 同步）
     projectTreeProvider?.setProjects(openProjects);
+    projectTreeProvider?.setActiveProject(activeProject);
 
     // 重建兜底符号索引（clangd 不可用时提供项目内补全）
     rebuildFallbackIndex();
@@ -544,8 +548,10 @@ async function openProject(filename: string): Promise<void> {
     // 持久化打开的项目顺序
     await persistProjectOrder();
 
-    // 记录活动项目路径（存 workspaceState，避免在工作区下生成 .vscode 目录）
-    await extContext?.workspaceState.update('codeblocks.activeProject', filename);
+    // 仅当新打开工程即活动工程时记录活动路径（避免用非活动工程覆盖上次选择）
+    if (activeProject?.filename === filename) {
+      await extContext?.workspaceState.update('codeblocks.activeProject', filename);
+    }
 
     vscode.window.showInformationMessage(`已打开 Code::Blocks 项目: ${project.title}`);
 
@@ -570,6 +576,48 @@ function requireProject(): Project | undefined {
     return undefined;
   }
   return activeProject;
+}
+
+/** 归一化路径（正斜杠 + 小写，Windows 大小写不敏感比较） */
+function normPath(p: string): string {
+  return p.replace(/\\/g, '/').toLowerCase();
+}
+
+/** 统一设置活动工程：更新全局状态、树高亮、状态栏，并按需持久化 */
+function setActiveProject(project: Project | undefined, opts: { persist?: boolean } = {}): void {
+  if (activeProject?.filename === project?.filename) return;
+  activeProject = project;
+  projectTreeProvider?.setActiveProject(project);
+  updateTargetStatusBar();
+  updateCompilerStatusBar();
+  if (opts.persist && project) {
+    void extContext?.workspaceState.update('codeblocks.activeProject', project.filename);
+  }
+}
+
+/** 将活动工程同步到当前活动编辑器所属工程（文件被多个/零个工程拥有时保持现状） */
+function syncActiveProjectToEditor(): void {
+  const fsPath = vscode.window.activeTextEditor?.document?.uri?.fsPath;
+  if (!fsPath) return;
+  const norm = normPath(fsPath);
+  // 精确匹配优先：文件被唯一工程收录时才切换
+  let owner: Project | undefined;
+  const exactOwners = openProjects.filter((p) =>
+    p.files?.some((f) => normPath(f.absolutePath || f.relativeFilename) === norm),
+  );
+  if (exactOwners.length === 1) {
+    owner = exactOwners[0];
+  } else {
+    // 回退：按工程树（commonTopLevelPath）唯一包含判断
+    const treeOwners = openProjects.filter((p) => {
+      const root = normPath(p.commonTopLevelPath || p.basePath).replace(/\/+$/, '');
+      return !!root && (norm === root || norm.startsWith(root + '/'));
+    });
+    if (treeOwners.length === 1) owner = treeOwners[0];
+  }
+  if (owner && owner.filename !== activeProject?.filename) {
+    setActiveProject(owner, { persist: true });
+  }
 }
 
 /** 计算多个目录的公共祖先目录（Windows 大小写不敏感比较，返回带尾分隔符） */
@@ -872,11 +920,9 @@ function removeProject(filename: string): void {
   if (idx === -1) return;
   const [removed] = openProjects.splice(idx, 1);
   if (activeProject?.filename === filename) {
-    activeProject = openProjects[0];
+    setActiveProject(openProjects[0], { persist: true });
   }
   projectTreeProvider?.setProjects(openProjects);
-  updateTargetStatusBar();
-  updateCompilerStatusBar();
   persistProjectOrder();
   rebuildFallbackIndex();
   outputChannel.appendLine(`[Code::Blocks] 已移除项目: ${removed.title}`);
@@ -1042,6 +1088,7 @@ async function addFilesToProject(filename: string): Promise<void> {
     await openProject(project.filename);
     if (wasActive) {
       activeProject = openProjects.find((p) => p.filename === project.filename);
+      projectTreeProvider?.setActiveProject(activeProject);
       updateTargetStatusBar();
       updateCompilerStatusBar();
     }
