@@ -41,9 +41,9 @@ function tokenize(command: string): string[] {
   return tokens;
 }
 
-/** 含空格则加引号 */
+/** 含空白或 cmd 元字符则加引号 */
 function quoteIfNeeded(t: string): string {
-  return /\s/.test(t) ? `"${t}"` : t;
+  return /[\s&|<>^()]/.test(t) ? `"${t}"` : t;
 }
 
 /** 对单条编译命令做 clang 兼容化：剔除不兼容 flag + 追加 -isystem */
