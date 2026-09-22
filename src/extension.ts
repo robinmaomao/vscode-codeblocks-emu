@@ -50,8 +50,10 @@ let maxErrorsReached = false;
 
 /** 底部状态栏构建目标项 */
 let targetStatusBar: vscode.StatusBarItem | undefined;
-/** 当前选中的构建目标标题（构建/运行/调试直接使用，不再弹窗） */
-let selectedTargetTitle: string | undefined;
+/** 各工程的构建目标标题（filename -> targetTitle，对齐 CodeBlocks cbProject::m_ActiveTarget 按工程存储） */
+let selectedTargets = new Map<string, string>();
+/** 各工程构建目标记忆的 workspaceState key */
+const SELECTED_TARGETS_KEY = 'codeblocks.selectedTargets';
 /** 底部状态栏：增量编译 */
 let buildStatusBar: vscode.StatusBarItem | undefined;
 /** 底部状态栏：全量编译 */
@@ -72,6 +74,7 @@ let clangdGenRunning = false;
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
   extContext = context;
+  loadSelectedTargets();
   outputChannel = vscode.window.createOutputChannel('Code::Blocks');
   diagnosticCollection = vscode.languages.createDiagnosticCollection('codeblocks');
 
@@ -537,10 +540,10 @@ async function openProject(filename: string): Promise<void> {
     // 重建兜底符号索引（clangd 不可用时提供项目内补全）
     rebuildFallbackIndex();
 
-    // 默认选中第一个构建目标（若之前选中的目标仍存在则保留）
+    // 每个工程各自默认选中第一个目标（对齐 CodeBlocks m_ActiveTarget = GetFirstValidBuildTargetName()）
     const titles = project.buildTargets.map((t) => t.title);
-    if (!selectedTargetTitle || !titles.includes(selectedTargetTitle)) {
-      selectedTargetTitle = titles[0];
+    if (titles.length && !getSelectedTarget(project)) {
+      setSelectedTarget(project, titles[0]);
     }
     updateTargetStatusBar();
     updateCompilerStatusBar();
@@ -578,6 +581,29 @@ function requireProject(): Project | undefined {
   return activeProject;
 }
 
+/** 从 workspaceState 载入各工程构建目标记忆 */
+function loadSelectedTargets(): void {
+  const saved = extContext?.workspaceState.get<Record<string, string>>(SELECTED_TARGETS_KEY);
+  selectedTargets = saved ? new Map(Object.entries(saved)) : new Map();
+}
+
+/** 持久化各工程构建目标记忆 */
+function persistSelectedTargets(): void {
+  void extContext?.workspaceState.update(SELECTED_TARGETS_KEY, Object.fromEntries(selectedTargets));
+}
+
+/** 获取工程的构建目标（无记忆返回 undefined） */
+function getSelectedTarget(project: Project): string | undefined {
+  return selectedTargets.get(project.filename);
+}
+
+/** 设置工程的构建目标（无变化则不写，避免无谓持久化） */
+function setSelectedTarget(project: Project, title: string): void {
+  if (selectedTargets.get(project.filename) === title) return;
+  selectedTargets.set(project.filename, title);
+  persistSelectedTargets();
+}
+
 /** 归一化路径（正斜杠 + 小写，Windows 大小写不敏感比较） */
 function normPath(p: string): string {
   return p.replace(/\\/g, '/').toLowerCase();
@@ -593,6 +619,30 @@ function setActiveProject(project: Project | undefined, opts: { persist?: boolea
   if (opts.persist && project) {
     void extContext?.workspaceState.update('codeblocks.activeProject', project.filename);
   }
+  // 仅当存在共享文件时才需重建（共享文件按活动工程去重）；无共享文件则 DB 内容与活动工程无关
+  if (hasSharedFiles()) {
+    void generateClangdForWorkspace();
+  }
+}
+
+/** 是否存在被多个工程共享的文件（同一源文件出现在多个 .cbp 中） */
+function hasSharedFiles(): boolean {
+  const seen = new Set<string>();
+  for (const p of openProjects) {
+    const local = new Set<string>();
+    const addAll = (files: ProjectFile[]) => {
+      for (const f of files) {
+        local.add(path.normalize(f.absolutePath).toLowerCase());
+      }
+    };
+    addAll(p.files);
+    for (const t of p.buildTargets) addAll(t.files);
+    for (const key of local) {
+      if (seen.has(key)) return true;
+      seen.add(key);
+    }
+  }
+  return false;
 }
 
 /** 将活动工程同步到当前活动编辑器所属工程（文件被多个/零个工程拥有时保持现状） */
@@ -720,13 +770,19 @@ async function generateClangdForWorkspaceInternal(interactive: boolean): Promise
 
     if (!openProjects.length) return;
 
-    // 收集所有打开项目的编译单元（每项目用其编译器 + 该系统 include 路径）
+    // 收集所有打开项目的编译单元（每项目用其编译器 + 该系统 include 路径）。
+    // 活动工程排最前：共享文件（同文件出现在多个工程）时保留活动工程的编译命令（对齐 CodeBlocks 活动工程决定 flag）。
+    const orderedProjects = [
+      ...openProjects.filter((p) => p.filename === activeProject?.filename),
+      ...openProjects.filter((p) => p.filename !== activeProject?.filename),
+    ];
     const entries: CompileCommandEntry[] = [];
+    const seenFiles = new Set<string>();
     const scopePaths: string[] = [];
     const includeCache = new Map<string, string[]>();
     const systemIncludesAll = new Set<string>();
     let targetTriple: string | undefined;
-    for (const p of openProjects) {
+    for (const p of orderedProjects) {
       try {
         const targetCompilerId = p.buildTargets[0]?.compilerId ?? p.compilerId;
         const compiler = getCompiler(targetCompilerId);
@@ -742,7 +798,13 @@ async function generateClangdForWorkspaceInternal(interactive: boolean): Promise
         if (systemIncludes) {
           for (const d of systemIncludes) systemIncludesAll.add(path.normalize(d));
         }
-        entries.push(...collectClangdEntries(p, compiler, outputChannel, systemIncludes ?? []));
+        // 同一文件只保留一条（活动工程优先，因其排在最前）
+        for (const e of collectClangdEntries(p, compiler, outputChannel, systemIncludes ?? [])) {
+          const key = path.normalize(e.file).toLowerCase();
+          if (seenFiles.has(key)) continue;
+          seenFiles.add(key);
+          entries.push(e);
+        }
         scopePaths.push(p.commonTopLevelPath || p.basePath);
       } catch (err) {
         // 单个项目失败不影响其它项目
@@ -1257,11 +1319,9 @@ async function showTodoList(): Promise<void> {
 /** 更新底部状态栏的构建目标显示 */
 function updateTargetStatusBar(): void {
   if (!targetStatusBar) return;
-  if (activeProject && selectedTargetTitle) {
-    targetStatusBar.text = `$(symbol-method) Target: ${selectedTargetTitle}`;
-    targetStatusBar.show();
-  } else if (activeProject) {
-    targetStatusBar.text = '$(symbol-method) Target: —';
+  if (activeProject) {
+    const t = getSelectedTarget(activeProject);
+    targetStatusBar.text = t ? `$(symbol-method) Target: ${t}` : '$(symbol-method) Target: —';
     targetStatusBar.show();
   } else {
     targetStatusBar.hide();
@@ -1313,7 +1373,7 @@ function updateCompilerStatusBar(): void {
   compilerStatusBar.show();
 }
 
-/** 返回当前选中的构建目标标题；未选中时默认选第一个（构建/运行/调试的兜底入口） */
+/** 返回当前活动工程选中的构建目标标题；未选中时默认第一个（构建/运行/调试的兜底入口） */
 async function selectTarget(): Promise<string | undefined> {
   const project = requireProject();
   if (!project) return undefined;
@@ -1322,14 +1382,15 @@ async function selectTarget(): Promise<string | undefined> {
     vscode.window.showWarningMessage('项目没有构建目标');
     return undefined;
   }
-  // 已选中且仍存在则直接返回，不弹窗
-  if (selectedTargetTitle && titles.includes(selectedTargetTitle)) {
-    return selectedTargetTitle;
+  // 该工程已记忆且目标仍存在则直接返回，不弹窗
+  const remembered = getSelectedTarget(project);
+  if (remembered && titles.includes(remembered)) {
+    return remembered;
   }
-  // 未选中：默认选中第一个目标，不弹窗
-  selectedTargetTitle = titles[0];
+  // 未记忆：默认选中第一个目标，不弹窗
+  setSelectedTarget(project, titles[0]);
   updateTargetStatusBar();
-  return selectedTargetTitle;
+  return titles[0];
 }
 
 /** 强制弹出选择框切换构建目标（点击状态栏项 / 菜单「选择目标」时调用） */
@@ -1341,14 +1402,15 @@ async function promptSelectTarget(): Promise<void> {
     vscode.window.showWarningMessage('项目没有构建目标');
     return;
   }
+  const current = getSelectedTarget(project);
   const picked = await vscode.window.showQuickPick(
-    titles.map((t) => ({ label: t, description: t === selectedTargetTitle ? '当前' : undefined })),
+    titles.map((t) => ({ label: t, description: t === current ? '当前' : undefined })),
     { placeHolder: '选择构建目标' },
   );
   if (picked) {
-    selectedTargetTitle = picked.label;
+    setSelectedTarget(project, picked.label);
     updateTargetStatusBar();
-    vscode.window.showInformationMessage(`已切换到构建目标: ${selectedTargetTitle}`);
+    vscode.window.showInformationMessage(`已切换到构建目标: ${picked.label}`);
   }
 }
 
@@ -1361,10 +1423,6 @@ async function build(rebuild: boolean): Promise<boolean> {
   // 构建前自动保存工作区未保存文件
   await saveAllBeforeBuild();
 
-  // 确定统一的目标名（状态栏当前目标，跨项目按名称匹配）
-  const targetTitle = await selectTarget();
-  if (targetTitle === undefined) return false;
-
   diagnosticCollection.clear();
   outputChannel.clear();
   outputChannel.show(true);
@@ -1375,8 +1433,14 @@ async function build(rebuild: boolean): Promise<boolean> {
   currentBuildErrorCount = 0;
   maxErrorsReached = false;
 
+  // 工作区构建：每个工程构建它自己的活动目标（对齐 CodeBlocks Build Workspace 语义）
   let allOk = true;
   for (const project of openProjects) {
+    const targetTitle = getSelectedTarget(project) ?? project.buildTargets[0]?.title;
+    if (!targetTitle) {
+      outputChannel.appendLine(`[Code::Blocks] 项目 "${project.title}" 没有构建目标，跳过`);
+      continue;
+    }
     const ok = await buildOneProject(project, targetTitle, rebuild);
     if (!ok) {
       allOk = false;
@@ -1404,8 +1468,11 @@ async function buildSingleProject(filename: string, rebuild: boolean): Promise<v
   }
   await saveAllBeforeBuild();
 
-  const targetTitle = await selectTarget();
-  if (targetTitle === undefined) return;
+  const targetTitle = getSelectedTarget(project) ?? project.buildTargets[0]?.title;
+  if (!targetTitle) {
+    vscode.window.showWarningMessage('项目没有构建目标');
+    return;
+  }
 
   diagnosticCollection.clear();
   outputChannel.clear();
@@ -1568,11 +1635,20 @@ async function clean(): Promise<void> {
   if (!project) return;
   // 清理前自动保存
   await saveAllBeforeBuild();
-  // 简化清理：删除对象输出目录
   for (const target of project.buildTargets) {
+    // 删除对象输出目录
     const objDir = target.objectOutput ? path.join(project.basePath, target.objectOutput) : '';
     if (objDir && fs.existsSync(objDir)) {
       fs.rmSync(objDir, { recursive: true, force: true });
+    }
+    // 删除输出文件（含 Windows 无扩展名输出时自动追加的 .exe）
+    if (target.outputFilename) {
+      const out = path.join(project.basePath, target.outputFilename);
+      for (const p of [out, out + '.exe']) {
+        if (fs.existsSync(p)) {
+          fs.rmSync(p, { force: true });
+        }
+      }
     }
   }
   outputChannel.appendLine('[Code::Blocks] 清理完成');

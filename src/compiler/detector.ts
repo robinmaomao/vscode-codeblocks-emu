@@ -157,20 +157,25 @@ export function detectMsvc(): DetectedCompiler | null {
 }
 
 function findClInVs(vsPath: string): string | null {
-  // 遍历 VC/Tools/MSVC/*/bin/Hostx64/x64/cl.exe
-  const msvcRoot = path.join(vsPath, 'VC', 'Tools', 'MSVC');
-  if (!fs.existsSync(msvcRoot)) return null;
-  for (const ver of fs.readdirSync(msvcRoot)) {
-    const binHosts = path.join(msvcRoot, ver, 'bin');
-    if (!fs.existsSync(binHosts)) continue;
-    for (const host of fs.readdirSync(binHosts)) {
-      for (const arch of fs.readdirSync(path.join(binHosts, host))) {
-        const cl = path.join(binHosts, host, arch, 'cl.exe');
-        if (fs.existsSync(cl)) return cl;
+  try {
+    // 遍历 VC/Tools/MSVC/*/bin/Hostx64/x64/cl.exe
+    const msvcRoot = path.join(vsPath, 'VC', 'Tools', 'MSVC');
+    if (!fs.existsSync(msvcRoot)) return null;
+    for (const ver of fs.readdirSync(msvcRoot)) {
+      const binHosts = path.join(msvcRoot, ver, 'bin');
+      if (!fs.existsSync(binHosts)) continue;
+      for (const host of fs.readdirSync(binHosts)) {
+        for (const arch of fs.readdirSync(path.join(binHosts, host))) {
+          const cl = path.join(binHosts, host, arch, 'cl.exe');
+          if (fs.existsSync(cl)) return cl;
+        }
       }
     }
+    return null;
+  } catch {
+    // 目录结构异常（权限/损坏安装）→ 回退到 PATH 找 cl.exe 的兜底分支
+    return null;
   }
-  return null;
 }
 
 /** RISC-V 工具链前缀（gcc 交叉编译器） */
@@ -187,7 +192,6 @@ const RISCV_PREFIXES = [
   'riscv32-elf',
   'riscv64-elf',
   'riscv32-esp-elf',   // ESP32-C2/C3
-  'riscv32-esp-elf-gcc', // 某些 ESP-IDF 版本前缀
 ];
 
 /** 在 PATH 中查找 RISC-V 交叉编译器（返回所有命中的前缀与 gcc 路径） */

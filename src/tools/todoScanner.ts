@@ -43,13 +43,24 @@ export function parseBufferForTodos(
 
   // 预处理：行号映射
   const lines = buffer.split(/\r?\n/);
+  let inBlockComment = false;
 
   for (let lineIdx = 0; lineIdx < lines.length; lineIdx++) {
     const line = lines[lineIdx];
-    // 只在注释中出现才算（含行内注释）
-    const commentPos = findCommentStart(line);
-    if (commentPos < 0) continue;
-    const commentText = line.slice(commentPos);
+    // 只在注释中出现才算（含行内注释）；支持跨行块注释
+    let commentText: string;
+    if (inBlockComment) {
+      const end = line.indexOf('*/');
+      commentText = end >= 0 ? line.slice(0, end) : line;
+      if (end >= 0) inBlockComment = false;
+    } else {
+      const commentPos = findCommentStart(line);
+      if (commentPos < 0) continue;
+      commentText = line.slice(commentPos);
+      if (commentText.startsWith('/*') && !commentText.includes('*/')) {
+        inBlockComment = true;
+      }
+    }
 
     for (let k = 0; k < startStrings.length; k++) {
       const marker = startStrings[k];

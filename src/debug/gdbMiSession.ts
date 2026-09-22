@@ -10,6 +10,7 @@
  * 移植自 codeblocks-src/src/plugins/debuggergdb/gdb_driver.cpp（GPL v3，逻辑独立重写）。
  */
 import { spawn, ChildProcess } from 'child_process';
+import { decodeText } from '../tools/encoding';
 
 export interface MiResult {
   token: number;
@@ -39,6 +40,11 @@ export class GdbMiSession {
   private pending = new Map<number, { resolve: (r: MiResult) => void; reject: (e: Error) => void }>();
   private buffer = '';
   private stopped = false;
+  private readonly timeoutMs: number;
+
+  constructor(timeoutMs = 30000) {
+    this.timeoutMs = timeoutMs;
+  }
 
   onAsyncRecord: ((rec: MiAsync) => void) | null = null;
   onConsole: ((text: string) => void) | null = null;
@@ -94,7 +100,7 @@ export class GdbMiSession {
           this.pending.delete(token);
           reject(new Error(`GDB 命令超时: ${command}`));
         }
-      }, 30000);
+      }, this.timeoutMs);
     });
   }
 
@@ -120,7 +126,7 @@ export class GdbMiSession {
           this.pending.delete(token);
           reject(new Error(`GDB 命令超时: ${command}`));
         }
-      }, 30000);
+      }, this.timeoutMs);
     });
   }
 
@@ -134,13 +140,9 @@ export class GdbMiSession {
     }
   }
 
-  /** 解码子进程输出：优先 GBK（中文 Windows），失败回退 UTF-8 */
+  /** 解码子进程输出：UTF-8 严格优先，失败回退 GBK（中文 Windows） */
   private decodeChunk(buf: Buffer): string {
-    try {
-      return new TextDecoder('gbk', { fatal: false }).decode(buf);
-    } catch {
-      return buf.toString('utf-8');
-    }
+    return decodeText(buf);
   }
 
   private parseLine(line: string): void {
@@ -240,16 +242,29 @@ export class GdbMiSession {
     return attrs;
   }
 
-  /** 解码 C 字符串字面量（含转义） */
+  /** 解码 C 字符串字面量（含常见转义与八进制/十六进制转义） */
   private decodeCString(s: string): string {
     if (s.startsWith('"') && s.endsWith('"')) {
-      return s
-        .slice(1, -1)
-        .replace(/\\n/g, '\n')
-        .replace(/\\t/g, '\t')
-        .replace(/\\r/g, '\r')
-        .replace(/\\"/g, '"')
-        .replace(/\\\\/g, '\\');
+      const body = s.slice(1, -1);
+      return body.replace(/\\([0-7]{1,3}|x[0-9A-Fa-f]{1,2}|.)/g, (_m, esc: string) => {
+        switch (esc) {
+          case 'n': return '\n';
+          case 't': return '\t';
+          case 'r': return '\r';
+          case 'b': return '\b';
+          case 'f': return '\f';
+          case 'v': return '\v';
+          case 'a': return '\x07';
+          case '0': return '\0';
+          case '\\': return '\\';
+          case '"': return '"';
+          case "'": return "'";
+          default:
+            if (/^x[0-9A-Fa-f]{1,2}$/.test(esc)) return String.fromCharCode(parseInt(esc.slice(1), 16));
+            if (/^[0-7]{1,3}$/.test(esc)) return String.fromCharCode(parseInt(esc, 8));
+            return esc; // 未知转义：保留原字符
+        }
+      });
     }
     return s;
   }
