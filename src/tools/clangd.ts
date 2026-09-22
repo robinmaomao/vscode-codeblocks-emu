@@ -1,15 +1,20 @@
 /**
- * clangd 集成 —— 检测 clangd 是否安装、生成 .clangd 配置。
+ * clangd 集成 —— 检测 clangd 是否安装、生成 clangd 用户配置（config.yaml）。
  *
  * 扩展负责产出准确的 compile_commands.json（与 Code::Blocks 对齐的编译命令），
  * clangd 负责补全 / 跳转 / 悬停 / 重命名等 IntelliSense 能力。
- * .clangd 配置默认压制 clangd 自身的诊断，避免与 Build Log / Problems 面板重复报错。
  */
 import * as fs from 'fs';
 import * as path from 'path';
+import * as crypto from 'crypto';
 import { spawnSync } from 'child_process';
 
 const EXE = process.platform === 'win32' ? 'clangd.exe' : 'clangd';
+
+/** 编译器 include 查询缓存（key = compilerPath|lang），避免重复同步 spawn 阻塞主线程 */
+const includesCache = new Map<string, string[]>();
+/** 编译器目标三元组缓存（key = compilerPath） */
+const targetCache = new Map<string, string | undefined>();
 
 /** 通过 PATH 查找 clangd（Windows 用 where，其它用 which） */
 function findOnPath(): string | undefined {
@@ -106,18 +111,27 @@ function isGccLike(compilerPath: string): boolean {
  * 通过 `<compiler> -E -x <lang> - -v` 的 stderr 输出解析
  * 「#include <...> search starts here:」到「End of search list.」之间的目录。
  */
-export function queryCompilerIncludes(compilerPath: string, lang: 'c' | 'c++'): string[] {
+export function queryCompilerIncludes(compilerPath: string, lang: 'c' | 'c++', extraFlags: string[] = []): string[] {
   if (!isGccLike(compilerPath)) return [];
+  const key = `${compilerPath}|${lang}|${extraFlags.join('\u0000')}`;
+  const cached = includesCache.get(key);
+  if (cached) return cached;
+
   let r: ReturnType<typeof spawnSync>;
   try {
-    r = spawnSync(compilerPath, ['-E', '-x', lang, '-', '-v'], { encoding: 'utf8', input: '' });
+    // extraFlags（如 -march=...）用于让 GCC 选择正确的 multilib 系统头目录
+    r = spawnSync(compilerPath, ['-E', '-x', lang, '-', '-v', ...extraFlags], { encoding: 'utf8', input: '' });
   } catch {
+    includesCache.set(key, []);
     return [];
   }
   // GCC/Clang 把 include 搜索列表打印到 stderr（-v 与 -E 组合）
   const stderr = String(r.stderr ?? '') + String(r.stdout ?? '');
   const m = stderr.match(/#include <\.\.\.> search starts here:\r?\n([\s\S]*?)\r?\nEnd of search list\./);
-  if (!m) return [];
+  if (!m) {
+    includesCache.set(key, []);
+    return [];
+  }
 
   const seen = new Set<string>();
   const out: string[] = [];
@@ -130,16 +144,17 @@ export function queryCompilerIncludes(compilerPath: string, lang: 'c' | 'c++'): 
     seen.add(abs);
     out.push(abs);
   }
+  includesCache.set(key, out);
   return out;
 }
 
-/** 查询 C + C++ 两个前端并合并去重，返回编译器系统 include 路径 */
-export function queryCompilerSystemIncludes(cPath?: string, cppPath?: string): string[] {
+/** 查询 C + C++ 两个前端并合并去重，返回编译器系统 include 路径（extraFlags 用于选择正确 multilib） */
+export function queryCompilerSystemIncludes(cPath?: string, cppPath?: string, extraFlags: string[] = []): string[] {
   const seen = new Set<string>();
   const out: string[] = [];
   for (const [p, lang] of [[cPath, 'c'], [cppPath, 'c++']] as const) {
     if (!p) continue;
-    for (const d of queryCompilerIncludes(p, lang)) {
+    for (const d of queryCompilerIncludes(p, lang, extraFlags)) {
       const norm = path.normalize(d);
       if (seen.has(norm)) continue;
       seen.add(norm);
@@ -152,14 +167,18 @@ export function queryCompilerSystemIncludes(cPath?: string, cppPath?: string): s
 /** 查询编译器目标三元组（`<compiler> -dumpmachine`，如 riscv32-elf），失败返回 undefined */
 export function queryCompilerTarget(compilerPath: string): string | undefined {
   if (!isGccLike(compilerPath)) return undefined;
+  if (targetCache.has(compilerPath)) return targetCache.get(compilerPath);
+
   let r: ReturnType<typeof spawnSync>;
   try {
     r = spawnSync(compilerPath, ['-dumpmachine'], { encoding: 'utf8' });
   } catch {
+    targetCache.set(compilerPath, undefined);
     return undefined;
   }
-  const triple = String(r.stdout ?? '').trim();
-  return triple || undefined;
+  const triple = String(r.stdout ?? '').trim() || undefined;
+  targetCache.set(compilerPath, triple);
+  return triple;
 }
 
 /** 转义正则特殊字符（用于 If.PathMatch） */
@@ -167,9 +186,50 @@ function escapeRegex(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-/** 我们写入用户 config.yaml 的片段标记（用于识别/替换，不碰用户自有内容） */
-const MARK_BEGIN = '# >>> codeblocks-vscode begin <<<';
-const MARK_END = '# <<< codeblocks-vscode end <<<';
+/** 每个作用域用带 hash 的独立标记，避免多个工作区同时写同一 config.yaml 时互相覆盖 */
+function scopeMarker(dir: string): { begin: string; end: string } {
+  // 归一化（正斜杠 + 去尾斜杠 + 小写）保证同一作用域 hash 稳定
+  const norm = dir.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
+  const h = crypto.createHash('md5').update(norm).digest('hex').slice(0, 12);
+  return {
+    begin: `# >>> codeblocks-vscode ${h} begin <<<`,
+    end: `# <<< codeblocks-vscode ${h} end <<<`,
+  };
+}
+
+/** 旧版本（无 hash 标记）的片段标记，用于升级时清理遗留 */
+const LEGACY_BEGIN = '# >>> codeblocks-vscode begin <<<';
+const LEGACY_END = '# <<< codeblocks-vscode end <<<';
+
+/** 从文本中移除指定标记包裹的片段（不含标记本身，保留其它内容） */
+function removeBlock(text: string, beginMark: string, endMark: string): string {
+  const begin = text.indexOf(beginMark);
+  if (begin === -1) return text;
+  const end = text.indexOf(endMark, begin);
+  if (end === -1) return text;
+  return text.slice(0, begin) + text.slice(end + endMark.length);
+}
+
+/** 清理移除片段后残留的孤立 --- 分隔符（合并连续、去首尾），避免生成空 YAML 文档 */
+function sanitizeRemainder(text: string): string {
+  const lines = text.replace(/\r\n/g, '\n').split('\n');
+  const out: string[] = [];
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (trimmed === '---') {
+      // 与前一个 --- 或空行连续时跳过（去重）
+      if (out.length) {
+        const prev = out[out.length - 1].trim();
+        if (prev === '---' || prev === '') continue;
+      }
+    }
+    out.push(line);
+  }
+  // 去首尾空行与 ---
+  while (out.length && (out[0].trim() === '' || out[0].trim() === '---')) out.shift();
+  while (out.length && (out[out.length - 1].trim() === '' || out[out.length - 1].trim() === '---')) out.pop();
+  return out.join('\n').trim();
+}
 
 /** 用户级 clangd 配置路径（Windows %LocalAppData%\clangd\config.yaml，其它 ~/.config/clangd/config.yaml） */
 export function clangdUserConfigPath(): string {
@@ -191,10 +251,51 @@ export interface ClangdScopeConfig {
   databaseDir: string;
   /** 头文件（无编译命令）的回退编译 flag：-I / -isystem / --target 等独立 argv 元素 */
   headerFlags?: string[];
+  /** 需要压制的警告类别（如 -Wunused-function，写入主片段 Diagnostics.Suppress） */
+  suppressedWarnings?: string[];
+  /** 是否在头文件中压制全部诊断（SDK 头文件不自包含，单独分析必然产生大量误报） */
+  suppressHeaderDiagnostics?: boolean;
+}
+
+/** 构造单个作用域的 YAML 片段 */
+function buildScopeFragment(s: ClangdScopeConfig, marker: { begin: string; end: string }): string {
+  const dirRe = escapeRegex(s.dir.replace(/\\/g, '/').replace(/\/+$/, ''));
+  const lines = [
+    marker.begin,
+    'If:',
+    `  PathMatch: ${dirRe}/.*`,
+    'CompileFlags:',
+    `  CompilationDatabase: ${s.databaseDir.replace(/\\/g, '/')}`,
+    'Diagnostics:',
+    '  UnusedIncludes: None',
+  ];
+  if (s.suppressedWarnings && s.suppressedWarnings.length) {
+    lines.push('  Suppress:');
+    for (const w of s.suppressedWarnings) {
+      lines.push(`    - ${w}`);
+    }
+  }
+  if (s.headerFlags && s.headerFlags.length) {
+    lines.push('---');
+    lines.push('If:');
+    lines.push(`  PathMatch: ${dirRe}/.*\\.(h|hpp|hh|hxx|inl)$`);
+    lines.push('CompileFlags:');
+    lines.push('  Add:');
+    for (const f of s.headerFlags) {
+      lines.push(`    - ${f}`);
+    }
+    if (s.suppressHeaderDiagnostics) {
+      lines.push('Diagnostics:');
+      lines.push("  Suppress: '*'");
+    }
+  }
+  lines.push(marker.end);
+  return lines.join('\n');
 }
 
 /**
- * 更新用户级 clangd 配置：用标记包裹追加/替换我们管理的片段，不碰用户自有内容。
+ * 更新用户级 clangd 配置：按作用域各自的 hash 标记替换，不碰用户自有内容，
+ * 也不影响其它工作区写入的片段（多工作区共存）。
  * 每个作用域写两个片段：① 全部文件 → CompilationDatabase 指向缓存目录；② 头文件 →
  * CompileFlags.Add 回退 flag（头文件在编译数据库里没有条目，否则会报 unknown type name 等）。
  */
@@ -207,48 +308,32 @@ export function updateClangdUserConfig(scopes: ClangdScopeConfig[]): void {
     existing = '';
   }
 
-  // 移除旧片段（含标记本身）
-  const begin = existing.indexOf(MARK_BEGIN);
-  const end = existing.indexOf(MARK_END);
-  if (begin !== -1 && end !== -1 && end > begin) {
-    existing = existing.slice(0, begin) + existing.slice(end + MARK_END.length);
-  }
-  existing = existing.trim();
+  // 清理旧版本（无 hash 标记）的遗留片段
+  existing = removeBlock(existing, LEGACY_BEGIN, LEGACY_END);
 
-  // 构造新片段
-  const frags: string[] = [];
+  // 逐个作用域移除旧片段（按 hash 标记），互不干扰
+  const newFrags: string[] = [];
   for (const s of scopes) {
-    const dirRe = escapeRegex(s.dir.replace(/\\/g, '/').replace(/\/+$/, ''));
-    const lines = [
-      MARK_BEGIN,
-      'If:',
-      `  PathMatch: ${dirRe}/.*`,
-      'CompileFlags:',
-      `  CompilationDatabase: ${s.databaseDir.replace(/\\/g, '/')}`,
-      'Diagnostics:',
-      '  UnusedIncludes: None',
-    ];
-    if (s.headerFlags && s.headerFlags.length) {
-      lines.push('---');
-      lines.push('If:');
-      lines.push(`  PathMatch: ${dirRe}/.*\\.(h|hpp|hh|hxx|inl)$`);
-      lines.push('CompileFlags:');
-      lines.push('  Add:');
-      for (const f of s.headerFlags) {
-        lines.push(`    - ${f}`);
-      }
-    }
-    lines.push(MARK_END);
-    frags.push(lines.join('\n'));
+    const marker = scopeMarker(s.dir);
+    existing = removeBlock(existing, marker.begin, marker.end);
+    newFrags.push(buildScopeFragment(s, marker));
   }
-  const ours = frags.join('\n\n');
 
-  let out: string;
-  if (existing) {
-    out = existing + '\n---\n' + ours + '\n';
-  } else {
-    out = ours + '\n';
+  // 清理移除片段后残留的孤立 --- 分隔符（避免空 YAML 文档报错）
+  existing = sanitizeRemainder(existing);
+
+  // 多片段之间用单个 --- 分隔（YAML 文档分隔符），每个片段内部已含头文件子片段
+  const ours = newFrags.join('\n---\n');
+  const out = existing ? existing + '\n---\n' + ours + '\n' : ours + '\n';
+
+  // 内容未变则跳过写入，避免 clangd 无谓地重新加载配置
+  let old = '';
+  try {
+    old = fs.readFileSync(cfgPath, 'utf-8');
+  } catch {
+    old = '';
   }
+  if (old === out) return;
 
   fs.mkdirSync(path.dirname(cfgPath), { recursive: true });
   fs.writeFileSync(cfgPath, out, 'utf-8');

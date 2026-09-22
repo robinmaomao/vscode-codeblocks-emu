@@ -2,7 +2,7 @@
   "name": "codeblocks-vscode",
   "displayName": "Code::Blocks for VS Code",
   "description": "原生移植 Code::Blocks 核心功能到 VS Code：项目模型、构建引擎、编译器管理与调试引擎",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "publisher": "codeblocks",
   "author": {
     "name": "Robinmaomao"
@@ -221,6 +221,23 @@
           "enum": ["build", "clangd"],
           "default": "build",
           "description": "检测到 clangd 时 Build Log 视图的诊断来源：build = 构建引擎完整诊断（默认，覆盖所有编译文件）；clangd = 使用 clangd 诊断（仅打开过的文件，可能不完整）。无论哪种，Problems 面板都由 clangd 产出"
+        },
+        "codeblocks.clangd.forcedIncludes": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": ["global.h"],
+          "description": "clangd 分析头文件时强制预包含的基础头文件名（按 include 搜索目录查找，存在则加 -include）。默认 global.h（typedef/macro/sfr/clib 基础上下文），不要用 include.h 这类「包含所有头文件」的主头文件，否则会对被它包含的头文件造成递归包含、产生大量误报"
+        },
+        "codeblocks.clangd.suppressedWarnings": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": ["-Wunused-function"],
+          "description": "在 clangd 诊断中压制的警告类别（写入 Diagnostics.Suppress）。嵌入式 SDK 常用静态函数做编译期断言，-Wunused-function 是预期噪声"
+        },
+        "codeblocks.clangd.suppressHeaderDiagnostics": {
+          "type": "boolean",
+          "default": true,
+          "description": "是否在头文件中压制全部诊断（单独打开 .h 文件时不再显示 unknown type name 等误报）。SDK 头文件普遍不自包含，单独分析必然报错；.c 文件的真实诊断不受影响"
         }
       }
     },

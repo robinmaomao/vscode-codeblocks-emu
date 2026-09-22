@@ -65,6 +65,10 @@ const fallbackIndex = new SymbolIndex();
 let fallbackEnabled = true;
 /** clangd 是否接管诊断（检测到 clangd 后置为 true：构建引擎不再写 Problems 面板） */
 let clangdDiagnosticsEnabled = false;
+/** clangd 配置生成的去抖定时器 */
+let clangdGenTimer: NodeJS.Timeout | undefined;
+/** clangd 配置生成进行中标志（防止并发写同一文件） */
+let clangdGenRunning = false;
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
   extContext = context;
@@ -509,8 +513,11 @@ async function openProject(filename: string): Promise<void> {
       return;
     }
 
-    // 已打开则跳过
-    if (openProjects.some((p) => p.filename === filename)) return;
+    // 已打开则跳过解析/入列表，但仍重新生成 clangd 配置文件（每次打开都刷新）
+    if (openProjects.some((p) => p.filename === filename)) {
+      void generateClangdForWorkspace();
+      return;
+    }
 
     const project = new ProjectParser().parse(filename);
     openProjects.push(project);
@@ -594,10 +601,13 @@ function extractAbsoluteIncludeDirs(entries: CompileCommandEntry[]): string[] {
   const seen = new Set<string>();
   const out: string[] = [];
   for (const e of entries) {
-    const re = /-I([^\s"]+)/g;
+    // 兼容 -Ipath / -I "path" / -I"path" 三种写法（含空格路径）
+    const re = /-I\s*"([^"]+)"|-I\s*([^\s"]+)/g;
     let m: RegExpExecArray | null;
     while ((m = re.exec(e.command)) !== null) {
-      const abs = path.resolve(e.directory, m[1]);
+      const raw = m[1] ?? m[2];
+      if (!raw) continue;
+      const abs = path.resolve(e.directory, raw);
       const norm = path.normalize(abs);
       if (!seen.has(norm)) {
         seen.add(norm);
@@ -608,12 +618,43 @@ function extractAbsoluteIncludeDirs(entries: CompileCommandEntry[]): string[] {
   return out;
 }
 
+/** 从项目 + 目标编译选项中提取影响 multilib / 目标架构的 flag（供 GCC include 查询选择正确系统头目录） */
+function extractMultilibFlags(project: Project, target?: BuildTarget): string[] {
+  const opts = [...(project.compilerOptions ?? []), ...(target?.compilerOptions ?? [])];
+  const re = /^-(march|mcpu|mfpu|mfloat-abi|mabi|mtune)=/;
+  const out: string[] = [];
+  for (const o of opts) {
+    const t = o.trim();
+    if (re.test(t)) out.push(t);
+  }
+  return out;
+}
+
 /**
  * 为整个工作区生成 clangd 所需的 compile_commands.json（写到工作区外的缓存目录），
  * 并更新用户级 clangd 配置（config.yaml，If.PathMatch 按工程树作用域指向缓存目录）。
  * 不生成/修改工作区内的 .clangd 或 compile_commands.json，不影响用户自有文件。
+ * 带去抖 + 单飞：打开多个项目会连续触发，合并为一次，避免并发写同一文件。
  */
 async function generateClangdForWorkspace(interactive = false): Promise<void> {
+  if (clangdGenTimer) clearTimeout(clangdGenTimer);
+  clangdGenTimer = setTimeout(() => {
+    clangdGenTimer = undefined;
+    void runClangdGeneration(interactive);
+  }, 150);
+}
+
+async function runClangdGeneration(interactive: boolean): Promise<void> {
+  if (clangdGenRunning) return; // 上一次还在跑，丢弃本次（后续触发会重新调度）
+  clangdGenRunning = true;
+  try {
+    await generateClangdForWorkspaceInternal(interactive);
+  } finally {
+    clangdGenRunning = false;
+  }
+}
+
+async function generateClangdForWorkspaceInternal(interactive: boolean): Promise<void> {
   try {
     if (!extContext) return;
     const cfg = vscode.workspace.getConfiguration('codeblocks');
@@ -638,44 +679,74 @@ async function generateClangdForWorkspace(interactive = false): Promise<void> {
     const systemIncludesAll = new Set<string>();
     let targetTriple: string | undefined;
     for (const p of openProjects) {
-      const targetCompilerId = p.buildTargets[0]?.compilerId ?? p.compilerId;
-      const compiler = getCompiler(targetCompilerId);
-      const cacheKey = compiler.programs.C || compiler.name;
-      let systemIncludes = includeCache.get(cacheKey);
-      if (!systemIncludes && clangd) {
-        systemIncludes = queryCompilerSystemIncludes(compiler.programs.C, compiler.programs.CPP);
-        includeCache.set(cacheKey, systemIncludes);
-        if (!targetTriple) targetTriple = queryCompilerTarget(compiler.programs.C);
+      try {
+        const targetCompilerId = p.buildTargets[0]?.compilerId ?? p.compilerId;
+        const compiler = getCompiler(targetCompilerId);
+        const cacheKey = compiler.programs.C || compiler.name;
+        let systemIncludes = includeCache.get(cacheKey);
+        if (!systemIncludes && clangd) {
+          // 带上目标架构 flag（-march 等），让 GCC 选择正确的 multilib 系统头目录
+          const multilibFlags = extractMultilibFlags(p, p.buildTargets[0]);
+          systemIncludes = queryCompilerSystemIncludes(compiler.programs.C, compiler.programs.CPP, multilibFlags);
+          includeCache.set(cacheKey, systemIncludes);
+          if (!targetTriple) targetTriple = queryCompilerTarget(compiler.programs.C);
+        }
+        if (systemIncludes) {
+          for (const d of systemIncludes) systemIncludesAll.add(path.normalize(d));
+        }
+        entries.push(...collectClangdEntries(p, compiler, outputChannel, systemIncludes ?? []));
+        scopePaths.push(p.commonTopLevelPath || p.basePath);
+      } catch (err) {
+        // 单个项目失败不影响其它项目
+        outputChannel.appendLine(`[Code::Blocks] 生成编译命令失败（项目 ${p.title}）: ${(err as Error).message}`);
       }
-      if (systemIncludes) {
-        for (const d of systemIncludes) systemIncludesAll.add(path.normalize(d));
-      }
-      entries.push(...collectClangdEntries(p, compiler, outputChannel, systemIncludes ?? []));
-      scopePaths.push(p.commonTopLevelPath || p.basePath);
     }
+
+    if (!entries.length) return;
 
     // 缓存目录：<globalStorage>/clangd/<公共祖先哈希>
     const scope = commonAncestor(scopePaths) || (activeProject?.basePath ?? '');
     const cacheDir = path.join(extContext.globalStorageUri.fsPath, 'clangd', hashPath(scope));
-    const { outPath, count } = writeClangdDatabase(entries, cacheDir);
-    outputChannel.appendLine(`[Code::Blocks] 已生成 compile_commands.json（${count} 条编译命令）→ ${outPath}`);
+    const { outPath, count, skipped } = writeClangdDatabase(entries, cacheDir);
+    outputChannel.appendLine(`[Code::Blocks] ${skipped
+      ? 'compile_commands.json 未变化，跳过写入'
+      : `已重新生成 compile_commands.json（${count} 条编译命令）→ ${outPath}`}`);
 
     if (clangd) {
       // 头文件回退 flag：编译数据库里只有 .c 条目，头文件需靠 Add 提供 -I/-isystem/--target
       const includeDirs = extractAbsoluteIncludeDirs(entries);
       const headerFlags: string[] = [];
       if (targetTriple) headerFlags.push(`--target=${targetTriple}`);
-      for (const d of includeDirs) headerFlags.push(`-I${d}`);
-      // SDK 主头文件 include.h 存在时强制预包含：头文件单独分析时缺类型上下文（unknown type name u8/u16 等）
-      if (includeDirs.some((d) => fs.existsSync(path.join(d, 'include.h')))) {
-        headerFlags.push('-include', 'include.h');
+      for (const d of includeDirs) headerFlags.push(`-I${d.replace(/\\/g, '/')}`);
+      // 基础头文件预包含：头文件单独分析时缺类型/宏上下文（unknown type name u8/u16 等）。
+      // 用 global.h（typedef.h + macro.h + sfr.h + clib.h），而非 include.h：
+      // include.h 会包含几乎所有头文件，对「被 include.h 包含的头文件」造成递归包含
+      // （clangd 报 main file cannot be included recursively），进而产生大量级联错误。
+      const forcedIncludes = cfg.get<string[]>('clangd.forcedIncludes', ['global.h']);
+      for (const h of forcedIncludes) {
+        if (includeDirs.some((d) => fs.existsSync(path.join(d, h)))) {
+          headerFlags.push('-include', h);
+        }
       }
       for (const d of systemIncludesAll) {
-        headerFlags.push('-isystem', d);
+        headerFlags.push('-isystem', d.replace(/\\/g, '/'));
+      }
+      // 头文件单独分析时压制全部诊断（SDK 头文件不自包含，误报多）；.c 文件诊断不受影响
+      const suppressHeader = cfg.get<boolean>('clangd.suppressHeaderDiagnostics', true);
+      if (suppressHeader) {
+        // 放开错误上限：递归级联虽被 Suppress:* 隐藏，但会计数触发「too many errors」汇总，放开后消除
+        headerFlags.push('-ferror-limit=0');
       }
 
       // 更新用户级 clangd 配置（工作区外，If.PathMatch 作用域到本工程树）
-      updateClangdUserConfig([{ dir: scope, databaseDir: cacheDir, headerFlags }]);
+      const suppressedWarnings = cfg.get<string[]>('clangd.suppressedWarnings', ['-Wunused-function']);
+      updateClangdUserConfig([{
+        dir: scope,
+        databaseDir: cacheDir,
+        headerFlags,
+        suppressedWarnings,
+        suppressHeaderDiagnostics: suppressHeader,
+      }]);
       outputChannel.appendLine(`[Code::Blocks] 已更新 clangd 用户配置 → ${clangdUserConfigPath()}`);
       outputChannel.appendLine(`[Code::Blocks] 检测到 clangd: ${clangd}`);
       if (interactive) {
