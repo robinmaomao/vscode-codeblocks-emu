@@ -32,7 +32,7 @@ import { formatActiveDocument } from './tools/astyle';
 let openProjects: Project[] = [];
 /** 当前活动项目（状态栏 Target/Compiler 针对的对象） */
 let activeProject: Project | undefined;
-let outputChannel: vscode.OutputChannel;
+let outputChannel: vscode.LogOutputChannel;
 let diagnosticCollection: vscode.DiagnosticCollection;
 let compilerLoader: CompilerOptionsLoader | undefined;
 let codeBlocksConfig: CodeBlocksConfig | undefined;
@@ -77,7 +77,7 @@ let restartClangdAfterGeneration = false;
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
   extContext = context;
   loadSelectedTargets();
-  outputChannel = vscode.window.createOutputChannel('Code::Blocks');
+  outputChannel = vscode.window.createOutputChannel('Code::Blocks', { log: true });
   diagnosticCollection = vscode.languages.createDiagnosticCollection('codeblocks');
 
   // 初始化编译器选项加载器（resources/compilers 目录）
@@ -541,8 +541,8 @@ async function openProject(filename: string): Promise<void> {
       const persisted = extContext?.workspaceState.get<string>('codeblocks.activeProject', '');
       activeProject = (persisted && openProjects.find((p) => p.filename === persisted)) || project;
     }
-    outputChannel.appendLine(`[Code::Blocks] 已打开项目: ${project.title}`);
-    outputChannel.appendLine(`  目标: ${project.buildTargets.map((t) => t.title).join(', ')}`);
+    outputChannel.info(`[Code::Blocks] 已打开项目: ${project.title}`);
+    outputChannel.info(`  目标: ${project.buildTargets.map((t) => t.title).join(', ')}`);
 
     // 刷新项目树（活动项目高亮随 activeProject 同步）
     projectTreeProvider?.setProjects(openProjects);
@@ -792,7 +792,7 @@ async function generateClangdForWorkspaceInternal(interactive: boolean): Promise
     if (!clangdEnabled) {
       fallbackEnabled = true; // clangd 集成禁用，启用兜底补全
       clangdDiagnosticsEnabled = false;
-      outputChannel.appendLine('[Code::Blocks] clangd 集成已禁用（codeblocks.clangd.enabled = false）');
+      outputChannel.warn('[Code::Blocks] clangd 集成已禁用（codeblocks.clangd.enabled = false）');
       return;
     }
 
@@ -840,7 +840,7 @@ async function generateClangdForWorkspaceInternal(interactive: boolean): Promise
         scopePaths.push(p.commonTopLevelPath || p.basePath);
       } catch (err) {
         // 单个项目失败不影响其它项目
-        outputChannel.appendLine(`[Code::Blocks] 生成编译命令失败（项目 ${p.title}）: ${(err as Error).message}`);
+        outputChannel.error(`[Code::Blocks] 生成编译命令失败（项目 ${p.title}）: ${(err as Error).message}`);
       }
     }
 
@@ -850,13 +850,13 @@ async function generateClangdForWorkspaceInternal(interactive: boolean): Promise
     const scope = commonAncestor(scopePaths) || (activeProject?.basePath ?? '');
     const cacheDir = path.join(extContext.globalStorageUri.fsPath, 'clangd', hashPath(scope));
     const { outPath, count, skipped } = writeClangdDatabase(entries, cacheDir);
-    outputChannel.appendLine(`[Code::Blocks] ${skipped
+    outputChannel.info(`[Code::Blocks] ${skipped
       ? 'compile_commands.json 未变化，跳过写入'
       : `已重新生成 compile_commands.json（${count} 条编译命令）→ ${outPath}`}`);
 
     // 活动工程切换且 DB 实际变化：重启 clangd，让已打开文件按新编译命令重新分析
     if (restartRequested && !skipped && cfg.get<boolean>('clangd.restartOnActiveProjectSwitch', true) && hasOpenSourceFile()) {
-      outputChannel.appendLine('[Code::Blocks] 活动工程已切换，重启 clangd 以刷新已打开文件');
+      outputChannel.info('[Code::Blocks] 活动工程已切换，重启 clangd 以刷新已打开文件');
       void restartClangd();
     }
 
@@ -898,13 +898,13 @@ async function generateClangdForWorkspaceInternal(interactive: boolean): Promise
         suppressedWarnings,
         suppressHeaderDiagnostics: suppressHeader,
       }]);
-      outputChannel.appendLine(`[Code::Blocks] 已更新 clangd 用户配置 → ${clangdUserConfigPath()}`);
-      outputChannel.appendLine(`[Code::Blocks] 检测到 clangd: ${clangd}`);
+      outputChannel.info(`[Code::Blocks] 已更新 clangd 用户配置 → ${clangdUserConfigPath()}`);
+      outputChannel.info(`[Code::Blocks] 检测到 clangd: ${clangd}`);
       if (interactive) {
         vscode.window.showInformationMessage(`已生成 compile_commands.json（${count} 条）并检测到 clangd，补全 / 跳转已就绪`);
       }
     } else {
-      outputChannel.appendLine('[Code::Blocks] 未检测到 clangd，补全 / 跳转暂不可用。安装方式见下方提示。');
+      outputChannel.warn('[Code::Blocks] 未检测到 clangd，补全 / 跳转暂不可用。安装方式见下方提示。');
       if (interactive) {
         const pick = await vscode.window.showWarningMessage(
           '未检测到 clangd。请安装 VS Code 扩展 "clangd" 并执行其 "Download language server" 命令，或安装 LLVM 工具链。',
@@ -1028,7 +1028,7 @@ function removeProject(filename: string): void {
   projectTreeProvider?.setProjects(openProjects);
   persistProjectOrder();
   rebuildFallbackIndex();
-  outputChannel.appendLine(`[Code::Blocks] 已移除项目: ${removed.title}`);
+  outputChannel.info(`[Code::Blocks] 已移除项目: ${removed.title}`);
 }
 
 /** 从项目移除文件（保留磁盘文件，写回 .cbp 删除对应 <Unit> 节点） */
@@ -1042,7 +1042,7 @@ async function removeFileFromProject(project: Project, file: ProjectFile): Promi
 
   try {
     removeUnitFromCbp(project.filename, file.relativeFilename);
-    outputChannel.appendLine(`[Code::Blocks] 已从项目移除文件: ${file.relativeFilename}`);
+    outputChannel.info(`[Code::Blocks] 已从项目移除文件: ${file.relativeFilename}`);
     // 重新解析项目刷新树
     const idx = openProjects.findIndex((p) => p.filename === project.filename);
     if (idx !== -1) openProjects.splice(idx, 1);
@@ -1064,7 +1064,7 @@ async function toggleFileOption(project: Project, file: ProjectFile, opt: 'compi
   try {
     setUnitOptionInCbp(project.filename, file.relativeFilename, opt, enable);
     const name = opt === 'compile' ? '编译' : '链接';
-    outputChannel.appendLine(`[Code::Blocks] 文件 ${file.relativeFilename} ${name} = ${enable}`);
+    outputChannel.info(`[Code::Blocks] 文件 ${file.relativeFilename} ${name} = ${enable}`);
     // 重新解析项目刷新树
     const idx = openProjects.findIndex((p) => p.filename === project.filename);
     if (idx !== -1) openProjects.splice(idx, 1);
@@ -1183,7 +1183,7 @@ async function addFilesToProject(filename: string): Promise<void> {
   // 写回 .cbp：在 </Project> 之前插入 <Unit> 节点
   try {
     writeUnitsToCbp(project.filename, addedUnits);
-    outputChannel.appendLine(`[Code::Blocks] 已向 ${path.basename(project.filename)} 添加 ${addedCount.value} 个文件`);
+    outputChannel.info(`[Code::Blocks] 已向 ${path.basename(project.filename)} 添加 ${addedCount.value} 个文件`);
     // 重新解析项目以刷新树（移除旧的再重新打开）
     const idx = openProjects.findIndex((p) => p.filename === project.filename);
     if (idx !== -1) openProjects.splice(idx, 1);
@@ -1319,16 +1319,16 @@ async function showCodeStats(): Promise<void> {
   const { perFile, aggregate } = countFiles(files);
 
   outputChannel.clear();
-  outputChannel.appendLine('=== 代码统计 ===');
-  outputChannel.appendLine(`文件数: ${aggregate.files}`);
-  outputChannel.appendLine(`总行数: ${aggregate.total}`);
-  outputChannel.appendLine(`代码行: ${aggregate.code}`);
-  outputChannel.appendLine(`注释行: ${aggregate.comment}`);
-  outputChannel.appendLine(`空行:   ${aggregate.blank}`);
-  outputChannel.appendLine('');
-  outputChannel.appendLine('--- 各文件明细 ---');
+  outputChannel.info('=== 代码统计 ===');
+  outputChannel.info(`文件数: ${aggregate.files}`);
+  outputChannel.info(`总行数: ${aggregate.total}`);
+  outputChannel.info(`代码行: ${aggregate.code}`);
+  outputChannel.info(`注释行: ${aggregate.comment}`);
+  outputChannel.info(`空行:   ${aggregate.blank}`);
+  outputChannel.info('');
+  outputChannel.info('--- 各文件明细 ---');
   for (const s of perFile) {
-    outputChannel.appendLine(
+    outputChannel.info(
       `${s.filename}\t总${s.total} 码${s.code} 注${s.comment} 空${s.blank}`,
     );
   }
@@ -1348,11 +1348,11 @@ async function showTodoList(): Promise<void> {
   }
 
   outputChannel.clear();
-  outputChannel.appendLine(`=== TODO 列表 (${todos.length} 项) ===`);
+  outputChannel.info(`=== TODO 列表 (${todos.length} 项) ===`);
   for (const t of todos) {
     const loc = `${path.basename(t.filename)}:${t.line}`;
     const user = t.user ? ` [${t.user}]` : '';
-    outputChannel.appendLine(`${t.type}${user} ${loc}: ${t.text}`);
+    outputChannel.info(`${t.type}${user} ${loc}: ${t.text}`);
   }
   outputChannel.show(true);
 }
@@ -1467,36 +1467,51 @@ async function build(rebuild: boolean): Promise<boolean> {
   diagnosticCollection.clear();
   outputChannel.clear();
   outputChannel.show(true);
-  outputChannel.appendLine(`[Code::Blocks] 开始构建 ${rebuild ? '(重新构建)' : ''}...（共 ${openProjects.length} 个项目）`);
+  outputChannel.info(`[Code::Blocks] 开始构建 ${rebuild ? '(重新构建)' : ''}...（共 ${openProjects.length} 个项目）`);
 
   const buildStartMs = Date.now();
   currentBuildProjects.length = 0;
   currentBuildErrorCount = 0;
   maxErrorsReached = false;
 
-  // 工作区构建：每个工程构建它自己的活动目标（对齐 CodeBlocks Build Workspace 语义）
+  const total = openProjects.length;
+  let done = 0;
   let allOk = true;
-  for (const project of openProjects) {
-    const targetTitle = getSelectedTarget(project) ?? project.buildTargets[0]?.title;
-    if (!targetTitle) {
-      outputChannel.appendLine(`[Code::Blocks] 项目 "${project.title}" 没有构建目标，跳过`);
-      continue;
-    }
-    const ok = await buildOneProject(project, targetTitle, rebuild);
-    if (!ok) {
-      allOk = false;
-      break;
-    }
-  }
 
-  if (allOk) {
-    outputChannel.appendLine('[Code::Blocks] 构建成功');
-    vscode.window.showInformationMessage('构建成功');
-  } else {
-    outputChannel.appendLine('[Code::Blocks] 构建失败');
-    vscode.window.showErrorMessage('构建失败，请查看输出');
-  }
-  finishBuildSummary(allOk, buildStartMs);
+  await vscode.window.withProgress(
+    { location: vscode.ProgressLocation.Notification, title: `Code::Blocks ${rebuild ? '重新构建' : '构建'}中...`, cancellable: false },
+    async (progress) => {
+      // 工作区构建：每个工程构建它自己的活动目标（对齐 CodeBlocks Build Workspace 语义）
+      for (const project of openProjects) {
+        const targetTitle = getSelectedTarget(project) ?? project.buildTargets[0]?.title;
+        if (!targetTitle) {
+          outputChannel.warn(`[Code::Blocks] 项目 "${project.title}" 没有构建目标，跳过`);
+          done++;
+          progress.report({ increment: 100 / total });
+          continue;
+        }
+        progress.report({ message: `${done + 1}/${total} ${project.title}` });
+        const ok = await buildOneProject(project, targetTitle, rebuild);
+        done++;
+        progress.report({ increment: 100 / total });
+        if (!ok) {
+          allOk = false;
+          break;
+        }
+      }
+
+      const { errorCount, warningCount } = buildResultStats();
+      if (allOk) {
+        outputChannel.info('[Code::Blocks] 构建成功');
+        vscode.window.showInformationMessage(`✅ 构建成功 · ${errorCount} 错误 · ${warningCount} 警告`);
+      } else {
+        outputChannel.error('[Code::Blocks] 构建失败');
+        vscode.window.showErrorMessage(`❌ 构建失败 · ${errorCount} 错误 · ${warningCount} 警告`);
+      }
+      finishBuildSummary(allOk, buildStartMs);
+    },
+  );
+
   return allOk;
 }
 
@@ -1520,20 +1535,28 @@ async function buildSingleProject(filename: string, rebuild: boolean): Promise<v
   diagnosticCollection.clear();
   outputChannel.clear();
   outputChannel.show(true);
-  outputChannel.appendLine(`[Code::Blocks] 开始构建 ${rebuild ? '(重新构建)' : ''}...（单项目）`);
+  outputChannel.info(`[Code::Blocks] 开始构建 ${rebuild ? '(重新构建)' : ''}...（单项目）`);
 
   const buildStartMs = Date.now();
   currentBuildProjects.length = 0;
   currentBuildErrorCount = 0;
   maxErrorsReached = false;
 
-  const ok = await buildOneProject(project, targetTitle, rebuild);
+  const ok = await vscode.window.withProgress(
+    { location: vscode.ProgressLocation.Notification, title: `Code::Blocks ${rebuild ? '重新构建' : '构建'}中...`, cancellable: false },
+    async (progress) => {
+      progress.report({ message: project.title });
+      return buildOneProject(project, targetTitle, rebuild);
+    },
+  );
+
+  const { errorCount, warningCount } = buildResultStats();
   if (ok) {
-    outputChannel.appendLine('[Code::Blocks] 构建成功');
-    vscode.window.showInformationMessage('构建成功');
+    outputChannel.info('[Code::Blocks] 构建成功');
+    vscode.window.showInformationMessage(`✅ 构建成功 · ${errorCount} 错误 · ${warningCount} 警告`);
   } else {
-    outputChannel.appendLine('[Code::Blocks] 构建失败');
-    vscode.window.showErrorMessage('构建失败，请查看输出');
+    outputChannel.error('[Code::Blocks] 构建失败');
+    vscode.window.showErrorMessage(`❌ 构建失败 · ${errorCount} 错误 · ${warningCount} 警告`);
   }
   finishBuildSummary(ok, buildStartMs);
 }
@@ -1542,14 +1565,14 @@ async function buildSingleProject(filename: string, rebuild: boolean): Promise<v
 async function buildOneProject(project: Project, targetTitle: string, rebuild: boolean): Promise<boolean> {
   const target = project.buildTargets.find((t) => t.title === targetTitle);
   if (!target) {
-    outputChannel.appendLine(`[Code::Blocks] 项目 "${project.title}" 无目标 "${targetTitle}"，跳过`);
+    outputChannel.warn(`[Code::Blocks] 项目 "${project.title}" 无目标 "${targetTitle}"，跳过`);
     return true;
   }
 
   const compiler = getCompiler(target.compilerId || project.compilerId);
-  outputChannel.appendLine('');
-  outputChannel.appendLine(`=== 构建项目: ${project.title} / 目标: ${targetTitle} ===`);
-  outputChannel.appendLine(`  使用编译器: ${compiler.programs.C}`);
+  outputChannel.info('');
+  outputChannel.info(`=== 构建项目: ${project.title} / 目标: ${targetTitle} ===`);
+  outputChannel.info(`  使用编译器: ${compiler.programs.C}`);
 
   // 本次项目构建的摘要数据（供 Build Log 视图）
   const diagnostics: BuildLogDiagnostic[] = [];
@@ -1558,7 +1581,11 @@ async function buildOneProject(project: Project, targetTitle: string, rebuild: b
   const engine = new BuildEngine(project, compiler, outputChannel);
   const ok = await engine.build(targetTitle, {
     rebuild,
-    onLine: (line) => outputChannel.appendLine(line),
+    onLine: (line, severity) => {
+      if (severity === 'error') outputChannel.error(line);
+      else if (severity === 'warning') outputChannel.warn(line);
+      else outputChannel.info(line);
+    },
     onDiagnostic: (diag, fileUri) => {
       // clangd 接管诊断时，Problems 面板由 clangd 产出，构建引擎不再写入（避免重复）
       if (clangdDiagnosticsEnabled) return;
@@ -1587,6 +1614,20 @@ async function buildOneProject(project: Project, targetTitle: string, rebuild: b
   const stats = engine.lastStats ?? { success: ok, compiledCount: 0, skippedCount: 0, failedCount: 0, linkSuccess: ok, linkSkipped: true, outputFilename: undefined };
   const projectName = path.basename(path.dirname(project.filename));
 
+  // === 构建完成汇总块（OUTPUT 文本，Emoji 风格）===
+  const doneSym = ok ? '✅' : '❌';
+  const errCount = diagnostics.filter((d) => d.severity === 'error').length;
+  const warnCount = diagnostics.filter((d) => d.severity === 'warning').length;
+  outputChannel.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+  outputChannel.info(`${doneSym} 构建完成: ${project.title} (${targetTitle})`);
+  outputChannel.info(`🔨 编译 ${stats.compiledCount} · ⏭️ 跳过 ${stats.skippedCount} · ❌ 失败 ${stats.failedCount}`);
+  if (!stats.linkSkipped) {
+    outputChannel.info(`${stats.linkSuccess ? '🔗' : '❌'} 链接${stats.linkSuccess ? '成功' : '失败'}${stats.outputFilename ? ` → ${stats.outputFilename}` : ''}`);
+  }
+  outputChannel.info(`🐞 错误 ${errCount} · ⚠️ 警告 ${warnCount}`);
+  outputChannel.info(`⏱️ 用时 ${(durationMs / 1000).toFixed(1)}s`);
+  outputChannel.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+
   // 项目源文件绝对路径（供「Build Log 使用 clangd 诊断」模式收集诊断）
   const projectFiles = new Set<string>();
   for (const f of project.files) projectFiles.add(f.absolutePath);
@@ -1608,10 +1649,11 @@ async function buildOneProject(project: Project, targetTitle: string, rebuild: b
     diagnostics,
     files: [...projectFiles],
     durationMs,
+    startTime: startMs,
   });
 
   if (!ok) {
-    outputChannel.appendLine(`[Code::Blocks] 项目 "${project.title}" 编译失败`);
+    outputChannel.error(`[Code::Blocks] 项目 "${project.title}" 编译失败`);
   }
   return ok;
 }
@@ -1644,6 +1686,13 @@ function collectClangdDiagnostics(files: string[]): BuildLogDiagnostic[] {
   return out;
 }
 
+/** 统计本次构建的错误 / 警告数（供通知与 Build Log 树视图共用） */
+function buildResultStats(): { errorCount: number; warningCount: number } {
+  const errorCount = currentBuildProjects.reduce((n, p) => n + p.diagnostics.filter((d) => d.severity === 'error').length, 0);
+  const warningCount = currentBuildProjects.reduce((n, p) => n + p.diagnostics.filter((d) => d.severity === 'warning').length, 0);
+  return { errorCount, warningCount };
+}
+
 /** 构建结束：汇总所有项目摘要，写入 Build Log 树视图 */
 function finishBuildSummary(allOk: boolean, buildStartMs: number): void {
   if (!buildLogTreeProvider) return;
@@ -1655,11 +1704,11 @@ function finishBuildSummary(allOk: boolean, buildStartMs: number): void {
     }
   }
 
-  const errorCount = currentBuildProjects.reduce((n, p) => n + p.diagnostics.filter((d) => d.severity === 'error').length, 0);
-  const warningCount = currentBuildProjects.reduce((n, p) => n + p.diagnostics.filter((d) => d.severity === 'warning').length, 0);
+  const { errorCount, warningCount } = buildResultStats();
   buildLogTreeProvider.setSummary({
     success: allOk,
     durationMs: Date.now() - buildStartMs,
+    startTime: buildStartMs,
     projects: [...currentBuildProjects],
     errorCount,
     warningCount,
@@ -1667,7 +1716,7 @@ function finishBuildSummary(allOk: boolean, buildStartMs: number): void {
   });
   // 达到上限时提示（CodeBlocks "More errors follow but not being shown"）
   if (maxErrorsReached) {
-    outputChannel.appendLine('[Code::Blocks] 错误数达到上限，后续错误不再显示（可在设置 codeblocks.maxReportedErrors 调整）');
+    outputChannel.warn('[Code::Blocks] 错误数达到上限，后续错误不再显示（可在设置 codeblocks.maxReportedErrors 调整）');
   }
   // 引导用户查看结构化摘要（不强制弹出）
   vscode.commands.executeCommand('codeblocks.buildLog.focus');
@@ -1694,7 +1743,7 @@ async function clean(): Promise<void> {
       }
     }
   }
-  outputChannel.appendLine('[Code::Blocks] 清理完成');
+  outputChannel.info('[Code::Blocks] 清理完成');
 }
 
 async function run(): Promise<void> {

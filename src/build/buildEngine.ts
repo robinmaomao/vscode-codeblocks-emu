@@ -28,7 +28,8 @@ export interface StructuredDiagnostic {
 export interface BuildOptions {
   rebuild?: boolean;
   clean?: boolean;
-  onLine?: (line: string) => void;
+  /** 原始编译输出行；severity 由解析器判定（error/warning/info） */
+  onLine?: (line: string, severity?: 'error' | 'warning' | 'info') => void;
   onDiagnostic?: (diag: vscode.Diagnostic, fileUri?: vscode.Uri) => void;
   /** 结构化诊断回调（Build Log 视图收集错误/警告） */
   onStructuredDiagnostic?: (d: StructuredDiagnostic) => void;
@@ -61,7 +62,7 @@ export class BuildEngine {
   constructor(
     private project: Project,
     private compiler: Compiler,
-    private output: vscode.OutputChannel,
+    private output: vscode.LogOutputChannel,
   ) {
     // 使用编译器 XML 加载的正则；若为空则回退内置正则
     this.parser = new OutputParser(compiler.regexes.length ? compiler.regexes : undefined);
@@ -168,7 +169,7 @@ export class BuildEngine {
         cmds,
         this.project.basePath,
         macroVars,
-        (l) => this.output.appendLine(l),
+        (l) => this.output.info(l),
         this.compilerBinPath(),
       );
       if (!ok) {
@@ -190,10 +191,10 @@ export class BuildEngine {
 
     // 0. pre-build 脚本
     if (preCommands.length) {
-      this.output.appendLine(`[Code::Blocks] 执行 pre-build 脚本 (${target.title})...`);
-      const preOk = await runScriptCommands(preCommands, this.project.basePath, macroVars, (l) => this.output.appendLine(l), this.compilerBinPath());
+      this.output.info(`[Code::Blocks] 执行 pre-build 脚本 (${target.title})...`);
+      const preOk = await runScriptCommands(preCommands, this.project.basePath, macroVars, (l) => this.output.info(l), this.compilerBinPath());
       if (!preOk) {
-        this.output.appendLine(`[Code::Blocks] 目标 "${target.title}" pre-build 脚本失败`);
+        this.output.error(`[Code::Blocks] 目标 "${target.title}" pre-build 脚本失败`);
         return { success: false, compiledCount: 0, skippedCount: 0, failedCount: 0, linkSuccess: false, linkSkipped: target.targetType === TargetType.StaticLib, outputFilename: target.outputFilename };
       }
     }
@@ -235,6 +236,7 @@ export class BuildEngine {
       // （Code::Blocks 对自定义 buildCommand 文件同样执行 IsObjectOutdated 判断）
       if (!options.rebuild && this.isUpToDate(file.absolutePath, object, includeDirs, depsCache)) {
         skippedCount++;
+        this.output.debug(`[Skipping] ${file.relativeFilename} (up to date)`);
         continue;
       }
 
@@ -266,7 +268,7 @@ export class BuildEngine {
     if (units.length === 0) {
       const outAbs = this.resolveOutputFile(target);
       if (fs.existsSync(outAbs)) {
-        this.output.appendLine(`[Code::Blocks] 目标 "${target.title}" 已是最新`);
+        this.output.info(`[Code::Blocks] 目标 "${target.title}" 已是最新`);
         return {
           success: true, compiledCount: 0, skippedCount, failedCount: 0,
           linkSuccess: true, linkSkipped: target.targetType === TargetType.StaticLib,
@@ -282,7 +284,7 @@ export class BuildEngine {
 
     const failedCount = results.filter((r) => !r).length;
     if (failedCount > 0) {
-      this.output.appendLine(`[Code::Blocks] 目标 "${target.title}" 编译失败`);
+      this.output.error(`[Code::Blocks] 目标 "${target.title}" 编译失败`);
       return {
         success: false,
         compiledCount: units.length - failedCount, // 编译成功的文件数
@@ -318,10 +320,11 @@ export class BuildEngine {
           hasCppFilesToLink: hasCpp,
         });
         if (linkCommand) {
-          this.output.appendLine(linkCommand);
+          this.output.info(linkCommand);
+          this.output.info(`[Linking] → ${target.outputFilename}`);
           const linkOk = await this.runCommand(linkCommand, this.project.basePath, options);
           if (!linkOk) {
-            this.output.appendLine(`[Code::Blocks] 目标 "${target.title}" 链接失败`);
+            this.output.error(`[Code::Blocks] 目标 "${target.title}" 链接失败`);
             return {
               success: false,
               compiledCount: units.length,
@@ -334,7 +337,7 @@ export class BuildEngine {
           }
         }
       } else {
-        this.output.appendLine(`[Code::Blocks] 目标 "${target.title}" 链接已是最新，跳过链接`);
+        this.output.info(`[Code::Blocks] 目标 "${target.title}" 链接已是最新，跳过链接`);
       }
     } else if (target.targetType === TargetType.StaticLib) {
       // 静态库用 ar 打包（用所有参与链接的对象，而非仅本次编译的）
@@ -348,7 +351,8 @@ export class BuildEngine {
       // 增量：静态库已存在且比所有对象新 → 跳过打包
       if (options.rebuild || !this.linkObjectsUpToDate(staticOutAbs, linkObjectsAbs)) {
         const arCmd = `${this.compiler.programs.LIB} -r -s ${staticOut} ${objects.join(' ')}`;
-        this.output.appendLine(arCmd);
+        this.output.info(arCmd);
+        this.output.info(`[Archiving] → ${staticOut}`);
         const ok = await this.runCommand(arCmd, this.project.basePath, options);
         if (!ok) {
           return {
@@ -362,16 +366,16 @@ export class BuildEngine {
           };
         }
       } else {
-        this.output.appendLine(`[Code::Blocks] 目标 "${target.title}" 静态库已是最新，跳过打包`);
+        this.output.info(`[Code::Blocks] 目标 "${target.title}" 静态库已是最新，跳过打包`);
       }
     }
 
     // 3. post-build 脚本
     if (postCommands.length) {
-      this.output.appendLine(`[Code::Blocks] 执行 post-build 脚本 (${target.title})...`);
-      const postOk = await runScriptCommands(postCommands, this.project.basePath, macroVars, (l) => this.output.appendLine(l), this.compilerBinPath());
+      this.output.info(`[Code::Blocks] 执行 post-build 脚本 (${target.title})...`);
+      const postOk = await runScriptCommands(postCommands, this.project.basePath, macroVars, (l) => this.output.info(l), this.compilerBinPath());
       if (!postOk) {
-        this.output.appendLine(`[Code::Blocks] 目标 "${target.title}" post-build 脚本失败`);
+        this.output.error(`[Code::Blocks] 目标 "${target.title}" post-build 脚本失败`);
         return {
           success: false,
           compiledCount: units.length,
@@ -579,9 +583,9 @@ export class BuildEngine {
     if (!objDir || !fs.existsSync(objDir)) return;
     try {
       fs.rmSync(objDir, { recursive: true, force: true });
-      this.output.appendLine(`[Code::Blocks] 清理对象目录: ${objDir}`);
+      this.output.info(`[Code::Blocks] 清理对象目录: ${objDir}`);
     } catch (e) {
-      this.output.appendLine(`[Code::Blocks] 清理对象目录失败: ${(e as Error).message}`);
+      this.output.error(`[Code::Blocks] 清理对象目录失败: ${(e as Error).message}`);
     }
   }
 
@@ -618,7 +622,7 @@ export class BuildEngine {
     try {
       fs.mkdirSync(dir, { recursive: true });
     } catch (e) {
-      this.output.appendLine(`[Code::Blocks] 无法创建目录 ${dir}: ${(e as Error).message}`);
+      this.output.error(`[Code::Blocks] 无法创建目录 ${dir}: ${(e as Error).message}`);
     }
   }
 
@@ -644,7 +648,8 @@ export class BuildEngine {
       while (cursor < units.length) {
         const idx = cursor++;
         const u = units[idx];
-        this.output.appendLine(u.command);
+        this.output.info(`[Compiling] ${u.file.relativeFilename}`);
+        this.output.debug(u.command);
         results[idx] = await this.runCommand(u.command, u.cwd, options);
       }
     });
@@ -668,7 +673,11 @@ export class BuildEngine {
       const processLines = (text: string) => {
         for (const line of text.split(/\r?\n/)) {
           if (!line) continue;
-          options.onLine?.(line);
+          const parsed = parser.parseLine(line);
+          const severity = parsed?.type === CompilerLineType.Error
+            ? 'error' as const
+            : parsed?.type === CompilerLineType.Warning ? 'warning' as const : 'info' as const;
+          options.onLine?.(line, severity);
           const diag = parser.toDiagnostic(line, cwd);
           if (diag) {
             options.onDiagnostic?.(diag, parser.resolveFileUri(line, cwd));
@@ -687,7 +696,7 @@ export class BuildEngine {
         resolve(success);
       });
       proc.on('error', (err) => {
-        this.output.appendLine(`[Code::Blocks] 无法执行: ${err.message}`);
+        this.output.error(`[Code::Blocks] 无法执行: ${err.message}`);
         resolve(false);
       });
     });
@@ -721,7 +730,7 @@ export class BuildEngine {
   private async runCommands(commands: string[], cwd: string): Promise<boolean> {
     let ok = true;
     for (const cmd of commands) {
-      this.output.appendLine(cmd);
+      this.output.info(cmd);
       const r = await this.runCommand(cmd, cwd, {});
       if (!r) ok = false;
     }
