@@ -80,6 +80,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   outputChannel = vscode.window.createOutputChannel('Code::Blocks', { log: true });
   diagnosticCollection = vscode.languages.createDiagnosticCollection('codeblocks');
 
+  // 安装/激活时自动写入 .ld/.xm 的 token 颜色规则（幂等，仅命中 source.ld/source.xm）
+  void applyTokenColorCustomizations();
+
   // 初始化编译器选项加载器（resources/compilers 目录）
   const resourcesDir = path.join(context.extensionPath, 'resources', 'compilers');
   compilerLoader = new CompilerOptionsLoader(resourcesDir);
@@ -1828,6 +1831,68 @@ async function locateGdb(): Promise<string | undefined> {
     if (fs.existsSync(full)) return full;
   }
   return undefined;
+}
+
+/** .ld / .xm 语法高亮的 token 颜色规则（对齐 hightlight-demo 的 Dark+ 配色；scope 后缀唯一，仅命中这两类文件） */
+const LD_XM_TOKEN_RULES: { scope: string; settings: { foreground?: string; fontStyle?: string } }[] = [
+  // === ld 链接脚本 ===
+  { scope: 'keyword.control.directive.ld', settings: { foreground: '#C586C0' } },
+  { scope: 'string.quoted.double.ld', settings: { foreground: '#CE9178' } },
+  { scope: 'keyword.control.ld', settings: { foreground: '#C586C0' } },
+  { scope: 'support.function.ld', settings: { foreground: '#DCDCAA' } },
+  { scope: 'storage.modifier.ld', settings: { foreground: '#C586C0' } },
+  { scope: 'storage.modifier.region-attr.ld', settings: { foreground: '#4EC9B0' } },
+  { scope: 'support.type.ld', settings: { foreground: '#9CDCFE' } },
+  { scope: 'constant.language.macro.ld', settings: { foreground: '#9CDCFE' } },
+  { scope: 'variable.other.ld', settings: { foreground: '#4FC1FF' } },
+  { scope: 'entity.name.function.ld', settings: { foreground: '#DCDCAA' } },
+  { scope: 'entity.name.section.ld', settings: { foreground: '#B5CEA8' } },
+  { scope: 'constant.numeric.hex.ld', settings: { foreground: '#B5CEA8' } },
+  { scope: 'constant.numeric.decimal.ld', settings: { foreground: '#B5CEA8' } },
+  { scope: 'keyword.operator.ld', settings: { foreground: '#D4D4D4' } },
+  { scope: 'keyword.operator.assignment.ld', settings: { foreground: '#FF79C6' } },
+  { scope: 'punctuation.separator.comma.ld', settings: { foreground: '#FF8C00' } },
+  { scope: 'punctuation.terminator.statement.ld', settings: { foreground: '#FF5555' } },
+  { scope: 'punctuation.separator.colon.ld', settings: { foreground: '#D4D4D4' } },
+  // === xm 配置脚本 ===
+  { scope: 'keyword.control.xm', settings: { foreground: '#C586C0' } },
+  { scope: 'storage.type.xm', settings: { foreground: '#4FC1FF' } },
+  { scope: 'variable.other.constant.xm', settings: { foreground: '#9CDCFE' } },
+  { scope: 'constant.other.mac-address.xm', settings: { foreground: '#DCDCAA' } },
+  { scope: 'constant.numeric.hex.xm', settings: { foreground: '#B5CEA8' } },
+  { scope: 'constant.numeric.decimal.xm', settings: { foreground: '#B5CEA8' } },
+  { scope: 'keyword.operator.xm', settings: { foreground: '#D4D4D4' } },
+  { scope: 'punctuation.separator.comma.xm', settings: { foreground: '#FF8C00' } },
+  { scope: 'punctuation.terminator.statement.xm', settings: { foreground: '#FF5555' } },
+  { scope: 'punctuation.definition.string.begin.xm', settings: { foreground: '#CE9178' } },
+  { scope: 'punctuation.definition.string.end.xm', settings: { foreground: '#CE9178' } },
+  { scope: 'string.quoted.double.xm', settings: { foreground: '#D4D4D4' } },
+];
+
+/** 安装/激活时自动把 .ld/.xm 的 token 颜色规则合并写入用户 settings.json（幂等，不覆盖用户其他规则） */
+async function applyTokenColorCustomizations(): Promise<void> {
+  const KEY = 'editor.tokenColorCustomizations';
+  const cfg = vscode.workspace.getConfiguration();
+  const inspect = cfg.inspect<{ textMateRules?: unknown[] }>(KEY);
+  const current = (inspect?.globalValue ?? {}) as { textMateRules?: unknown[] };
+  const currentRules: unknown[] = Array.isArray(current?.textMateRules) ? current.textMateRules : [];
+  // 判定一条规则是否属于 ld/xm（scope 含 .ld/.xm 后缀或 source.ld/source.xm 前缀）
+  const isLdXmRule = (r: unknown): boolean => {
+    const s = (r as { scope?: string })?.scope ?? '';
+    return /\.ld\b|\.xm\b|source\.ld|source\.xm/.test(s);
+  };
+  const kept = currentRules.filter((r) => !isLdXmRule(r));
+  const merged = [...kept, ...LD_XM_TOKEN_RULES];
+  if (JSON.stringify(merged) !== JSON.stringify(currentRules)) {
+    await cfg.update(KEY, { ...current, textMateRules: merged }, vscode.ConfigurationTarget.Global);
+  }
+  // 清除旧版本写入的 [xm]/[ld] 括号配对关闭（已改用标准 bracket scope，无需关闭）
+  for (const lang of ['xm', 'ld']) {
+    const langCfg = vscode.workspace.getConfiguration(`[${lang}]`);
+    if (langCfg.inspect<unknown>('editor.bracketPairColorization')?.globalValue !== undefined) {
+      await langCfg.update('editor.bracketPairColorization', undefined, vscode.ConfigurationTarget.Global);
+    }
+  }
 }
 
 export function deactivate(): void {

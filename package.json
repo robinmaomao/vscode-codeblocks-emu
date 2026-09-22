@@ -2,7 +2,7 @@
   "name": "codeblocks-vscode",
   "displayName": "Code::Blocks for VS Code",
   "description": "原生移植 Code::Blocks 核心功能到 VS Code：项目模型、构建引擎、编译器管理与调试引擎",
-  "version": "0.7.3",
+  "version": "0.8.0",
   "publisher": "codeblocks",
   "author": {
     "name": "Robinmaomao"
@@ -158,6 +158,16 @@
         "command": "codeblocks.prevError",
         "title": "Code::Blocks: Previous Error"
       }
+    ],
+    "languages": [
+      { "id": "ld", "aliases": ["GNU ld", "ld"], "extensions": [".ld", ".lcf"], "configuration": "./language-configurations/ld.json" },
+      { "id": "asm", "extensions": [".S", ".s"], "aliases": ["GNU Assembly (RISC-V)"] },
+      { "id": "xm", "aliases": ["xmaker xm", "xm"], "extensions": [".xm"], "configuration": "./language-configurations/xm.json" }
+    ],
+    "grammars": [
+      { "language": "ld", "scopeName": "source.ld", "path": "./syntaxes/ld.tmLanguage.json" },
+      { "language": "asm", "scopeName": "source.asm", "path": "./syntaxes/asm.tmLanguage.json" },
+      { "language": "xm", "scopeName": "source.xm", "path": "./syntaxes/xm.tmLanguage.json" }
     ],
     "configuration": {
       "title": "Code::Blocks",

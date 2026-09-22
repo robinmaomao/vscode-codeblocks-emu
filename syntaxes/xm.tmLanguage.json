@@ -1,0 +1,77 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "xmaker-xm",
+  "scopeName": "source.xm",
+  "fileTypes": ["xm"],
+  "patterns": [
+    {
+      "comment": "行注释：# 到行尾",
+      "name": "comment.line.number-sign.xm",
+      "match": "#.*$"
+    },
+    {
+      "comment": "顶层命令：config / depend / makecfgfile 等",
+      "name": "keyword.control.xm",
+      "match": "\\b(depend|config|makecfgfile|makecfgdef|xcopy|loadresdir|makeres|makeresdef|save)\\b"
+    },
+    {
+      "comment": "config 元素类型关键字（第 1 个参数）",
+      "name": "storage.type.xm",
+      "match": "\\b(SUB|LEVEL|CHECK|BIT|LISTVAL|RELATE|TEXT|MAC|BYTE|LED|KEEP|KEEPEND)\\b"
+    },
+    {
+      "comment": "双引号字符串：内容标为 string scope（供括号配对跳过），颜色由 tokenColorCustomizations 设为默认前景",
+      "begin": "\"",
+      "end": "\"",
+      "contentName": "string.quoted.double.xm",
+      "beginCaptures": { "0": { "name": "punctuation.definition.string.begin.xm" } },
+      "endCaptures": { "0": { "name": "punctuation.definition.string.end.xm" } }
+    },
+    {
+      "comment": "MAC 地址：41:42:98:00:00:01",
+      "name": "constant.other.mac-address.xm",
+      "match": "\\b[0-9A-Fa-f]{2}(?::[0-9A-Fa-f]{2}){5}\\b"
+    },
+    {
+      "comment": "十六进制数",
+      "name": "constant.numeric.hex.xm",
+      "match": "\\b0[xX][0-9A-Fa-f]+\\b"
+    },
+    {
+      "comment": "十进制数",
+      "name": "constant.numeric.decimal.xm",
+      "match": "\\b\\d+\\b"
+    },
+    {
+      "comment": "配置宏（大写标识符，如 BT_TWS_EN）",
+      "name": "variable.other.constant.xm",
+      "match": "\\b[A-Z][A-Z0-9_]*\\b"
+    },
+    {
+      "comment": "RELATE 条件运算符：! >",
+      "name": "keyword.operator.xm",
+      "match": "[!>]"
+    },
+    {
+      "comment": "逗号",
+      "name": "punctuation.separator.comma.xm",
+      "match": ","
+    },
+    {
+      "comment": "左括号",
+      "name": "punctuation.definition.bracket.round.begin.xm",
+      "match": "\\("
+    },
+    {
+      "comment": "右括号",
+      "name": "punctuation.definition.bracket.round.end.xm",
+      "match": "\\)"
+    },
+    {
+      "comment": "分号",
+      "name": "punctuation.terminator.statement.xm",
+      "match": ";"
+    }
+  ],
+  "repository": {}
+}

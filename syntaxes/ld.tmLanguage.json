@@ -1,0 +1,138 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "gnu-ld",
+  "scopeName": "source.ld",
+  "fileTypes": ["ld", "lcf", "xcl"],
+  "patterns": [
+    {
+      "comment": "块注释：/* ... */",
+      "name": "comment.block.ld",
+      "begin": "/\\*",
+      "end": "\\*/"
+    },
+    {
+      "comment": "行注释：// 到行尾",
+      "name": "comment.line.double-slash.ld",
+      "match": "//.*$"
+    },
+    {
+      "comment": "C 预处理器指令：#include / #define 等",
+      "name": "keyword.control.directive.ld",
+      "match": "^\\s*#\\s*[a-zA-Z_]+\\b"
+    },
+    {
+      "comment": "双引号字符串（如 #include \"config.h\"）",
+      "name": "string.quoted.double.ld",
+      "begin": "\"",
+      "end": "\"",
+      "beginCaptures": { "0": { "name": "punctuation.definition.string.begin.ld" } },
+      "endCaptures": { "0": { "name": "punctuation.definition.string.end.ld" } }
+    },
+    {
+      "comment": "顶层命令",
+      "name": "keyword.control.ld",
+      "match": "\\b(ENTRY|MEMORY|SECTIONS|PHDRS|VERSION|INCLUDE|INPUT|GROUP|OUTPUT|OUTPUT_ARCH|OUTPUT_FORMAT|SEARCH_DIR|STARTUP|TARGET|EXTERN|PROVIDE|PROVIDE_HIDDEN|OVERLAY|NOCROSSREFS|INSERT|ASSERT|FORCE_COMMON_ALLOCATION|INHIBIT_COMMON_ALLOCATION)\\b"
+    },
+    {
+      "comment": "段命令/内建函数",
+      "name": "support.function.ld",
+      "match": "\\b(KEEP|ALIGN|BLOCK|LOADADDR|SIZEOF|SIZEOF_HEADERS|ADDR|ORIGIN|LENGTH|MAX|MIN|ALIGNOF|ABS|DEFINED|NEXT|LOG2CEIL|DATA_SEGMENT_ALIGN|DATA_SEGMENT_END|DATA_SEGMENT_RELRO_END|EXCLUDE_FILE|SORT|SORT_BY_NAME|SORT_BY_ALIGNMENT|SORT_NONE)\\b"
+    },
+    {
+      "comment": "段类型/修饰符",
+      "name": "storage.modifier.ld",
+      "match": "\\b(NOLOAD|AT)\\b"
+    },
+    {
+      "comment": "输入段关键字 COMMON",
+      "name": "support.type.ld",
+      "match": "\\bCOMMON\\b"
+    },
+    {
+      "comment": "内存区域属性 (rx) (rw) (rwx) (ax) 等",
+      "name": "storage.modifier.region-attr.ld",
+      "match": "\\b(?:[Rr][Ww]?[Xx]?|[Aa][Xx]|[Ww][Xx]?|[Rr]|[Ww]|[Xx])\\b"
+    },
+    {
+      "comment": "C 宏（大写标识符，如 FLASH_CODE_SIZE）",
+      "name": "constant.language.macro.ld",
+      "match": "\\b[A-Z][A-Z0-9_]*\\b"
+    },
+    {
+      "comment": "双下划线链接符号：__base / __bss_start",
+      "name": "variable.other.ld",
+      "match": "\\b__[A-Za-z0-9_]+\\b"
+    },
+    {
+      "comment": "以下划线开头的符号：_start",
+      "name": "entity.name.function.ld",
+      "match": "\\b_[A-Za-z0-9_]+\\b"
+    },
+    {
+      "comment": "段名：.text / .bss / .com_text.bt.*",
+      "name": "entity.name.section.ld",
+      "match": "\\.[A-Za-z_][A-Za-z0-9_]*"
+    },
+    {
+      "comment": "十六进制数",
+      "name": "constant.numeric.hex.ld",
+      "match": "\\b0[xX][0-9A-Fa-f]+\\b"
+    },
+    {
+      "comment": "十进制数（含 k/M 后缀）",
+      "name": "constant.numeric.decimal.ld",
+      "match": "\\b\\d+[kKmM]?\\b"
+    },
+    {
+      "comment": "位置计数器 .",
+      "name": "keyword.operator.ld",
+      "match": "\\B\\.\\B"
+    },
+    {
+      "comment": "赋值运算符 =",
+      "name": "keyword.operator.assignment.ld",
+      "match": "="
+    },
+    {
+      "comment": "运算符",
+      "name": "keyword.operator.ld",
+      "match": "[><+\\-*/&|~?]"
+    },
+    {
+      "comment": "逗号",
+      "name": "punctuation.separator.comma.ld",
+      "match": ","
+    },
+    {
+      "comment": "分号",
+      "name": "punctuation.terminator.statement.ld",
+      "match": ";"
+    },
+    {
+      "comment": "冒号",
+      "name": "punctuation.separator.colon.ld",
+      "match": ":"
+    },
+    {
+      "comment": "左括号",
+      "name": "punctuation.definition.bracket.round.begin.ld",
+      "match": "\\("
+    },
+    {
+      "comment": "右括号",
+      "name": "punctuation.definition.bracket.round.end.ld",
+      "match": "\\)"
+    },
+    {
+      "comment": "左花括号",
+      "name": "punctuation.definition.bracket.curly.begin.ld",
+      "match": "\\{"
+    },
+    {
+      "comment": "右花括号",
+      "name": "punctuation.definition.bracket.curly.end.ld",
+      "match": "\\}"
+    }
+  ],
+  "repository": {}
+}
