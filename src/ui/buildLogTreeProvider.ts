@@ -36,12 +36,16 @@ export interface BuildLogProject {
   /** 项目源文件绝对路径（供「Build Log 使用 clangd 诊断」模式收集诊断） */
   files?: string[];
   durationMs: number;
+  /** 构建开始时间戳（毫秒） */
+  startTime?: number;
 }
 
 /** 一次构建的整体摘要 */
 export interface BuildLogSummary {
   success: boolean;
   durationMs: number;
+  /** 构建开始时间戳（毫秒） */
+  startTime?: number;
   projects: BuildLogProject[];
   errorCount: number;
   warningCount: number;
@@ -161,7 +165,8 @@ export class BuildLogTreeProvider implements vscode.TreeDataProvider<BuildLogNod
       vscode.TreeItemCollapsibleState.Expanded,
       s.success ? this.icon('log-success.svg', 'check') : this.icon('log-error.svg', 'error'),
     );
-    node.description = `用时 ${(s.durationMs / 1000).toFixed(1)}s · ${s.errorCount} 错误 · ${s.warningCount} 警告${s.truncated ? '（已截断）' : ''}`;
+    const start = s.startTime !== undefined ? `开始 ${formatTime(s.startTime)} · ` : '';
+    node.description = `${start}用时 ${(s.durationMs / 1000).toFixed(1)}s · ${s.errorCount} 错误 · ${s.warningCount} 警告${s.truncated ? '（已截断）' : ''}`;
     node.tooltip = node.description;
     node.children = s.projects.map((p) => this.buildProjectNode(p));
     return node;
@@ -174,7 +179,7 @@ export class BuildLogTreeProvider implements vscode.TreeDataProvider<BuildLogNod
       vscode.TreeItemCollapsibleState.Expanded,
       p.success ? this.icon('log-project.svg', 'package') : this.icon('log-error.svg', 'error'),
     );
-    node.description = `${p.targetName} · ${p.success ? '成功' : '失败'}`;
+    node.description = `${p.targetName} · ${p.success ? '成功' : '失败'} · ${(p.durationMs / 1000).toFixed(1)}s`;
     node.tooltip = `${p.projectName} · 目标 ${p.targetName}`;
 
     const children: BuildLogNode[] = [];
@@ -250,9 +255,14 @@ export class BuildLogTreeProvider implements vscode.TreeDataProvider<BuildLogNod
       isError ? this.icon('log-error.svg', 'error') : this.icon('log-warning.svg', 'warning'),
     );
     node.description = d.file ? d.message : undefined;
-    node.tooltip = d.file
-      ? `${d.file}${d.line ? `:${d.line}` : ''}${d.column ? `:${d.column}` : ''} — ${d.message}`
-      : d.message;
+
+    const md = new vscode.MarkdownString();
+    md.appendMarkdown(`**${d.message}**`);
+    if (d.file) {
+      md.appendMarkdown('\n\n');
+      md.appendCodeblock(`${d.file}${d.line ? `:${d.line}` : ''}${d.column ? `:${d.column}` : ''}`, 'text');
+    }
+    node.tooltip = md;
 
     if (d.file) {
       const line0 = d.line && d.line > 0 ? d.line - 1 : 0;
@@ -266,4 +276,11 @@ export class BuildLogTreeProvider implements vscode.TreeDataProvider<BuildLogNod
     }
     return node;
   }
+}
+
+/** 格式化时间戳为 HH:MM:SS */
+function formatTime(ms: number): string {
+  const d = new Date(ms);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
 }

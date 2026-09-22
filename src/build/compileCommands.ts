@@ -63,7 +63,7 @@ function bakeCommand(command: string, systemIncludes: string[]): string {
 export function collectClangdEntries(
   project: Project,
   compiler: Compiler,
-  output: vscode.OutputChannel,
+  output: vscode.LogOutputChannel,
   systemIncludes: string[],
 ): CompileCommandEntry[] {
   const engine = new BuildEngine(project, compiler, output);
