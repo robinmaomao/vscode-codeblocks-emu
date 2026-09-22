@@ -7,6 +7,8 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as crypto from 'crypto';
+import * as os from 'os';
+import * as vscode from 'vscode';
 import { spawnSync } from 'child_process';
 
 const EXE = process.platform === 'win32' ? 'clangd.exe' : 'clangd';
@@ -91,6 +93,16 @@ function commonLocations(): string[] {
 
 /** 检测 clangd 可执行文件路径（未找到返回 undefined） */
 export function detectClangd(): string | undefined {
+  // 优先：clangd 扩展的 clangd.path 设置（用户手动指定的 clangd 路径，含 ${userHome} 变量展开）
+  try {
+    const configured = vscode.workspace.getConfiguration('clangd').get<string>('path', '');
+    if (configured) {
+      const expanded = configured.trim().replace(/\$\{userHome\}/gi, os.homedir());
+      if (expanded && fs.existsSync(expanded)) return expanded;
+    }
+  } catch {
+    // 忽略：配置读取失败时回退到 PATH / 常见目录
+  }
   const onPath = findOnPath();
   if (onPath) return onPath;
   for (const p of commonLocations()) {
