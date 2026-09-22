@@ -140,7 +140,7 @@ export class GdbDebugAdapter implements vscode.DebugAdapter {
       return;
     }
 
-    this.session = new GdbMiSession();
+    this.session = new GdbMiSession(vscode.workspace.getConfiguration('codeblocks').get<number>('gdbTimeoutMs', 30000));
     this.session.onAsyncRecord = (rec) => this.handleAsync(rec);
     this.session.onConsole = (t) => this.sendOutput('console', t);
     this.session.onLog = (t) => this.sendOutput('console', t);

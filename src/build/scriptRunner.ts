@@ -11,6 +11,7 @@
  */
 import * as vscode from 'vscode';
 import { spawn } from 'child_process';
+import { decodeText } from '../tools/encoding';
 
 /** 展开命令中的宏（Code::Blocks 变量风格） */
 export function expandMacros(cmd: string, vars: Record<string, string>): string {
@@ -29,13 +30,9 @@ export interface ScriptResult {
   output: string;
 }
 
-/** 解码子进程输出：优先 GBK（中文 Windows），失败回退 UTF-8 */
+/** 解码子进程输出：UTF-8 严格优先，失败回退 GBK（中文 Windows） */
 function decodeOutput(buf: Buffer): string {
-  try {
-    return new TextDecoder('gbk', { fatal: false }).decode(buf);
-  } catch {
-    return buf.toString('utf-8');
-  }
+  return decodeText(buf);
 }
 
 /** 执行单条脚本命令（可附加环境变量，如编译器 bin 目录加入 PATH） */
@@ -97,6 +94,8 @@ export function buildMacroVars(
   outputFilename: string,
   targetTitle: string,
   objectOutput = 'obj/',
+  projectTitle = targetTitle,
+  projectFilename = outputFilename,
 ): Record<string, string> {
   const toUnix = (s: string) => s.replace(/\\/g, '/');
   const out = toUnix(outputFilename);
@@ -113,11 +112,11 @@ export function buildMacroVars(
     TARGET_OUTPUT_DIR: outDir,
     TARGET_NAME: targetTitle,
     TARGET_OBJECT_DIR: toUnix(objectOutput),
-    // 项目相关
+    // 项目相关（对齐 cbProject::GetTitle / GetFilename 语义）
     PROJECT_DIR: basePath,
     PROJECT_DIRECTORY: basePath,
-    PROJECT_NAME: targetTitle,
-    PROJECTNAME: targetTitle,
-    PROJECT_FILENAME: out,
+    PROJECT_NAME: projectTitle,
+    PROJECTNAME: projectTitle,
+    PROJECT_FILENAME: projectFilename,
   };
 }

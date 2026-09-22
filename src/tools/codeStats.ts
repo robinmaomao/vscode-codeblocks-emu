@@ -4,6 +4,7 @@
  * 逻辑独立重写。统计每个源文件的代码行、注释行、空行、总行数。
  */
 import * as fs from 'fs';
+import * as path from 'path';
 
 export interface CodeStats {
   filename: string;
@@ -25,6 +26,8 @@ export interface AggregateStats {
 export function countFile(filename: string): CodeStats {
   const content = fs.readFileSync(filename, 'utf-8');
   const lines = content.split(/\r?\n/);
+  // `#` 只在脚本语言里是注释；C/C++/Java 等的 `#` 是预处理指令，属代码
+  const hashIsComment = ['.py', '.rb', '.php', '.sh', '.pl', '.r'].includes(path.extname(filename).toLowerCase());
 
   let code = 0;
   let comment = 0;
@@ -57,7 +60,7 @@ export function countFile(filename: string): CodeStats {
     }
 
     // 行注释
-    if (line.startsWith('//') || line.startsWith('#')) {
+    if (line.startsWith('//') || (hashIsComment && line.startsWith('#'))) {
       comment++;
       continue;
     }

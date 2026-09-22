@@ -36,6 +36,11 @@ function unquote(s: string): string {
   return s;
 }
 
+/** 转义正则特殊字符（用于把 flag 当作字面量匹配） */
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 /** 选项关系合并 —— 对应 GetOrderedOptions 语义 */
 function combineOptions(
   projectOpts: string[],
@@ -196,7 +201,12 @@ export class CommandGenerator {
   }
 
   private setupLinkLibraries(target: BuildTarget): string {
-    const libs = target.linkLibs.length ? target.linkLibs : this.project.linkLibs;
+    // 项目级 + 目标级库合并，沿用 linkerOptions 的选项关系（对齐 CodeBlocks SetupLinkLibraries → GetOrderedOptions）
+    const libs = combineOptions(
+      this.project.linkLibs,
+      target.linkLibs,
+      this.getRelation(target, this.rel.LinkerOptions),
+    );
     const s = this.compiler.switches;
     return libs
       .map((lib) => {
@@ -240,9 +250,9 @@ export class CommandGenerator {
       if (params.pf.compilerVar === 'CC') return { comp: prog.C, isCpp: false };
       if (params.pf.compilerVar === 'WINDRES') return { comp: prog.WINDRES, isCpp: false };
     }
-    // 按扩展名
+    // 按扩展名（.s/.S/.asm 汇编文件归 C 编译器，避免 g++ 链接带入 C++ 运行库）
     const ext = path.extname(unquote(params.file)).toLowerCase().replace('.', '');
-    if (ext === 'c') return { comp: prog.C, isCpp: false };
+    if (ext === 'c' || ext === 's' || ext === 'asm') return { comp: prog.C, isCpp: false };
     return { comp: prog.CPP, isCpp: true };
   }
 
@@ -413,7 +423,7 @@ export class CommandGenerator {
 
     // 9. 展开 Code::Blocks 构建变量宏（$(TARGET_OBJECT_DIR)、$(PROJECT_NAME) 等）
     if (params.target) {
-      macro = expandBuildVars(macro, this.project.basePath, params.target);
+      macro = expandBuildVars(macro, this.project.basePath, params.target, this.project.title, this.project.filename);
     }
     return macro;
   }
@@ -436,14 +446,18 @@ export class CommandGenerator {
   /** 从 flags 字符串中过滤掉指定的 flag（对应 GetCPPOnlyFlags/GetCOnlyFlags 移除逻辑） */
   private filterOutFlags(flags: string, toRemove: string[]): string {
     if (!toRemove.length) return flags;
-    const parts = flags.split(' ').filter(Boolean);
-    const removeSet = new Set(toRemove);
-    return parts.filter((p) => !removeSet.has(p)).join(' ');
+    let out = flags;
+    for (const f of toRemove) {
+      // 匹配独立 flag（前有空白/行首，后有空白/行尾），避免误删带前缀/带值 flag，也不破坏带引号 flag
+      const re = new RegExp(`(^|\\s)${escapeRegExp(f)}(?=\\s|$)`, 'g');
+      out = out.replace(re, '$1');
+    }
+    return out.trim();
   }
 }
 
 /** 展开 Code::Blocks 构建变量宏（$(TARGET_OBJECT_DIR)、$(PROJECT_NAME) 等） */
-export function expandBuildVars(cmd: string, basePath: string, target: BuildTarget): string {
+export function expandBuildVars(cmd: string, basePath: string, target: BuildTarget, projectTitle: string, projectFilename: string): string {
   const u = (s: string) => s.replace(/\\/g, '/');
   const out = u(target.outputFilename);
   const outDir = out.includes('/') ? out.slice(0, out.lastIndexOf('/') + 1) : '';
@@ -459,9 +473,9 @@ export function expandBuildVars(cmd: string, basePath: string, target: BuildTarg
     TARGET_OBJECT_DIR: u(target.objectOutput || 'obj/'),
     PROJECT_DIR: basePath,
     PROJECT_DIRECTORY: basePath,
-    PROJECT_NAME: target.title,
-    PROJECTNAME: target.title,
-    PROJECT_FILENAME: out,
+    PROJECT_NAME: projectTitle,
+    PROJECTNAME: projectTitle,
+    PROJECT_FILENAME: projectFilename,
   };
 
   let result = cmd;

@@ -14,6 +14,7 @@ import { Compiler } from '../compiler/compiler';
 import { CommandGenerator } from '../compiler/commandGenerator';
 import { OutputParser } from './outputParser';
 import { runScriptCommands, buildMacroVars } from './scriptRunner';
+import { decodeText } from '../tools/encoding';
 
 /** 结构化的诊断信息（供 Build Log 视图展示，文件为绝对路径） */
 export interface StructuredDiagnostic {
@@ -131,10 +132,8 @@ export class BuildEngine {
         // 自定义 buildCommand 文件（ram.ld/app.xm 等链接脚本/资源）不是 C/C++ 源文件，
         // clangd 无法解析，compile_commands.json 里跳过（构建仍照常处理它们）。
         if (isCustom) continue;
-        // 只收集可编译的 C/C++ 源文件
-        if (!this.isCompilable(file.relativeFilename)) continue;
-        // .rc（Windows 资源脚本）虽参与构建，但 clangd 无法解析，compile_commands.json 里跳过
-        if (/\.rc$/i.test(file.relativeFilename)) continue;
+        // 只收集 clangd 可索引的 C/C++ 源文件（.rc 资源脚本 clangd 无法解析）
+        if (!this.isClangdIndexable(file.relativeFilename)) continue;
 
         const objectRel = this.objectPathRelative(target, file);
 
@@ -157,7 +156,7 @@ export class BuildEngine {
 
   /** 构建单个目标（始终返回统计对象，用 success 标记成败） */
   private async buildTarget(target: BuildTarget, options: BuildOptions): Promise<BuildTargetStats> {
-    const macroVars = buildMacroVars(this.project.basePath, target.outputFilename, target.title, target.objectOutput);
+    const macroVars = buildMacroVars(this.project.basePath, target.outputFilename, target.title, target.objectOutput, this.project.title, this.project.filename);
 
     if (target.targetType === TargetType.CommandsOnly) {
       // 仅执行 pre/post build 命令（项目级 + 目标级）
@@ -173,7 +172,7 @@ export class BuildEngine {
         this.compilerBinPath(),
       );
       if (!ok) {
-        return { success: false, compiledCount: 0, skippedCount: 0, failedCount: 1, linkSuccess: false, linkSkipped: true, outputFilename: target.outputFilename };
+        return { success: false, compiledCount: 0, skippedCount: 0, failedCount: 0, linkSuccess: false, linkSkipped: true, outputFilename: target.outputFilename };
       }
       return { success: true, compiledCount: 0, skippedCount: 0, failedCount: 0, linkSuccess: true, linkSkipped: true };
     }
@@ -409,6 +408,11 @@ export class BuildEngine {
     return /\.(c|cpp|cc|cxx|C)$/.test(rel) || /\.rc$/.test(rel);
   }
 
+  /** 是否可被 clangd 索引（C/C++ 源文件；.rc 资源脚本 clangd 无法解析） */
+  private isClangdIndexable(rel: string): boolean {
+    return /\.(c|cpp|cc|cxx|C)$/.test(rel);
+  }
+
   /** 编译器 bin 目录（用于把交叉编译器工具加入脚本执行的 PATH） */
   private compilerBinPath(): string {
     // 优先从完整程序路径推导（如 .../RV32-V2/bin/riscv32-elf-gcc.exe → .../RV32-V2/bin）
@@ -530,10 +534,13 @@ export class BuildEngine {
     let newest = 0;
     try {
       const content = fs.readFileSync(key, 'utf-8');
-      const re = /^\s*#\s*include\s*"([^"]+)"/gm;
+      // 同时匹配双引号与尖括号 include
+      const re = /^\s*#\s*include\s*(?:"([^"]+)"|<([^>]+)>)/gm;
       let m: RegExpExecArray | null;
       while ((m = re.exec(content)) !== null) {
-        const resolved = this.resolveInclude(m[1], key, includeDirs);
+        const quoted = m[1];
+        const angled = m[2];
+        const resolved = this.resolveInclude(quoted ?? angled, key, includeDirs, quoted === undefined);
         if (!resolved) continue;
         try {
           newest = Math.max(newest, fs.statSync(resolved).mtimeMs);
@@ -550,15 +557,17 @@ export class BuildEngine {
     return newest;
   }
 
-  /** 解析 #include 头文件的实际路径（先查当前文件目录，再查 include 搜索目录） */
-  private resolveInclude(inc: string, fromFile: string, includeDirs: string[]): string | undefined {
-    // 1. 相对当前源文件所在目录（C 编译器默认行为）
-    let cand = path.resolve(path.dirname(fromFile), inc);
-    if (fs.existsSync(cand)) return cand;
+  /** 解析 #include 头文件的实际路径：双引号先查源文件目录再查 include 目录；尖括号只查 include 目录 */
+  private resolveInclude(inc: string, fromFile: string, includeDirs: string[], angleBracket = false): string | undefined {
+    // 1. 双引号：相对当前源文件所在目录（C 编译器默认行为）
+    if (!angleBracket) {
+      const cand = path.resolve(path.dirname(fromFile), inc);
+      if (fs.existsSync(cand)) return cand;
+    }
     // 2. 相对项目 include 目录（相对路径基于项目根目录解析）
     for (const dir of includeDirs) {
       const base = path.isAbsolute(dir) ? dir : path.join(this.project.basePath, dir);
-      cand = path.resolve(base, inc);
+      const cand = path.resolve(base, inc);
       if (fs.existsSync(cand)) return cand;
     }
     return undefined;
@@ -615,8 +624,10 @@ export class BuildEngine {
 
   private depsPathFor(target: BuildTarget, file: ProjectFile): string {
     const objDir = target.objectOutput || 'obj';
-    const name = path.parse(file.relativeFilename).name;
-    return path.join(this.project.basePath, objDir, name + '.d');
+    const rel = file.relativeToCommonTopLevelPath || file.relativeFilename;
+    const name = path.parse(rel).name;
+    // 与对象路径一致（含目录），避免不同目录同名文件（a/foo.c、b/foo.c）的 .d 互相覆盖
+    return path.join(this.project.basePath, objDir, path.dirname(rel), name + '.d');
   }
 
   private maxJobs(): number {
@@ -649,37 +660,13 @@ export class BuildEngine {
       });
       const parser = this.parser;
 
-      // 编译器输出解码器：优先 GBK（中文 Windows 下 GCC/MinGW 中文错误信息为 GBK），
-      // 失败时回退 UTF-8；使用 { stream: true } 避免多字节字符被 chunk 边界截断。
-      const makeDecoder = () => {
-        try {
-          const td = new TextDecoder('gbk', { fatal: false });
-          return {
-            push: (buf: Buffer) => td.decode(buf, { stream: true }),
-            flush: () => td.decode(),
-          };
-        } catch {
-          const td = new TextDecoder('utf-8', { fatal: false });
-          return {
-            push: (buf: Buffer) => td.decode(buf, { stream: true }),
-            flush: () => td.decode(),
-          };
-        }
-      };
+      // 累积原始字节，命令结束时统一解码（UTF-8 严格优先，回退 GBK），
+      // 避免流式分块在「UTF-8 / GBK 多字节字符跨 chunk 边界」时误判编码。
+      const stdoutChunks: Buffer[] = [];
+      const stderrChunks: Buffer[] = [];
 
-      const stdoutDecoder = makeDecoder();
-      const stderrDecoder = makeDecoder();
-      // 残留缓冲：保存上次未以换行结尾的部分，与下次拼接，避免行被截断
-      let stdoutTail = '';
-      let stderrTail = '';
-
-      const handleChunk = (decoder: ReturnType<typeof makeDecoder>, tailRef: { value: string }, data: Buffer, streamName: string) => {
-        const text = decoder.push(data);
-        const combined = tailRef.value + text;
-        const lines = combined.split(/\r?\n/);
-        // 最后一段可能是不完整行，保留到 tail
-        tailRef.value = lines.pop() ?? '';
-        for (const line of lines) {
+      const processLines = (text: string) => {
+        for (const line of text.split(/\r?\n/)) {
           if (!line) continue;
           options.onLine?.(line);
           const diag = parser.toDiagnostic(line, cwd);
@@ -690,30 +677,12 @@ export class BuildEngine {
         }
       };
 
-      const stdoutTailRef = { value: '' };
-      const stderrTailRef = { value: '' };
-
-      proc.stdout?.on('data', (data: Buffer) => handleChunk(stdoutDecoder, stdoutTailRef, data, 'stdout'));
-      proc.stderr?.on('data', (data: Buffer) => handleChunk(stderrDecoder, stderrTailRef, data, 'stderr'));
+      proc.stdout?.on('data', (data: Buffer) => stdoutChunks.push(data));
+      proc.stderr?.on('data', (data: Buffer) => stderrChunks.push(data));
 
       proc.on('close', (code) => {
-        // 刷新残留尾行
-        if (stdoutTailRef.value) {
-          options.onLine?.(stdoutTailRef.value);
-          const diag = parser.toDiagnostic(stdoutTailRef.value, cwd);
-          if (diag) {
-            options.onDiagnostic?.(diag, parser.resolveFileUri(stdoutTailRef.value, cwd));
-            this.emitStructuredDiagnostic(stdoutTailRef.value, cwd, options);
-          }
-        }
-        if (stderrTailRef.value) {
-          options.onLine?.(stderrTailRef.value);
-          const diag = parser.toDiagnostic(stderrTailRef.value, cwd);
-          if (diag) {
-            options.onDiagnostic?.(diag, parser.resolveFileUri(stderrTailRef.value, cwd));
-            this.emitStructuredDiagnostic(stderrTailRef.value, cwd, options);
-          }
-        }
+        if (stdoutChunks.length) processLines(decodeText(Buffer.concat(stdoutChunks)));
+        if (stderrChunks.length) processLines(decodeText(Buffer.concat(stderrChunks)));
         const success = code !== null && code <= this.compiler.switches.statusSuccess;
         resolve(success);
       });
