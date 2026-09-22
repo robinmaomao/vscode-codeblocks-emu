@@ -865,7 +865,10 @@ async function generateClangdForWorkspaceInternal(interactive: boolean): Promise
       const includeDirs = extractAbsoluteIncludeDirs(entries);
       const headerFlags: string[] = [];
       if (targetTriple) headerFlags.push(`--target=${targetTriple}`);
-      for (const d of includeDirs) headerFlags.push(`-I${d.replace(/\\/g, '/')}`);
+      // -I 与路径拆成两个独立元素（与 -isystem 一致），避免含空格路径依赖 clangd 的拆分行为
+      for (const d of includeDirs) {
+        headerFlags.push('-I', d.replace(/\\/g, '/'));
+      }
       // 基础头文件预包含：头文件单独分析时缺类型/宏上下文（unknown type name u8/u16 等）。
       // 用 global.h（typedef.h + macro.h + sfr.h + clib.h），而非 include.h：
       // include.h 会包含几乎所有头文件，对「被 include.h 包含的头文件」造成递归包含

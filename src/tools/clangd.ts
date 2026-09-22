@@ -186,6 +186,11 @@ function escapeRegex(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
+/** 用 YAML 单引号包裹（内部单引号双写）；单引号不解释反斜杠，可保留正则转义，且避免 #/&/冒号破坏解析 */
+function yamlSingleQuote(s: string): string {
+  return `'${s.replace(/'/g, "''")}'`;
+}
+
 /** 每个作用域用带 hash 的独立标记，避免多个工作区同时写同一 config.yaml 时互相覆盖 */
 function scopeMarker(dir: string): { begin: string; end: string } {
   // 归一化（正斜杠 + 去尾斜杠 + 小写）保证同一作用域 hash 稳定
@@ -263,9 +268,9 @@ function buildScopeFragment(s: ClangdScopeConfig, marker: { begin: string; end: 
   const lines = [
     marker.begin,
     'If:',
-    `  PathMatch: ${dirRe}/.*`,
+    `  PathMatch: ${yamlSingleQuote(`${dirRe}/.*`)}`,
     'CompileFlags:',
-    `  CompilationDatabase: ${s.databaseDir.replace(/\\/g, '/')}`,
+    `  CompilationDatabase: ${yamlSingleQuote(s.databaseDir.replace(/\\/g, '/'))}`,
     'Diagnostics:',
     '  UnusedIncludes: None',
   ];
@@ -278,7 +283,7 @@ function buildScopeFragment(s: ClangdScopeConfig, marker: { begin: string; end: 
   if (s.headerFlags && s.headerFlags.length) {
     lines.push('---');
     lines.push('If:');
-    lines.push(`  PathMatch: ${dirRe}/.*\\.(h|hpp|hh|hxx|inl)$`);
+    lines.push(`  PathMatch: ${yamlSingleQuote(`${dirRe}/.*\\.(h|hpp|hh|hxx|inl)$`)}`);
     lines.push('CompileFlags:');
     lines.push('  Add:');
     for (const f of s.headerFlags) {
