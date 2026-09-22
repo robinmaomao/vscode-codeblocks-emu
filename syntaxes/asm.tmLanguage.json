@@ -1,0 +1,76 @@
+{
+  "name": "GNU Assembly (RISC-V)",
+  "scopeName": "source.asm",
+  "fileTypes": ["S", "s"],
+  "patterns": [
+    { "include": "#preprocessor" },
+    { "include": "#comments" },
+    { "include": "#strings" },
+    { "include": "#directives" },
+    { "include": "#registers" },
+    { "include": "#mnemonics" },
+    { "include": "#labels" },
+    { "include": "#numbers" }
+  ],
+  "repository": {
+    "preprocessor": {
+      "patterns": [
+        {
+          "name": "meta.preprocessor.asm",
+          "match": "^[ \\t]*#[ \\t]*(include|define|ifdef|ifndef|endif|if|elif|else|undef|error|warning|pragma)\\b.*$"
+        }
+      ]
+    },
+    "comments": {
+      "patterns": [
+        { "name": "comment.block.asm", "begin": "/\\*", "end": "\\*/" },
+        { "name": "comment.line.double-slash.asm", "match": "//.*$" },
+        { "name": "comment.line.hash.asm", "match": "#.*$" },
+        { "name": "comment.line.semicolon.asm", "match": ";.*$" }
+      ]
+    },
+    "strings": {
+      "patterns": [
+        { "name": "string.quoted.double.asm", "begin": "\"", "end": "\"" }
+      ]
+    },
+    "directives": {
+      "patterns": [
+        {
+          "name": "keyword.directive.asm",
+          "match": "\\.[A-Za-z_][A-Za-z0-9_]*"
+        }
+      ]
+    },
+    "registers": {
+      "patterns": [
+        {
+          "name": "variable.other.register.asm",
+          "match": "\\b(x(?:[0-9]|[12][0-9]|3[01])|zero|ra|sp|gp|tp|fp|pc|t[0-6]|s(?:[0-9]|1[01])|a[0-7])\\b"
+        }
+      ]
+    },
+    "mnemonics": {
+      "patterns": [
+        {
+          "name": "keyword.control.asm",
+          "match": "\\b(li|la|lui|auipc|addi|add|sub|and|or|xor|sll|srl|sra|slt|sltu|lb|lh|lw|ld|lbu|lhu|lwu|sb|sh|sw|sd|beq|bne|blt|bge|bltu|bgeu|jal|jalr|j|jr|ret|call|tail|nop|mv|not|neg|sext|zext|ecall|ebreak|fence|fence\\.i|csrr|csrw|csrs|csrc|csrwi|csrsi|csrci|mul|div|rem|mulh|mulhu|mulhsu|remu|remw)\\b"
+        }
+      ]
+    },
+    "labels": {
+      "patterns": [
+        {
+          "name": "entity.name.function.asm",
+          "match": "^[ \\t]*([A-Za-z_.$][A-Za-z0-9_.$]*)[ \\t]*:"
+        }
+      ]
+    },
+    "numbers": {
+      "patterns": [
+        { "name": "constant.numeric.hex.asm", "match": "\\b0[xX][0-9a-fA-F]+\\b" },
+        { "name": "constant.numeric.asm", "match": "\\b[0-9]+\\b" }
+      ]
+    }
+  }
+}
