@@ -31,7 +31,9 @@ const CLANG_INCOMPATIBLE_FLAGS = [
 /** 按空白切分命令行，但保留引号内的路径（含空格） */
 function tokenize(command: string): string[] {
   const tokens: string[] = [];
-  const re = /"([^"]*)"|(\S+)/g;
+  // 裸 token 排除引号：形如 -I"path with space" 的粘连引号会被拆成 -I 与 "path with space" 两个 token，
+  // 而非被 \S+ 贪婪匹配成 -I"path 这种坏 token
+  const re = /"([^"]*)"|([^\s"]+)/g;
   let m: RegExpExecArray | null;
   while ((m = re.exec(command)) !== null) {
     tokens.push(m[1] !== undefined ? m[1] : m[2]);
@@ -72,10 +74,21 @@ export function collectClangdEntries(
   }));
 }
 
-/** 把合并后的编译单元写入 compile_commands.json，返回路径与条数 */
-export function writeClangdDatabase(entries: CompileCommandEntry[], outDir: string): { outPath: string; count: number } {
+/** 把合并后的编译单元写入 compile_commands.json，返回路径与条数（内容未变则跳过写入） */
+export function writeClangdDatabase(entries: CompileCommandEntry[], outDir: string): { outPath: string; count: number; skipped: boolean } {
   if (!fs.existsSync(outDir)) fs.mkdirSync(outDir, { recursive: true });
   const outPath = path.join(outDir, 'compile_commands.json');
-  fs.writeFileSync(outPath, JSON.stringify(entries, null, 2) + '\n', 'utf-8');
-  return { outPath, count: entries.length };
+  const content = JSON.stringify(entries, null, 2) + '\n';
+
+  // 内容未变则跳过写入，避免 clangd 无谓地重建索引
+  try {
+    if (fs.readFileSync(outPath, 'utf-8') === content) {
+      return { outPath, count: entries.length, skipped: true };
+    }
+  } catch {
+    // 文件不存在，正常写入
+  }
+
+  fs.writeFileSync(outPath, content, 'utf-8');
+  return { outPath, count: entries.length, skipped: false };
 }

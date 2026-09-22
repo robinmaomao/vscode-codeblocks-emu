@@ -128,25 +128,25 @@ export class BuildEngine {
 
         const customCmd = file.customBuildCommands?.[target.compilerId]?.trim();
         const isCustom = customCmd !== undefined && customCmd !== '';
-        // 自定义命令文件（ram.ld/app.xm 等）或标准源文件才编译
-        if (!isCustom && !this.isCompilable(file.relativeFilename)) continue;
+        // 自定义 buildCommand 文件（ram.ld/app.xm 等链接脚本/资源）不是 C/C++ 源文件，
+        // clangd 无法解析，compile_commands.json 里跳过（构建仍照常处理它们）。
+        if (isCustom) continue;
+        // 只收集可编译的 C/C++ 源文件
+        if (!this.isCompilable(file.relativeFilename)) continue;
+        // .rc（Windows 资源脚本）虽参与构建，但 clangd 无法解析，compile_commands.json 里跳过
+        if (/\.rc$/i.test(file.relativeFilename)) continue;
 
         const objectRel = this.objectPathRelative(target, file);
 
-        let command: string;
-        if (isCustom) {
-          command = this.expandCustomCommand(customCmd, generator, target, file, objectRel);
-        } else {
-          command = generator.generate(CommandType.CompileObjectCmd, {
-            target,
-            pf: file,
-            file: file.absolutePath,
-            object: objectRel,
-            flatObject: objectRel,
-            deps: this.depsPathFor(target, file),
-            hasCppFilesToLink: hasCpp,
-          });
-        }
+        const command = generator.generate(CommandType.CompileObjectCmd, {
+          target,
+          pf: file,
+          file: file.absolutePath,
+          object: objectRel,
+          flatObject: objectRel,
+          deps: this.depsPathFor(target, file),
+          hasCppFilesToLink: hasCpp,
+        });
         if (command) {
           entries.push({ directory: this.project.basePath, command, file: file.absolutePath });
         }
