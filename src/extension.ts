@@ -71,6 +71,8 @@ let clangdDiagnosticsEnabled = false;
 let clangdGenTimer: NodeJS.Timeout | undefined;
 /** clangd 配置生成进行中标志（防止并发写同一文件） */
 let clangdGenRunning = false;
+/** 活动工程切换后，若编译数据库实际变化则重启 clangd（刷新已打开文件） */
+let restartClangdAfterGeneration = false;
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
   extContext = context;
@@ -105,6 +107,15 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     reorderProjects(src, target);
   };
   context.subscriptions.push(projectTreeView);
+
+  // 点击工程树任意节点（项目/文件夹/文件）时，切换活动工程为该节点所属工程；
+  // 共享文件点哪个工程子树就切哪个（每个节点自带所属 project）
+  projectTreeView.onDidChangeSelection((e) => {
+    const node = e.selection[0];
+    if (node?.project) {
+      setActiveProject(node.project, { persist: true });
+    }
+  });
 
   // 注册构建日志树视图（结构化构建摘要）
   buildLogTreeProvider = new BuildLogTreeProvider();
@@ -621,7 +632,25 @@ function setActiveProject(project: Project | undefined, opts: { persist?: boolea
   }
   // 仅当存在共享文件时才需重建（共享文件按活动工程去重）；无共享文件则 DB 内容与活动工程无关
   if (hasSharedFiles()) {
+    // 标记：若 DB 实际变化，则重启 clangd 强制刷新已打开文件
+    restartClangdAfterGeneration = true;
     void generateClangdForWorkspace();
+  }
+}
+
+/** 是否有打开的 C/C++ 源文件（用于判断是否值得重启 clangd 刷新诊断） */
+function hasOpenSourceFile(): boolean {
+  return vscode.window.visibleTextEditors.some((e) =>
+    /\.(c|cpp|cc|cxx|h|hpp|hh|hxx)$/i.test(e.document.uri.fsPath),
+  );
+}
+
+/** 重启 clangd（最佳努力；clangd 扩展未安装时静默忽略） */
+async function restartClangd(): Promise<void> {
+  try {
+    await vscode.commands.executeCommand('clangd.restart');
+  } catch {
+    // 忽略：clangd 扩展不存在或命令不可用
   }
 }
 
@@ -753,6 +782,9 @@ async function runClangdGeneration(interactive: boolean): Promise<void> {
 }
 
 async function generateClangdForWorkspaceInternal(interactive: boolean): Promise<void> {
+  // 捕获本次是否由「活动工程切换」触发（用于 DB 变化后决定是否重启 clangd）
+  const restartRequested = restartClangdAfterGeneration;
+  restartClangdAfterGeneration = false;
   try {
     if (!extContext) return;
     const cfg = vscode.workspace.getConfiguration('codeblocks');
@@ -821,6 +853,12 @@ async function generateClangdForWorkspaceInternal(interactive: boolean): Promise
     outputChannel.appendLine(`[Code::Blocks] ${skipped
       ? 'compile_commands.json 未变化，跳过写入'
       : `已重新生成 compile_commands.json（${count} 条编译命令）→ ${outPath}`}`);
+
+    // 活动工程切换且 DB 实际变化：重启 clangd，让已打开文件按新编译命令重新分析
+    if (restartRequested && !skipped && cfg.get<boolean>('clangd.restartOnActiveProjectSwitch', true) && hasOpenSourceFile()) {
+      outputChannel.appendLine('[Code::Blocks] 活动工程已切换，重启 clangd 以刷新已打开文件');
+      void restartClangd();
+    }
 
     if (clangd) {
       // 头文件回退 flag：编译数据库里只有 .c 条目，头文件需靠 Add 提供 -I/-isystem/--target
@@ -1466,6 +1504,8 @@ async function buildSingleProject(filename: string, rebuild: boolean): Promise<v
     vscode.window.showWarningMessage('项目未找到');
     return;
   }
+  // 单工程编译时，活动工程也切换为该工程（状态栏 / 后续构建 / clangd 随之更新）
+  setActiveProject(project, { persist: true });
   await saveAllBeforeBuild();
 
   const targetTitle = getSelectedTarget(project) ?? project.buildTargets[0]?.title;

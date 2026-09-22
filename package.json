@@ -2,7 +2,7 @@
   "name": "codeblocks-vscode",
   "displayName": "Code::Blocks for VS Code",
   "description": "原生移植 Code::Blocks 核心功能到 VS Code：项目模型、构建引擎、编译器管理与调试引擎",
-  "version": "0.7.0",
+  "version": "0.7.1",
   "publisher": "codeblocks",
   "author": {
     "name": "Robinmaomao"
@@ -226,6 +226,11 @@
           "enum": ["build", "clangd"],
           "default": "build",
           "description": "检测到 clangd 时 Build Log 视图的诊断来源：build = 构建引擎完整诊断（默认，覆盖所有编译文件）；clangd = 使用 clangd 诊断（仅打开过的文件，可能不完整）。无论哪种，Problems 面板都由 clangd 产出"
+        },
+        "codeblocks.clangd.restartOnActiveProjectSwitch": {
+          "type": "boolean",
+          "default": true,
+          "description": "切换活动工程且编译数据库实际变化（存在共享文件）时，是否重启 clangd 以让已打开文件立即按新活动工程的编译命令重新分析（更新红波浪线/补全/跳转）。重启会触发 clangd 重新索引，若觉得频繁可关闭"
         },
         "codeblocks.clangd.forcedIncludes": {
           "type": "array",
