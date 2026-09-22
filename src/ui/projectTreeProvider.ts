@@ -114,6 +114,14 @@ export class ProjectTreeProvider implements vscode.TreeDataProvider<TreeNode> {
   }
 
   getTreeItem(element: TreeNode): vscode.TreeItem {
+    // 项目节点图标在此实时计算：getTreeItem 每次渲染都会调用，拿到的是最新 activeProject，
+    // 避免只在 getChildren 里算一次、切换活动工程时被 TreeView 节点复用缓存吞掉（绿点不更新）。
+    if (element.kind === 'project') {
+      const isActive = element.project?.filename === this.activeProject?.filename;
+      element.iconPath = isActive
+        ? (this.activeIconPath ?? new vscode.ThemeIcon('circle-filled'))
+        : (this.inactiveIconPath ?? new vscode.ThemeIcon('circle-outline'));
+    }
     return element;
   }
 
@@ -131,14 +139,10 @@ export class ProjectTreeProvider implements vscode.TreeDataProvider<TreeNode> {
           'project',
           p,
         );
+        // 稳定 id：让 TreeView 在刷新时能正确识别/复用项目节点，配合 getTreeItem 更新图标
+        node.id = p.filename;
         node.description = path.basename(p.filename);
         node.tooltip = p.filename;
-        // 活动项目高亮：实心绿点；非活动：空心灰点（自定义 SVG，颜色可靠）
-        if (p.filename === this.activeProject?.filename) {
-          node.iconPath = this.activeIconPath ?? new vscode.ThemeIcon('circle-filled');
-        } else {
-          node.iconPath = this.inactiveIconPath ?? new vscode.ThemeIcon('circle-outline');
-        }
         return node;
       });
     }
