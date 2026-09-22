@@ -1,9 +1,13 @@
 {
-  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
   "name": "xmaker-xm",
   "scopeName": "source.xm",
   "fileTypes": ["xm"],
   "patterns": [
+    {
+      "comment": "C 预处理器指令：#include / #define 等",
+      "name": "keyword.control.directive.xm",
+      "match": "^\\s*#\\s*(include|define|ifdef|ifndef|endif|if|elif|else|undef|error|warning|pragma)\\b"
+    },
     {
       "comment": "行注释：# 到行尾",
       "name": "comment.line.number-sign.xm",

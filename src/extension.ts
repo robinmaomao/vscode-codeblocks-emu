@@ -60,6 +60,10 @@ let buildStatusBar: vscode.StatusBarItem | undefined;
 let rebuildStatusBar: vscode.StatusBarItem | undefined;
 /** 底部状态栏：编译器选择 */
 let compilerStatusBar: vscode.StatusBarItem | undefined;
+/** 底部状态栏：检测到未打开的 Code::Blocks 项目入口 */
+let cbpStatusBar: vscode.StatusBarItem | undefined;
+/** 检测到但未打开的 .cbp 文件（供状态栏入口重新打开） */
+let pendingCbpFiles: string[] = [];
 
 /** 兜底 IntelliSense 符号索引（clangd 不可用时启用） */
 const fallbackIndex = new SymbolIndex();
@@ -441,6 +445,18 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     }),
   );
 
+  // 状态栏入口：检测到未打开的 .cbp 时显示，点击重新选择打开
+  cbpStatusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 110);
+  cbpStatusBar.command = 'codeblocks.openDetectedProject';
+  cbpStatusBar.tooltip = '检测到未打开的 Code::Blocks 项目，点击选择打开';
+  cbpStatusBar.hide();
+  context.subscriptions.push(cbpStatusBar);
+  context.subscriptions.push(
+    vscode.commands.registerCommand('codeblocks.openDetectedProject', async () => {
+      await pickAndOpenCbp(pendingCbpFiles);
+    }),
+  );
+
   // 自动检测并打开工作区中的 .cbp
   await autoDetectAndOpenProject();
 
@@ -486,18 +502,45 @@ async function autoDetectAndOpenProject(): Promise<void> {
   // 已打开的项目不重复列在可选列表里（但标记）
   const alreadyOpen = new Set(openProjects.map((p) => p.filename));
   const notOpen = cbpFiles.filter((f) => !alreadyOpen.has(f));
+
+  // 更新待打开列表与状态栏入口
+  pendingCbpFiles = notOpen;
+  updateCbpStatusBar();
+
   if (notOpen.length === 0) return;
 
   // 单文件直接打开；多文件让用户多选
   if (notOpen.length === 1) {
     await openProject(notOpen[0]);
+    pendingCbpFiles = [];
+    updateCbpStatusBar();
     return;
   }
 
+  await pickAndOpenCbp(notOpen);
+
+  // 打开完成后按持久化顺序排列
+  applyPersistedOrder();
+}
+
+/** 弹出多选让用户打开检测到的 .cbp（供自动检测与状态栏入口复用） */
+async function pickAndOpenCbp(files: string[]): Promise<void> {
+  const alreadyOpen = new Set(openProjects.map((p) => p.filename));
+  const notOpen = files.filter((f) => !alreadyOpen.has(f));
+  if (notOpen.length === 0) {
+    pendingCbpFiles = [];
+    updateCbpStatusBar();
+    return;
+  }
   const picked = await vscode.window.showQuickPick(
-    notOpen.map((f) => ({ label: path.basename(f), description: f })),
+    notOpen.map((f) => ({
+      label: `${path.basename(path.dirname(f))}/${path.basename(f)}`,
+      description: f,
+      picked: true,
+    })),
     {
-      placeHolder: '检测到多个 Code::Blocks 项目，请选择要打开的 .cbp（可多选）',
+      title: `检测到 ${notOpen.length} 个 Code::Blocks 项目`,
+      placeHolder: '回车打开全部，空格勾选/取消，Esc 跳过',
       canPickMany: true,
     },
   );
@@ -506,9 +549,21 @@ async function autoDetectAndOpenProject(): Promise<void> {
       await openProject(p.description!);
     }
   }
+  // 重新计算待打开列表（未选中的仍保留在状态栏入口）
+  const stillOpen = new Set(openProjects.map((p) => p.filename));
+  pendingCbpFiles = notOpen.filter((f) => !stillOpen.has(f));
+  updateCbpStatusBar();
+}
 
-  // 打开完成后按持久化顺序排列
-  applyPersistedOrder();
+/** 根据待打开的 .cbp 数量更新状态栏入口 */
+function updateCbpStatusBar(): void {
+  if (!cbpStatusBar) return;
+  if (pendingCbpFiles.length > 0) {
+    cbpStatusBar.text = `$(project) Code::Blocks 项目 (${pendingCbpFiles.length})`;
+    cbpStatusBar.show();
+  } else {
+    cbpStatusBar.hide();
+  }
 }
 
 async function findCbpFiles(folders: string[]): Promise<string[]> {
@@ -1855,6 +1910,7 @@ const LD_XM_TOKEN_RULES: { scope: string; settings: { foreground?: string; fontS
   { scope: 'punctuation.terminator.statement.ld', settings: { foreground: '#FF5555' } },
   { scope: 'punctuation.separator.colon.ld', settings: { foreground: '#D4D4D4' } },
   // === xm 配置脚本 ===
+  { scope: 'keyword.control.directive.xm', settings: { foreground: '#C586C0' } },
   { scope: 'keyword.control.xm', settings: { foreground: '#C586C0' } },
   { scope: 'storage.type.xm', settings: { foreground: '#4FC1FF' } },
   { scope: 'variable.other.constant.xm', settings: { foreground: '#9CDCFE' } },
