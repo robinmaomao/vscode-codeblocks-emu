@@ -43,6 +43,71 @@ export function isStaticLibFile(filename: string): boolean {
   return fileExt(filename) === 'a';
 }
 
+/** 文件类型 —— globals.h FileType（完整枚举，供 buildEngine 分类） */
+export enum FileType {
+  Source = 'ftSource',
+  TemplateSource = 'ftTemplateSource',
+  Header = 'ftHeader',
+  Object = 'ftObject',
+  XRCResource = 'ftXRCResource',
+  Resource = 'ftResource',
+  ResourceBin = 'ftResourceBin',
+  StaticLib = 'ftStaticLib',
+  DynamicLib = 'ftDynamicLib',
+  Native = 'ftNative',
+  Executable = 'ftExecutable',
+  XMLDocument = 'ftXMLDocument',
+  Script = 'ftScript',
+  Other = 'ftOther',
+}
+
+/** FileTypeOf 等价实现（globals.cpp 的扩展名→类型映射） */
+export function fileTypeOf(filenameOrPath: string): FileType {
+  if (isSourceFile(filenameOrPath)) return FileType.Source;
+  const ext = fileExt(filenameOrPath);
+  if (ext === 'tpp' || ext === 'tcc') return FileType.TemplateSource;
+  if (ext === 'h' || ext === 'hh' || ext === 'hpp' || ext === 'hxx' || ext === 'h++' || ext === 'inl') return FileType.Header;
+  if (ext === 'o') return FileType.Object;
+  if (ext === 'xrc') return FileType.XRCResource;
+  if (ext === 'rc') return FileType.Resource;
+  if (ext === 'res') return FileType.ResourceBin;
+  if (ext === 'a') return FileType.StaticLib;
+  if (ext === 'dll' || ext === 'so' || ext === 'dylib') return FileType.DynamicLib;
+  if (ext === 'sys') return FileType.Native;
+  if (ext === 'exe') return FileType.Executable;
+  if (ext === 'xml') return FileType.XMLDocument;
+  if (ext === 'script') return FileType.Script;
+  return FileType.Other;
+}
+
+/** 是否可编译 —— 对齐 cbProject::AddFile 的 localCompile 默认（源文件/资源文件） */
+export function isCompilableFileType(ft: FileType): boolean {
+  return ft === FileType.Source || ft === FileType.Resource;
+}
+
+/** 是否可链接 —— 对齐 cbProject::AddFile 的 localLink 默认 */
+export function isLinkableFileType(ft: FileType): boolean {
+  return (
+    ft === FileType.Source ||
+    ft === FileType.Resource ||
+    ft === FileType.Object ||
+    ft === FileType.ResourceBin ||
+    ft === FileType.StaticLib
+  );
+}
+
+/** 是否为 C++ 源文件（用于 hasCppFilesToLink / 链接器选择） */
+export function isCppSource(filenameOrPath: string): boolean {
+  const ext = fileExt(filenameOrPath);
+  return ext === 'cc' || ext === 'cpp' || ext === 'cxx' || ext === 'c++';
+}
+
+/** 是否为 clangd 可索引的 C/C++ 源文件（汇编/资源/链接脚本不可索引） */
+export function isClangdIndexable(filenameOrPath: string): boolean {
+  const ext = fileExt(filenameOrPath);
+  return ext === 'c' || ext === 'cc' || ext === 'cpp' || ext === 'cxx' || ext === 'c++';
+}
+
 /**
  * compile 默认值 —— SaveUnit: f->compile != (ft == ftSource || ft == ftResource)。
  * 源文件 / .rc 默认 true，头文件等默认 false。

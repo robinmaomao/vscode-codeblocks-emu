@@ -66,6 +66,14 @@ export interface EnvVariable {
   value: string;
 }
 
+/** 自定义编译命令 —— projectfile.h pfCustomBuild */
+export interface CustomBuildCommand {
+  /** 构建命令模板（含 $compiler/$file 等宏） */
+  command: string;
+  /** 是否启用该自定义命令（<Option use="1"/>） */
+  use: boolean;
+}
+
 /** 单个文件在项目中的定义 —— projectfile.h ProjectFile */
 export interface ProjectFile {
   /** 相对项目根目录的路径（Unix 分隔符） */
@@ -84,8 +92,8 @@ export interface ProjectFile {
   compile: boolean;
   /** 是否参与链接（<Option link="1"/>） */
   link: boolean;
-  /** 自定义编译命令（按编译器 ID 映射：compilerId → buildCommand） */
-  customBuildCommands: Record<string, string>;
+  /** 自定义编译命令（按编译器 ID 映射：compilerId → pfCustomBuild） */
+  customBuildCommands: Record<string, CustomBuildCommand>;
   /** 编译权重（0-100，默认 50，小者先编译，对应 projectfile.h weight） */
   weight: number;
   /** 虚拟文件夹归属（空 = 根，对应 <Option virtualFolder>） */

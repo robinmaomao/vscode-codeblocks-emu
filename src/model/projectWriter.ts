@@ -214,9 +214,9 @@ function writeUnit(L: string[], f: ProjectFile, totalTargets: number): void {
   }
   if (f.weight !== 50) opts.push(`weight="${f.weight}"`);
   if (f.virtualFolder) opts.push(`virtualFolder="${esc(unix(f.virtualFolder))}"`);
-  for (const [compiler, cmd] of Object.entries(f.customBuildCommands)) {
-    if (!cmd) continue;
-    opts.push(`compiler="${esc(compiler)}" use="1" buildCommand="${esc(cmd.replace(/\n/g, '\\n'))}"`);
+  for (const [compiler, c] of Object.entries(f.customBuildCommands)) {
+    if (!c || !c.command) continue;
+    opts.push(`compiler="${esc(compiler)}" use="${c.use ? '1' : '0'}" buildCommand="${esc(c.command.replace(/\n/g, '\\n'))}"`);
   }
   // 文件目标数 != 项目目标数 时才写 target（数量相等 = 默认属于所有目标）
   if (f.buildTargets.length !== totalTargets) {
