@@ -246,14 +246,19 @@ export class CommandGenerator {
   /** 选择编译/链接器程序（对应 GenerateCommandLine 里的 compExec 逻辑） */
   private pickCompilerProgram(params: GenerateParams): { comp: string; isCpp: boolean } {
     const prog = this.compiler.programs;
+    // 汇编源文件（.s/.S/.asm/.ss/.s62）无论 compilerVar 如何都归 C 编译器：
+    // 与扩展既有策略一致，避免用 g++ 汇编、并防止 g++ 链接带入 C++ 运行库（嵌入式交叉编译器场景）。
+    const ext = path.extname(unquote(params.file)).toLowerCase().replace('.', '');
+    if (ext === 's' || ext === 'asm' || ext === 'ss' || ext === 's62') {
+      return { comp: prog.C, isCpp: false };
+    }
     if (params.pf) {
       if (params.pf.compilerVar === 'CPP') return { comp: prog.CPP, isCpp: true };
       if (params.pf.compilerVar === 'CC') return { comp: prog.C, isCpp: false };
       if (params.pf.compilerVar === 'WINDRES') return { comp: prog.WINDRES, isCpp: false };
     }
-    // 按扩展名（.s/.S/.asm 汇编文件归 C 编译器，避免 g++ 链接带入 C++ 运行库）
-    const ext = path.extname(unquote(params.file)).toLowerCase().replace('.', '');
-    if (ext === 'c' || ext === 's' || ext === 'asm') return { comp: prog.C, isCpp: false };
+    // 按扩展名兜底：.c 归 C 编译器，其余（.cpp/.cc/.cxx 等）归 C++ 编译器
+    if (ext === 'c') return { comp: prog.C, isCpp: false };
     return { comp: prog.CPP, isCpp: true };
   }
 

@@ -185,7 +185,7 @@ export class ProjectPropertiesPanel {
       compile: f.compile !== false,
       link: f.link !== false,
       buildTargets: [...f.buildTargets],
-      buildCommand: (f.customBuildCommands[cmp] ?? '').replace(/\r?\n/g, '\\n'),
+      buildCommand: (f.customBuildCommands[cmp]?.command ?? '').replace(/\r?\n/g, '\\n'),
       weight: f.weight,
       virtualFolder: f.virtualFolder,
     }));

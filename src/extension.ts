@@ -1343,7 +1343,7 @@ async function saveProjectProperties(
     const cmp = project.compilerId;
     const cmd = fe.buildCommand.trim();
     if (cmd) {
-      f.customBuildCommands[cmp] = cmd;
+      f.customBuildCommands[cmp] = { command: cmd, use: true };
     } else {
       delete f.customBuildCommands[cmp];
     }

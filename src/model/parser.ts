@@ -526,10 +526,15 @@ export class ProjectParser {
           if (o['@_weight'] !== undefined) file.weight = Number(o['@_weight']) || 50;
           if (o['@_virtualFolder'] !== undefined) file.virtualFolder = toUnix(String(o['@_virtualFolder']));
           // custom build command：<Option compiler="id" use="1" buildCommand="..."/>
+          // 对齐 DoUnitOptions：compiler 与 buildCommand 均非空（不 trim）才记录；
+          // use 属性仅在此时读取（缺省为 0/false，即不启用）。
           if (o['@_buildCommand'] !== undefined && o['@_compiler'] !== undefined) {
             const cmp = String(o['@_compiler']);
             const cmd = String(o['@_buildCommand']).replace(/\\n/g, '\n');
-            if (cmp && cmd) file.customBuildCommands[cmp] = cmd;
+            if (cmp && cmd) {
+              const use = o['@_use'] !== undefined ? String(o['@_use']) !== '0' : false;
+              file.customBuildCommands[cmp] = { command: cmd, use };
+            }
           }
         }
       }

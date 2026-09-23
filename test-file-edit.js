@@ -28,7 +28,7 @@ for (const fe of fileEdits) {
   f.link = fe.link;
   const cmp = project.compilerId;
   const cmd = fe.buildCommand.trim();
-  if (cmd) f.customBuildCommands[cmp] = cmd; else delete f.customBuildCommands[cmp];
+  if (cmd) f.customBuildCommands[cmp] = { command: cmd, use: true }; else delete f.customBuildCommands[cmp];
   const checked = fe.buildTargets.filter(t => newTitles.has(t));
   if (checked.length === newTitles.size && newTitles.size > 0) {
     f.explicitTargets = false;
