@@ -8,6 +8,16 @@
 import * as path from 'path';
 import * as fs from 'fs';
 import * as os from 'os';
+import { ProjectFile } from '../model/types';
+
+/** 按 weight + 文件名排序（对齐 directcommands.cpp MySortProjectFilesByWeight） */
+export function compareFilesByWeight(a: ProjectFile, b: ProjectFile): number {
+  const dw = a.weight - b.weight;
+  if (dw !== 0) return dw;
+  const ci = a.relativeFilename.toLowerCase().localeCompare(b.relativeFilename.toLowerCase());
+  if (ci !== 0) return ci;
+  return a.relativeFilename.localeCompare(b.relativeFilename);
+}
 
 /** Windows cmd.exe 命令行上限 8191 字符，留余量 */
 export const MAX_CMD_LENGTH = 8000;

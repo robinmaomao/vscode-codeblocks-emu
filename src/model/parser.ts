@@ -421,6 +421,7 @@ export class ProjectParser {
         compile: isCompilableFileType(ft),
         link: isLinkableFileType(ft),
         customBuildCommands: {},
+        weight: 50,
       };
 
       let foundTarget = false;
@@ -444,6 +445,7 @@ export class ProjectParser {
           if (o['@_compilerVar'] !== undefined) file.compilerVar = String(o['@_compilerVar']);
           if (o['@_compile'] !== undefined) file.compile = String(o['@_compile']) !== '0';
           if (o['@_link'] !== undefined) file.link = String(o['@_link']) !== '0';
+          if (o['@_weight'] !== undefined) file.weight = Number(o['@_weight']) || 50;
           // custom build command：<Option compiler="id" use="1" buildCommand="..."/>
           // 对齐 DoUnitOptions：compiler 与 buildCommand 均非空（不 trim）才记录；
           // use 属性仅在此时读取（缺省为 0/false，即不启用）。
