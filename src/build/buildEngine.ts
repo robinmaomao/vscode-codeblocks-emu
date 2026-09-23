@@ -147,6 +147,7 @@ export class BuildEngine {
           flatObject: objectRel,
           deps: this.depsPathFor(target, file),
           hasCppFilesToLink: hasCpp,
+          nativeSep: false,
         });
         if (command) {
           entries.push({ directory: this.project.basePath, command, file: file.absolutePath });
