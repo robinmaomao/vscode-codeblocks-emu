@@ -23,7 +23,7 @@ function toUnix(p: string): string {
 }
 
 /** 如果字符串含空白则加引号（QuoteStringIfNeeded） */
-function quoteIfNeeded(s: string): string {
+export function quoteIfNeeded(s: string): string {
   if (!s) return s;
   // 含空白或 cmd 元字符（& | < > ^ ( )）时加引号，避免 shell 二次解析拆断路径
   if (/[ \t&|<>^()]/.test(s) && !s.startsWith('"')) {
