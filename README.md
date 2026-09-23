@@ -4,7 +4,7 @@
 
 直接在 VS Code 中打开 `.cbp` / `.workspace` 工程，即可获得与 Code::Blocks 对齐的构建、调试与工程浏览体验。
 
-> **作者**：Robinmaomao ｜ **版本**：0.8.4
+> **作者**：Robinmaomao ｜ **版本**：0.8.11
 
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE.md)
 
@@ -28,6 +28,9 @@
   - 增量编译（源文件 + `#include` 头文件依赖 mtime 比对）、`rebuild` 对齐 Code::Blocks（先 Clean 再 Build）
   - 文件类型判定对齐 Code::Blocks `FileTypeOf`：汇编源文件（`.S`/`.s`/`.asm`/`.ss`/`.s62`）正确编译并参与链接；链接脚本（`.ld`）等非源文件默认不编译不链接；`<Option buildCommand>` 自定义命令按 `use="1"` 语义识别
   - pre/post build 脚本（`.bat` / 命令；Windows 下实时读取系统 PATH，支持运行期新加入 PATH 的工具）
+  - 带空格工具链路径自动加引号（如 `C:\Program Files (x86)\...` 下的 gcc / ar，避免 cmd 在空格处截断）
+  - 超长命令行自动改用响应文件（`@file`，对齐 Code::Blocks CheckForToLongCommandLine，解决大量对象文件链接时 cmd「命令行太长」）
+  - 静态库归档对齐 Code::Blocks `LinkStatic` 模板（先删旧库再 ar，避免追加旧符号）
   - 对象目录 `CreateDirRecursively` 自动创建
   - `GetCommonTopLevelPath` 对象路径布局（`Output/obj/<公共顶层>/...`）
   - GBK 输出解码（中文 Windows 下 GCC 报错不乱码）
@@ -51,7 +54,7 @@ npx tsc -p ./
 npx vsce package --allow-missing-repository
 
 # 4. 安装
-code --install-extension codeblocks-vscode-0.8.4.vsix --force
+code --install-extension codeblocks-vscode-0.8.11.vsix --force
 ```
 
 > Windows 下建议使用 `npm.cmd` / `npx.cmd`（PSReadLine 执行策略）。

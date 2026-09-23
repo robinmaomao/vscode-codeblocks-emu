@@ -8,6 +8,7 @@
  */
 import * as path from 'path';
 import { Compiler } from '../compiler/compiler';
+import { upperDrive } from '../tools/pathCase';
 import {
   Project,
   BuildTarget,
@@ -28,13 +29,36 @@ function toNative(p: string): string {
 }
 
 /** 如果字符串含空白则加引号（QuoteStringIfNeeded） */
-function quoteIfNeeded(s: string): string {
+export function quoteIfNeeded(s: string): string {
   if (!s) return s;
   // 含空白或 cmd 元字符（& | < > ^ ( )）时加引号，避免 shell 二次解析拆断路径
   if (/[ \t&|<>^()]/.test(s) && !s.startsWith('"')) {
     return `"${s}"`;
   }
   return s;
+}
+
+/**
+ * 计算库输出文件名（对齐 SetupOutputFilenames，compilercommandgenerator.cpp:747 / 773）：
+ * prefix_auto（平台默认）时 basename 不以 libPrefix 开头则加 lib 前缀；
+ * extension_auto（平台默认）时扩展名不是指定扩展名则追加。
+ */
+export function computeLibOutput(outputFilename: string, libPrefix: string, extension: string): string {
+  const parsed = path.parse(outputFilename);
+  let name = parsed.name;
+  if (libPrefix && !name.startsWith(libPrefix)) {
+    name = libPrefix + name;
+  }
+  let result = path.join(parsed.dir, name);
+  if (!result.endsWith('.' + extension)) {
+    result = result + '.' + extension;
+  }
+  return result;
+}
+
+/** 静态库/import 库输出（.a），复用 computeLibOutput */
+export function computeStaticOutput(outputFilename: string, switches: { libPrefix: string; libExtension: string }): string {
+  return computeLibOutput(outputFilename, switches.libPrefix, switches.libExtension);
 }
 
 function unquote(s: string): string {
@@ -141,17 +165,12 @@ export class CommandGenerator {
   }
 
   private setupStaticOutput(target: BuildTarget): string {
-    const out = target.outputFilename;
-    const ext = path.extname(out);
-    const base = out.slice(0, out.length - ext.length);
-    return quoteIfNeeded(base + '.' + this.compiler.switches.libExtension);
+    return quoteIfNeeded(computeStaticOutput(target.outputFilename, this.compiler.switches));
   }
 
   private setupDefOutput(target: BuildTarget): string {
-    const out = target.outputFilename;
-    const ext = path.extname(out);
-    const base = out.slice(0, out.length - ext.length);
-    return quoteIfNeeded(base + '.def');
+    // def 文件名同样加 lib 前缀（对齐 SetupOutputFilenames 第 773 行的 fname.SetExt("def")）
+    return quoteIfNeeded(computeLibOutput(target.outputFilename, this.compiler.switches.libPrefix, 'def'));
   }
 
   private setupIncludeDirs(target: BuildTarget): string {
@@ -340,7 +359,7 @@ export class CommandGenerator {
     const file = params.file;
     // 默认将 $file/$file_dir 转为平台原生分隔符（Windows 反斜杠），对齐 Code::Blocks 命令行；
     // nativeSep=false 时保持正斜杠（clangd compile_commands.json 偏好正斜杠）
-    const fname = params.nativeSep === false ? unquote(file) : toNative(unquote(file));
+    const fname = params.nativeSep === false ? unquote(file) : upperDrive(toNative(unquote(file)));
     const ext = path.extname(fname);
     const baseName = path.basename(fname, ext);
     const dirName = path.dirname(fname);
@@ -435,6 +454,11 @@ export class CommandGenerator {
         }
       }
     }
+
+    // 8.5 路径转换函数式宏（对齐 macrosmanager.cpp：$TO_WINDOWS_PATH{$x} / $TO_UNIX_PATH{$x}）
+    // 必须在 $static_output 等宏展开之后处理（{} 内可能嵌套宏）
+    macro = macro.replace(/\$TO_WINDOWS_PATH\{([^}]*)\}/g, (_, p: string) => p.replace(/\//g, '\\'));
+    macro = macro.replace(/\$TO_UNIX_PATH\{([^}]*)\}/g, (_, p: string) => p.replace(/\\/g, '/'));
 
     // 9. 展开 Code::Blocks 构建变量宏（$(TARGET_OBJECT_DIR)、$(PROJECT_NAME) 等）
     if (params.target) {
