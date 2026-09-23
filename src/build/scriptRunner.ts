@@ -12,6 +12,7 @@
 import * as vscode from 'vscode';
 import { spawn } from 'child_process';
 import { decodeText } from '../tools/encoding';
+import { getWindowsSystemPath } from '../tools/windowsPath';
 
 /** 展开命令中的宏（Code::Blocks 变量风格） */
 export function expandMacros(cmd: string, vars: Record<string, string>): string {
@@ -35,6 +36,23 @@ function decodeOutput(buf: Buffer): string {
   return decodeText(buf);
 }
 
+/** 合并 PATH 段并去重（Windows 分号分隔，忽略大小写去重，保持顺序） */
+function mergePath(...parts: string[]): string {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const part of parts) {
+    for (const seg of part.split(';')) {
+      const s = seg.trim();
+      const key = s.toLowerCase();
+      if (s && !seen.has(key)) {
+        seen.add(key);
+        out.push(s);
+      }
+    }
+  }
+  return out.join(';');
+}
+
 /** 执行单条脚本命令（可附加环境变量，如编译器 bin 目录加入 PATH） */
 export function runScriptCommand(
   command: string,
@@ -45,6 +63,10 @@ export function runScriptCommand(
   return new Promise((resolve) => {
     const expanded = expandMacros(command, vars);
     const env: Record<string, string> = { ...(process.env as Record<string, string>) };
+    if (process.platform === 'win32') {
+      // Windows：实时读取系统 PATH（注册表 Machine+User），宿主进程 PATH 快照可能过期
+      env.PATH = mergePath(getWindowsSystemPath(), env.PATH ?? '');
+    }
     if (extraPath) {
       const sep = process.platform === 'win32' ? ';' : ':';
       env.PATH = extraPath + sep + (env.PATH ?? '');
