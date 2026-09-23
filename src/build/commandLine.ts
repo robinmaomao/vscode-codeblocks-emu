@@ -14,9 +14,16 @@ import { ProjectFile } from '../model/types';
 export function compareFilesByWeight(a: ProjectFile, b: ProjectFile): number {
   const dw = a.weight - b.weight;
   if (dw !== 0) return dw;
-  const ci = a.relativeFilename.toLowerCase().localeCompare(b.relativeFilename.toLowerCase());
-  if (ci !== 0) return ci;
-  return a.relativeFilename.localeCompare(b.relativeFilename);
+  // 对齐 wxString::CmpNoCase / Cmp 的字节序比较，而非 localeCompare：
+  // localeCompare 会忽略 '.' / '_' 等标点，导致 "func.c" 被排到 "func_aux.c" 之后，
+  // 进而链接对象顺序与 Code::Blocks 不一致、产物字节不同。
+  const al = a.relativeFilename.toLowerCase();
+  const bl = b.relativeFilename.toLowerCase();
+  if (al < bl) return -1;
+  if (al > bl) return 1;
+  if (a.relativeFilename < b.relativeFilename) return -1;
+  if (a.relativeFilename > b.relativeFilename) return 1;
+  return 0;
 }
 
 /** Windows cmd.exe 命令行上限 8191 字符，留余量 */

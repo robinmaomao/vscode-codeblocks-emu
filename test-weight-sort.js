@@ -45,4 +45,9 @@ const files3 = [mk('z.c', 50), mk('m.c', 50), mk('a.c', 50)];
 const sorted3 = [...files3].sort(compareFilesByWeight).map((f) => f.relativeFilename);
 check('默认 weight 全 50 → 按文件名', JSON.stringify(sorted3) === JSON.stringify(['a.c', 'm.c', 'z.c']));
 
+// 5. 字节序：'.' < '_'，所以 func.c 应排在 func_aux.c 之前（对齐 wxString::CmpNoCase，而非 localeCompare）
+const files4 = [mk('func_aux.c', 50), mk('func.c', 50), mk('func_bt.c', 50)];
+const sorted4 = [...files4].sort(compareFilesByWeight).map((f) => f.relativeFilename);
+check('func.c < func_aux.c（字节序）', JSON.stringify(sorted4) === JSON.stringify(['func.c', 'func_aux.c', 'func_bt.c']));
+
 process.exit(failed ? 1 : 0);
