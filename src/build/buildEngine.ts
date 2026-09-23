@@ -17,6 +17,7 @@ import { OutputParser } from './outputParser';
 import { runScriptCommands, buildMacroVars } from './scriptRunner';
 import { decodeText } from '../tools/encoding';
 import { applyResponseFile, compareFilesByWeight } from './commandLine';
+import { upperDrive } from '../tools/pathCase';
 
 /** 结构化的诊断信息（供 Build Log 视图展示，文件为绝对路径） */
 export interface StructuredDiagnostic {
@@ -704,7 +705,7 @@ export class BuildEngine {
       }
       command = resp.command;
       const proc = spawn(command, {
-        cwd,
+        cwd: upperDrive(cwd),
         shell: true,
       });
       const parser = this.parser;
