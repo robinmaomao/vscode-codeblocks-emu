@@ -34,6 +34,7 @@ const MENU_STRUCTURE: MenuItemDef[] = [
     label: 'File',
     children: [
       { label: 'New…', command: 'workbench.action.files.newUntitledFile' },
+      { label: 'New Project…', command: 'codeblocks.newProject' },
       { label: 'Open Project…', command: 'codeblocks.openProject' },
       { label: 'Save File', command: 'workbench.action.files.save' },
       { label: 'Save All Files', command: 'workbench.action.files.saveAll' },
@@ -71,6 +72,7 @@ const MENU_STRUCTURE: MenuItemDef[] = [
     label: 'Project',
     children: [
       { label: 'Open Project…', command: 'codeblocks.openProject' },
+      { label: 'Properties…', command: 'codeblocks.projectProperties' },
       { label: 'Select Build Target…', command: 'codeblocks.selectTarget' },
       { label: 'Build Options…', command: 'codeblocks.compilerOptions' },
     ],
