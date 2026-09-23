@@ -12,10 +12,11 @@ import { spawn } from 'child_process';
 import { Project, BuildTarget, ProjectFile, TargetType, CommandType, CompilerLineType } from '../model/types';
 import { FileType, fileTypeOf, isCompilableFileType, isLinkableFileType, isCppSource, isClangdIndexable } from '../model/fileTypes';
 import { Compiler } from '../compiler/compiler';
-import { CommandGenerator } from '../compiler/commandGenerator';
+import { CommandGenerator, quoteIfNeeded } from '../compiler/commandGenerator';
 import { OutputParser } from './outputParser';
 import { runScriptCommands, buildMacroVars } from './scriptRunner';
 import { decodeText } from '../tools/encoding';
+import { applyResponseFile } from './commandLine';
 
 /** 结构化的诊断信息（供 Build Log 视图展示，文件为绝对路径） */
 export interface StructuredDiagnostic {
@@ -358,7 +359,7 @@ export class BuildEngine {
       const linkObjectsAbs = linkFiles.map((f) => this.objectPathFor(target, f));
       // 增量：静态库已存在且比所有对象新 → 跳过打包
       if (options.rebuild || !this.linkObjectsUpToDate(staticOutAbs, linkObjectsAbs)) {
-        const arCmd = `${this.compiler.programs.LIB} -r -s ${staticOut} ${objects.join(' ')}`;
+        const arCmd = `${quoteIfNeeded(this.compiler.programs.LIB)} -r -s ${quoteIfNeeded(staticOut)} ${objects.map((o) => quoteIfNeeded(o)).join(' ')}`;
         this.output.info(arCmd);
         this.output.info(`[Archiving] → ${staticOut}`);
         const ok = await this.runCommand(arCmd, this.project.basePath, options);
@@ -652,6 +653,11 @@ export class BuildEngine {
 
   private async runCommand(command: string, cwd: string, options: BuildOptions): Promise<boolean> {
     return new Promise<boolean>((resolve) => {
+      const resp = applyResponseFile(command);
+      if (resp.respFile) {
+        this.output.debug(`[Code::Blocks] 命令行过长，改用响应文件: ${resp.respFile}`);
+      }
+      command = resp.command;
       const proc = spawn(command, {
         cwd,
         shell: true,
