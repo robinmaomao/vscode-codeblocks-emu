@@ -26,4 +26,11 @@ test-implib-roundtrip.js
 test-makecommands.js
 test-html-syntax.js
 test-unit-options.js
+test-ar-quote.js
+test-resp-file.js
+test-link-static.js
+test-static-prefix.js
+test-weight-sort.js
+test-native-sep.js
+test-drive-case.js
 *.vsix

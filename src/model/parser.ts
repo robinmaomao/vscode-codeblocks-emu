@@ -19,7 +19,7 @@ import {
   LinkerExecutableOption,
   EnvVariable,
 } from './types';
-import { defaultCompilerVar, defaultCompile, defaultLink } from './fileTypes';
+import { fileTypeOf, defaultCompilerVar, defaultCompile, defaultLink } from './fileTypes';
 
 function toUnix(p: string): string {
   return p.replace(/\\/g, '/');
@@ -486,6 +486,9 @@ export class ProjectParser {
       if (!filename) continue;
 
       const rel = toUnix(filename);
+      // 对齐 cbProject::AddFile：compile/link 默认值按文件类型决定，compilerVar 按扩展名决定；
+      // 随后由显式 <Option compile/link/compilerVar> 覆盖（projectloader.cpp DoUnitOptions）。
+      const ft = fileTypeOf(rel);
       const file: ProjectFile = {
         relativeFilename: rel,
         relativeToCommonTopLevelPath: rel,

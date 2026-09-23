@@ -12,10 +12,12 @@ import { spawn } from 'child_process';
 import { Project, BuildTarget, ProjectFile, TargetType, CommandType, CompilerLineType } from '../model/types';
 import { FileType, fileTypeOf, isCompilableFileType, isLinkableFileType, isCppSource, isClangdIndexable } from '../model/fileTypes';
 import { Compiler } from '../compiler/compiler';
-import { CommandGenerator } from '../compiler/commandGenerator';
+import { CommandGenerator, computeStaticOutput } from '../compiler/commandGenerator';
 import { OutputParser } from './outputParser';
 import { runScriptCommands, buildMacroVars } from './scriptRunner';
 import { decodeText } from '../tools/encoding';
+import { applyResponseFile, compareFilesByWeight } from './commandLine';
+import { upperDrive } from '../tools/pathCase';
 
 /** 结构化的诊断信息（供 Build Log 视图展示，文件为绝对路径） */
 export interface StructuredDiagnostic {
@@ -204,26 +206,34 @@ export class BuildEngine {
     // 1. 编译所有文件（增量：跳过未变更文件）
     const units: CompileUnit[] = [];
     const files = target.files.length ? target.files : this.project.files;
-    const hasCpp = files.some((f) => isCppSource(f.relativeFilename));
+    // 按 weight 排序（对齐 GetProjectFilesSortedByWeight：weight 升序，同 weight 按文件名）
+    const sortedFiles = [...files].sort(compareFilesByWeight);
+    const hasCpp = sortedFiles.some((f) => isCppSource(f.relativeFilename));
 
     // 头文件依赖扫描（增量编译）：收集 include 搜索目录与依赖 mtime 缓存（跨文件复用）
     const includeDirs = this.getIncludeDirs(target);
     const depsCache = new Map<string, number>();
 
     // 1a. 链接对象集合（独立于编译，对应 GetTargetLinkCommands：link=true 且可链接类型；
-    //     自定义 buildCommand 文件如 ram.ld/app.xm 是链接脚本/资源，不参与链接）
+    //     自定义 buildCommand 文件如 ram.ld/app.xm 是链接脚本/资源，不参与链接；
+    //     资源文件（.rc）单独到 resFiles（$link_resobjects），其余到 linkFiles（$link_objects））
     const linkFiles: ProjectFile[] = [];
-    for (const file of files) {
+    const resFiles: ProjectFile[] = [];
+    for (const file of sortedFiles) {
       const custom = file.customBuildCommands?.[target.compilerId];
       if (custom !== undefined && custom.use) continue;
       if (file.link === false) continue;
       if (!isLinkableFileType(fileTypeOf(file.relativeFilename))) continue;
-      linkFiles.push(file);
+      if (fileTypeOf(file.relativeFilename) === FileType.Resource) {
+        resFiles.push(file);
+      } else {
+        linkFiles.push(file);
+      }
     }
 
     // 1b. 编译单元（对应 GetCompileFileCommand：compile=true 且可编译类型或自定义命令）
     let skippedCount = 0;
-    for (const file of files) {
+    for (const file of sortedFiles) {
       // 跳过不参与编译的文件（<Option compile="0"/>）
       if (file.compile === false) continue;
 
@@ -311,11 +321,14 @@ export class BuildEngine {
       // 链接对象 = 所有参与链接的标准源文件对象（不论本次是否重编译）
       // （ram.ld → ram.o 是链接脚本、app.xm → appxm.o 是资源，均不参与链接）
       const linkObjects = linkFiles.map((f) => this.objectPathRelative(target, f));
+      const resObjects = resFiles.map((f) => this.objectPathRelative(target, f));
       const linkObjectsAbs = linkFiles.map((f) => this.objectPathFor(target, f));
+      // 资源对象同样参与增量判断（对齐 GetTargetLinkCommands 的时间戳检查遍历所有对象）
+      const allObjectsAbs = [...linkObjectsAbs, ...resFiles.map((f) => this.objectPathFor(target, f))];
 
       // 增量：输出已存在且比所有链接对象新 → 跳过链接（对应 GetTargetLinkCommands 时间戳检查）
       const outputAbs = this.resolveOutputFile(target);
-      if (options.rebuild || !this.linkObjectsUpToDate(outputAbs, linkObjectsAbs)) {
+      if (options.rebuild || !this.linkObjectsUpToDate(outputAbs, allObjectsAbs)) {
         // 创建输出目录（如 Output\bin），否则链接器无法写 app.rv32
         this.ensureDir(path.join(this.project.basePath, path.dirname(target.outputFilename)));
 
@@ -325,7 +338,7 @@ export class BuildEngine {
           file: '',
           object: linkObjects.join(this.compiler.switches.objectSeparator),
           flatObject: linkObjects.join(this.compiler.switches.objectSeparator),
-          deps: '',
+          deps: resObjects.join(this.compiler.switches.objectSeparator),
           hasCppFilesToLink: hasCpp,
         });
         if (linkCommand) {
@@ -349,30 +362,37 @@ export class BuildEngine {
         this.output.info(`[Code::Blocks] 目标 "${target.title}" 链接已是最新，跳过链接`);
       }
     } else if (target.targetType === TargetType.StaticLib) {
-      // 静态库用 ar 打包（用所有参与链接的对象，而非仅本次编译的）
+      // 静态库用 ar 打包（对齐 Code::Blocks LinkStatic 模板，含 $lib_linker 引号与多行命令拆分）
       const objects = linkFiles.map((f) => this.objectPathRelative(target, f));
-      const staticOut = path.join(
-        path.dirname(target.outputFilename),
-        path.parse(target.outputFilename).name + '.' + this.compiler.switches.libExtension,
-      );
+      const staticOut = computeStaticOutput(target.outputFilename, this.compiler.switches);
       const staticOutAbs = path.join(this.project.basePath, staticOut);
       const linkObjectsAbs = linkFiles.map((f) => this.objectPathFor(target, f));
       // 增量：静态库已存在且比所有对象新 → 跳过打包
       if (options.rebuild || !this.linkObjectsUpToDate(staticOutAbs, linkObjectsAbs)) {
-        const arCmd = `${this.compiler.programs.LIB} -r -s ${staticOut} ${objects.join(' ')}`;
-        this.output.info(arCmd);
-        this.output.info(`[Archiving] → ${staticOut}`);
-        const ok = await this.runCommand(arCmd, this.project.basePath, options);
-        if (!ok) {
-          return {
-            success: false,
-            compiledCount: units.length,
-            skippedCount,
-            failedCount: 0,
-            linkSuccess: false,
-            linkSkipped: true,
-            outputFilename: target.outputFilename,
-          };
+        const arCmd = generator.generate(CommandType.LinkStaticCmd, {
+          target,
+          pf: null,
+          file: '',
+          object: objects.join(this.compiler.switches.objectSeparator),
+          flatObject: objects.join(this.compiler.switches.objectSeparator),
+          deps: '',
+          hasCppFilesToLink: false,
+        });
+        if (arCmd) {
+          this.output.info(arCmd);
+          this.output.info(`[Archiving] → ${staticOut}`);
+          const ok = await this.runCommand(arCmd, this.project.basePath, options);
+          if (!ok) {
+            return {
+              success: false,
+              compiledCount: units.length,
+              skippedCount,
+              failedCount: 0,
+              linkSuccess: false,
+              linkSkipped: true,
+              outputFilename: target.outputFilename,
+            };
+          }
         }
       } else {
         this.output.info(`[Code::Blocks] 目标 "${target.title}" 静态库已是最新，跳过打包`);
@@ -413,6 +433,7 @@ export class BuildEngine {
       case TargetType.ConsoleOnly: return CommandType.LinkConsoleExeCmd;
       case TargetType.DynamicLib: return CommandType.LinkDynamicCmd;
       case TargetType.Native: return CommandType.LinkNativeCmd;
+      case TargetType.StaticLib: return CommandType.LinkStaticCmd;
       default: return CommandType.LinkExeCmd;
     }
   }
@@ -480,6 +501,10 @@ export class BuildEngine {
    * 因此时间戳判断需先解析出真实存在的文件。
    */
   private resolveOutputFile(target: BuildTarget): string {
+    // 静态库实际输出带 lib 前缀 + .a（computeStaticOutput），而非原始 outputFilename
+    if (target.targetType === TargetType.StaticLib) {
+      return path.join(this.project.basePath, computeStaticOutput(target.outputFilename, this.compiler.switches));
+    }
     const out = path.join(this.project.basePath, target.outputFilename);
     if (fs.existsSync(out)) return out;
     if (process.platform === 'win32') {
@@ -637,24 +662,50 @@ export class BuildEngine {
 
   private async runInParallel(units: CompileUnit[], maxJobs: number, options: BuildOptions): Promise<boolean[]> {
     const results: boolean[] = new Array(units.length).fill(false);
-    let cursor = 0;
-    const workers = Array.from({ length: Math.min(maxJobs, units.length) }, async () => {
-      while (cursor < units.length) {
-        const idx = cursor++;
-        const u = units[idx];
-        this.output.info(`[Compiling] ${u.file.relativeFilename}`);
-        this.output.debug(u.command);
-        results[idx] = await this.runCommand(u.command, u.cwd, options);
-      }
-    });
-    await Promise.all(workers);
+    // 按 weight 分组执行：同 weight 并行，跨 weight 串行（对齐 GetCompileCommands 的 COMPILER_WAIT 屏障）
+    let groupStart = 0;
+    while (groupStart < units.length) {
+      let groupEnd = groupStart + 1;
+      const w = units[groupStart].file.weight;
+      while (groupEnd < units.length && units[groupEnd].file.weight === w) groupEnd++;
+      let cursor = groupStart;
+      const workers = Array.from({ length: Math.min(maxJobs, groupEnd - groupStart) }, async () => {
+        while (cursor < groupEnd) {
+          const idx = cursor++;
+          const u = units[idx];
+          this.output.info(`[Compiling] ${u.file.relativeFilename}`);
+          this.output.debug(u.command);
+          results[idx] = await this.runCommand(u.command, u.cwd, options);
+        }
+      });
+      await Promise.all(workers);
+      groupStart = groupEnd;
+    }
     return results;
   }
 
   private async runCommand(command: string, cwd: string, options: BuildOptions): Promise<boolean> {
+    // 多行命令（模板含 \n）逐条执行，对齐 Code::Blocks AddCommandsToArray
+    const lines = command.split('\n').map((s) => s.trim()).filter(Boolean);
+    if (lines.length <= 1) {
+      return this.runSingleCommand(command, cwd, options);
+    }
+    let ok = true;
+    for (const line of lines) {
+      if (!(await this.runSingleCommand(line, cwd, options))) ok = false;
+    }
+    return ok;
+  }
+
+  private async runSingleCommand(command: string, cwd: string, options: BuildOptions): Promise<boolean> {
     return new Promise<boolean>((resolve) => {
+      const resp = applyResponseFile(command);
+      if (resp.respFile) {
+        this.output.debug(`[Code::Blocks] 命令行过长，改用响应文件: ${resp.respFile}`);
+      }
+      command = resp.command;
       const proc = spawn(command, {
-        cwd,
+        cwd: upperDrive(cwd),
         shell: true,
       });
       const parser = this.parser;
