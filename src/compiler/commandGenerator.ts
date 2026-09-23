@@ -8,6 +8,7 @@
  */
 import * as path from 'path';
 import { Compiler } from '../compiler/compiler';
+import { upperDrive } from '../tools/pathCase';
 import {
   Project,
   BuildTarget,
@@ -358,7 +359,7 @@ export class CommandGenerator {
     const file = params.file;
     // 默认将 $file/$file_dir 转为平台原生分隔符（Windows 反斜杠），对齐 Code::Blocks 命令行；
     // nativeSep=false 时保持正斜杠（clangd compile_commands.json 偏好正斜杠）
-    const fname = params.nativeSep === false ? unquote(file) : toNative(unquote(file));
+    const fname = params.nativeSep === false ? unquote(file) : upperDrive(toNative(unquote(file)));
     const ext = path.extname(fname);
     const baseName = path.basename(fname, ext);
     const dirName = path.dirname(fname);

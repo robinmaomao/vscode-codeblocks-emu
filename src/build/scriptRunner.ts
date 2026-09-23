@@ -13,6 +13,7 @@ import * as vscode from 'vscode';
 import { spawn } from 'child_process';
 import { decodeText } from '../tools/encoding';
 import { getWindowsSystemPath } from '../tools/windowsPath';
+import { upperDrive } from '../tools/pathCase';
 
 /** 展开命令中的宏（Code::Blocks 变量风格） */
 export function expandMacros(cmd: string, vars: Record<string, string>): string {
@@ -72,7 +73,7 @@ export function runScriptCommand(
       env.PATH = extraPath + sep + (env.PATH ?? '');
     }
     const proc = spawn(expanded, {
-      cwd,
+      cwd: upperDrive(cwd),
       shell: true,
       env,
     });

@@ -14,4 +14,6 @@ test-resp-file.js
 test-link-static.js
 test-static-prefix.js
 test-weight-sort.js
+test-native-sep.js
+test-drive-case.js
 *.vsix
