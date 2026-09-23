@@ -22,6 +22,11 @@ function toUnix(p: string): string {
   return p.replace(/\\/g, '/');
 }
 
+/** Windows 下转为反斜杠（对齐 Code::Blocks 在 Windows 生成命令行时的原生分隔符） */
+function toNative(p: string): string {
+  return process.platform === 'win32' ? p.replace(/\//g, '\\') : p;
+}
+
 /** 如果字符串含空白则加引号（QuoteStringIfNeeded） */
 function quoteIfNeeded(s: string): string {
   if (!s) return s;
@@ -70,6 +75,8 @@ export interface GenerateParams {
   flatObject: string;
   deps: string;
   hasCppFilesToLink?: boolean;
+  /** false 时保持正斜杠（供 clangd compile_commands.json 使用，clangd 偏好正斜杠） */
+  nativeSep?: boolean;
 }
 
 /** 预生成的各目标命令行片段（对应 m_Output/m_CFlags 等缓存） */
@@ -331,7 +338,9 @@ export class CommandGenerator {
     }
 
     const file = params.file;
-    const fname = unquote(file);
+    // 默认将 $file/$file_dir 转为平台原生分隔符（Windows 反斜杠），对齐 Code::Blocks 命令行；
+    // nativeSep=false 时保持正斜杠（clangd compile_commands.json 偏好正斜杠）
+    const fname = params.nativeSep === false ? unquote(file) : toNative(unquote(file));
     const ext = path.extname(fname);
     const baseName = path.basename(fname, ext);
     const dirName = path.dirname(fname);
@@ -369,7 +378,7 @@ export class CommandGenerator {
     macro = macro.replace(/\$file_name/g, baseName);
     macro = macro.replace(/\$file_dir/g, dirName);
     macro = macro.replace(/\$file_ext/g, fileExt);
-    macro = macro.replace(/\$file/g, quoteIfNeeded(file));
+    macro = macro.replace(/\$file/g, quoteIfNeeded(fname));
     macro = macro.replace(/\$dep_object/g, quoteIfNeeded(deps));
 
     // 4. objects_output_dir 必须在 $object 之前
