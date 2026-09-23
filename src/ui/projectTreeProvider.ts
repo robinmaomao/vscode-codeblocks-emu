@@ -14,7 +14,7 @@ class TreeNode extends vscode.TreeItem {
   constructor(
     public readonly label: string,
     public readonly collapsibleState: vscode.TreeItemCollapsibleState,
-    public readonly kind: 'project' | 'folder' | 'file',
+    public readonly kind: 'project' | 'folder' | 'file' | 'virtualFolder' | 'fileGroup',
     public readonly project?: Project,
     public readonly resourceUri?: vscode.Uri,
     public readonly children: TreeNode[] = [],
@@ -74,6 +74,8 @@ export class ProjectTreeProvider implements vscode.TreeDataProvider<TreeNode> {
   private projects: Project[] = [];
   /** 当前活动项目（用于高亮标识） */
   private activeProject: Project | undefined;
+  /** 是否按文件类型分组（categorize，对齐 Code::Blocks 默认 true） */
+  private categorize = true;
   readonly dragAndDropController = new ProjectDragAndDropController();
 
   /** 活动/非活动项目图标（自定义 SVG，保证颜色可靠渲染） */
@@ -113,6 +115,13 @@ export class ProjectTreeProvider implements vscode.TreeDataProvider<TreeNode> {
     this._onDidChangeTreeData.fire(undefined);
   }
 
+  /** 设置是否按文件类型分组 */
+  setCategorize(categorize: boolean): void {
+    if (this.categorize === categorize) return;
+    this.categorize = categorize;
+    this._onDidChangeTreeData.fire(undefined);
+  }
+
   getTreeItem(element: TreeNode): vscode.TreeItem {
     // 项目节点图标在此实时计算：getTreeItem 每次渲染都会调用，拿到的是最新 activeProject，
     // 避免只在 getChildren 里算一次、切换活动工程时被 TreeView 节点复用缓存吞掉（绿点不更新）。
@@ -148,65 +157,82 @@ export class ProjectTreeProvider implements vscode.TreeDataProvider<TreeNode> {
     }
 
     if (element.kind === 'project') {
-      // 参考 Code::Blocks BuildProjectTree()：项目节点下直接挂文件目录树，
-      // 不含构建目标（Debug/Release）节点。
+      // 项目节点下直接挂文件树（虚拟文件夹 / 物理目录），对齐 Code::Blocks BuildProjectTree()
       return this.buildFileNodes(element.project!);
     }
 
-    if (element.kind === 'folder') {
+    if (element.kind === 'folder' || element.kind === 'virtualFolder' || element.kind === 'fileGroup') {
       return element.children;
     }
 
     return [];
   }
 
-  /** 构建文件树节点（逐层嵌套目录树，参考 VSCode Explorer） */
-  private buildFileNodes(project: Project): TreeNode[] {
-    const dirNodes = new Map<string, TreeNode>(); // key: 目录完整相对路径（无 ../），value: 节点
+  /** 创建目录节点（区分物理目录 / 虚拟文件夹） */
+  private makeDirNode(name: string, key: string, project: Project, kind: 'folder' | 'virtualFolder'): TreeNode {
+    const node = new TreeNode(name, vscode.TreeItemCollapsibleState.Collapsed, kind, project);
+    node.iconPath = kind === 'virtualFolder'
+      ? (this.iconUri('vfolder.svg') ?? new vscode.ThemeIcon('folder-library'))
+      : (this.iconUri('folder.svg') ?? new vscode.ThemeIcon('folder'));
+    node.tooltip = kind === 'virtualFolder' ? `虚拟文件夹: ${key}` : key;
+    return node;
+  }
+
+  /** 逐层确保目录节点存在（返回最深层节点；kind 决定图标/类型） */
+  private ensureDirNodes(
+    pathStr: string,
+    project: Project,
+    dirNodes: Map<string, TreeNode>,
+    rootDirs: TreeNode[],
+    kind: 'folder' | 'virtualFolder',
+  ): TreeNode | undefined {
+    const segs = cleanRelativePath(pathStr).split('/').filter(Boolean);
+    let parentNode: TreeNode | undefined;
+    let parentKey = '';
+    let result: TreeNode | undefined;
+    for (const seg of segs) {
+      const key = parentKey ? `${parentKey}/${seg}` : seg;
+      let dirNode = dirNodes.get(key);
+      if (!dirNode) {
+        dirNode = this.makeDirNode(seg, key, project, kind);
+        dirNodes.set(key, dirNode);
+        if (parentNode) {
+          parentNode.children.push(dirNode);
+        } else {
+          rootDirs.push(dirNode);
+        }
+      }
+      parentNode = dirNode;
+      parentKey = key;
+      result = dirNode;
+    }
+    return result;
+  }
+
+  /** 构建目录树（给定文件列表 → 目录节点 + 根文件），组内/纯目录视图共用 */
+  private buildDirTree(files: ProjectFile[], project: Project): TreeNode[] {
+    const dirNodes = new Map<string, TreeNode>();
     const rootDirs: TreeNode[] = [];
     const rootFiles: TreeNode[] = [];
-
-    for (const f of project.files) {
-      // 使用相对「公共顶层目录」的路径（对应 Code::Blocks 的 relativeToCommonTopLevelPath），
-      // 按实际工程目录层级展开；为空时回退 relativeFilename（与 buildEngine.ts 一致）。
-      const clean = cleanRelativePath(f.relativeToCommonTopLevelPath || f.relativeFilename);
-      const segs = clean.split('/');
+    for (const f of files) {
+      const rel = f.relativeToCommonTopLevelPath || f.relativeFilename;
+      const segs = cleanRelativePath(rel).split('/').filter(Boolean);
       const fileNode = this.fileToNode(project, f);
-
-      // 无目录段 → 根级文件
-      if (segs.length === 1) {
+      if (segs.length <= 1) {
         rootFiles.push(fileNode);
         continue;
       }
-
-      // 逐层构建目录节点
-      let parentNode: TreeNode | undefined;
-      let parentKey = '';
-      for (let i = 0; i < segs.length - 1; i++) {
-        const key = parentKey ? `${parentKey}/${segs[i]}` : segs[i];
-        let dirNode = dirNodes.get(key);
-        if (!dirNode) {
-          dirNode = new TreeNode(segs[i], vscode.TreeItemCollapsibleState.Collapsed, 'folder', project);
-          dirNode.iconPath = this.iconUri('folder.svg') ?? new vscode.ThemeIcon('folder');
-          dirNode.tooltip = key;
-          dirNodes.set(key, dirNode);
-          if (parentNode) {
-            parentNode.children.push(dirNode);
-          } else {
-            rootDirs.push(dirNode);
-          }
-        }
-        parentNode = dirNode;
-        parentKey = key;
+      const parentNode = this.ensureDirNodes(segs.slice(0, -1).join('/'), project, dirNodes, rootDirs, 'folder');
+      if (parentNode) {
+        parentNode.children.push(fileNode);
+      } else {
+        rootFiles.push(fileNode);
       }
-      parentNode!.children.push(fileNode);
     }
-
-    // 每层目录内：子目录在前、文件在后，各自按名称排序（对齐 Explorer）
     for (const d of dirNodes.values()) {
       d.children.sort((a, b) => {
-        const aIsDir = a.kind === 'folder' ? 0 : 1;
-        const bIsDir = b.kind === 'folder' ? 0 : 1;
+        const aIsDir = (a.kind === 'folder' || a.kind === 'virtualFolder' || a.kind === 'fileGroup') ? 0 : 1;
+        const bIsDir = (b.kind === 'folder' || b.kind === 'virtualFolder' || b.kind === 'fileGroup') ? 0 : 1;
         if (aIsDir !== bIsDir) return aIsDir - bIsDir;
         return a.label.localeCompare(b.label);
       });
@@ -214,6 +240,67 @@ export class ProjectTreeProvider implements vscode.TreeDataProvider<TreeNode> {
     rootDirs.sort((a, b) => a.label.localeCompare(b.label));
     rootFiles.sort((a, b) => a.label.localeCompare(b.label));
     return [...rootDirs, ...rootFiles];
+  }
+
+  /** 构建文件树节点：虚拟文件夹 > 文件类型分组 > 组内/物理目录（对齐 Code::Blocks BuildProjectTree） */
+  private buildFileNodes(project: Project): TreeNode[] {
+    const rootNodes: TreeNode[] = [];
+
+    // 1. 虚拟文件夹（优先级最高，对齐 pf->virtual_path）
+    const vfDirNodes = new Map<string, TreeNode>();
+    for (const vf of project.virtualFolders) {
+      this.ensureDirNodes(vf, project, vfDirNodes, rootNodes, 'virtualFolder');
+    }
+    for (const f of project.files) {
+      if (!f.virtualFolder) continue;
+      const rel = path.posix.join(f.virtualFolder, path.basename(f.relativeFilename));
+      const segs = cleanRelativePath(rel).split('/').filter(Boolean);
+      const fileNode = this.fileToNode(project, f);
+      if (segs.length <= 1) {
+        rootNodes.push(fileNode);
+        continue;
+      }
+      const parentNode = this.ensureDirNodes(segs.slice(0, -1).join('/'), project, vfDirNodes, rootNodes, 'virtualFolder');
+      if (parentNode) {
+        parentNode.children.push(fileNode);
+      } else {
+        rootNodes.push(fileNode);
+      }
+    }
+
+    // 2. 非虚拟文件夹文件：按类型分组（categorize）或纯目录
+    const plainFiles = project.files.filter((f) => !f.virtualFolder);
+    if (this.categorize) {
+      const groupNodes = new Map<string, TreeNode>();
+      for (const f of plainFiles) {
+        const name = matchGroupName(path.basename(f.relativeFilename));
+        if (!groupNodes.has(name)) {
+          const gn = new TreeNode(name, vscode.TreeItemCollapsibleState.Collapsed, 'fileGroup', project);
+          gn.iconPath = this.iconUri('vfolder.svg') ?? new vscode.ThemeIcon('folder-library');
+          gn.tooltip = `文件分组: ${name}`;
+          groupNodes.set(name, gn);
+          rootNodes.push(gn);
+        }
+      }
+      for (const [name, gn] of groupNodes) {
+        const files = plainFiles.filter((f) => matchGroupName(path.basename(f.relativeFilename)) === name);
+        gn.children.push(...this.buildDirTree(files, project));
+      }
+    } else {
+      rootNodes.push(...this.buildDirTree(plainFiles, project));
+    }
+
+    // 根层排序：目录/分组在前，文件在后；分组节点按 Code::Blocks 定义顺序（Sources→Headers→…→Others）
+    rootNodes.sort((a, b) => {
+      const aIsDir = (a.kind === 'folder' || a.kind === 'virtualFolder' || a.kind === 'fileGroup') ? 0 : 1;
+      const bIsDir = (b.kind === 'folder' || b.kind === 'virtualFolder' || b.kind === 'fileGroup') ? 0 : 1;
+      if (aIsDir !== bIsDir) return aIsDir - bIsDir;
+      if (a.kind === 'fileGroup' && b.kind === 'fileGroup') {
+        return groupOrder(a.label) - groupOrder(b.label);
+      }
+      return a.label.localeCompare(b.label);
+    });
+    return rootNodes;
   }
 
   private fileToNode(project: Project, f: ProjectFile): TreeNode {
@@ -229,9 +316,21 @@ export class ProjectTreeProvider implements vscode.TreeDataProvider<TreeNode> {
     );
     // 文件图标：不显式设置 iconPath，交由 VS Code 依据 resourceUri
     // 使用当前文件图标主题（默认 Seti）渲染，与资源管理器保持一致。
-    // 文件状态：缺失文件标记（对应 ProjectFile::fvsMissing）
-    if (!fs.existsSync(f.absolutePath)) {
-      node.description = '缺失';
+
+    // 文件归属目标展示（对齐 Code::Blocks：文件只出现一次，归属通过描述/提示体现）
+    const allTitles = project.buildTargets.map((t) => t.title);
+    if (allTitles.length) {
+      const belongs = f.buildTargets.filter((t) => allTitles.includes(t));
+      if (!fs.existsSync(f.absolutePath)) {
+        node.description = '缺失'; // 对应 ProjectFile::fvsMissing
+      } else if (belongs.length === 0) {
+        node.description = '（未归属任何目标）';
+      } else if (belongs.length < allTitles.length) {
+        node.description = belongs.join(', ');
+      }
+      if (belongs.length) {
+        node.tooltip = `目标: ${belongs.join(', ')}`;
+      }
     }
     return node;
   }
@@ -243,4 +342,52 @@ function cleanRelativePath(rel: string): string {
   // 去掉所有开头的 ../（或 ./）
   const stripped = norm.replace(/^(\.\.\/)+|^(\.\/)+/, '');
   return stripped;
+}
+
+/** 文件类型分组定义 —— 移植 filegroupsandmasks.cpp 的 SetDefault() */
+interface FileGroupDef {
+  name: string;
+  masks: string[];
+}
+
+const DEFAULT_FILE_GROUPS: FileGroupDef[] = [
+  { name: 'Sources', masks: ['*.c', '*.cpp', '*.cc', '*.cxx'] },
+  { name: 'D Sources', masks: ['*.d'] },
+  { name: 'Fortran Sources', masks: ['*.f', '*.f77', '*.for', '*.fpp', '*.f90', '*.f95', '*.f03', '*.f08'] },
+  { name: 'Java Sources', masks: ['*.java'] },
+  { name: 'Headers', masks: ['*.h', '*.hpp', '*.hh', '*.hxx'] },
+  { name: 'ASM Sources', masks: ['*.asm', '*.s', '*.ss', '*.s62'] },
+  { name: 'Resources', masks: ['*.res', '*.xrc', '*.rc', '*.wxs'] },
+  { name: 'Scripts', masks: ['*.script'] },
+];
+
+/** glob（如 *.c）转正则 */
+function globToRegex(glob: string): RegExp {
+  const escaped = glob
+    .replace(/[.+^${}()|[\]\\]/g, '\\$&')
+    .replace(/\*/g, '.*')
+    .replace(/\?/g, '.');
+  return new RegExp(`^${escaped}$`, 'i');
+}
+
+/** 预编译的默认文件组 */
+const COMPILED_GROUPS = DEFAULT_FILE_GROUPS.map((g) => ({
+  name: g.name,
+  regexes: g.masks.map(globToRegex),
+}));
+
+/** 根据文件名（basename，含扩展名）匹配分组名；未匹配返回 Others */
+function matchGroupName(filename: string): string {
+  for (const g of COMPILED_GROUPS) {
+    for (const re of g.regexes) {
+      if (re.test(filename)) return g.name;
+    }
+  }
+  return 'Others';
+}
+
+/** 分组排序权重：按 DEFAULT_FILE_GROUPS 定义顺序（对齐 SetDefault），未知组（Others 等）排最后 */
+function groupOrder(name: string): number {
+  const idx = DEFAULT_FILE_GROUPS.findIndex((g) => g.name === name);
+  return idx === -1 ? Number.MAX_SAFE_INTEGER : idx;
 }
