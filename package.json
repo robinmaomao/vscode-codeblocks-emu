@@ -41,6 +41,11 @@
   "contributes": {
     "commands": [
       {
+        "command": "codeblocks.newProject",
+        "title": "Code::Blocks: New Project",
+        "icon": "$(new-file)"
+      },
+      {
         "command": "codeblocks.openProject",
         "title": "Code::Blocks: Open Project (.cbp)",
         "icon": "$(folder-opened)"
@@ -74,6 +79,10 @@
         "title": "Code::Blocks: Select Build Target"
       },
       {
+        "command": "codeblocks.selectProjectTarget",
+        "title": "Code::Blocks: Select Build Target for Project"
+      },
+      {
         "command": "codeblocks.detectCompilers",
         "title": "Code::Blocks: Detect Compilers"
       },
@@ -81,6 +90,11 @@
         "command": "codeblocks.compilerOptions",
         "title": "Code::Blocks: Compiler Options",
         "icon": "$(settings-gear)"
+      },
+      {
+        "command": "codeblocks.projectProperties",
+        "title": "Code::Blocks: Project Properties",
+        "icon": "$(gear)"
       },
       {
         "command": "codeblocks.generateCompileCommands",
@@ -175,6 +189,11 @@
     "configuration": {
       "title": "Code::Blocks",
       "properties": {
+        "codeblocks.projectTree.categorize": {
+          "type": "boolean",
+          "default": true,
+          "description": "工程树按文件类型分组显示（Sources / Headers / ASM Sources / Resources / Others，对齐 Code::Blocks）。关闭后按物理目录显示。"
+        },
         "codeblocks.compilerId": {
           "type": "string",
           "default": "gcc",
@@ -310,47 +329,67 @@
     "menus": {
       "view/title": [
         {
-          "command": "codeblocks.openProject",
+          "command": "codeblocks.newProject",
           "when": "view == codeblocks.projectTree",
           "group": "navigation@1"
         },
         {
-          "command": "codeblocks.compilerOptions",
+          "command": "codeblocks.openProject",
           "when": "view == codeblocks.projectTree",
           "group": "navigation@2"
         },
         {
-          "command": "codeblocks.build",
+          "command": "codeblocks.compilerOptions",
           "when": "view == codeblocks.projectTree",
           "group": "navigation@3"
         },
         {
-          "command": "codeblocks.rebuild",
+          "command": "codeblocks.projectProperties",
           "when": "view == codeblocks.projectTree",
           "group": "navigation@4"
         },
         {
-          "command": "codeblocks.run",
+          "command": "codeblocks.build",
           "when": "view == codeblocks.projectTree",
           "group": "navigation@5"
         },
         {
-          "command": "codeblocks.debug",
+          "command": "codeblocks.rebuild",
           "when": "view == codeblocks.projectTree",
           "group": "navigation@6"
         },
         {
-          "command": "codeblocks.clean",
+          "command": "codeblocks.run",
           "when": "view == codeblocks.projectTree",
           "group": "navigation@7"
         },
         {
-          "command": "codeblocks.codeStats",
+          "command": "codeblocks.debug",
           "when": "view == codeblocks.projectTree",
           "group": "navigation@8"
+        },
+        {
+          "command": "codeblocks.clean",
+          "when": "view == codeblocks.projectTree",
+          "group": "navigation@9"
+        },
+        {
+          "command": "codeblocks.codeStats",
+          "when": "view == codeblocks.projectTree",
+          "group": "navigation@10"
         }
       ],
       "view/item/context": [
+        {
+          "command": "codeblocks.selectProjectTarget",
+          "when": "view == codeblocks.projectTree && viewItem == project",
+          "group": "1_project@1"
+        },
+        {
+          "command": "codeblocks.projectProperties",
+          "when": "view == codeblocks.projectTree && viewItem == project",
+          "group": "0_properties@1"
+        },
         {
           "command": "codeblocks.moveProjectUp",
           "when": "view == codeblocks.projectTree && viewItem == project",

@@ -8,12 +8,15 @@ import * as path from 'path';
 import * as fs from 'fs';
 import * as crypto from 'crypto';
 import { ProjectParser, WorkspaceParser } from './model/parser';
-import { Project, BuildTarget, ProjectFile } from './model/types';
+import { Project, BuildTarget, ProjectFile, TargetType, OptionsRelation, OptionsRelationType, LinkerExecutableOption } from './model/types';
+import { serializeProject } from './model/projectWriter';
+import { createProjectFromTemplate, PROJECT_TEMPLATES } from './project/newProject';
 import { Compiler } from './compiler/compiler';
 import { CompilerOptionsLoader } from './compiler/optionsLoader';
 import { CodeBlocksConfig } from './compiler/codeblocksConfig';
-import { detectAllCompilers } from './compiler/detector';
+import { detectAllCompilers, DetectedCompiler } from './compiler/detector';
 import { CompilerOptionsPanel } from './ui/compilerOptionsPanel';
+import { ProjectPropertiesPanel, TargetEditData, FileEditData, BuildOptionsEditData, SearchDirsEditData, ProjectSettingsEditData, BuildScriptsEditData, NotesEditData, VirtualTargetEditData } from './ui/projectPropertiesPanel';
 import { ProjectTreeProvider } from './ui/projectTreeProvider';
 import { MenuTreeProvider } from './ui/menuTreeProvider';
 import { BuildLogTreeProvider, BuildLogProject, BuildLogDiagnostic } from './ui/buildLogTreeProvider';
@@ -105,6 +108,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   // 注册项目树视图（支持多项目 + 拖拽排序）
   projectTreeProvider = new ProjectTreeProvider();
   projectTreeProvider.setResourcesDir(path.join(context.extensionPath, 'resources'));
+  projectTreeProvider.setCategorize(vscode.workspace.getConfiguration('codeblocks').get<boolean>('projectTree.categorize', true));
   projectTreeView = vscode.window.createTreeView('codeblocks.projectTree', {
     treeDataProvider: projectTreeProvider,
     showCollapseAll: true,
@@ -114,6 +118,17 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     reorderProjects(src, target);
   };
   context.subscriptions.push(projectTreeView);
+
+  // 配置变更：工程树文件分组开关
+  context.subscriptions.push(
+    vscode.workspace.onDidChangeConfiguration((e) => {
+      if (e.affectsConfiguration('codeblocks.projectTree.categorize')) {
+        projectTreeProvider?.setCategorize(
+          vscode.workspace.getConfiguration('codeblocks').get<boolean>('projectTree.categorize', true),
+        );
+      }
+    }),
+  );
 
   // 点击工程树任意节点（项目/文件夹/文件）时，切换活动工程为该节点所属工程；
   // 共享文件点哪个工程子树就切哪个（每个节点自带所属 project）
@@ -230,6 +245,18 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       if (p) {
         setActiveProject(p, { persist: true });
       }
+    }),
+  );
+
+  // 选择构建目标（项目节点右键 / 状态栏）
+  context.subscriptions.push(
+    vscode.commands.registerCommand('codeblocks.selectProjectTarget', async (node?: any) => {
+      const filename = resolveProjectFilename(node);
+      const project = filename
+        ? openProjects.find((p) => p.filename === filename)
+        : requireProject();
+      if (!project) return;
+      await promptSelectTargetForProject(project);
     }),
   );
 
@@ -356,6 +383,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     }),
   );
 
+  // 新建工程（对标 Code::Blocks New Project 向导）
+  context.subscriptions.push(
+    vscode.commands.registerCommand('codeblocks.newProject', async () => {
+      await createNewProject();
+    }),
+  );
+
   // 构建
   context.subscriptions.push(
     vscode.commands.registerCommand('codeblocks.build', async () => {
@@ -421,6 +455,20 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       const targetTitle = await selectTarget();
       const target = targetTitle ? project.buildTargets.find((t) => t.title === targetTitle) : undefined;
       CompilerOptionsPanel.show(getCompiler(), project, target, context.extensionUri);
+    }),
+  );
+
+  // 工程属性面板（构建目标管理）
+  context.subscriptions.push(
+    vscode.commands.registerCommand('codeblocks.projectProperties', async (node?: any) => {
+      const filename = resolveProjectFilename(node);
+      const project = filename
+        ? openProjects.find((p) => p.filename === filename)
+        : requireProject();
+      if (!project) return;
+      ProjectPropertiesPanel.show(project, context.extensionUri, async (targets, files, options, searchDirs, projectSettings, buildScripts, notes, virtualTargets) => {
+        await saveProjectProperties(project, targets, files, options, searchDirs, projectSettings, buildScripts, notes, virtualTargets);
+      });
     }),
   );
 
@@ -573,6 +621,118 @@ async function findCbpFiles(folders: string[]): Promise<string[]> {
       .map((u) => u.fsPath));
   }
   return results;
+}
+
+/** 编译器探测结果缓存（按 masterPath 失效） */
+let cachedCompilersMasterPath: string | undefined;
+let cachedCompilers: DetectedCompiler[] = [];
+
+/** 获取探测到的编译器（缓存；masterPath 变化时重新探测） */
+function getDetectedCompilers(masterPath: string): DetectedCompiler[] {
+  if (cachedCompilersMasterPath !== masterPath) {
+    cachedCompilersMasterPath = masterPath;
+    try {
+      cachedCompilers = detectAllCompilers(masterPath);
+    } catch {
+      cachedCompilers = [];
+    }
+  }
+  return cachedCompilers;
+}
+
+/** 选择编译器（内置模板 + 探测到的实际编译器），返回编译器 ID */
+async function pickCompiler(): Promise<string | undefined> {
+  const cfg = vscode.workspace.getConfiguration('codeblocks');
+  const defaultId = cfg.get<string>('compilerId', 'gcc');
+  const masterPath = cfg.get<string>('masterPath', '');
+
+  const detected = getDetectedCompilers(masterPath);
+
+  const seen = new Set<string>();
+  const items: { label: string; description?: string }[] = [];
+  const push = (id: string, description?: string) => {
+    if (!id || seen.has(id)) return;
+    seen.add(id);
+    items.push({ label: id, description });
+  };
+
+  // 内置模板优先（gcc / clang；MSVC 仅 Windows 平台）
+  push('gcc', defaultId === 'gcc' ? '默认' : undefined);
+  push('clang', defaultId === 'clang' ? '默认' : undefined);
+  if (process.platform === 'win32') {
+    push('msvc17');
+  }
+  // 探测到的（去重；MSVC id 统一映射到 msvc17，与 options_msvc17.xml 对齐）
+  for (const d of detected) {
+    const id = d.id === 'msvc' ? 'msvc17' : d.id;
+    push(id, id === defaultId ? '默认' : (d.version ? `v${d.version}` : undefined));
+  }
+
+  const picked = await vscode.window.showQuickPick(items, { placeHolder: '选择编译器' });
+  return picked?.label ?? defaultId;
+}
+
+/** 新建工程向导（模板选择 → 名称 → 目录 → 编译器 → 生成 .cbp + 骨架文件 → 打开） */
+async function createNewProject(): Promise<void> {
+  // 1. 选择模板
+  const tplPick = await vscode.window.showQuickPick(
+    PROJECT_TEMPLATES.map((t) => ({ label: t.label, description: t.description, template: t })),
+    { placeHolder: '选择工程模板', matchOnDescription: true },
+  );
+  if (!tplPick) return;
+  const tpl = (tplPick as any).template;
+
+  // 2. 输入工程名
+  const name = await vscode.window.showInputBox({
+    prompt: '输入工程名称',
+    placeHolder: 'my-project',
+    validateInput: (v) => {
+      if (!v.trim()) return '工程名不能为空';
+      if (/[<>:"/\\|?*\x00-\x1f]/.test(v)) return '工程名含非法字符';
+      return undefined;
+    },
+  });
+  if (!name?.trim()) return;
+
+  // 3. 选择父目录（默认工作区根）
+  const defaultUri = vscode.workspace.workspaceFolders?.[0]?.uri;
+  const dirUris = await vscode.window.showOpenDialog({
+    canSelectFiles: false,
+    canSelectFolders: true,
+    canSelectMany: false,
+    defaultUri,
+    openLabel: '选择父目录',
+    title: '选择工程存放目录',
+  });
+  const basePath = dirUris?.[0]?.fsPath ?? defaultUri?.fsPath;
+  if (!basePath) {
+    vscode.window.showWarningMessage('请先打开一个工作区文件夹，或选择一个目录');
+    return;
+  }
+
+  // 4. 选择编译器
+  const compilerId = await pickCompiler();
+  if (!compilerId) return;
+
+  // 5. 生成模型并落盘
+  const { project, projectDir } = createProjectFromTemplate(name.trim(), basePath, tpl, compilerId);
+  try {
+    fs.mkdirSync(projectDir, { recursive: true });
+    // 骨架源文件
+    for (const f of tpl.skeleton) {
+      fs.writeFileSync(path.join(projectDir, f.name), f.content, 'utf-8');
+    }
+    // .cbp
+    const xml = serializeProject(project);
+    fs.writeFileSync(project.filename, xml, 'utf-8');
+    outputChannel.info(`[Code::Blocks] 已创建工程: ${project.title}（${tpl.label}）`);
+  } catch (err) {
+    vscode.window.showErrorMessage(`创建工程失败: ${(err as Error).message}`);
+    return;
+  }
+
+  // 5. 打开
+  await openProject(project.filename);
 }
 
 async function openProject(filename: string): Promise<void> {
@@ -1055,6 +1215,219 @@ function resolveProjectFilename(node: any): string | undefined {
   return typeof filename === 'string' ? filename : undefined;
 }
 
+/** 创建默认空构建目标（对齐 ProjectBuildTarget 构造默认值） */
+function createEmptyTarget(): BuildTarget {
+  return {
+    title: '',
+    targetType: TargetType.ConsoleOnly,
+    compilerId: 'gcc',
+    outputFilename: '',
+    objectOutput: '',
+    optionRelations: {
+      [OptionsRelationType.CompilerOptions]: OptionsRelation.AppendToParentOptions,
+      [OptionsRelationType.LinkerOptions]: OptionsRelation.AppendToParentOptions,
+      [OptionsRelationType.IncludeDirs]: OptionsRelation.AppendToParentOptions,
+      [OptionsRelationType.LibDirs]: OptionsRelation.AppendToParentOptions,
+      [OptionsRelationType.ResDirs]: OptionsRelation.AppendToParentOptions,
+    },
+    compilerOptions: [],
+    linkerOptions: [],
+    resourceCompilerOptions: [],
+    includeDirs: [],
+    libDirs: [],
+    resourceIncludeDirs: [],
+    linkLibs: [],
+    files: [],
+    linkerExecutable: LinkerExecutableOption.AutoDetect,
+    createDefFile: false,
+    createStaticLib: false,
+    useConsoleRunner: true,
+    includeInTargetAll: true,
+    commandsBeforeBuild: [],
+    commandsAfterBuild: [],
+    commandsBeforeClean: [],
+    commandsAfterClean: [],
+    buildScripts: [],
+    envVars: [],
+    alwaysRunPostBuildSteps: false,
+  };
+}
+
+/**
+ * 保存工程属性面板的编辑结果（构建目标 + 文件归属/编译选项）：
+ * 应用增删改 → 同步文件目标归属 → 序列化写回 .cbp → 重新解析刷新树。
+ */
+async function saveProjectProperties(
+  project: Project,
+  edits: TargetEditData[],
+  fileEdits: FileEditData[],
+  options: BuildOptionsEditData,
+  searchDirs: SearchDirsEditData,
+  projectSettings: ProjectSettingsEditData,
+  buildScripts: BuildScriptsEditData,
+  notes: NotesEditData,
+  virtualTargets: VirtualTargetEditData[],
+): Promise<void> {
+  // 项目设置（标题/默认编译器/虚拟文件夹）—— 先应用，files 的自定义命令按新默认编译器写入
+  project.title = projectSettings.title.trim() || project.title;
+  project.compilerId = projectSettings.compilerId.trim() || project.compilerId;
+  project.virtualFolders = projectSettings.virtualFolders;
+  project.notes = notes.notes;
+  project.showNotesOnLoad = notes.showNotesOnLoad;
+  project.buildScripts = buildScripts.project.scripts;
+  project.commandsBeforeBuild = buildScripts.project.before;
+  project.commandsAfterBuild = buildScripts.project.after;
+
+  const oldByOriginal = new Map(project.buildTargets.map((t) => [t.title, t]));
+  const renameMap = new Map<string, string>(); // 旧标题 → 新标题
+  const newTargets: BuildTarget[] = [];
+  const newTitles = new Set<string>();
+
+  for (const e of edits) {
+    const title = e.title.trim();
+    if (!title) throw new Error('目标标题不能为空');
+    if (newTitles.has(title)) throw new Error(`目标标题重复: "${title}"`);
+
+    let t: BuildTarget;
+    if (e.originalTitle && oldByOriginal.has(e.originalTitle)) {
+      t = oldByOriginal.get(e.originalTitle)!;
+      if (t.title !== title) {
+        renameMap.set(t.title, title);
+        t.title = title;
+      }
+    } else {
+      t = createEmptyTarget();
+      t.title = title;
+    }
+    t.targetType = e.targetType as TargetType;
+    t.outputFilename = e.outputFilename;
+    t.objectOutput = e.objectOutput || '';
+    t.compilerId = e.compilerId.trim() || project.compilerId;
+    newTargets.push(t);
+    newTitles.add(title);
+  }
+
+  // 同步文件目标归属：
+  //  - 隐式归属所有目标的文件（未写 target）：保持归属所有新目标
+  //  - 显式写了 target 的文件：重命名替换标题，被删除的目标从归属中移除
+  for (const f of project.files) {
+    if (!f.explicitTargets) {
+      f.buildTargets = [...newTitles];
+      continue;
+    }
+    const mapped = new Set<string>();
+    for (const bt of f.buildTargets) {
+      const mappedTitle = renameMap.get(bt) ?? bt;
+      if (newTitles.has(mappedTitle)) mapped.add(mappedTitle);
+    }
+    f.buildTargets = [...mapped];
+  }
+
+  project.buildTargets = newTargets;
+
+  // 应用文件编辑（编译变量 / 编译 / 链接 / 自定义命令 / 目标归属）
+  const fileByRel = new Map(project.files.map((f) => [f.relativeFilename, f]));
+  for (const fe of fileEdits) {
+    const f = fileByRel.get(fe.relativeFilename);
+    if (!f) continue;
+
+    // 编译变量：'' 或 'CPP' 视为默认（不写 compilerVar）
+    const cv = fe.compilerVar.trim();
+    f.compilerVar = cv === 'CC' || cv === 'WINDRES' ? cv : '';
+    f.compile = fe.compile;
+    f.link = fe.link;
+    f.weight = fe.weight;
+    f.virtualFolder = fe.virtualFolder;
+
+    // 自定义构建命令：只更新项目默认编译器的映射，保留其它编译器
+    const cmp = project.compilerId;
+    const cmd = fe.buildCommand.trim();
+    if (cmd) {
+      f.customBuildCommands[cmp] = cmd;
+    } else {
+      delete f.customBuildCommands[cmp];
+    }
+
+    // 目标归属：勾选全部 → 隐式归属所有目标；否则显式
+    const checked = fe.buildTargets.filter((t) => newTitles.has(t));
+    if (checked.length === newTitles.size && newTitles.size > 0) {
+      f.explicitTargets = false;
+      f.buildTargets = [...newTitles];
+    } else {
+      f.explicitTargets = true;
+      f.buildTargets = checked;
+    }
+  }
+
+  // 应用编译/链接选项（项目级 + 各目标，options.targets 与 newTargets 顺序对齐）
+  project.compilerOptions = options.project.compilerOptions;
+  project.linkerOptions = options.project.linkerOptions;
+  project.linkLibs = options.project.linkLibs;
+  for (let i = 0; i < newTargets.length && i < options.targets.length; i++) {
+    newTargets[i].compilerOptions = options.targets[i].compilerOptions;
+    newTargets[i].linkerOptions = options.targets[i].linkerOptions;
+    newTargets[i].linkLibs = options.targets[i].linkLibs;
+    newTargets[i].optionRelations[OptionsRelationType.CompilerOptions] = options.targets[i].relations.compiler;
+    newTargets[i].optionRelations[OptionsRelationType.LinkerOptions] = options.targets[i].relations.linker;
+    newTargets[i].optionRelations[OptionsRelationType.IncludeDirs] = options.targets[i].relations.include;
+    newTargets[i].optionRelations[OptionsRelationType.LibDirs] = options.targets[i].relations.lib;
+    newTargets[i].optionRelations[OptionsRelationType.ResDirs] = options.targets[i].relations.res;
+  }
+
+  // 应用搜索目录（项目级 + 各目标，与 newTargets 顺序对齐）
+  project.includeDirs = searchDirs.project.includeDirs;
+  project.libDirs = searchDirs.project.libDirs;
+  project.resourceIncludeDirs = searchDirs.project.resourceDirs;
+  for (let i = 0; i < newTargets.length && i < searchDirs.targets.length; i++) {
+    newTargets[i].includeDirs = searchDirs.targets[i].includeDirs;
+    newTargets[i].libDirs = searchDirs.targets[i].libDirs;
+    newTargets[i].resourceIncludeDirs = searchDirs.targets[i].resourceDirs;
+  }
+
+  // 应用构建脚本 + pre/post build 命令（目标级，与 newTargets 顺序对齐；项目级已在函数开头应用）
+  for (let i = 0; i < newTargets.length && i < buildScripts.targets.length; i++) {
+    newTargets[i].buildScripts = buildScripts.targets[i].scripts;
+    newTargets[i].commandsBeforeBuild = buildScripts.targets[i].before;
+    newTargets[i].commandsAfterBuild = buildScripts.targets[i].after;
+  }
+
+  // 应用虚拟目标（直接重建：alias + 过滤为仍然存在的新目标标题）
+  project.virtualTargets = virtualTargets
+    .map((v) => ({ title: v.alias.trim(), targets: v.targets.filter((t) => newTitles.has(t)) }))
+    .filter((v) => v.title);
+
+  // 同步选中目标记忆（重命名/删除时保持一致）
+  const oldSelected = getSelectedTarget(project);
+  if (oldSelected) {
+    const mappedSelected = renameMap.get(oldSelected) ?? oldSelected;
+    if (newTitles.has(mappedSelected)) {
+      setSelectedTarget(project, mappedSelected);
+    } else if (newTargets.length) {
+      selectedTargets.delete(project.filename);
+      persistSelectedTargets();
+      setSelectedTarget(project, newTargets[0].title);
+    }
+  }
+
+  // 序列化写回 .cbp
+  const xml = serializeProject(project);
+  fs.writeFileSync(project.filename, xml, 'utf-8');
+  outputChannel.info(`[Code::Blocks] 已保存工程属性: ${project.title}（${newTargets.length} 个目标）`);
+
+  // 重新解析项目刷新树
+  const idx = openProjects.findIndex((p) => p.filename === project.filename);
+  if (idx !== -1) openProjects.splice(idx, 1);
+  const wasActive = activeProject?.filename === project.filename;
+  await openProject(project.filename);
+  if (wasActive) {
+    activeProject = openProjects.find((p) => p.filename === project.filename);
+    projectTreeProvider?.setActiveProject(activeProject);
+    updateTargetStatusBar();
+    updateCompilerStatusBar();
+  }
+}
+
+
 /** 从右键菜单传入的文件节点解析出 project + file */
 function resolveFileNode(node: any): { project?: Project; file?: ProjectFile } {
   if (!node) return {};
@@ -1492,10 +1865,8 @@ async function selectTarget(): Promise<string | undefined> {
   return titles[0];
 }
 
-/** 强制弹出选择框切换构建目标（点击状态栏项 / 菜单「选择目标」时调用） */
-async function promptSelectTarget(): Promise<void> {
-  const project = requireProject();
-  if (!project) return;
+/** 强制弹出选择框切换指定工程的构建目标 */
+async function promptSelectTargetForProject(project: Project): Promise<void> {
   const titles = project.buildTargets.map((t) => t.title);
   if (titles.length === 0) {
     vscode.window.showWarningMessage('项目没有构建目标');
@@ -1504,13 +1875,20 @@ async function promptSelectTarget(): Promise<void> {
   const current = getSelectedTarget(project);
   const picked = await vscode.window.showQuickPick(
     titles.map((t) => ({ label: t, description: t === current ? '当前' : undefined })),
-    { placeHolder: '选择构建目标' },
+    { placeHolder: `选择构建目标: ${project.title}` },
   );
   if (picked) {
     setSelectedTarget(project, picked.label);
     updateTargetStatusBar();
     vscode.window.showInformationMessage(`已切换到构建目标: ${picked.label}`);
   }
+}
+
+/** 强制弹出选择框切换构建目标（点击状态栏项 / 菜单「选择目标」时调用） */
+async function promptSelectTarget(): Promise<void> {
+  const project = requireProject();
+  if (!project) return;
+  await promptSelectTargetForProject(project);
 }
 
 async function build(rebuild: boolean): Promise<boolean> {
