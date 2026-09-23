@@ -12,7 +12,7 @@ import { spawn } from 'child_process';
 import { Project, BuildTarget, ProjectFile, TargetType, CommandType, CompilerLineType } from '../model/types';
 import { FileType, fileTypeOf, isCompilableFileType, isLinkableFileType, isCppSource, isClangdIndexable } from '../model/fileTypes';
 import { Compiler } from '../compiler/compiler';
-import { CommandGenerator, quoteIfNeeded } from '../compiler/commandGenerator';
+import { CommandGenerator, computeStaticOutput } from '../compiler/commandGenerator';
 import { OutputParser } from './outputParser';
 import { runScriptCommands, buildMacroVars } from './scriptRunner';
 import { decodeText } from '../tools/encoding';
@@ -349,30 +349,37 @@ export class BuildEngine {
         this.output.info(`[Code::Blocks] 目标 "${target.title}" 链接已是最新，跳过链接`);
       }
     } else if (target.targetType === TargetType.StaticLib) {
-      // 静态库用 ar 打包（用所有参与链接的对象，而非仅本次编译的）
+      // 静态库用 ar 打包（对齐 Code::Blocks LinkStatic 模板，含 $lib_linker 引号与多行命令拆分）
       const objects = linkFiles.map((f) => this.objectPathRelative(target, f));
-      const staticOut = path.join(
-        path.dirname(target.outputFilename),
-        path.parse(target.outputFilename).name + '.' + this.compiler.switches.libExtension,
-      );
+      const staticOut = computeStaticOutput(target.outputFilename, this.compiler.switches);
       const staticOutAbs = path.join(this.project.basePath, staticOut);
       const linkObjectsAbs = linkFiles.map((f) => this.objectPathFor(target, f));
       // 增量：静态库已存在且比所有对象新 → 跳过打包
       if (options.rebuild || !this.linkObjectsUpToDate(staticOutAbs, linkObjectsAbs)) {
-        const arCmd = `${quoteIfNeeded(this.compiler.programs.LIB)} -r -s ${quoteIfNeeded(staticOut)} ${objects.map((o) => quoteIfNeeded(o)).join(' ')}`;
-        this.output.info(arCmd);
-        this.output.info(`[Archiving] → ${staticOut}`);
-        const ok = await this.runCommand(arCmd, this.project.basePath, options);
-        if (!ok) {
-          return {
-            success: false,
-            compiledCount: units.length,
-            skippedCount,
-            failedCount: 0,
-            linkSuccess: false,
-            linkSkipped: true,
-            outputFilename: target.outputFilename,
-          };
+        const arCmd = generator.generate(CommandType.LinkStaticCmd, {
+          target,
+          pf: null,
+          file: '',
+          object: objects.join(this.compiler.switches.objectSeparator),
+          flatObject: objects.join(this.compiler.switches.objectSeparator),
+          deps: '',
+          hasCppFilesToLink: false,
+        });
+        if (arCmd) {
+          this.output.info(arCmd);
+          this.output.info(`[Archiving] → ${staticOut}`);
+          const ok = await this.runCommand(arCmd, this.project.basePath, options);
+          if (!ok) {
+            return {
+              success: false,
+              compiledCount: units.length,
+              skippedCount,
+              failedCount: 0,
+              linkSuccess: false,
+              linkSkipped: true,
+              outputFilename: target.outputFilename,
+            };
+          }
         }
       } else {
         this.output.info(`[Code::Blocks] 目标 "${target.title}" 静态库已是最新，跳过打包`);
@@ -413,6 +420,7 @@ export class BuildEngine {
       case TargetType.ConsoleOnly: return CommandType.LinkConsoleExeCmd;
       case TargetType.DynamicLib: return CommandType.LinkDynamicCmd;
       case TargetType.Native: return CommandType.LinkNativeCmd;
+      case TargetType.StaticLib: return CommandType.LinkStaticCmd;
       default: return CommandType.LinkExeCmd;
     }
   }
@@ -480,6 +488,10 @@ export class BuildEngine {
    * 因此时间戳判断需先解析出真实存在的文件。
    */
   private resolveOutputFile(target: BuildTarget): string {
+    // 静态库实际输出带 lib 前缀 + .a（computeStaticOutput），而非原始 outputFilename
+    if (target.targetType === TargetType.StaticLib) {
+      return path.join(this.project.basePath, computeStaticOutput(target.outputFilename, this.compiler.switches));
+    }
     const out = path.join(this.project.basePath, target.outputFilename);
     if (fs.existsSync(out)) return out;
     if (process.platform === 'win32') {
@@ -652,6 +664,19 @@ export class BuildEngine {
   }
 
   private async runCommand(command: string, cwd: string, options: BuildOptions): Promise<boolean> {
+    // 多行命令（模板含 \n）逐条执行，对齐 Code::Blocks AddCommandsToArray
+    const lines = command.split('\n').map((s) => s.trim()).filter(Boolean);
+    if (lines.length <= 1) {
+      return this.runSingleCommand(command, cwd, options);
+    }
+    let ok = true;
+    for (const line of lines) {
+      if (!(await this.runSingleCommand(line, cwd, options))) ok = false;
+    }
+    return ok;
+  }
+
+  private async runSingleCommand(command: string, cwd: string, options: BuildOptions): Promise<boolean> {
     return new Promise<boolean>((resolve) => {
       const resp = applyResponseFile(command);
       if (resp.respFile) {
