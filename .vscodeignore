@@ -11,4 +11,6 @@ CodeBlocks2VSCode-解耦扩展提示词.md
 package-lock.json
 test-ar-quote.js
 test-resp-file.js
+test-link-static.js
+test-static-prefix.js
 *.vsix
