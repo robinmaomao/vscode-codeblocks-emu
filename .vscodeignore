@@ -13,4 +13,5 @@ test-ar-quote.js
 test-resp-file.js
 test-link-static.js
 test-static-prefix.js
+test-weight-sort.js
 *.vsix

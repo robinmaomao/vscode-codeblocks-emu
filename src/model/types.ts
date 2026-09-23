@@ -86,6 +86,8 @@ export interface ProjectFile {
   link: boolean;
   /** 自定义编译命令（按编译器 ID 映射：compilerId → pfCustomBuild） */
   customBuildCommands: Record<string, CustomBuildCommand>;
+  /** 编译权重（0-100，默认 50，小者先编译，对应 projectfile.h weight） */
+  weight: number;
 }
 
 /** 构建目标 —— projectbuildtarget.h ProjectBuildTarget（继承 CompileTargetBase） */
