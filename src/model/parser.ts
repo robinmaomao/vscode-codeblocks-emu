@@ -17,7 +17,9 @@ import {
   OptionsRelation,
   OptionsRelationType,
   LinkerExecutableOption,
+  EnvVariable,
 } from './types';
+import { defaultCompilerVar, defaultCompile, defaultLink } from './fileTypes';
 
 function toUnix(p: string): string {
   return p.replace(/\\/g, '/');
@@ -150,8 +152,14 @@ export class ProjectParser {
       virtualFolders: [],
       commandsBeforeBuild: [],
       commandsAfterBuild: [],
+      buildScripts: [],
+      notes: '',
+      showNotesOnLoad: false,
+      envVars: [],
+      alwaysRunPostBuildSteps: false,
       files: [],
       extensions: root.Extensions ?? null,
+      rawProject: root.Project,
     };
 
     // 项目级选项（<Project><Option .../><Build><Target>...）
@@ -237,6 +245,18 @@ export class ProjectParser {
       if (node['@_virtualFolders'] !== undefined) {
         project.virtualFolders = String(node['@_virtualFolders']).split(';').filter(Boolean);
       }
+      // 项目备注：<Option show_notes="1"><notes><![CDATA[...]]></notes></Option>
+      if (node['@_show_notes'] !== undefined) {
+        project.showNotesOnLoad = String(node['@_show_notes']) !== '0';
+      }
+      const notesNode = node['notes'];
+      if (notesNode !== undefined) {
+        if (typeof notesNode === 'string') {
+          project.notes = notesNode;
+        } else if (notesNode && typeof notesNode === 'object') {
+          project.notes = String(notesNode['__cdata'] ?? notesNode['#text'] ?? '');
+        }
+      }
     }
   }
 
@@ -256,6 +276,8 @@ export class ProjectParser {
   private parseResourceCompilerOptions(node: any, sink: Project | BuildTarget): void {
     if (!sink.resourceCompilerOptions) sink.resourceCompilerOptions = [];
     sink.resourceCompilerOptions.push(...collectAddOptions(node));
+    // <ResourceCompiler><Add directory=...> → resourceIncludeDirs（DoResourceCompilerOptions）
+    sink.resourceIncludeDirs.push(...collectAddDirectories(node));
   }
 
   private parseIncludeDirs(node: any, sink: { includeDirs: string[] }): void {
@@ -305,17 +327,21 @@ export class ProjectParser {
         linkerExecutable: LinkerExecutableOption.AutoDetect,
         createDefFile: false,
         createStaticLib: false,
-        useConsoleRunner: false,
+        useConsoleRunner: true,
         includeInTargetAll: true,
         commandsBeforeBuild: [],
         commandsAfterBuild: [],
         commandsBeforeClean: [],
         commandsAfterClean: [],
+        buildScripts: [],
+        envVars: [],
+        alwaysRunPostBuildSteps: false,
       };
 
       this.parseTargetOptions(tnode.Option, target);
       this.parseCompilerOptions(tnode.Compiler, target);
       this.parseLinkerOptions(tnode.Linker, target);
+      this.parseLinkerExe(tnode.Linker, target);
       this.parseResourceCompilerOptions(tnode.ResourceCompiler, target);
       this.parseIncludeDirs(tnode.IncludeDirs, target);
       this.parseLibDirs(tnode.LibDirs, target);
@@ -324,7 +350,54 @@ export class ProjectParser {
       this.parseExtraCommands(tnode.ExtraCommands, target);
       this.parseExtraCommands(tnode.MakeCommands, target);
 
+      // 目标级构建脚本 <Script file="..."/>
+      this.parseBuildScripts(tnode, target.buildScripts);
+
+      // 目标级环境变量 <Environment><Variable name value>
+      this.parseEnvironment(tnode.Environment, target);
+
       project.buildTargets.push(target);
+    }
+
+    // 项目级构建脚本（<Build><Script>，与目标并列于 Build 节点下）
+    this.parseBuildScripts(buildNode, project.buildScripts);
+
+    // 项目级环境变量（<Build><Environment>，位于 Target 之后）
+    this.parseEnvironment(buildNode.Environment, project);
+  }
+
+  /** 解析 <Script file="..."/> 到目标数组（对应 DoBuildTarget / DoBuild 的 Script 循环） */
+  private parseBuildScripts(parent: any, sink: string[]): void {
+    if (!parent?.Script) return;
+    let scripts = parent.Script;
+    if (!Array.isArray(scripts)) scripts = [scripts];
+    for (const s of scripts) {
+      const f = s['@_file'];
+      if (f !== undefined) sink.push(toUnix(String(f)));
+    }
+  }
+
+  /** 解析 <Linker><LinkerExe value="CCompiler|CppCompiler|Linker">（DoLinkerOptions） */
+  private parseLinkerExe(node: any, target: BuildTarget): void {
+    if (!node?.LinkerExe) return;
+    const value = String(node.LinkerExe['@_value'] ?? '');
+    switch (value) {
+      case 'CCompiler': target.linkerExecutable = LinkerExecutableOption.CCompiler; break;
+      case 'CppCompiler': target.linkerExecutable = LinkerExecutableOption.CppCompiler; break;
+      case 'Linker': target.linkerExecutable = LinkerExecutableOption.Linker; break;
+      default: target.linkerExecutable = LinkerExecutableOption.AutoDetect;
+    }
+  }
+
+  /** 解析 <Environment><Variable name value>（DoEnvironment） */
+  private parseEnvironment(node: any, sink: { envVars: EnvVariable[] }): void {
+    if (!node?.Variable) return;
+    let vars = node.Variable;
+    if (!Array.isArray(vars)) vars = [vars];
+    for (const v of vars) {
+      const name = String(v['@_name'] ?? '');
+      if (!name) continue;
+      sink.envVars.push({ name, value: toNativeSeparator(String(v['@_value'] ?? '')) });
     }
   }
 
@@ -345,7 +418,7 @@ export class ProjectParser {
       this.parseRelation(node['@_projectLinkerOptionsRelation'], OptionsRelationType.LinkerOptions, target);
       this.parseRelation(node['@_projectIncludeDirsRelation'], OptionsRelationType.IncludeDirs, target);
       this.parseRelation(node['@_projectLibDirsRelation'], OptionsRelationType.LibDirs, target);
-      this.parseRelation(node['@_projectResIncludeDirsRelation'], OptionsRelationType.ResDirs, target);
+      this.parseRelation(node['@_projectResourceIncludeDirsRelation'], OptionsRelationType.ResDirs, target);
     }
   }
 
@@ -358,8 +431,18 @@ export class ProjectParser {
   }
 
   /** 解析 pre/post build/clean 命令（DoExtraCommands + DoMakeCommands） */
-  private parseExtraCommands(node: any, sink: { commandsBeforeBuild: string[]; commandsAfterBuild: string[] }): void {
+  private parseExtraCommands(node: any, sink: { commandsBeforeBuild: string[]; commandsAfterBuild: string[]; alwaysRunPostBuildSteps?: boolean }): void {
     if (!node) return;
+    // <ExtraCommands><Mode after="always"> → AlwaysRunPostBuildSteps
+    let modes = node.Mode;
+    if (modes !== undefined) {
+      if (!Array.isArray(modes)) modes = [modes];
+      for (const m of modes) {
+        if (String(m['@_after'] ?? '') === 'always') {
+          if (sink.alwaysRunPostBuildSteps !== undefined) sink.alwaysRunPostBuildSteps = true;
+        }
+      }
+    }
     // <ExtraCommands><Add before=".." after=".."/></ExtraCommands>
     let adds = node.Add;
     if (adds === undefined) return;
@@ -408,10 +491,13 @@ export class ProjectParser {
         relativeToCommonTopLevelPath: rel,
         absolutePath: unixJoin(project.basePath, rel),
         buildTargets: [],
-        compilerVar: '',
-        compile: true,
-        link: true,
+        explicitTargets: false,
+        compilerVar: defaultCompilerVar(rel),
+        compile: defaultCompile(rel),
+        link: defaultLink(rel),
         customBuildCommands: {},
+        weight: 50,
+        virtualFolder: '',
       };
 
       let foundTarget = false;
@@ -424,17 +510,21 @@ export class ProjectParser {
         for (const o of opts) {
           const targets = o['@_target'];
           if (targets !== undefined) {
-            const list = String(targets).split(';').filter(Boolean);
+            file.explicitTargets = true;
+            // Code::Blocks 用特殊值 <{~None~}> 表示「不归属任何目标」
+            const list = String(targets).split(';').filter((x) => x && x !== '<{~None~}>');
             if (list.length) {
               file.buildTargets.push(...list);
               foundTarget = true;
             } else {
-              noTarget = true; // <{~None~}>
+              noTarget = true;
             }
           }
           if (o['@_compilerVar'] !== undefined) file.compilerVar = String(o['@_compilerVar']);
           if (o['@_compile'] !== undefined) file.compile = String(o['@_compile']) !== '0';
           if (o['@_link'] !== undefined) file.link = String(o['@_link']) !== '0';
+          if (o['@_weight'] !== undefined) file.weight = Number(o['@_weight']) || 50;
+          if (o['@_virtualFolder'] !== undefined) file.virtualFolder = toUnix(String(o['@_virtualFolder']));
           // custom build command：<Option compiler="id" use="1" buildCommand="..."/>
           if (o['@_buildCommand'] !== undefined && o['@_compiler'] !== undefined) {
             const cmp = String(o['@_compiler']);

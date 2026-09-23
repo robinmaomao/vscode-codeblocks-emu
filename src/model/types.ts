@@ -60,6 +60,12 @@ export enum CompilerLineType {
   Info = 3,    // cltInfo
 }
 
+/** 环境变量项（<Environment><Variable name value>） */
+export interface EnvVariable {
+  name: string;
+  value: string;
+}
+
 /** 单个文件在项目中的定义 —— projectfile.h ProjectFile */
 export interface ProjectFile {
   /** 相对项目根目录的路径（Unix 分隔符） */
@@ -70,6 +76,8 @@ export interface ProjectFile {
   absolutePath: string;
   /** 该文件所属的构建目标标题列表 */
   buildTargets: string[];
+  /** 是否在 .cbp 中显式写了 <Option target=...>（false = 未写，隐式归属所有目标） */
+  explicitTargets: boolean;
   /** 编译变量：CPP / CC / WINDRES */
   compilerVar: string;
   /** 是否参与编译（<Option compile="1"/>） */
@@ -78,6 +86,10 @@ export interface ProjectFile {
   link: boolean;
   /** 自定义编译命令（按编译器 ID 映射：compilerId → buildCommand） */
   customBuildCommands: Record<string, string>;
+  /** 编译权重（0-100，默认 50，小者先编译，对应 projectfile.h weight） */
+  weight: number;
+  /** 虚拟文件夹归属（空 = 根，对应 <Option virtualFolder>） */
+  virtualFolder: string;
 }
 
 /** 构建目标 —— projectbuildtarget.h ProjectBuildTarget（继承 CompileTargetBase） */
@@ -125,6 +137,14 @@ export interface BuildTarget {
   /** clean 命令（pre/post） */
   commandsBeforeClean: string[];
   commandsAfterClean: string[];
+
+  /** 构建脚本列表（<Script file="..."/>） */
+  buildScripts: string[];
+
+  /** 目标级环境变量（<Environment><Variable name value>） */
+  envVars: EnvVariable[];
+  /** 是否始终运行 post build 步骤（<ExtraCommands><Mode after="always">） */
+  alwaysRunPostBuildSteps: boolean;
 }
 
 /** 虚拟目标（如 "All"） */
@@ -167,11 +187,25 @@ export interface Project {
   commandsBeforeBuild: string[];
   commandsAfterBuild: string[];
 
+  /** 项目级构建脚本列表（<Build><Script file="..."/>） */
+  buildScripts: string[];
+  /** 项目备注（<Option show_notes><notes>） */
+  notes: string;
+  /** 加载项目时是否显示备注 */
+  showNotesOnLoad: boolean;
+
+  /** 项目级环境变量（<Build><Environment>） */
+  envVars: EnvVariable[];
+  /** 项目级是否始终运行 post build 步骤（<ExtraCommands><Mode after="always">） */
+  alwaysRunPostBuildSteps: boolean;
+
   /** 所有文件（含未归属具体目标的） */
   files: ProjectFile[];
 
   /** 扩展数据（含扩展节点） */
   extensions: unknown;
+  /** 原始 XML 项目节点（fast-xml-parser 结果，供序列化透传未映射元素） */
+  rawProject?: unknown;
 }
 
 /** 工作区 —— cbworkspace.h cbWorkspace */
