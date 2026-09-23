@@ -4,7 +4,7 @@
 
 直接在 VS Code 中打开 `.cbp` / `.workspace` 工程，即可获得与 Code::Blocks 对齐的构建、调试与工程浏览体验。
 
-> **作者**：Robinmaomao ｜ **版本**：0.8.2
+> **作者**：Robinmaomao ｜ **版本**：0.8.3
 
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE.md)
 
@@ -26,7 +26,7 @@
 - 🎨 **专用语法高亮**：为链接脚本（`.ld` / `.lcf`）、GNU 汇编（`.S` / `.s`，RISC-V）、xmaker 配置脚本（`.xm`）提供专用 TextMate 语法高亮；安装时自动写入仅作用于这些文件的 token 颜色规则，不覆盖用户其他配色。
 - 🚀 **对齐 Code::Blocks 细节**：
   - 增量编译（源文件 + `#include` 头文件依赖 mtime 比对）、`rebuild` 对齐 Code::Blocks（先 Clean 再 Build）
-  - pre/post build 脚本（`.bat` / 命令）
+  - pre/post build 脚本（`.bat` / 命令；Windows 下实时读取系统 PATH，支持运行期新加入 PATH 的工具）
   - 对象目录 `CreateDirRecursively` 自动创建
   - `GetCommonTopLevelPath` 对象路径布局（`Output/obj/<公共顶层>/...`）
   - GBK 输出解码（中文 Windows 下 GCC 报错不乱码）
@@ -50,7 +50,7 @@ npx tsc -p ./
 npx vsce package --allow-missing-repository
 
 # 4. 安装
-code --install-extension codeblocks-vscode-0.8.2.vsix --force
+code --install-extension codeblocks-vscode-0.8.3.vsix --force
 ```
 
 > Windows 下建议使用 `npm.cmd` / `npx.cmd`（PSReadLine 执行策略）。
