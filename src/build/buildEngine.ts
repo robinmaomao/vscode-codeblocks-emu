@@ -10,6 +10,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import { spawn } from 'child_process';
 import { Project, BuildTarget, ProjectFile, TargetType, CommandType, CompilerLineType } from '../model/types';
+import { FileType, fileTypeOf, isCompilableFileType, isLinkableFileType, isCppSource, isClangdIndexable } from '../model/fileTypes';
 import { Compiler } from '../compiler/compiler';
 import { CommandGenerator } from '../compiler/commandGenerator';
 import { OutputParser } from './outputParser';
@@ -122,19 +123,19 @@ export class BuildEngine {
 
     for (const target of targets) {
       const files = target.files.length ? target.files : this.project.files;
-      const hasCpp = files.some((f) => /\.(cpp|cc|cxx|C)$/.test(f.relativeFilename));
+      const hasCpp = files.some((f) => isCppSource(f.relativeFilename));
 
       for (const file of files) {
         // 跳过不参与编译的文件（<Option compile="0"/>）
         if (file.compile === false) continue;
 
-        const customCmd = file.customBuildCommands?.[target.compilerId]?.trim();
-        const isCustom = customCmd !== undefined && customCmd !== '';
+        const custom = file.customBuildCommands?.[target.compilerId];
+        const isCustom = custom !== undefined && custom.use;
         // 自定义 buildCommand 文件（ram.ld/app.xm 等链接脚本/资源）不是 C/C++ 源文件，
         // clangd 无法解析，compile_commands.json 里跳过（构建仍照常处理它们）。
         if (isCustom) continue;
         // 只收集 clangd 可索引的 C/C++ 源文件（.rc 资源脚本 clangd 无法解析）
-        if (!this.isClangdIndexable(file.relativeFilename)) continue;
+        if (!isClangdIndexable(file.relativeFilename)) continue;
 
         const objectRel = this.objectPathRelative(target, file);
 
@@ -201,36 +202,40 @@ export class BuildEngine {
 
     // 1. 编译所有文件（增量：跳过未变更文件）
     const units: CompileUnit[] = [];
-    // 参与链接的文件列表（无论本次是否重编译，只要编译产出对象就参与链接）
-    const linkFiles: ProjectFile[] = [];
     const files = target.files.length ? target.files : this.project.files;
-    const hasCpp = files.some((f) => /\.(cpp|cc|cxx|C)$/.test(f.relativeFilename));
+    const hasCpp = files.some((f) => isCppSource(f.relativeFilename));
 
     // 头文件依赖扫描（增量编译）：收集 include 搜索目录与依赖 mtime 缓存（跨文件复用）
     const includeDirs = this.getIncludeDirs(target);
     const depsCache = new Map<string, number>();
 
-    // 统计：增量跳过 / 实际编译
-    let skippedCount = 0;
+    // 1a. 链接对象集合（独立于编译，对应 GetTargetLinkCommands：link=true 且可链接类型；
+    //     自定义 buildCommand 文件如 ram.ld/app.xm 是链接脚本/资源，不参与链接）
+    const linkFiles: ProjectFile[] = [];
+    for (const file of files) {
+      const custom = file.customBuildCommands?.[target.compilerId];
+      if (custom !== undefined && custom.use) continue;
+      if (file.link === false) continue;
+      if (!isLinkableFileType(fileTypeOf(file.relativeFilename))) continue;
+      linkFiles.push(file);
+    }
 
+    // 1b. 编译单元（对应 GetCompileFileCommand：compile=true 且可编译类型或自定义命令）
+    let skippedCount = 0;
     for (const file of files) {
       // 跳过不参与编译的文件（<Option compile="0"/>）
       if (file.compile === false) continue;
 
-      const customCmd = file.customBuildCommands?.[target.compilerId]?.trim();
-      const isCustom = customCmd !== undefined && customCmd !== '';
-      // 自定义命令文件（ram.ld/app.xm 等）或标准源文件才编译
-      if (!isCustom && !this.isCompilable(file.relativeFilename)) continue;
+      const custom = file.customBuildCommands?.[target.compilerId];
+      const isCustom = custom !== undefined && custom.use;
+      const ft = fileTypeOf(file.relativeFilename);
+      // 自定义命令文件（ram.ld/app.xm 等）或可编译类型（源文件/资源文件）才编译
+      if (!isCustom && !isCompilableFileType(ft)) continue;
 
       // 绝对对象路径用于增量判断，相对对象路径用于命令行（避免含空格路径）
       const object = this.objectPathFor(target, file);
       const objectRel = this.objectPathRelative(target, file);
       const deps = this.depsPathFor(target, file);
-
-      // 标准源文件（非自定义命令）参与链接
-      if (!isCustom && file.link !== false) {
-        linkFiles.push(file);
-      }
 
       // 增量编译：源/头文件未变更且对象文件存在时跳过（rebuild 强制重编译）
       // （Code::Blocks 对自定义 buildCommand 文件同样执行 IsObjectOutdated 判断）
@@ -243,9 +248,11 @@ export class BuildEngine {
       let command: string;
       if (isCustom) {
         // 自定义编译命令：直接展开 $compiler/$file 等内置宏 + $(...) 变量
-        command = this.expandCustomCommand(customCmd, generator, target, file, objectRel);
+        command = this.expandCustomCommand(custom.command, generator, target, file, objectRel);
       } else {
-        command = generator.generate(CommandType.CompileObjectCmd, {
+        // 资源文件走 CompileResourceCmd（windres），其余走 CompileObjectCmd（对齐 GetCompileFileCommand）
+        const cmdType = ft === FileType.Resource ? CommandType.CompileResourceCmd : CommandType.CompileObjectCmd;
+        command = generator.generate(cmdType, {
           target,
           pf: file,
           file: file.absolutePath,
@@ -255,7 +262,8 @@ export class BuildEngine {
           hasCppFilesToLink: hasCpp,
         });
       }
-      if (command) {
+      // 对齐 AddCommandsToArray：展开后为空/纯空白的命令（如 buildCommand=" " 的 no-op）不执行
+      if (command && command.trim() !== '') {
         units.push({ target, file, command, cwd: this.project.basePath });
       }
     }
@@ -408,15 +416,6 @@ export class BuildEngine {
     }
   }
 
-  private isCompilable(rel: string): boolean {
-    return /\.(c|cpp|cc|cxx|C)$/.test(rel) || /\.rc$/.test(rel);
-  }
-
-  /** 是否可被 clangd 索引（C/C++ 源文件；.rc 资源脚本 clangd 无法解析） */
-  private isClangdIndexable(rel: string): boolean {
-    return /\.(c|cpp|cc|cxx|C)$/.test(rel);
-  }
-
   /** 编译器 bin 目录（用于把交叉编译器工具加入脚本执行的 PATH） */
   private compilerBinPath(): string {
     // 优先从完整程序路径推导（如 .../RV32-V2/bin/riscv32-elf-gcc.exe → .../RV32-V2/bin）
@@ -429,12 +428,6 @@ export class BuildEngine {
       return path.join(this.compiler.masterPath, 'bin');
     }
     return '';
-  }
-
-  /** 判断文件是否为自定义 buildCommand 文件（不参与链接） */
-  private isCustomFile(file: ProjectFile, target: BuildTarget): boolean {
-    const cmd = file.customBuildCommands?.[target.compilerId]?.trim();
-    return cmd !== undefined && cmd !== '';
   }
 
   /** 展开自定义编译命令（ram.ld/app.xm 等 <Option buildCommand>） */

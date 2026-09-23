@@ -18,6 +18,12 @@ import {
   OptionsRelationType,
   LinkerExecutableOption,
 } from './types';
+import {
+  fileTypeOf,
+  isCompilableFileType,
+  isLinkableFileType,
+  defaultCompilerVar,
+} from './fileTypes';
 
 function toUnix(p: string): string {
   return p.replace(/\\/g, '/');
@@ -403,14 +409,17 @@ export class ProjectParser {
       if (!filename) continue;
 
       const rel = toUnix(filename);
+      // 对齐 cbProject::AddFile：compile/link 默认值按文件类型决定，compilerVar 按扩展名决定；
+      // 随后由显式 <Option compile/link/compilerVar> 覆盖（projectloader.cpp DoUnitOptions）。
+      const ft = fileTypeOf(rel);
       const file: ProjectFile = {
         relativeFilename: rel,
         relativeToCommonTopLevelPath: rel,
         absolutePath: unixJoin(project.basePath, rel),
         buildTargets: [],
-        compilerVar: '',
-        compile: true,
-        link: true,
+        compilerVar: defaultCompilerVar(rel),
+        compile: isCompilableFileType(ft),
+        link: isLinkableFileType(ft),
         customBuildCommands: {},
       };
 
@@ -436,10 +445,15 @@ export class ProjectParser {
           if (o['@_compile'] !== undefined) file.compile = String(o['@_compile']) !== '0';
           if (o['@_link'] !== undefined) file.link = String(o['@_link']) !== '0';
           // custom build command：<Option compiler="id" use="1" buildCommand="..."/>
+          // 对齐 DoUnitOptions：compiler 与 buildCommand 均非空（不 trim）才记录；
+          // use 属性仅在此时读取（缺省为 0/false，即不启用）。
           if (o['@_buildCommand'] !== undefined && o['@_compiler'] !== undefined) {
             const cmp = String(o['@_compiler']);
             const cmd = String(o['@_buildCommand']).replace(/\\n/g, '\n');
-            if (cmp && cmd) file.customBuildCommands[cmp] = cmd;
+            if (cmp && cmd) {
+              const use = o['@_use'] !== undefined ? String(o['@_use']) !== '0' : false;
+              file.customBuildCommands[cmp] = { command: cmd, use };
+            }
           }
         }
       }
