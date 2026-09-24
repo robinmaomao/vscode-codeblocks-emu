@@ -99,7 +99,9 @@ function makeTarget(name: string, title: string, type: TargetType, compilerOptio
     title,
     targetType: type,
     compilerId,
-    outputFilename: `bin/${title}/${name}`,
+    outputFilename: type === TargetType.StaticLib ? `bin/${title}/lib${name}.a`
+      : type === TargetType.DynamicLib ? (process.platform === 'win32' ? `bin/${title}/lib${name}.dll` : `bin/${title}/lib${name}.so`)
+      : `bin/${title}/${name}`,
     objectOutput: `obj/${title}/`,
     optionRelations: defaultRelations(),
     compilerOptions,
@@ -113,6 +115,8 @@ function makeTarget(name: string, title: string, type: TargetType, compilerOptio
     linkerExecutable: LinkerExecutableOption.AutoDetect,
     createDefFile: false,
     createStaticLib: false,
+    impLib: '',
+    defFile: '',
     useConsoleRunner: true,
     includeInTargetAll: false,
     commandsBeforeBuild: [],

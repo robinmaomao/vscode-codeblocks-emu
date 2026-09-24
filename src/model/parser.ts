@@ -327,6 +327,8 @@ export class ProjectParser {
         linkerExecutable: LinkerExecutableOption.AutoDetect,
         createDefFile: false,
         createStaticLib: false,
+        impLib: '',
+        defFile: '',
         useConsoleRunner: true,
         includeInTargetAll: true,
         commandsBeforeBuild: [],
@@ -412,6 +414,8 @@ export class ProjectParser {
       if (node['@_object_output'] !== undefined) target.objectOutput = toUnix(String(node['@_object_output']));
       if (node['@_createDefFile'] !== undefined) target.createDefFile = node['@_createDefFile'] === '1' || node['@_createDefFile'] === 'true';
       if (node['@_createStaticLib'] !== undefined) target.createStaticLib = node['@_createStaticLib'] === '1' || node['@_createStaticLib'] === 'true';
+      if (node['@_imp_lib'] !== undefined) target.impLib = toNativeSeparator(String(node['@_imp_lib']));
+      if (node['@_def_file'] !== undefined) target.defFile = toNativeSeparator(String(node['@_def_file']));
       if (node['@_use_console_runner'] !== undefined) target.useConsoleRunner = node['@_use_console_runner'] === '1' || node['@_use_console_runner'] === 'true';
       // 关系属性（projectCompilerOptionsRelation 等）
       this.parseRelation(node['@_projectCompilerOptionsRelation'], OptionsRelationType.CompilerOptions, target);
