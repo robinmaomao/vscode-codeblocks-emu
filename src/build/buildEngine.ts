@@ -15,6 +15,7 @@ import { Compiler } from '../compiler/compiler';
 import { CommandGenerator, computeStaticOutput } from '../compiler/commandGenerator';
 import { OutputParser } from './outputParser';
 import { runScriptCommands, buildMacroVars } from './scriptRunner';
+import { BuildCancelHandle } from './cancelToken';
 import { decodeText } from '../tools/encoding';
 import { applyResponseFile, compareFilesByWeight } from './commandLine';
 import { upperDrive } from '../tools/pathCase';
@@ -38,6 +39,8 @@ export interface BuildOptions {
   onDiagnostic?: (diag: vscode.Diagnostic, fileUri?: vscode.Uri) => void;
   /** 结构化诊断回调（Build Log 视图收集错误/警告） */
   onStructuredDiagnostic?: (d: StructuredDiagnostic) => void;
+  /** 取消句柄（null 时不支持取消；提供后各检查点查询 + 活动子进程注册强杀） */
+  cancel?: BuildCancelHandle;
 }
 
 /** 单次构建目标级统计（供 Build Log 视图展示） */
@@ -48,6 +51,8 @@ export interface BuildTargetStats {
   failedCount: number;    // 编译失败文件数
   linkSuccess: boolean;
   linkSkipped: boolean;   // static lib 无链接步骤
+  /** 构建是否被用户取消（取消 ≠ 失败：failedCount 不计被强杀的编译进程） */
+  cancelled?: boolean;
   outputFilename?: string;
 }
 
@@ -121,7 +126,13 @@ export class BuildEngine {
     let outputFilename: string | undefined;
 
     let ok = true;
+    let cancelled = false;
     for (const target of targets) {
+      // 取消检查点：目标之间（多目标 / 工作区多项目构建）
+      if (options.cancel?.isCancelled()) {
+        cancelled = true;
+        break;
+      }
       const result = await this.buildTarget(target, options);
       // 无论成功失败都累加统计（失败时统计已累计的部分）
       compiledCount += result.compiledCount;
@@ -130,13 +141,17 @@ export class BuildEngine {
       linkSuccess = linkSuccess && result.linkSuccess;
       linkSkipped = linkSkipped && result.linkSkipped;
       if (result.outputFilename) outputFilename = result.outputFilename;
+      if (result.cancelled) {
+        cancelled = true;
+        break;
+      }
       if (!result.success) {
         ok = false;
         break;
       }
     }
 
-    this.lastStats = { success: ok, compiledCount, skippedCount, failedCount, linkSuccess, linkSkipped, outputFilename };
+    this.lastStats = { success: ok, cancelled, compiledCount, skippedCount, failedCount, linkSuccess, linkSkipped, outputFilename };
     return ok;
   }
 
@@ -189,6 +204,23 @@ export class BuildEngine {
     return entries;
   }
 
+  /**
+   * 构造「已取消」统计对象 —— 取消不是失败：
+   * failedCount 不计被强杀的编译进程，success=false 但 cancelled=true 供上层区分。
+   */
+  private cancelledStats(target: BuildTarget, compiledCount: number, skippedCount: number): BuildTargetStats {
+    return {
+      success: false,
+      cancelled: true,
+      compiledCount,
+      skippedCount,
+      failedCount: 0,
+      linkSuccess: false,
+      linkSkipped: target.targetType === TargetType.StaticLib,
+      outputFilename: target.outputFilename,
+    };
+  }
+
   /** 构建单个目标（始终返回统计对象，用 success 标记成败） */
   private async buildTarget(target: BuildTarget, options: BuildOptions): Promise<BuildTargetStats> {
     // 本次目标构建的耗时记录（提前 return 路径也要清空，避免汇总显示上次构建的 Top3）
@@ -220,8 +252,13 @@ export class BuildEngine {
         macroVars,
         (l) => this.output.info(l),
         this.compilerBinPath(),
+        options.cancel,
       );
       if (!ok) {
+        // 取消优先判定（被强杀的脚本进程返回失败，但语义是取消）
+        if (options.cancel?.isCancelled()) {
+          return this.cancelledStats(target, 0, 0);
+        }
         return { success: false, compiledCount: 0, skippedCount: 0, failedCount: 0, linkSuccess: false, linkSkipped: true, outputFilename: target.outputFilename };
       }
       return { success: true, compiledCount: 0, skippedCount: 0, failedCount: 0, linkSuccess: true, linkSkipped: true };
@@ -238,8 +275,12 @@ export class BuildEngine {
     // 0. pre-build 脚本
     if (preCommands.length) {
       this.output.info(`[Code::Blocks] 执行 pre-build 脚本 (${target.title})...`);
-      const preOk = await runScriptCommands(preCommands, this.project.basePath, macroVars, (l) => this.output.info(l), this.compilerBinPath());
+      const preOk = await runScriptCommands(preCommands, this.project.basePath, macroVars, (l) => this.output.info(l), this.compilerBinPath(), options.cancel);
       if (!preOk) {
+        // 取消优先判定（被强杀的脚本进程返回失败，但语义是取消）
+        if (options.cancel?.isCancelled()) {
+          return this.cancelledStats(target, 0, 0);
+        }
         this.output.error(`[Code::Blocks] 目标 "${target.title}" pre-build 脚本失败`);
         return { success: false, compiledCount: 0, skippedCount: 0, failedCount: 0, linkSuccess: false, linkSkipped: target.targetType === TargetType.StaticLib, outputFilename: target.outputFilename };
       }
@@ -350,7 +391,10 @@ export class BuildEngine {
       if (fs.existsSync(outAbs)) {
         this.output.info(`[Code::Blocks] 目标 "${target.title}" 已是最新`);
         // 目标已最新（hasCommands=false）：仅当 alwaysRunPostBuildSteps 为真时才执行 post-build（对齐 CodeBlocks）
-        if (!(await this.runPostBuild(target, macroVars, expandScriptMacros, false))) {
+        if (!(await this.runPostBuild(target, macroVars, expandScriptMacros, false, options))) {
+          if (options.cancel?.isCancelled()) {
+            return this.cancelledStats(target, 0, skippedCount);
+          }
           return {
             success: false, compiledCount: 0, skippedCount, failedCount: 0,
             linkSuccess: false, linkSkipped: target.targetType === TargetType.StaticLib,
@@ -376,6 +420,11 @@ export class BuildEngine {
     }
     const compileSec = ((Date.now() - compileStartMs) / 1000).toFixed(1);
     this.lastCompileTimings = [...this.compileTimings];
+
+    // 取消检查点：被强杀的编译进程 close 返回失败，但语义是取消而非失败（failedCount 不计）
+    if (options.cancel?.isCancelled()) {
+      return this.cancelledStats(target, results.filter((r) => r).length, skippedCount);
+    }
 
     const failedCount = results.filter((r) => !r).length;
     if (failedCount > 0) {
@@ -426,6 +475,10 @@ export class BuildEngine {
           const linkOk = await this.runCommand(linkCommand, this.project.basePath, options);
           const linkSec = ((Date.now() - linkStartMs) / 1000).toFixed(1);
           if (!linkOk) {
+            // 取消优先判定（被强杀的链接器返回失败，但语义是取消）
+            if (options.cancel?.isCancelled()) {
+              return this.cancelledStats(target, totalUnits, skippedCount);
+            }
             this.output.error(`[Code::Blocks] 目标 "${target.title}" 链接失败`);
             return {
               success: false,
@@ -468,6 +521,10 @@ export class BuildEngine {
           const ok = await this.runCommand(arCmd, this.project.basePath, options);
           const arSec = ((Date.now() - arStartMs) / 1000).toFixed(1);
           if (!ok) {
+            // 取消优先判定（被强杀的 ar 返回失败，但语义是取消）
+            if (options.cancel?.isCancelled()) {
+              return this.cancelledStats(target, totalUnits, skippedCount);
+            }
             return {
               success: false,
               compiledCount: totalUnits,
@@ -486,7 +543,10 @@ export class BuildEngine {
     }
 
     // 3. post-build 脚本（对齐 CodeBlocks：目标 post → 项目 post；hasCommands=true 时执行）
-    if (!(await this.runPostBuild(target, macroVars, expandScriptMacros, true))) {
+    if (!(await this.runPostBuild(target, macroVars, expandScriptMacros, true, options))) {
+      if (options.cancel?.isCancelled()) {
+        return this.cancelledStats(target, totalUnits, skippedCount);
+      }
       return {
         success: false,
         compiledCount: totalUnits,
@@ -519,6 +579,7 @@ export class BuildEngine {
     macroVars: Record<string, string>,
     expandScriptMacros: (cmd: string) => string,
     hasCommands: boolean,
+    options: BuildOptions,
   ): Promise<boolean> {
     const targetPost = [...target.commandsAfterBuild].map(expandScriptMacros);
     const projectPost = [...this.project.commandsAfterBuild].map(expandScriptMacros);
@@ -526,16 +587,18 @@ export class BuildEngine {
 
     if (targetPost.length && (hasCommands || target.alwaysRunPostBuildSteps)) {
       this.output.info(`[Code::Blocks] 执行目标 post-build 脚本 (${target.title})...`);
-      const ok = await runScriptCommands(targetPost, this.project.basePath, macroVars, (l) => this.output.info(l), extraPath);
+      const ok = await runScriptCommands(targetPost, this.project.basePath, macroVars, (l) => this.output.info(l), extraPath, options.cancel);
       if (!ok) {
+        if (options.cancel?.isCancelled()) return false;
         this.output.error(`[Code::Blocks] 目标 "${target.title}" post-build 脚本失败`);
         return false;
       }
     }
     if (projectPost.length && (hasCommands || this.project.alwaysRunPostBuildSteps)) {
       this.output.info('[Code::Blocks] 执行项目 post-build 脚本...');
-      const ok = await runScriptCommands(projectPost, this.project.basePath, macroVars, (l) => this.output.info(l), extraPath);
+      const ok = await runScriptCommands(projectPost, this.project.basePath, macroVars, (l) => this.output.info(l), extraPath, options.cancel);
       if (!ok) {
+        if (options.cancel?.isCancelled()) return false;
         this.output.error('[Code::Blocks] 项目 post-build 脚本失败');
         return false;
       }
@@ -1017,6 +1080,8 @@ export class BuildEngine {
     let cursor = 0;
     const workers = Array.from({ length: Math.min(maxJobs, localIdx.length) }, async () => {
       while (cursor < localIdx.length) {
+        // 取消检查点：不再启动新的编译单元（已启动的由 cancel() 强杀整棵进程树）
+        if (options.cancel?.isCancelled()) break;
         const pos = cursor++;
         const li = localIdx[pos];
         const u = group[li];
@@ -1034,10 +1099,15 @@ export class BuildEngine {
         const idx = baseGlobalIdx + li + 1;
         if (ok) {
           this.output.info(`✓ [Compiled] ${idx}-${totalCount} ${u.file.relativeFilename} (${elapsedSec}s)`);
+        } else if (options.cancel?.isCancelled()) {
+          // 取消导致的失败不是错误：不打印红色 Failed，不参与最慢 Top3 统计
+          this.output.warn(`⚠ [Interrupted] ${idx}-${totalCount} ${u.file.relativeFilename}`);
         } else {
           this.output.error(`✗ [Failed] ${idx}-${totalCount} ${u.file.relativeFilename} (${elapsedSec}s)`);
         }
-        this.compileTimings.push({ file: u.file.relativeFilename, ms: elapsedMs });
+        if (ok) {
+          this.compileTimings.push({ file: u.file.relativeFilename, ms: elapsedMs });
+        }
         results[baseGlobalIdx + li] = ok;
       }
     });
@@ -1052,6 +1122,11 @@ export class BuildEngine {
     }
     let ok = true;
     for (const line of lines) {
+      // 取消检查点：多行命令逐行之间
+      if (options.cancel?.isCancelled()) {
+        ok = false;
+        break;
+      }
       if (!(await this.runSingleCommand(line, cwd, options))) ok = false;
     }
     return ok;
@@ -1059,6 +1134,11 @@ export class BuildEngine {
 
   private async runSingleCommand(command: string, cwd: string, options: BuildOptions): Promise<boolean> {
     return new Promise<boolean>((resolve) => {
+      // 取消检查点：spawn 前（已取消则不再派生新进程）
+      if (options.cancel?.isCancelled()) {
+        resolve(false);
+        return;
+      }
       const resp = applyResponseFile(command);
       if (resp.respFile) {
         this.output.debug(`[Code::Blocks] 命令行过长，改用响应文件: ${resp.respFile}`);
@@ -1070,6 +1150,8 @@ export class BuildEngine {
         // PATH 前置编译器 bin 目录（对齐 CodeBlocks Init 的 PATH 重构），仅 win32 时已由 build() 计算
         env: this.buildEnv,
       });
+      // 注册进取消源：cancel() 时强杀整棵进程树（Windows taskkill /T /F，覆盖 cmd.exe→gcc→cc1/as）
+      options.cancel?.register(proc);
       const parser = this.parser;
 
       // 累积原始字节，命令结束时统一解码（UTF-8 严格优先，回退 GBK），
@@ -1097,12 +1179,14 @@ export class BuildEngine {
       proc.stderr?.on('data', (data: Buffer) => stderrChunks.push(data));
 
       proc.on('close', (code) => {
+        options.cancel?.unregister(proc);
         if (stdoutChunks.length) processLines(decodeText(Buffer.concat(stdoutChunks)));
         if (stderrChunks.length) processLines(decodeText(Buffer.concat(stderrChunks)));
         const success = code !== null && code <= this.compiler.switches.statusSuccess;
         resolve(success);
       });
       proc.on('error', (err) => {
+        options.cancel?.unregister(proc);
         this.output.error(`[Code::Blocks] 无法执行: ${err.message}`);
         resolve(false);
       });

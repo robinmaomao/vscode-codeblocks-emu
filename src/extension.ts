@@ -22,6 +22,7 @@ import { MenuTreeProvider } from './ui/menuTreeProvider';
 import { BuildLogTreeProvider, BuildLogProject, BuildLogDiagnostic } from './ui/buildLogTreeProvider';
 import { SymbolTreeProvider } from './ui/symbolTreeProvider';
 import { BuildEngine } from './build/buildEngine';
+import { BuildCancelSource, BuildCancelHandle } from './build/cancelToken';
 import { buildMacroVars, expandMacros } from './build/scriptRunner';
 import { applyGeneratedFiles } from './build/generatedFiles';
 import { OutputParser } from './build/outputParser';
@@ -53,6 +54,10 @@ const currentBuildProjects: BuildLogProject[] = [];
 let currentBuildErrorCount = 0;
 /** 本次构建是否因达到 maxReportedErrors 上限而被截断 */
 let maxErrorsReached = false;
+/** 当前构建的取消源（「停止构建」命令与通知取消按钮共用） */
+let currentBuildCancel: BuildCancelSource | undefined;
+/** 构建进行中互斥标志（防止双开构建进程打架） */
+let buildInProgress = false;
 
 /** 底部状态栏构建目标项 */
 let targetStatusBar: vscode.StatusBarItem | undefined;
@@ -411,6 +416,17 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   context.subscriptions.push(
     vscode.commands.registerCommand('codeblocks.rebuild', async () => {
       await build(true);
+    }),
+  );
+
+  // 停止构建（编译随时停止）
+  context.subscriptions.push(
+    vscode.commands.registerCommand('codeblocks.build.stop', () => {
+      if (!currentBuildCancel || currentBuildCancel.isCancelled()) {
+        vscode.window.showInformationMessage('当前没有进行中的构建');
+        return;
+      }
+      currentBuildCancel.cancel();
     }),
   );
 
@@ -2179,9 +2195,29 @@ function topologicalBuildOrder(projects: Project[]): Project[] {
   return result;
 }
 
+/** Rebuild 确认对话框 —— 对齐 Code::Blocks 的 "Rebuild project?" 确认（删除对象文件 + 全量编译） */
+async function confirmRebuild(): Promise<boolean> {
+  const choice = await vscode.window.showWarningMessage(
+    '重新构建将删除所有对象文件并全量重新编译，确定继续？',
+    { modal: true },
+    '重新构建',
+  );
+  return choice === '重新构建';
+}
+
 async function build(rebuild: boolean): Promise<boolean> {
+  // 构建互斥：进行中时忽略新的构建命令（防止双开构建进程打架）
+  if (buildInProgress) {
+    vscode.window.showWarningMessage('已有构建正在进行，请等待完成或先停止');
+    return false;
+  }
   if (openProjects.length === 0) {
     vscode.window.showWarningMessage('请先打开一个 Code::Blocks 项目 (.cbp)');
+    return false;
+  }
+
+  // Rebuild 前由用户确认（对齐 Code::Blocks 的 Rebuild 确认对话框）
+  if (rebuild && !(await confirmRebuild())) {
     return false;
   }
 
@@ -2201,47 +2237,88 @@ async function build(rebuild: boolean): Promise<boolean> {
   const total = openProjects.length;
   let done = 0;
   let allOk = true;
-
-  await vscode.window.withProgress(
-    { location: vscode.ProgressLocation.Notification, title: `Code::Blocks ${rebuild ? '重新构建' : '构建'}中...`, cancellable: false },
-    async (progress) => {
-      // 工作区构建：每个工程构建它自己的活动目标（对齐 CodeBlocks Build Workspace 语义）
-      // 依赖排序：依赖工程先构建（.workspace 的 <Depends>，DFS 拓扑排序）
-      for (const project of topologicalBuildOrder(openProjects)) {
-        const targetTitle = getSelectedTarget(project) ?? project.buildTargets[0]?.title;
-        if (!targetTitle) {
-          outputChannel.warn(`[Code::Blocks] 项目 "${project.title}" 没有构建目标，跳过`);
-          done++;
-          progress.report({ increment: 100 / total });
-          continue;
+  let cancelled = false;
+  buildInProgress = true;
+  try {
+    await vscode.window.withProgress(
+      { location: vscode.ProgressLocation.Notification, title: `Code::Blocks ${rebuild ? '重新构建' : '构建'}中...`, cancellable: true },
+      async (progress, token) => {
+        // 取消源：通知 ❌ 按钮与「停止构建」命令共用；取消后引擎强杀所有活动子进程
+        const cancelSource = new BuildCancelSource();
+        currentBuildCancel = cancelSource;
+        token.onCancellationRequested(() => cancelSource.cancel());
+        try {
+          // 工作区构建：每个工程构建它自己的活动目标（对齐 CodeBlocks Build Workspace 语义）
+          // 依赖排序：依赖工程先构建（.workspace 的 <Depends>，DFS 拓扑排序）
+          for (const project of topologicalBuildOrder(openProjects)) {
+            const targetTitle = getSelectedTarget(project) ?? project.buildTargets[0]?.title;
+            if (!targetTitle) {
+              outputChannel.warn(`[Code::Blocks] 项目 "${project.title}" 没有构建目标，跳过`);
+              done++;
+              progress.report({ increment: 100 / total });
+              continue;
+            }
+            progress.report({ message: `${done + 1}/${total} ${project.title}` });
+            const ok = await buildOneProject(project, targetTitle, rebuild, cancelSource);
+            done++;
+            progress.report({ increment: 100 / total });
+            if (cancelSource.isCancelled()) {
+              cancelled = true;
+              allOk = false;
+              break;
+            }
+            if (!ok) {
+              allOk = false;
+              break;
+            }
+          }
+        } finally {
+          currentBuildCancel = undefined;
         }
-        progress.report({ message: `${done + 1}/${total} ${project.title}` });
-        const ok = await buildOneProject(project, targetTitle, rebuild);
-        done++;
-        progress.report({ increment: 100 / total });
-        if (!ok) {
-          allOk = false;
-          break;
-        }
-      }
+      },
+    );
+  } catch (e) {
+    // 用户取消时 withProgress 会以 CancellationError 拒绝（任务已由各检查点快速收尾）
+    if (e instanceof vscode.CancellationError) {
+      cancelled = true;
+      allOk = false;
+    } else {
+      throw e;
+    }
+  } finally {
+    buildInProgress = false;
+    currentBuildCancel = undefined;
+  }
 
-      const { errorCount, warningCount } = buildResultStats();
-      if (allOk) {
-        outputChannel.info('[Code::Blocks] 构建成功');
-        vscode.window.showInformationMessage(`✅ 构建成功 · ${errorCount} 错误 · ${warningCount} 警告`);
-      } else {
-        outputChannel.error('[Code::Blocks] 构建失败');
-        vscode.window.showErrorMessage(`❌ 构建失败 · ${errorCount} 错误 · ${warningCount} 警告`);
-      }
-      finishBuildSummary(allOk, buildStartMs);
-    },
-  );
+  const { errorCount, warningCount } = buildResultStats();
+  if (cancelled) {
+    outputChannel.warn('[Code::Blocks] ⚠ 构建已取消（用户中断）');
+    vscode.window.showWarningMessage('⚠ 构建已取消');
+  } else if (allOk) {
+    outputChannel.info('[Code::Blocks] 构建成功');
+    vscode.window.showInformationMessage(`✅ 构建成功 · ${errorCount} 错误 · ${warningCount} 警告`);
+  } else {
+    outputChannel.error('[Code::Blocks] 构建失败');
+    vscode.window.showErrorMessage(`❌ 构建失败 · ${errorCount} 错误 · ${warningCount} 警告`);
+  }
+  finishBuildSummary(allOk && !cancelled, buildStartMs);
 
-  return allOk;
+  return allOk && !cancelled;
 }
 
 /** 构建单个项目（右键菜单的 Build/Rebuild 使用） */
 async function buildSingleProject(filename: string, rebuild: boolean): Promise<void> {
+  // 构建互斥：进行中时忽略新的构建命令
+  if (buildInProgress) {
+    vscode.window.showWarningMessage('已有构建正在进行，请等待完成或先停止');
+    return;
+  }
+
+  // Rebuild 前由用户确认（对齐 Code::Blocks 的 Rebuild 确认对话框）
+  if (rebuild && !(await confirmRebuild())) {
+    return;
+  }
+
   const project = openProjects.find((p) => p.filename === filename);
   if (!project) {
     vscode.window.showWarningMessage('项目未找到');
@@ -2267,33 +2344,63 @@ async function buildSingleProject(filename: string, rebuild: boolean): Promise<v
   currentBuildErrorCount = 0;
   maxErrorsReached = false;
 
-  const ok = await vscode.window.withProgress(
-    { location: vscode.ProgressLocation.Notification, title: `Code::Blocks ${rebuild ? '重新构建' : '构建'}中...`, cancellable: false },
-    async (progress) => {
-      progress.report({ message: project.title });
-      return buildOneProject(project, targetTitle, rebuild);
-    },
-  );
+  let ok = false;
+  let cancelled = false;
+  buildInProgress = true;
+  try {
+    ok = await vscode.window.withProgress(
+      { location: vscode.ProgressLocation.Notification, title: `Code::Blocks ${rebuild ? '重新构建' : '构建'}中...`, cancellable: true },
+      async (progress, token) => {
+        const cancelSource = new BuildCancelSource();
+        currentBuildCancel = cancelSource;
+        token.onCancellationRequested(() => cancelSource.cancel());
+        try {
+          progress.report({ message: project.title });
+          return await buildOneProject(project, targetTitle, rebuild, cancelSource);
+        } finally {
+          currentBuildCancel = undefined;
+        }
+      },
+    );
+  } catch (e) {
+    if (e instanceof vscode.CancellationError) {
+      cancelled = true;
+      ok = false;
+    } else {
+      throw e;
+    }
+  } finally {
+    buildInProgress = false;
+    currentBuildCancel = undefined;
+  }
 
   const { errorCount, warningCount } = buildResultStats();
-  if (ok) {
+  if (cancelled) {
+    outputChannel.warn('[Code::Blocks] ⚠ 构建已取消（用户中断）');
+    vscode.window.showWarningMessage('⚠ 构建已取消');
+  } else if (ok) {
     outputChannel.info('[Code::Blocks] 构建成功');
     vscode.window.showInformationMessage(`✅ 构建成功 · ${errorCount} 错误 · ${warningCount} 警告`);
   } else {
     outputChannel.error('[Code::Blocks] 构建失败');
     vscode.window.showErrorMessage(`❌ 构建失败 · ${errorCount} 错误 · ${warningCount} 警告`);
   }
-  finishBuildSummary(ok, buildStartMs);
+  finishBuildSummary(ok && !cancelled, buildStartMs);
 }
 
 /** 构建单个项目的一个目标（被 build / buildSingleProject 复用）；支持虚拟目标展开 */
-async function buildOneProject(project: Project, targetTitle: string, rebuild: boolean): Promise<boolean> {
+async function buildOneProject(project: Project, targetTitle: string, rebuild: boolean, cancel?: BuildCancelHandle): Promise<boolean> {
   // 虚拟目标：展开为其包含的物理目标逐个构建（对齐 CodeBlocks VirtualTarget）
   const vt = project.virtualTargets.find((v) => v.title === targetTitle);
   if (vt) {
     let ok = true;
     for (const t of vt.targets) {
-      const one = await buildOneProject(project, t, rebuild);
+      // 取消检查点：虚拟目标各子目标之间
+      if (cancel?.isCancelled()) {
+        ok = false;
+        break;
+      }
+      const one = await buildOneProject(project, t, rebuild, cancel);
       if (!one) {
         ok = false;
         break;
@@ -2322,6 +2429,7 @@ async function buildOneProject(project: Project, targetTitle: string, rebuild: b
   const engine = new BuildEngine(project, compiler, outputChannel);
   const ok = await engine.build(targetTitle, {
     rebuild,
+    cancel,
     onLine: (line, severity) => {
       if (severity === 'error') outputChannel.error(line);
       else if (severity === 'warning') outputChannel.warn(line);
@@ -2353,14 +2461,16 @@ async function buildOneProject(project: Project, targetTitle: string, rebuild: b
 
   const durationMs = Date.now() - startMs;
   const stats = engine.lastStats ?? { success: ok, compiledCount: 0, skippedCount: 0, failedCount: 0, linkSuccess: ok, linkSkipped: true, outputFilename: undefined };
+  // 取消判定：引擎统计标记或取消源已置位（用户中途停止）
+  const cancelled = !!stats.cancelled || !!cancel?.isCancelled();
   const projectName = path.basename(path.dirname(project.filename));
 
   // === 构建完成汇总块（OUTPUT 文本，Emoji 风格）===
-  const doneSym = ok ? '✅' : '❌';
+  const doneSym = cancelled ? '⚠' : ok ? '✅' : '❌';
   const errCount = diagnostics.filter((d) => d.severity === 'error').length;
   const warnCount = diagnostics.filter((d) => d.severity === 'warning').length;
   outputChannel.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-  outputChannel.info(`${doneSym} 构建完成: ${project.title} (${targetTitle})`);
+  outputChannel.info(`${doneSym} ${cancelled ? '构建已取消' : '构建完成'}: ${project.title} (${targetTitle})`);
   outputChannel.info(`🔨 编译 ${stats.compiledCount} · ⏭️ 跳过 ${stats.skippedCount} · ❌ 失败 ${stats.failedCount}`);
   if (!stats.linkSkipped) {
     outputChannel.info(`${stats.linkSuccess ? '🔗' : '❌'} 链接${stats.linkSuccess ? '成功' : '失败'}${stats.outputFilename ? ` → ${stats.outputFilename}` : ''}`);
@@ -2398,7 +2508,7 @@ async function buildOneProject(project: Project, targetTitle: string, rebuild: b
     startTime: startMs,
   });
 
-  if (!ok) {
+  if (!ok && !cancelled) {
     outputChannel.error(`[Code::Blocks] 项目 "${project.title}" 编译失败`);
   }
   return ok;

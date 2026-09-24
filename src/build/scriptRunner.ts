@@ -14,6 +14,7 @@ import { spawn } from 'child_process';
 import { decodeText } from '../tools/encoding';
 import { getWindowsSystemPath } from '../tools/windowsPath';
 import { upperDrive } from '../tools/pathCase';
+import { BuildCancelHandle } from './cancelToken';
 
 /** 展开命令中的宏（Code::Blocks 变量风格） */
 export function expandMacros(cmd: string, vars: Record<string, string>): string {
@@ -54,14 +55,20 @@ function mergePath(...parts: string[]): string {
   return out.join(';');
 }
 
-/** 执行单条脚本命令（可附加环境变量，如编译器 bin 目录加入 PATH） */
+/** 执行单条脚本命令（可附加环境变量，如编译器 bin 目录加入 PATH；cancel 提供时注册子进程并支持强杀） */
 export function runScriptCommand(
   command: string,
   cwd: string,
   vars: Record<string, string>,
   extraPath?: string,
+  cancel?: BuildCancelHandle,
 ): Promise<ScriptResult> {
   return new Promise((resolve) => {
+    // 取消检查点：spawn 前
+    if (cancel?.isCancelled()) {
+      resolve({ success: false, output: '' });
+      return;
+    }
     const expanded = expandMacros(command, vars);
     const env: Record<string, string> = { ...(process.env as Record<string, string>) };
     if (process.platform === 'win32') {
@@ -77,33 +84,43 @@ export function runScriptCommand(
       shell: true,
       env,
     });
+    // 注册进取消源：cancel() 时强杀整棵进程树
+    cancel?.register(proc);
     let output = '';
     proc.stdout?.on('data', (d: Buffer) => (output += decodeOutput(d)));
     proc.stderr?.on('data', (d: Buffer) => (output += decodeOutput(d)));
     proc.on('close', (code) => {
+      cancel?.unregister(proc);
       resolve({ success: code === 0, output });
     });
     proc.on('error', (err) => {
+      cancel?.unregister(proc);
       resolve({ success: false, output: err.message });
     });
   });
 }
 
-/** 依次执行多条脚本命令（可附加编译器 bin 目录到 PATH） */
+/** 依次执行多条脚本命令（可附加编译器 bin 目录到 PATH；cancel 提供时命令间检查 + 活动命令强杀） */
 export async function runScriptCommands(
   commands: string[],
   cwd: string,
   vars: Record<string, string>,
   onLog?: (line: string) => void,
   extraPath?: string,
+  cancel?: BuildCancelHandle,
 ): Promise<boolean> {
   let ok = true;
   const total = commands.length;
   for (let i = 0; i < total; i++) {
+    // 取消检查点：不再执行后续脚本命令（正在执行的由 cancel() 强杀）
+    if (cancel?.isCancelled()) {
+      ok = false;
+      break;
+    }
     const cmd = commands[i];
     // 脚本命令编号（[script 1-5]，连字符避免 Output 面板误判为路径链接）
     if (onLog) onLog(`[script ${i + 1}-${total}] ${cmd}`);
-    const r = await runScriptCommand(cmd, cwd, vars, extraPath);
+    const r = await runScriptCommand(cmd, cwd, vars, extraPath, cancel);
     if (r.output) {
       // 子进程输出缩进两空格，与脚本命令区分层次
       for (const line of r.output.split(/\r?\n/)) {
