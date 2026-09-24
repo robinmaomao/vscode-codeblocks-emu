@@ -2,7 +2,7 @@
   "name": "codeblocks-vscode",
   "displayName": "Code::Blocks for VS Code",
   "description": "原生移植 Code::Blocks 核心功能到 VS Code：项目模型、构建引擎、编译器管理与调试引擎",
-  "version": "0.8.17-dev",
+  "version": "0.8.18-dev",
   "icon": "resources/icon.png",
   "publisher": "robinmaomao",
   "author": {
@@ -212,6 +212,11 @@
           "type": "number",
           "default": 0,
           "description": "并行编译任务数（0 = 自动，取 CPU 核数）"
+        },
+        "codeblocks.build.skipIncludeDeps": {
+          "type": "boolean",
+          "default": false,
+          "description": "增量编译时跳过 #include 依赖扫描（对齐 Code::Blocks 的 skip_include_deps 设置，供非 C/C++ 编译器使用）"
         },
         "codeblocks.saveBeforeBuild": {
           "type": "boolean",

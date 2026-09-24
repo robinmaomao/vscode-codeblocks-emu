@@ -176,6 +176,7 @@ export class ProjectParser {
       basePath,
       commonTopLevelPath: basePath,
       pchMode: 1,
+      extendedObjNames: false,
       filename,
       compilerId: '',
       compilerOptions: [],
@@ -288,6 +289,10 @@ export class ProjectParser {
         const n = Number(node['@_pch_mode']);
         if (!Number.isNaN(n) && n >= 0 && n <= 2) project.pchMode = n;
       }
+      // 扩展对象命名（projectloader.cpp:1524：<Option extended_obj_names="1">）
+      if (node['@_extended_obj_names'] !== undefined) {
+        project.extendedObjNames = node['@_extended_obj_names'] === '1' || node['@_extended_obj_names'] === 'true';
+      }
       // 项目备注：<Option show_notes="1"><notes><![CDATA[...]]></notes></Option>
       if (node['@_show_notes'] !== undefined) {
         project.showNotesOnLoad = String(node['@_show_notes']) !== '0';
@@ -358,6 +363,8 @@ export class ProjectParser {
         compilerId: project.compilerId,
         outputFilename: '',
         objectOutput: '',
+        depsOutput: '',
+        executionParameters: '',
         optionRelations: defaultRelations(),
         compilerOptions: [],
         linkerOptions: [],
@@ -455,6 +462,8 @@ export class ProjectParser {
       if (node['@_compiler'] !== undefined) target.compilerId = String(node['@_compiler']);
       if (node['@_output'] !== undefined) target.outputFilename = toNativeSeparator(String(node['@_output']));
       if (node['@_object_output'] !== undefined) target.objectOutput = toUnix(String(node['@_object_output']));
+      if (node['@_deps_output'] !== undefined) target.depsOutput = toUnix(String(node['@_deps_output']));
+      if (node['@_parameters'] !== undefined) target.executionParameters = String(node['@_parameters']);
       if (node['@_createDefFile'] !== undefined) target.createDefFile = node['@_createDefFile'] === '1' || node['@_createDefFile'] === 'true';
       if (node['@_createStaticLib'] !== undefined) target.createStaticLib = node['@_createStaticLib'] === '1' || node['@_createStaticLib'] === 'true';
       if (node['@_imp_lib'] !== undefined) target.impLib = toNativeSeparator(String(node['@_imp_lib']));
