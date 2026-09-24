@@ -2,7 +2,7 @@
   "name": "codeblocks-vscode",
   "displayName": "Code::Blocks for VS Code",
   "description": "原生移植 Code::Blocks 核心功能到 VS Code：项目模型、构建引擎、编译器管理与调试引擎",
-  "version": "0.8.13-dev",
+  "version": "0.8.14-dev",
   "icon": "resources/icon.png",
   "publisher": "robinmaomao",
   "author": {
@@ -166,6 +166,10 @@
       {
         "command": "codeblocks.toggleLink",
         "title": "Link File"
+      },
+      {
+        "command": "codeblocks.editFileBuildCommand",
+        "title": "Edit Custom Build Command..."
       },
       {
         "command": "codeblocks.nextError",
@@ -429,6 +433,11 @@
           "command": "codeblocks.toggleLink",
           "when": "view == codeblocks.projectTree && viewItem =~ /^file/",
           "group": "1_file@2"
+        },
+        {
+          "command": "codeblocks.editFileBuildCommand",
+          "when": "view == codeblocks.projectTree && viewItem =~ /^file/",
+          "group": "1_file@3"
         },
         {
           "command": "codeblocks.removeFile",

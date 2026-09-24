@@ -34,4 +34,9 @@ test-weight-sort.js
 test-native-sep.js
 test-drive-case.js
 test-workspace-deps.js
+test-tree-lazy.js
+test-parse-cache.js
+test-tree-lazy2.js
+test-deps-cache.js
+test-lru.js
 *.vsix
