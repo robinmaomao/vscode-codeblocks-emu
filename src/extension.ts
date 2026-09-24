@@ -1241,6 +1241,8 @@ function createEmptyTarget(): BuildTarget {
     linkerExecutable: LinkerExecutableOption.AutoDetect,
     createDefFile: false,
     createStaticLib: false,
+    impLib: '',
+    defFile: '',
     useConsoleRunner: true,
     includeInTargetAll: true,
     commandsBeforeBuild: [],

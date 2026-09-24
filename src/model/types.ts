@@ -134,6 +134,10 @@ export interface BuildTarget {
   createDefFile: boolean;
   /** 动态库是否生成 import 库 */
   createStaticLib: boolean;
+  /** 动态库 import 库文件名（<Option output imp_lib="...">，空 = 由 output 推导） */
+  impLib: string;
+  /** 动态库 def 文件名（<Option output def_file="...">，空 = 由 output 推导） */
+  defFile: string;
   /** 是否使用 console runner */
   useConsoleRunner: boolean;
   /** 是否纳入 "All" 虚拟目标 */

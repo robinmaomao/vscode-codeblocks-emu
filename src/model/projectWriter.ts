@@ -51,7 +51,7 @@ function passthroughTargetOptions(rawProject: unknown, title: string): { key: st
   const raw = rawProject as any;
   const handled = new Set([
     'title', 'type', 'compiler', 'output', 'object_output', 'use_console_runner',
-    'createDefFile', 'createStaticLib', 'prefix_auto', 'extension_auto',
+    'createDefFile', 'createStaticLib', 'prefix_auto', 'extension_auto', 'imp_lib', 'def_file',
     'projectCompilerOptionsRelation', 'projectLinkerOptionsRelation',
     'projectIncludeDirsRelation', 'projectResourceIncludeDirsRelation', 'projectLibDirsRelation',
   ]);
@@ -170,7 +170,9 @@ function writeTarget(L: string[], t: BuildTarget, rawProject: unknown): void {
   for (const { key, value } of passthroughTargetOptions(rawProject, t.title)) {
     L.push(`\t\t\t\t<Option ${key}="${esc(value)}" />`);
   }
-  L.push(`\t\t\t\t<Option output="${esc(unix(t.outputFilename))}" prefix_auto="1" extension_auto="1" />`);
+  const impLibAttr = t.impLib ? ` imp_lib="${esc(unix(t.impLib))}"` : '';
+  const defFileAttr = t.defFile ? ` def_file="${esc(unix(t.defFile))}"` : '';
+  L.push(`\t\t\t\t<Option output="${esc(unix(t.outputFilename))}" prefix_auto="1" extension_auto="1"${impLibAttr}${defFileAttr} />`);
   if (t.objectOutput && t.objectOutput !== '.objs') {
     L.push(`\t\t\t\t<Option object_output="${esc(unix(t.objectOutput))}" />`);
   }

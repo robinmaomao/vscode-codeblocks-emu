@@ -165,12 +165,14 @@ export class CommandGenerator {
   }
 
   private setupStaticOutput(target: BuildTarget): string {
-    return quoteIfNeeded(computeStaticOutput(target.outputFilename, this.compiler.switches));
+    // DynamicLib import 库：优先自定义 imp_lib，否则由 output 推导（对齐 GetDynamicLibImportFilename）
+    return quoteIfNeeded(computeStaticOutput(target.impLib || target.outputFilename, this.compiler.switches));
   }
 
   private setupDefOutput(target: BuildTarget): string {
-    // def 文件名同样加 lib 前缀（对齐 SetupOutputFilenames 第 773 行的 fname.SetExt("def")）
-    return quoteIfNeeded(computeLibOutput(target.outputFilename, this.compiler.switches.libPrefix, 'def'));
+    // def 文件名同样加 lib 前缀（对齐 SetupOutputFilenames 第 773 行的 fname.SetExt("def")）；
+    // 优先自定义 def_file，否则由 output 推导（对齐 GetDynamicLibDefFilename）
+    return quoteIfNeeded(computeLibOutput(target.defFile || target.outputFilename, this.compiler.switches.libPrefix, 'def'));
   }
 
   private setupIncludeDirs(target: BuildTarget): string {
