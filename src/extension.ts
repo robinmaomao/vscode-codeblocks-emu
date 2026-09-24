@@ -22,12 +22,12 @@ import { MenuTreeProvider } from './ui/menuTreeProvider';
 import { BuildLogTreeProvider, BuildLogProject, BuildLogDiagnostic } from './ui/buildLogTreeProvider';
 import { SymbolTreeProvider } from './ui/symbolTreeProvider';
 import { BuildEngine } from './build/buildEngine';
+import { buildMacroVars, expandMacros } from './build/scriptRunner';
 import { OutputParser } from './build/outputParser';
 import { collectClangdEntries, writeClangdDatabase, CompileCommandEntry } from './build/compileCommands';
 import { detectClangd, queryCompilerSystemIncludes, queryCompilerTarget, updateClangdUserConfig, clangdUserConfigPath } from './tools/clangd';
 import { SymbolIndex, registerFallbackIntelliSense } from './tools/codeCompletion';
-import { GdbDebugAdapter } from './debug/gdbDebugAdapter';
-import { scanTodos } from './tools/todoScanner';
+import { GdbDebugAdapter } from './debug/gdbDebugAdapter';import { scanTodos } from './tools/todoScanner';
 import { countFiles, isSourceFile } from './tools/codeStats';
 import { formatActiveDocument } from './tools/astyle';
 
@@ -1414,6 +1414,8 @@ function createEmptyTarget(): BuildTarget {
     compilerId: 'gcc',
     outputFilename: '',
     objectOutput: '',
+    depsOutput: '',
+    executionParameters: '',
     optionRelations: {
       [OptionsRelationType.CompilerOptions]: OptionsRelation.AppendToParentOptions,
       [OptionsRelationType.LinkerOptions]: OptionsRelation.AppendToParentOptions,
@@ -2487,12 +2489,20 @@ async function run(): Promise<void> {
     return;
   }
 
+  // 执行参数宏展开（对齐 GetExecutionParameters：$(TARGET_OUTPUT_FILE) 等）
+  const vars = buildMacroVars(project.basePath, target.outputFilename, target.title, target.objectOutput, project.title, project.filename);
+  const args = target.executionParameters ? expandMacros(target.executionParameters, vars) : '';
+  // 环境变量（项目级 + 目标级 <Environment><Variable name value>）
+  const env: Record<string, string> = {};
+  for (const ev of [...project.envVars, ...target.envVars]) env[ev.name] = ev.value;
+
   const terminal = vscode.window.createTerminal({
     name: `Run: ${target.title}`,
     cwd: project.basePath,
+    env: Object.keys(env).length ? { ...(process.env as Record<string, string>), ...env } : undefined,
   });
   terminal.show();
-  terminal.sendText(`"${exePath}"`);
+  terminal.sendText(`"${exePath}" ${args}`.trim());
 }
 
 async function debug(): Promise<void> {
@@ -2519,6 +2529,12 @@ async function debug(): Promise<void> {
     return;
   }
 
+  // 执行参数与环境变量（对齐 GetExecutionParameters + <Environment>）
+  const vars = buildMacroVars(project.basePath, target.outputFilename, target.title, target.objectOutput, project.title, project.filename);
+  const argsStr = target.executionParameters ? expandMacros(target.executionParameters, vars) : '';
+  const env: Record<string, string> = {};
+  for (const ev of [...project.envVars, ...target.envVars]) env[ev.name] = ev.value;
+
   const started = await vscode.debug.startDebugging(undefined, {
     type: 'codeblocks',
     name: `Debug: ${target.title}`,
@@ -2526,11 +2542,25 @@ async function debug(): Promise<void> {
     program: exePath,
     cwd: project.basePath,
     gdbPath,
+    args: splitCommandLine(argsStr),
+    environment: env,
   });
 
   if (!started) {
     vscode.window.showErrorMessage('调试启动失败');
   }
+}
+
+/** 简单命令行分词（引号感知），供 DAP launch args 使用 */
+function splitCommandLine(s: string): string[] {
+  if (!s.trim()) return [];
+  const out: string[] = [];
+  const re = /"([^"]*)"|'([^']*)'|(\S+)/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(s)) !== null) {
+    out.push(m[1] ?? m[2] ?? m[3]);
+  }
+  return out;
 }
 
 /** 定位 GDB 可执行文件 */

@@ -143,6 +143,11 @@ export interface BuildTarget {
   /** 是否纳入 "All" 虚拟目标 */
   includeInTargetAll: boolean;
 
+  /** deps 输出目录（<Option deps_output>，默认 .deps，对齐 GetDepsOutput） */
+  depsOutput: string;
+  /** 执行参数（<Option parameters>，Run/Debug 用，对齐 GetExecutionParameters） */
+  executionParameters: string;
+
   /** pre/post build 命令 */
   commandsBeforeBuild: string[];
   commandsAfterBuild: string[];
@@ -176,6 +181,8 @@ export interface Project {
   commonTopLevelPath: string;
   /** PCH 模式（cbp <Option pch_mode>，PCHMode：0=pchSourceDir 1=pchObjectDir 2=pchSourceFile，默认 1） */
   pchMode: number;
+  /** 扩展对象命名（<Option extended_obj_names="1">：foo.c → foo.c.o，默认 false） */
+  extendedObjNames: boolean;
   /** .cbp 文件绝对路径 */
   filename: string;
   /** 默认编译器 ID */

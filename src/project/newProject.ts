@@ -103,6 +103,8 @@ function makeTarget(name: string, title: string, type: TargetType, compilerOptio
       : type === TargetType.DynamicLib ? (process.platform === 'win32' ? `bin/${title}/lib${name}.dll` : `bin/${title}/lib${name}.so`)
       : `bin/${title}/${name}`,
     objectOutput: `obj/${title}/`,
+    depsOutput: '',
+    executionParameters: '',
     optionRelations: defaultRelations(),
     compilerOptions,
     linkerOptions: [],
@@ -160,6 +162,7 @@ export function createProjectFromTemplate(
     basePath: projectDir,
     commonTopLevelPath: projectDir,
     pchMode: 1,
+    extendedObjNames: false,
     filename: path.join(projectDir, `${name}.cbp`),
     compilerId,
     compilerOptions: [],

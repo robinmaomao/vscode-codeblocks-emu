@@ -159,6 +159,8 @@ export class GdbDebugAdapter implements vscode.DebugAdapter {
         gdbPath: this.gdbPath,
         program: this.program,
         cwd: this.cwd,
+        args: Array.isArray(args.args) ? (args.args as string[]) : [],
+        env: (args.environment as Record<string, string>) ?? {},
       });
       this.sendResponse(req, true, {});
     } catch (err) {

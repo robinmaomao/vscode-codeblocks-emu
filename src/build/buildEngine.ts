@@ -562,17 +562,28 @@ export class BuildEngine {
     includeDirs: string[],
     depsCache: Map<string, number>,
   ): boolean {
+    let srcStat: fs.Stats;
+    let objStat: fs.Stats;
     try {
-      const srcStat = fs.statSync(sourceFile);
-      const objStat = fs.statSync(objectFile);
-      if (objStat.mtimeMs < srcStat.mtimeMs) return false; // 源文件比对象新 → 需编译
-      // 扫描 #include 依赖，头文件更新也触发重编译（对应 depsScanForHeaders + depsGetNewest）
-      const newestDep = this.depsNewestMtime(sourceFile, includeDirs, depsCache);
-      return newestDep <= objStat.mtimeMs;
+      srcStat = fs.statSync(sourceFile);
+    } catch {
+      // 源文件不存在：跳过编译（对齐 IsObjectOutdated：!timeSrc 且文件不存在 → 不编译）
+      return true;
+    }
+    try {
+      objStat = fs.statSync(objectFile);
     } catch {
       // 对象文件不存在 → 需要编译
       return false;
     }
+    if (objStat.mtimeMs < srcStat.mtimeMs) return false; // 源文件比对象新 → 需编译
+    // skip_include_deps：跳过 include 依赖扫描（对齐 CodeBlocks /skip_include_deps 设置）
+    if (vscode.workspace.getConfiguration('codeblocks').get<boolean>('build.skipIncludeDeps', false)) {
+      return true;
+    }
+    // 扫描 #include 依赖，头文件更新也触发重编译（对应 depsScanForHeaders + depsGetNewest）
+    const newestDep = this.depsNewestMtime(sourceFile, includeDirs, depsCache);
+    return newestDep <= objStat.mtimeMs;
   }
 
   /**
@@ -674,7 +685,9 @@ export class BuildEngine {
     }
     const includes: string[] = [];
     try {
-      const content = fs.readFileSync(fileAbs, 'utf-8');
+      const raw = fs.readFileSync(fileAbs, 'utf-8');
+      // 剥离注释与字符串后再匹配（注释里的 #include 不计依赖；字符串内的 # 不是预处理指令）
+      const content = this.stripCommentsAndStrings(raw);
       // 同时匹配双引号与尖括号 include
       const re = /^\s*#\s*include\s*(?:"([^"]+)"|<([^>]+)>)/gm;
       let m: RegExpExecArray | null;
@@ -705,6 +718,52 @@ export class BuildEngine {
       if (fs.existsSync(cand)) return cand;
     }
     return undefined;
+  }
+
+  /**
+   * 剥离 C 源码中的注释与字符串/字符常量，供 #include 扫描使用：
+   * 1. 块注释全局剥离（保留换行，跨行）；
+   * 2. #include 行原样保留（引号内是头文件名，不能剥字符串）；
+   * 3. 其余行先剥字符串/字符常量（避免字符串里的 # 或 // 被误认）再截行注释。
+   */
+  private stripCommentsAndStrings(src: string): string {
+    // 1. 块注释 → 等宽空格（保留换行）
+    const noBlock = src.replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, ' '));
+    const lines = noBlock.split('\n');
+    const out: string[] = [];
+    for (const rawLine of lines) {
+      if (/^\s*#\s*include\b/.test(rawLine)) {
+        // #include 行：保留（引号内容即头文件名），仅截行注释
+        out.push(rawLine.replace(/\/\/.*$/, ''));
+        continue;
+      }
+      // 其它行：先剥字符串/字符常量，再截行注释
+      out.push(this.stripStrings(rawLine).replace(/\/\/.*$/, ''));
+    }
+    return out.join('\n');
+  }
+
+  /** 剥离单行中的字符串/字符常量（替换为等宽空格，处理转义引号） */
+  private stripStrings(line: string): string {
+    let out = '';
+    let i = 0;
+    while (i < line.length) {
+      const c = line[i];
+      if (c === '"' || c === "'") {
+        const q = c;
+        out += ' ';
+        i++;
+        while (i < line.length && line[i] !== q) {
+          if (line[i] === '\\') i++; // 跳过转义字符
+          i++;
+        }
+        i++;
+        continue;
+      }
+      out += c;
+      i++;
+    }
+    return out;
   }
 
   /**
@@ -764,7 +823,11 @@ export class BuildEngine {
     const parsed = path.parse(rel);
     const ext = ft === FileType.Resource ? 'res' : this.compiler.switches.objectExtension;
     const flat = this.compiler.switches.useFlatObjects;
-    return path.join(objDir, flat ? '' : path.dirname(rel), parsed.name + '.' + ext);
+    // extended_obj_names：保留原扩展名再追加（foo.c → foo.c.o，projectfile.cpp SetObjName）
+    const name = this.project.extendedObjNames
+      ? path.basename(rel) + '.' + ext
+      : parsed.name + '.' + ext;
+    return path.join(objDir, flat ? '' : path.dirname(rel), name);
   }
 
   /** PCH 头文件对象路径（对齐 projectfile.cpp:229-243 GetObjName + 410-459 pfDetails::Update） */
@@ -773,6 +836,16 @@ export class BuildEngine {
     if (this.project.pchMode === 2) {
       // pchSourceFile：源文件旁（项目相对原路径 + .gch），不进 obj 目录
       return toUnix(file.relativeFilename) + '.' + gch;
+    }
+    if (this.project.pchMode === 0) {
+      // pchSourceDir：<源文件目录>/<原名>.<gch>/<target>_<扁平化名字>（projectfile.cpp:414-431）
+      const src = toUnix(file.relativeFilename);
+      const dir = path.dirname(src);
+      const fullName = path.basename(src);
+      const inner = (target.title + '_' + (file.relativeToCommonTopLevelPath || file.relativeFilename))
+        .replace(/[/\\]/g, '_')
+        .replace(/\./g, '_');
+      return path.join(dir, fullName + '.' + gch, inner);
     }
     // pchObjectDir（默认）：obj 目录 + <原名>.gch（如 include/all.h.gch）
     const objDir = target.objectOutput || 'obj';
@@ -828,18 +901,20 @@ export class BuildEngine {
   }
 
   private depsPathFor(target: BuildTarget, file: ProjectFile): string {
-    const objDir = target.objectOutput || 'obj';
+    // 对齐 pfDetails::Update：depsOut（默认 .deps，GetDepsOutput）+ <对象名>.depend
+    const depsOut = target.depsOutput || '.deps';
     const rel = file.relativeToCommonTopLevelPath || file.relativeFilename;
     const name = path.parse(rel).name;
-    // 与对象路径一致（含目录），避免不同目录同名文件（a/foo.c、b/foo.c）的 .d 互相覆盖
-    return path.join(this.project.basePath, objDir, path.dirname(rel), name + '.d');
+    // 与对象路径一致（含目录），避免不同目录同名文件（a/foo.c、b/foo.c）的 deps 互相覆盖
+    return path.join(this.project.basePath, depsOut, path.dirname(rel), name + '.depend');
   }
 
   private maxJobs(): number {
     const cfg = vscode.workspace.getConfiguration('codeblocks');
     const n = cfg.get<number>('parallelJobs', 0);
     if (n && n > 0) return n;
-    return Math.max(1, Math.min(8, (os.cpus().length || 2)));
+    // 默认 CPU 数（对齐 CodeBlocks processCount 默认值，无上限）
+    return Math.max(1, os.cpus().length || 2);
   }
 
   private async runInParallel(units: CompileUnit[], maxJobs: number, options: BuildOptions): Promise<boolean[]> {
