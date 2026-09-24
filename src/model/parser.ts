@@ -20,6 +20,44 @@ import {
   EnvVariable,
 } from './types';
 import { fileTypeOf, defaultCompilerVar, defaultCompile, defaultLink } from './fileTypes';
+import { upperDrive } from '../tools/pathCase';
+import { LruCache } from '../tools/lru';
+
+/** XML 解析结果缓存条目 */
+interface XmlCacheEntry {
+  mtimeMs: number;
+  size: number;
+  result: any;
+}
+
+/**
+ * XML 解析缓存：.cbp/.workspace 的 readFile + fast-xml-parser 解析是最昂贵步骤。
+ * Parser 每次调用均新建实例（extension.ts 中 new ProjectParser()），故用模块级缓存，
+ * 按绝对路径（盘符归一化）+ mtime + size 失效，命中时直接复用 XML 解析结果（只读透传，不回写）。
+ * ProjectParser 与 WorkspaceParser 的 XMLParser 配置不同，故分别用独立缓存；LRU 上限防无界增长。
+ */
+const projectXmlCache = new LruCache<string, XmlCacheEntry>(128);
+const workspaceXmlCache = new LruCache<string, XmlCacheEntry>(128);
+
+function parseXmlCached(filename: string, parser: XMLParser, cache: LruCache<string, XmlCacheEntry>): any {
+  // 盘符归一化（e:\ → E:\），让同一文件以不同大小写盘符访问时命中同一缓存条目
+  const key = upperDrive(path.resolve(filename));
+  let st: fs.Stats;
+  try {
+    st = fs.statSync(key);
+  } catch {
+    // 保持原行为：文件不可读时让 readFileSync 抛出原始错误
+    return parser.parse(fs.readFileSync(key, 'utf-8'));
+  }
+  const entry = cache.get(key);
+  if (entry && entry.mtimeMs === st.mtimeMs && entry.size === st.size) {
+    return entry.result;
+  }
+  const raw = fs.readFileSync(key, 'utf-8');
+  const result = parser.parse(raw);
+  cache.set(key, { mtimeMs: st.mtimeMs, size: st.size, result });
+  return result;
+}
 
 function toUnix(p: string): string {
   return p.replace(/\\/g, '/');
@@ -127,8 +165,7 @@ export class ProjectParser {
 
   /** 解析 .cbp 文件 */
   parse(filename: string): Project {
-    const raw = fs.readFileSync(filename, 'utf-8');
-    const result = this.parser.parse(raw);
+    const result = parseXmlCached(filename, this.parser, projectXmlCache);
 
     const root = result.CodeBlocks_project_file;
     if (!root) throw new Error('不是有效的 .cbp 文件：缺少 <CodeBlocks_project_file> 根节点');
@@ -573,8 +610,7 @@ export class WorkspaceParser {
   }
 
   parse(filename: string): Workspace {
-    const raw = fs.readFileSync(filename, 'utf-8');
-    const result = this.parser.parse(raw);
+    const result = parseXmlCached(filename, this.parser, workspaceXmlCache);
     const root = result.CodeBlocks_workspace_file;
     if (!root) throw new Error('不是有效的 .workspace 文件');
 

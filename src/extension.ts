@@ -367,6 +367,15 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     }),
   );
 
+  // 编辑文件自定义构建命令（右键快捷入口，写回 .cbp <Option buildCommand>）
+  context.subscriptions.push(
+    vscode.commands.registerCommand('codeblocks.editFileBuildCommand', async (node?: any) => {
+      const { project, file } = resolveFileNode(node);
+      if (!project || !file) return;
+      await editFileBuildCommand(project, file);
+    }),
+  );
+
   // 打开项目
   context.subscriptions.push(
     vscode.commands.registerCommand('codeblocks.openProject', async () => {
@@ -1551,6 +1560,47 @@ async function toggleFileOption(project: Project, file: ProjectFile, opt: 'compi
     }
   } catch (err) {
     vscode.window.showErrorMessage(`切换${opt === 'compile' ? '编译' : '链接'}选项失败: ${(err as Error).message}`);
+  }
+}
+
+/** 编辑文件自定义构建命令（右键快捷入口；留空则删除，写回 .cbp <Option buildCommand>） */
+async function editFileBuildCommand(project: Project, file: ProjectFile): Promise<void> {
+  const cmp = project.compilerId;
+  const current = file.customBuildCommands[cmp];
+  const value = await vscode.window.showInputBox({
+    title: `自定义构建命令: ${file.relativeFilename}`,
+    prompt: `默认编译器 "${cmp}"；留空则删除该文件的自定义构建命令`,
+    value: current?.command ?? '',
+    placeHolder: '例如: make -f custom.mk',
+    ignoreFocusOut: true,
+  });
+  if (value === undefined) return; // 用户取消
+
+  // 对齐工程属性面板：trim 后为空则删除，否则启用该编译器的自定义命令
+  const cmd = value.trim();
+  if (cmd) {
+    file.customBuildCommands[cmp] = { command: cmd, use: true };
+  } else {
+    delete file.customBuildCommands[cmp];
+  }
+
+  try {
+    const xml = serializeProject(project);
+    fs.writeFileSync(project.filename, xml, 'utf-8');
+    outputChannel.info(`[Code::Blocks] 已更新自定义构建命令: ${file.relativeFilename}`);
+    // 重新解析项目刷新树
+    const idx = openProjects.findIndex((p) => p.filename === project.filename);
+    if (idx !== -1) openProjects.splice(idx, 1);
+    const wasActive = activeProject?.filename === project.filename;
+    await openProject(project.filename);
+    if (wasActive) {
+      activeProject = openProjects.find((p) => p.filename === project.filename);
+      projectTreeProvider?.setActiveProject(activeProject);
+      updateTargetStatusBar();
+      updateCompilerStatusBar();
+    }
+  } catch (err) {
+    vscode.window.showErrorMessage(`更新自定义构建命令失败: ${(err as Error).message}`);
   }
 }
 

@@ -18,6 +18,7 @@ import { runScriptCommands, buildMacroVars } from './scriptRunner';
 import { decodeText } from '../tools/encoding';
 import { applyResponseFile, compareFilesByWeight } from './commandLine';
 import { upperDrive } from '../tools/pathCase';
+import { LruCache } from '../tools/lru';
 
 /** 结构化的诊断信息（供 Build Log 视图展示，文件为绝对路径） */
 export interface StructuredDiagnostic {
@@ -58,6 +59,9 @@ interface CompileUnit {
   /** 是否为 PCH 头文件（需先于同组其它文件编译） */
   isPch: boolean;
 }
+
+/** 跨构建持久化的 include 依赖缓存（BuildEngine 每次构建新建实例，故用模块级静态缓存；LRU 上限防无界增长） */
+const depsIncludeCache = new LruCache<string, { srcMtimeMs: number; srcSize: number; dirsKey: string; includes: string[] }>(2000);
 
 export class BuildEngine {
   private parser: OutputParser;
@@ -557,7 +561,8 @@ export class BuildEngine {
     cache: Map<string, number>,
     inProgress?: Set<string>,
   ): number {
-    const key = path.resolve(fileAbs);
+    // 盘符归一化（e:\ → E:\），让同一文件以不同大小写盘符访问时命中同一缓存条目
+    const key = upperDrive(path.resolve(fileAbs));
     const cached = cache.get(key);
     if (cached !== undefined) return cached;
     const inProg = inProgress ?? new Set<string>();
@@ -565,29 +570,58 @@ export class BuildEngine {
     inProg.add(key);
 
     let newest = 0;
+    for (const resolved of this.scanIncludes(key, includeDirs)) {
+      try {
+        newest = Math.max(newest, fs.statSync(resolved).mtimeMs);
+      } catch {
+        continue;
+      }
+      newest = Math.max(newest, this.depsNewestMtime(resolved, includeDirs, cache, inProg));
+    }
+    inProg.delete(key);
+    cache.set(key, newest);
+    return newest;
+  }
+
+  /**
+   * 扫描源文件的 #include 依赖列表。
+   * 跨构建持久化缓存：源文件 mtime 与 include 搜索目录均未变时直接复用，避免每次构建重复读文件。
+   */
+  private scanIncludes(fileAbs: string, includeDirs: string[]): string[] {
+    let srcStat: fs.Stats;
     try {
-      const content = fs.readFileSync(key, 'utf-8');
+      srcStat = fs.statSync(fileAbs);
+    } catch {
+      return [];
+    }
+    const srcMtimeMs = srcStat.mtimeMs;
+    const srcSize = srcStat.size;
+    const norm = (d: string): string => (process.platform === 'win32' ? d.toLowerCase() : d);
+    const dirsKey = includeDirs
+      .map((d) => (path.isAbsolute(d) ? path.normalize(d) : path.join(this.project.basePath, d)))
+      .map(norm)
+      .join('|');
+    const entry = depsIncludeCache.get(fileAbs);
+    if (entry && entry.srcMtimeMs === srcMtimeMs && entry.srcSize === srcSize && entry.dirsKey === dirsKey) {
+      return entry.includes;
+    }
+    const includes: string[] = [];
+    try {
+      const content = fs.readFileSync(fileAbs, 'utf-8');
       // 同时匹配双引号与尖括号 include
       const re = /^\s*#\s*include\s*(?:"([^"]+)"|<([^>]+)>)/gm;
       let m: RegExpExecArray | null;
       while ((m = re.exec(content)) !== null) {
         const quoted = m[1];
         const angled = m[2];
-        const resolved = this.resolveInclude(quoted ?? angled, key, includeDirs, quoted === undefined);
-        if (!resolved) continue;
-        try {
-          newest = Math.max(newest, fs.statSync(resolved).mtimeMs);
-        } catch {
-          continue;
-        }
-        newest = Math.max(newest, this.depsNewestMtime(resolved, includeDirs, cache, inProg));
+        const resolved = this.resolveInclude(quoted ?? angled, fileAbs, includeDirs, quoted === undefined);
+        if (resolved) includes.push(resolved);
       }
     } catch {
       // 文件读取失败（如二进制/无权限），忽略其依赖
     }
-    inProg.delete(key);
-    cache.set(key, newest);
-    return newest;
+    depsIncludeCache.set(fileAbs, { srcMtimeMs, srcSize, dirsKey, includes });
+    return includes;
   }
 
   /** 解析 #include 头文件的实际路径：双引号先查源文件目录再查 include 目录；尖括号只查 include 目录 */
