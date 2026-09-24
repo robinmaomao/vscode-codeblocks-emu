@@ -174,6 +174,8 @@ export interface Project {
   basePath: string;
   /** 所有文件的公共顶层路径（绝对路径，用于生成对象文件，对应 cbproject.cpp CalculateCommonTopLevelPath） */
   commonTopLevelPath: string;
+  /** PCH 模式（cbp <Option pch_mode>，PCHMode：0=pchSourceDir 1=pchObjectDir 2=pchSourceFile，默认 1） */
+  pchMode: number;
   /** .cbp 文件绝对路径 */
   filename: string;
   /** 默认编译器 ID */

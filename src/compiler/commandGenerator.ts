@@ -512,8 +512,9 @@ export function expandBuildVars(cmd: string, basePath: string, target: BuildTarg
     TARGET_OUTPUT_DIR: outDir,
     TARGET_NAME: target.title,
     TARGET_OBJECT_DIR: u(target.objectOutput || 'obj/'),
-    PROJECT_DIR: basePath,
-    PROJECT_DIRECTORY: basePath,
+    // 项目根目录宏：对齐 Code::Blocks GetBasePath()（wxPATH_GET_SEPARATOR，带结尾分隔符）+ UnixFilename（正斜杠）
+    PROJECT_DIR: u(basePath).replace(/\/?$/, '/'),
+    PROJECT_DIRECTORY: u(basePath).replace(/\/?$/, '/'),
     PROJECT_NAME: projectTitle,
     PROJECTNAME: projectTitle,
     PROJECT_FILENAME: projectFilename,

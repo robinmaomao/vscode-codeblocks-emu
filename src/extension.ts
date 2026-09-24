@@ -2103,7 +2103,10 @@ function refreshStatusBars(): void {
 async function selectTarget(): Promise<string | undefined> {
   const project = requireProject();
   if (!project) return undefined;
-  const titles = project.buildTargets.map((t) => t.title);
+  const titles = [
+    ...project.buildTargets.map((t) => t.title),
+    ...project.virtualTargets.map((v) => v.title),
+  ];
   if (titles.length === 0) {
     vscode.window.showWarningMessage('项目没有构建目标');
     return undefined;
@@ -2121,7 +2124,10 @@ async function selectTarget(): Promise<string | undefined> {
 
 /** 强制弹出选择框切换指定工程的构建目标 */
 async function promptSelectTargetForProject(project: Project): Promise<void> {
-  const titles = project.buildTargets.map((t) => t.title);
+  const titles = [
+    ...project.buildTargets.map((t) => t.title),
+    ...project.virtualTargets.map((v) => v.title),
+  ];
   if (titles.length === 0) {
     vscode.window.showWarningMessage('项目没有构建目标');
     return;
@@ -2275,8 +2281,22 @@ async function buildSingleProject(filename: string, rebuild: boolean): Promise<v
   finishBuildSummary(ok, buildStartMs);
 }
 
-/** 构建单个项目的一个目标（被 build / buildSingleProject 复用） */
+/** 构建单个项目的一个目标（被 build / buildSingleProject 复用）；支持虚拟目标展开 */
 async function buildOneProject(project: Project, targetTitle: string, rebuild: boolean): Promise<boolean> {
+  // 虚拟目标：展开为其包含的物理目标逐个构建（对齐 CodeBlocks VirtualTarget）
+  const vt = project.virtualTargets.find((v) => v.title === targetTitle);
+  if (vt) {
+    let ok = true;
+    for (const t of vt.targets) {
+      const one = await buildOneProject(project, t, rebuild);
+      if (!one) {
+        ok = false;
+        break;
+      }
+    }
+    return ok;
+  }
+
   const target = project.buildTargets.find((t) => t.title === targetTitle);
   if (!target) {
     outputChannel.warn(`[Code::Blocks] 项目 "${project.title}" 无目标 "${targetTitle}"，跳过`);
@@ -2441,21 +2461,11 @@ async function clean(): Promise<void> {
   if (!project) return;
   // 清理前自动保存
   await saveAllBeforeBuild();
+  // 逐文件删除构建产物（对齐 CodeBlocks GetTargetCleanCommands：对象文件 + 输出文件，不删目录）
   for (const target of project.buildTargets) {
-    // 删除对象输出目录
-    const objDir = target.objectOutput ? path.join(project.basePath, target.objectOutput) : '';
-    if (objDir && fs.existsSync(objDir)) {
-      fs.rmSync(objDir, { recursive: true, force: true });
-    }
-    // 删除输出文件（含 Windows 无扩展名输出时自动追加的 .exe）
-    if (target.outputFilename) {
-      const out = path.join(project.basePath, target.outputFilename);
-      for (const p of [out, out + '.exe']) {
-        if (fs.existsSync(p)) {
-          fs.rmSync(p, { force: true });
-        }
-      }
-    }
+    const compiler = getCompiler(target.compilerId || project.compilerId);
+    const engine = new BuildEngine(project, compiler, outputChannel);
+    engine.cleanTarget(target);
   }
   outputChannel.info('[Code::Blocks] 清理完成');
 }
