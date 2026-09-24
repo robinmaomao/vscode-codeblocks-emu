@@ -507,6 +507,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     }),
   );
 
+  // 恢复上次会话打开的项目（.workspace 或项目列表）
+  await restorePersistedProjects();
+
   // 自动检测并打开工作区中的 .cbp
   await autoDetectAndOpenProject();
 
@@ -558,6 +561,9 @@ async function autoDetectAndOpenProject(): Promise<void> {
   updateCbpStatusBar();
 
   if (notOpen.length === 0) return;
+
+  // 已有项目打开（如 reload 后已恢复上次会话）：不自动打开/弹窗，仅更新状态栏入口
+  if (openProjects.length > 0) return;
 
   // 单文件直接打开；多文件让用户多选
   if (notOpen.length === 1) {
@@ -757,6 +763,8 @@ async function openProject(filename: string): Promise<void> {
         const activeProj = openProjects.find((p) => p.filename === activeAbs);
         if (activeProj) setActiveProject(activeProj, { persist: true });
       }
+      // 记住 .workspace 路径，reload 后恢复（重新打开全部项目 + 依赖）
+      await extContext?.workspaceState.update('codeblocks.openedWorkspace', filename);
       return;
     }
 
@@ -1180,6 +1188,24 @@ async function persistProjectOrder(): Promise<void> {
 /** 从 workspaceState 恢复项目顺序 */
 function restoreProjectOrder(): string[] {
   return extContext?.workspaceState.get<string[]>('codeblocks.projectOrder') ?? [];
+}
+
+/** 恢复上次会话打开的项目：优先 .workspace（重新打开全部项目+依赖），否则按持久化顺序恢复各项目 */
+async function restorePersistedProjects(): Promise<void> {
+  if (openProjects.length > 0) return;
+  const wsPath = extContext?.workspaceState.get<string>('codeblocks.openedWorkspace', '');
+  if (wsPath && fs.existsSync(wsPath)) {
+    await openProject(wsPath);
+    return;
+  }
+  const order = restoreProjectOrder();
+  const fallback = extContext?.workspaceState.get<string>('codeblocks.activeProject', '') ?? '';
+  const list = order.length ? order : [fallback].filter(Boolean);
+  for (const fn of list) {
+    if (fn && fs.existsSync(fn) && !openProjects.some((p) => p.filename === fn)) {
+      await openProject(fn);
+    }
+  }
 }
 
 /** 拖拽重排：把 src 移到 target 之前（target 为空则移到最后） */
