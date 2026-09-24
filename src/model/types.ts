@@ -229,4 +229,6 @@ export interface Workspace {
   projectPaths: string[];
   /** 激活项目（相对路径） */
   activeProject?: string;
+  /** 项目依赖（工程相对路径 → 依赖的相对路径列表，来自 <Depends filename>） */
+  dependencies: Record<string, string[]>;
 }

@@ -33,4 +33,5 @@ test-static-prefix.js
 test-weight-sort.js
 test-native-sep.js
 test-drive-case.js
+test-workspace-deps.js
 *.vsix
