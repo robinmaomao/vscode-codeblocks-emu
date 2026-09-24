@@ -4,7 +4,7 @@
 
 直接在 VS Code 中打开 `.cbp` / `.workspace` 工程，即可获得与 Code::Blocks 对齐的构建、调试与工程浏览体验。
 
-> **作者**：Robinmaomao ｜ **版本**：0.8.15-dev
+> **作者**：Robinmaomao ｜ **版本**：0.8.16-dev
 
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE.md)
 
@@ -39,6 +39,17 @@
   - 路径分隔符对齐 Code::Blocks（`UnixFilename(wxPATH_NATIVE)`）：Windows 下 `directory`/`library`/`output` 属性用反斜杠，保证 `map.txt` 等构建产物与 Code::Blocks 一致
 - 📊 **辅助工具**：代码统计、TODO 扫描、AStyle 格式化。
 
+## ⚠️ 已知限制（不支持的功能）
+
+以下 Code::Blocks 功能暂未移植，遇到相关配置时扩展会明确警告或跳过：
+
+| 功能 | 说明 |
+|------|------|
+| **Squirrel 构建脚本**（`<Script file="*.script"/>`） | Squirrel 脚本引擎未移植，构建时输出警告并跳过 |
+| **makefile 项目模式**（`makefile_is_custom="1"`） | 自定义 Makefile 项目未实现，构建仍走内部编译链路 |
+| **DAP 深层成员赋值** | 调试中修改变量值支持顶层变量与一层成员，二层以上嵌套暂不支持 |
+| **其他工程模板** | sdl / glfw / qt / wxwidgets 等依赖外部库的模板未移植（当前 5 个基础模板） |
+
 ## 安装
 
 ### 从源码构建
@@ -54,7 +65,7 @@ npx tsc -p ./
 npx vsce package --allow-missing-repository
 
 # 4. 安装
-code --install-extension codeblocks-vscode-0.8.15-dev.vsix --force
+code --install-extension codeblocks-vscode-0.8.16-dev.vsix --force
 ```
 
 > Windows 下建议使用 `npm.cmd` / `npx.cmd`（PSReadLine 执行策略）。

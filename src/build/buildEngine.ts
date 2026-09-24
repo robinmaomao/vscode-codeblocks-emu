@@ -169,6 +169,12 @@ export class BuildEngine {
   private async buildTarget(target: BuildTarget, options: BuildOptions): Promise<BuildTargetStats> {
     const macroVars = buildMacroVars(this.project.basePath, target.outputFilename, target.title, target.objectOutput, this.project.title, this.project.filename);
 
+    // 构建脚本（<Script file>）：Code::Blocks 用 Squirrel 脚本引擎，扩展暂不支持，明确警告跳过
+    const buildScripts = [...this.project.buildScripts, ...target.buildScripts];
+    for (const s of buildScripts) {
+      this.output.warn(`[Code::Blocks] 暂不支持 Squirrel 构建脚本，已跳过: ${s}`);
+    }
+
     if (target.targetType === TargetType.CommandsOnly) {
       // 仅执行 pre/post build 命令（项目级 + 目标级）
       const cmds = [
