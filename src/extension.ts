@@ -23,6 +23,7 @@ import { BuildLogTreeProvider, BuildLogProject, BuildLogDiagnostic } from './ui/
 import { SymbolTreeProvider } from './ui/symbolTreeProvider';
 import { BuildEngine } from './build/buildEngine';
 import { buildMacroVars, expandMacros } from './build/scriptRunner';
+import { applyGeneratedFiles } from './build/generatedFiles';
 import { OutputParser } from './build/outputParser';
 import { collectClangdEntries, writeClangdDatabase, CompileCommandEntry } from './build/compileCommands';
 import { detectClangd, queryCompilerSystemIncludes, queryCompilerTarget, updateClangdUserConfig, clangdUserConfigPath } from './tools/clangd';
@@ -928,6 +929,8 @@ async function openProject(filename: string): Promise<void> {
     }
 
     const project = new ProjectParser().parse(filename);
+    // 建立 生成器 → 生成文件 关系（对齐 cbProject::AddFile 的 GenFilesHackMap，来自编译器 XML gen 属性）
+    applyGeneratedFiles(project, getCompiler);
     openProjects.push(project);
     if (!activeProject) {
       // 优先恢复上次持久化的活动工程；否则默认第一个打开的工程

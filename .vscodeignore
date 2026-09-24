@@ -40,5 +40,6 @@ test-tree-lazy2.js
 test-deps-cache.js
 test-lru.js
 test-strip-comments.js
+test-generated-files.js
 .git-msg.txt
 *.vsix

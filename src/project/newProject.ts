@@ -145,6 +145,7 @@ function makeFile(projectDir: string, rel: string, targetTitles: string[]): Proj
     customBuildCommands: {},
     weight: 50,
     virtualFolder: '',
+    generatedFiles: [],
   };
 }
 

@@ -559,6 +559,7 @@ export class ProjectParser {
         customBuildCommands: {},
         weight: 50,
         virtualFolder: '',
+        generatedFiles: [],
       };
 
       let foundTarget = false;
