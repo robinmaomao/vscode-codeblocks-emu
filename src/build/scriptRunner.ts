@@ -126,6 +126,8 @@ export function buildMacroVars(
   const outDir = out.includes('/') ? out.slice(0, out.lastIndexOf('/') + 1) : '';
   const baseName = out.includes('/') ? out.slice(out.lastIndexOf('/') + 1) : out;
   const stem = baseName.replace(/\.[^.]+$/, '');
+  // 项目根目录宏：对齐 Code::Blocks GetBasePath()（wxPATH_GET_SEPARATOR，带结尾分隔符）+ UnixFilename（正斜杠）
+  const projDir = toUnix(basePath).replace(/\/?$/, '/');
 
   return {
     // 目标相关（macrosmanager.cpp）
@@ -136,8 +138,8 @@ export function buildMacroVars(
     TARGET_NAME: targetTitle,
     TARGET_OBJECT_DIR: toUnix(objectOutput),
     // 项目相关（对齐 cbProject::GetTitle / GetFilename 语义）
-    PROJECT_DIR: basePath,
-    PROJECT_DIRECTORY: basePath,
+    PROJECT_DIR: projDir,
+    PROJECT_DIRECTORY: projDir,
     PROJECT_NAME: projectTitle,
     PROJECTNAME: projectTitle,
     PROJECT_FILENAME: projectFilename,

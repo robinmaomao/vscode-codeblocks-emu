@@ -175,6 +175,7 @@ export class ProjectParser {
       title: String(root.Project?.['@_title'] ?? path.basename(filename, '.cbp')),
       basePath,
       commonTopLevelPath: basePath,
+      pchMode: 1,
       filename,
       compilerId: '',
       compilerOptions: [],
@@ -281,6 +282,11 @@ export class ProjectParser {
       if (node['@_compiler'] !== undefined) project.compilerId = String(node['@_compiler']);
       if (node['@_virtualFolders'] !== undefined) {
         project.virtualFolders = String(node['@_virtualFolders']).split(';').filter(Boolean);
+      }
+      // PCH 模式（projectloader.cpp:400-443：<Option pch_mode="0/1/2">，默认 pchObjectDir=1）
+      if (node['@_pch_mode'] !== undefined) {
+        const n = Number(node['@_pch_mode']);
+        if (!Number.isNaN(n) && n >= 0 && n <= 2) project.pchMode = n;
       }
       // 项目备注：<Option show_notes="1"><notes><![CDATA[...]]></notes></Option>
       if (node['@_show_notes'] !== undefined) {
@@ -454,6 +460,8 @@ export class ProjectParser {
       if (node['@_imp_lib'] !== undefined) target.impLib = toNativeSeparator(String(node['@_imp_lib']));
       if (node['@_def_file'] !== undefined) target.defFile = toNativeSeparator(String(node['@_def_file']));
       if (node['@_use_console_runner'] !== undefined) target.useConsoleRunner = node['@_use_console_runner'] === '1' || node['@_use_console_runner'] === 'true';
+      // <Option include_in_target_all="0/1">（DoBuildTargetOptions，默认 true）
+      if (node['@_include_in_target_all'] !== undefined) target.includeInTargetAll = node['@_include_in_target_all'] !== '0';
       // 关系属性（projectCompilerOptionsRelation 等）
       this.parseRelation(node['@_projectCompilerOptionsRelation'], OptionsRelationType.CompilerOptions, target);
       this.parseRelation(node['@_projectLinkerOptionsRelation'], OptionsRelationType.LinkerOptions, target);
