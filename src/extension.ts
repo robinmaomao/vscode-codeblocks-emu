@@ -2310,8 +2310,10 @@ async function buildOneProject(project: Project, targetTitle: string, rebuild: b
 
   const compiler = getCompiler(target.compilerId || project.compilerId);
   outputChannel.info('');
-  outputChannel.info(`=== 构建项目: ${project.title} / 目标: ${targetTitle} ===`);
-  outputChannel.info(`  使用编译器: ${compiler.programs.C}`);
+  // 构建 Banner（对齐 Code::Blocks PrintBanner：Build: <target> in <project> (compiler: <显示名>)）
+  const sep = '='.repeat(14);
+  outputChannel.info(`[Code::Blocks] ${sep} Build: ${targetTitle} in ${project.title} (compiler: ${compiler.name}) ${sep}`);
+  outputChannel.info(`  编译器程序: ${compiler.programs.C}`);
 
   // 本次项目构建的摘要数据（供 Build Log 视图）
   const diagnostics: BuildLogDiagnostic[] = [];
@@ -2365,6 +2367,11 @@ async function buildOneProject(project: Project, targetTitle: string, rebuild: b
   }
   outputChannel.info(`🐞 错误 ${errCount} · ⚠️ 警告 ${warnCount}`);
   outputChannel.info(`⏱️ 用时 ${(durationMs / 1000).toFixed(1)}s`);
+  // 最慢 Top 3（定位慢文件）
+  const top = [...engine.lastCompileTimings].sort((a, b) => b.ms - a.ms).slice(0, 3);
+  if (top.length) {
+    outputChannel.info(`🐢 最慢: ${top.map((t) => `${t.file} (${(t.ms / 1000).toFixed(1)}s)`).join(' · ')}`);
+  }
   outputChannel.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
 
   // 项目源文件绝对路径（供「Build Log 使用 clangd 诊断」模式收集诊断）
