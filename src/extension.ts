@@ -222,7 +222,6 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   buildStatusBar.command = 'codeblocks.build';
   buildStatusBar.tooltip = '增量编译（Ctrl+F9）';
   context.subscriptions.push(buildStatusBar);
-  buildStatusBar.show();
 
   // 底部状态栏：全量编译
   rebuildStatusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 80);
@@ -230,7 +229,6 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   rebuildStatusBar.command = 'codeblocks.rebuild';
   rebuildStatusBar.tooltip = '全量编译（Ctrl+F11）';
   context.subscriptions.push(rebuildStatusBar);
-  rebuildStatusBar.show();
 
   // 底部状态栏：编译器选择
   compilerStatusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 70);
@@ -515,6 +513,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       await pickAndOpenCbp(pendingCbpFiles);
     }),
   );
+  context.subscriptions.push(
+    vscode.commands.registerCommand('codeblocks.projectManager', async () => {
+      await showProjectManager();
+    }),
+  );
 
   // 恢复上次会话打开的项目（.workspace 或项目列表）
   await restorePersistedProjects();
@@ -540,10 +543,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   cbpWatcher.onDidDelete(scheduleRescan);
   context.subscriptions.push(cbpWatcher);
 
+  // 初始状态：无工程时仅显示 Code::Blocks 入口，有工程时显示 Target/Build/Rebuild/Compiler
+  refreshStatusBars();
+
   return;
 }
 
-/** 自动检测 .cbp：扫描目录下所有 .cbp，由用户多选打开 */
+/** 自动检测项目：扫描目录下所有 .cbp/.workspace，由用户多选打开 */
 async function autoDetectAndOpenProject(): Promise<void> {
   const folders = vscode.workspace.workspaceFolders;
   if (!folders || folders.length === 0) {
@@ -555,15 +561,15 @@ async function autoDetectAndOpenProject(): Promise<void> {
     return;
   }
 
-  const cbpFiles = await findCbpFiles(folders.map((f) => f.uri.fsPath));
+  const projectFiles = await findProjectFiles();
 
-  if (cbpFiles.length === 0) {
+  if (projectFiles.length === 0) {
     return;
   }
 
   // 已打开的项目不重复列在可选列表里（但标记）
   const alreadyOpen = new Set(openProjects.map((p) => p.filename));
-  const notOpen = cbpFiles.filter((f) => !alreadyOpen.has(f));
+  const notOpen = projectFiles.filter((f) => !alreadyOpen.has(f));
 
   // 更新待打开列表与状态栏入口
   pendingCbpFiles = notOpen;
@@ -620,24 +626,162 @@ async function pickAndOpenCbp(files: string[]): Promise<void> {
   updateCbpStatusBar();
 }
 
-/** 根据待打开的 .cbp 数量更新状态栏入口 */
+/** 更新底部状态栏的 Code::Blocks 入口（常驻）：无工程→打开入口，待打开→提示，已打开→项目管理菜单 */
 function updateCbpStatusBar(): void {
   if (!cbpStatusBar) return;
-  if (pendingCbpFiles.length > 0) {
+  if (openProjects.length > 0) {
+    cbpStatusBar.text = `$(project) Code::Blocks: ${openProjects.length} 项目`;
+    cbpStatusBar.tooltip = '点击管理项目（打开 / 新建 / 检测工作区项目）';
+    cbpStatusBar.command = 'codeblocks.projectManager';
+    cbpStatusBar.show();
+  } else if (pendingCbpFiles.length > 0) {
     cbpStatusBar.text = `$(project) Code::Blocks 项目 (${pendingCbpFiles.length})`;
+    cbpStatusBar.tooltip = '检测到未打开的 Code::Blocks 项目，点击选择打开';
+    cbpStatusBar.command = 'codeblocks.openDetectedProject';
     cbpStatusBar.show();
   } else {
-    cbpStatusBar.hide();
+    cbpStatusBar.text = '$(project) Code::Blocks';
+    cbpStatusBar.tooltip = '点击打开 Code::Blocks 项目';
+    cbpStatusBar.command = 'codeblocks.openProject';
+    cbpStatusBar.show();
   }
 }
 
-async function findCbpFiles(folders: string[]): Promise<string[]> {
-  const results: string[] = [];
-  for (const folder of folders) {
-    results.push(...(await vscode.workspace.findFiles('**/*.cbp', '**/node_modules/**', 500))
-      .map((u) => u.fsPath));
+/** 项目管理菜单项（扩展 QuickPickItem，携带 action / filename） */
+interface ProjectManagerItem extends vscode.QuickPickItem {
+  action?: 'open' | 'new' | 'scan';
+  filename?: string;
+}
+
+/** 构建项目管理菜单项：打开 / 新建 / 检测工作区项目 + 已打开项目（活动标记 + 移除按钮） */
+function buildManagerItems(): ProjectManagerItem[] {
+  const items: ProjectManagerItem[] = [
+    { label: '$(folder-opened) 打开项目...', description: '打开 .cbp / .workspace', action: 'open' },
+    { label: '$(new-file) 新建工程...', description: '从模板创建 Code::Blocks 工程', action: 'new' },
+    { label: '$(search) 检测工作区项目...', description: '扫描并打开工作区中的 .cbp / .workspace', action: 'scan' },
+  ];
+  if (openProjects.length > 0) {
+    items.push({ label: '已打开项目', kind: vscode.QuickPickItemKind.Separator });
+    for (const p of openProjects) {
+      const isActive = p.filename === activeProject?.filename;
+      items.push({
+        label: `${isActive ? '$(circle-filled)' : '$(circle-outline)'} ${p.title || path.basename(p.filename, '.cbp')}`,
+        description: `${path.basename(path.dirname(p.filename))}${isActive ? ' · 活动' : ''}`,
+        detail: p.filename,
+        filename: p.filename,
+        buttons: [{ iconPath: new vscode.ThemeIcon('close'), tooltip: '从侧边栏移除项目' }],
+      });
+    }
   }
-  return results;
+  return items;
+}
+
+/** 项目管理菜单：打开 / 新建 / 检测工作区项目，下方内联已打开项目（选中即切换活动工程，按钮移除，菜单保持打开） */
+async function showProjectManager(): Promise<void> {
+  const qp = vscode.window.createQuickPick<ProjectManagerItem>();
+  qp.title = 'Code::Blocks';
+  qp.placeholder = '选择操作，或点击已打开项目切换活动工程';
+  qp.matchOnDescription = true;
+  qp.items = buildManagerItems();
+
+  // 实时切换：选中已打开项目立即设为活动工程（菜单保持打开）
+  qp.onDidChangeSelection((sel) => {
+    const item = sel[0];
+    if (item?.filename) {
+      const proj = openProjects.find((p) => p.filename === item.filename);
+      if (proj) setActiveProject(proj, { persist: true });
+    }
+  });
+
+  // 回车：执行动作或关闭
+  qp.onDidAccept(async () => {
+    const item = qp.selectedItems[0];
+    if (!item) {
+      qp.hide();
+      return;
+    }
+    if (item.action === 'open') {
+      qp.hide();
+      await vscode.commands.executeCommand('codeblocks.openProject');
+    } else if (item.action === 'new') {
+      qp.hide();
+      await vscode.commands.executeCommand('codeblocks.newProject');
+    } else if (item.action === 'scan') {
+      qp.hide();
+      await scanAndOpenWorkspaceProjects();
+    } else if (item.filename) {
+      const proj = openProjects.find((p) => p.filename === item.filename);
+      if (proj) setActiveProject(proj, { persist: true });
+      qp.hide();
+    }
+  });
+
+  // 移除按钮：点击移除项目并刷新列表
+  qp.onDidTriggerItemButton((e) => {
+    if (e.item.filename) {
+      removeProject(e.item.filename);
+      qp.items = buildManagerItems();
+    }
+  });
+
+  qp.onDidHide(() => qp.dispose());
+  qp.show();
+}
+
+/** 工作区项目选择项（扩展 QuickPickItem，携带 filename） */
+interface WorkspaceProjectPickItem extends vscode.QuickPickItem {
+  filename: string;
+}
+
+/** 扫描工作区所有 .cbp/.workspace，多选打开（已打开则设为活动工程） */
+async function scanAndOpenWorkspaceProjects(): Promise<void> {
+  const folders = vscode.workspace.workspaceFolders;
+  if (!folders || folders.length === 0) {
+    vscode.window.showWarningMessage('请先打开一个工作区文件夹');
+    return;
+  }
+  const files = await findProjectFiles();
+  if (files.length === 0) {
+    vscode.window.showInformationMessage('工作区未检测到 .cbp / .workspace 项目');
+    return;
+  }
+  const openSet = new Set(openProjects.map((p) => p.filename));
+  const items: WorkspaceProjectPickItem[] = files.map((f) => {
+    const isOpen = openSet.has(f);
+    return {
+      label: `${isOpen ? '$(circle-filled)' : '$(circle-outline)'} ${path.basename(path.dirname(f))}/${path.basename(f)}`,
+      description: isOpen ? '已打开' : '',
+      detail: f,
+      picked: !isOpen,
+      filename: f,
+    };
+  });
+  const picked = await vscode.window.showQuickPick(items, {
+    title: `检测到 ${files.length} 个 Code::Blocks 项目`,
+    placeHolder: '回车打开，空格勾选/取消，Esc 跳过',
+    canPickMany: true,
+  });
+  if (!picked || picked.length === 0) return;
+  for (const p of picked) {
+    const f = p.filename;
+    if (openSet.has(f)) {
+      // 已打开：设为活动工程（不重复打开）
+      const proj = openProjects.find((x) => x.filename === f);
+      if (proj) setActiveProject(proj, { persist: true });
+    } else {
+      await openProject(f);
+    }
+  }
+  updateCbpStatusBar();
+}
+
+/** 扫描工作区所有项目文件（.cbp + .workspace，并行 + 去重；findFiles 全局搜索多根工作区） */
+async function findProjectFiles(): Promise<string[]> {
+  const [cbps, wss] = await Promise.all([
+    vscode.workspace.findFiles('**/*.cbp', '**/node_modules/**', 500),
+    vscode.workspace.findFiles('**/*.workspace', '**/node_modules/**', 500),
+  ]);
+  return [...new Set([...cbps, ...wss].map((u) => u.fsPath))];
 }
 
 /** 编译器探测结果缓存（按 masterPath 失效） */
@@ -805,8 +949,7 @@ async function openProject(filename: string): Promise<void> {
     if (titles.length && !getSelectedTarget(project)) {
       setSelectedTarget(project, titles[0]);
     }
-    updateTargetStatusBar();
-    updateCompilerStatusBar();
+    refreshStatusBars();
 
     // 持久化打开的项目顺序
     await persistProjectOrder();
@@ -874,8 +1017,7 @@ function setActiveProject(project: Project | undefined, opts: { persist?: boolea
   if (activeProject?.filename === project?.filename) return;
   activeProject = project;
   projectTreeProvider?.setActiveProject(project);
-  updateTargetStatusBar();
-  updateCompilerStatusBar();
+  refreshStatusBars();
   if (opts.persist && project) {
     void extContext?.workspaceState.update('codeblocks.activeProject', project.filename);
   }
@@ -1508,6 +1650,7 @@ function removeProject(filename: string): void {
     setActiveProject(openProjects[0], { persist: true });
   }
   projectTreeProvider?.setProjects(openProjects);
+  refreshStatusBars();
   persistProjectOrder();
   rebuildFallbackIndex();
   outputChannel.info(`[Code::Blocks] 已移除项目: ${removed.title}`);
@@ -1933,8 +2076,27 @@ function currentCompilerName(): string {
 /** 更新底部状态栏的编译器显示 */
 function updateCompilerStatusBar(): void {
   if (!compilerStatusBar) return;
-  compilerStatusBar.text = `$(tools) Compiler: ${currentCompilerName()}`;
-  compilerStatusBar.show();
+  if (openProjects.length > 0) {
+    compilerStatusBar.text = `$(tools) Compiler: ${currentCompilerName()}`;
+    compilerStatusBar.show();
+  } else {
+    compilerStatusBar.hide();
+  }
+}
+
+/** 统一刷新底部状态栏所有按钮的可见性与文本（无工程时仅显示 Code::Blocks 入口） */
+function refreshStatusBars(): void {
+  updateTargetStatusBar();
+  updateCompilerStatusBar();
+  if (buildStatusBar) {
+    if (openProjects.length > 0) buildStatusBar.show();
+    else buildStatusBar.hide();
+  }
+  if (rebuildStatusBar) {
+    if (openProjects.length > 0) rebuildStatusBar.show();
+    else rebuildStatusBar.hide();
+  }
+  updateCbpStatusBar();
 }
 
 /** 返回当前活动工程选中的构建目标标题；未选中时默认第一个（构建/运行/调试的兜底入口） */
