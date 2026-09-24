@@ -55,6 +55,8 @@ interface CompileUnit {
   file: ProjectFile;
   command: string;
   cwd: string;
+  /** 是否为 PCH 头文件（需先于同组其它文件编译） */
+  isPch: boolean;
 }
 
 export class BuildEngine {
@@ -240,8 +242,10 @@ export class BuildEngine {
       const custom = file.customBuildCommands?.[target.compilerId];
       const isCustom = custom !== undefined && custom.use;
       const ft = fileTypeOf(file.relativeFilename);
-      // 自定义命令文件（ram.ld/app.xm 等）或可编译类型（源文件/资源文件）才编译
-      if (!isCustom && !isCompilableFileType(ft)) continue;
+      const isHeader = ft === FileType.Header;
+      // 自定义命令文件（ram.ld/app.xm 等）或可编译类型（源文件/资源文件）才编译；
+      // 头文件在编译器 supportsPCH 时也编译为 .gch（对齐 GetCompileFileCommand 的 is_header && supportsPCH）
+      if (!isCustom && !isCompilableFileType(ft) && !(isHeader && this.compiler.switches.supportsPCH)) continue;
 
       // 绝对对象路径用于增量判断，相对对象路径用于命令行（避免含空格路径）
       const object = this.objectPathFor(target, file);
@@ -273,9 +277,13 @@ export class BuildEngine {
           hasCppFilesToLink: hasCpp,
         });
       }
+      // PCH 头文件：编译前删除旧 .gch（对齐 directcommands.cpp 的 wxRemoveFile，避免陈旧产物）
+      if (isHeader) {
+        command = `cmd /c if exist "${objectRel}" del "${objectRel}"\n${command}`;
+      }
       // 对齐 AddCommandsToArray：展开后为空/纯空白的命令（如 buildCommand=" " 的 no-op）不执行
       if (command && command.trim() !== '') {
-        units.push({ target, file, command, cwd: this.project.basePath });
+        units.push({ target, file, command, cwd: this.project.basePath, isPch: isHeader });
       }
     }
 
@@ -612,7 +620,7 @@ export class BuildEngine {
     const objDir = target.objectOutput || 'obj';
     const rel = file.relativeToCommonTopLevelPath || file.relativeFilename;
     const name = path.parse(rel).name;
-    return path.join(this.project.basePath, objDir, path.dirname(rel), name + '.' + this.compiler.switches.objectExtension);
+    return path.join(this.project.basePath, objDir, path.dirname(rel), name + '.' + this.objectExtensionFor(file));
   }
 
   /** 相对项目根的对象路径（用于命令行，与 CodeBlocks 一致，避免绝对路径含空格） */
@@ -620,7 +628,14 @@ export class BuildEngine {
     const objDir = target.objectOutput || 'obj';
     const rel = file.relativeToCommonTopLevelPath || file.relativeFilename;
     const name = path.parse(rel).name;
-    return path.join(objDir, path.dirname(rel), name + '.' + this.compiler.switches.objectExtension);
+    return path.join(objDir, path.dirname(rel), name + '.' + this.objectExtensionFor(file));
+  }
+
+  /** 对象扩展名：头文件（PCH）用 .gch，其余用 .o（对齐 projectfile.cpp:245 SetExt(PCHExtension)） */
+  private objectExtensionFor(file: ProjectFile): string {
+    return fileTypeOf(file.relativeFilename) === FileType.Header
+      ? this.compiler.switches.PCHExtension
+      : this.compiler.switches.objectExtension;
   }
 
   /** 为所有待编译单元递归创建对象目录（对应 CreateDirRecursively） */
@@ -668,20 +683,37 @@ export class BuildEngine {
       let groupEnd = groupStart + 1;
       const w = units[groupStart].file.weight;
       while (groupEnd < units.length && units[groupEnd].file.weight === w) groupEnd++;
-      let cursor = groupStart;
-      const workers = Array.from({ length: Math.min(maxJobs, groupEnd - groupStart) }, async () => {
-        while (cursor < groupEnd) {
-          const idx = cursor++;
-          const u = units[idx];
-          this.output.info(`[Compiling] ${u.file.relativeFilename}`);
-          this.output.debug(u.command);
-          results[idx] = await this.runCommand(u.command, u.cwd, options);
-        }
-      });
-      await Promise.all(workers);
+
+      // 组内 PCH 头文件先于其它文件编译（COMPILER_WAIT 屏障语义）
+      const group = units.slice(groupStart, groupEnd);
+      const pchIdx = group.map((u, i) => (u.isPch ? i : -1)).filter((i) => i >= 0);
+      const normalIdx = group.map((u, i) => (!u.isPch ? i : -1)).filter((i) => i >= 0);
+      await this.runGroupSubset(group, pchIdx, groupStart, maxJobs, options, results);
+      await this.runGroupSubset(group, normalIdx, groupStart, maxJobs, options, results);
+
       groupStart = groupEnd;
     }
     return results;
+  }
+
+  /** 编译一组单元（按 maxJobs 并行），结果写回全局 results（baseGlobalIdx + 组内下标） */
+  private async runGroupSubset(
+    group: CompileUnit[], localIdx: number[], baseGlobalIdx: number,
+    maxJobs: number, options: BuildOptions, results: boolean[],
+  ): Promise<void> {
+    if (!localIdx.length) return;
+    let cursor = 0;
+    const workers = Array.from({ length: Math.min(maxJobs, localIdx.length) }, async () => {
+      while (cursor < localIdx.length) {
+        const pos = cursor++;
+        const li = localIdx[pos];
+        const u = group[li];
+        this.output.info(`[Compiling] ${u.file.relativeFilename}`);
+        this.output.debug(u.command);
+        results[baseGlobalIdx + li] = await this.runCommand(u.command, u.cwd, options);
+      }
+    });
+    await Promise.all(workers);
   }
 
   private async runCommand(command: string, cwd: string, options: BuildOptions): Promise<boolean> {
