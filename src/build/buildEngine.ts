@@ -75,6 +75,10 @@ export class BuildEngine {
   private buildEnv: NodeJS.ProcessEnv | undefined;
   /** 最近一次 build() 的累计统计（供 Build Log 视图读取） */
   lastStats: BuildTargetStats | undefined;
+  /** 最近一次构建的单文件编译耗时（供汇总「最慢 Top 3」） */
+  lastCompileTimings: { file: string; ms: number }[] = [];
+  /** 本次构建的单文件编译耗时（并发 push，JS 单线程安全） */
+  private compileTimings: { file: string; ms: number }[] = [];
 
   constructor(
     private project: Project,
@@ -187,6 +191,9 @@ export class BuildEngine {
 
   /** 构建单个目标（始终返回统计对象，用 success 标记成败） */
   private async buildTarget(target: BuildTarget, options: BuildOptions): Promise<BuildTargetStats> {
+    // 本次目标构建的耗时记录（提前 return 路径也要清空，避免汇总显示上次构建的 Top3）
+    this.compileTimings = [];
+    this.lastCompileTimings = [];
     const macroVars = buildMacroVars(this.project.basePath, target.outputFilename, target.title, target.objectOutput, this.project.title, this.project.filename);
     const generator = new CommandGenerator(this.project, this.compiler);
 
@@ -295,7 +302,11 @@ export class BuildEngine {
       // （Code::Blocks 对自定义 buildCommand 文件同样执行 IsObjectOutdated 判断）
       if (!options.rebuild && this.isUpToDate(file.absolutePath, object, includeDirs, depsCache)) {
         skippedCount++;
-        this.output.debug(`[Skipping] ${file.relativeFilename} (up to date)`);
+        if (this.verboseOutput()) {
+          this.output.info(`[Skipping] ${file.relativeFilename} (up to date)`);
+        } else {
+          this.output.debug(`[Skipping] ${file.relativeFilename} (up to date)`);
+        }
         continue;
       }
 
@@ -356,13 +367,16 @@ export class BuildEngine {
     }
 
     // 并行编译（受配置限制）；生成文件在常规编译全部完成后执行
-    const maxJobs = this.maxJobs();
-    const results = await this.runInParallel(units, maxJobs, options);
-    if (deferredUnits.length) {
-      results.push(...(await this.runInParallel(deferredUnits, maxJobs, options)));
-    }
-
     const totalUnits = units.length + deferredUnits.length;
+    const compileStartMs = Date.now();
+    const maxJobs = this.maxJobs();
+    const results = await this.runInParallel(units, maxJobs, options, totalUnits);
+    if (deferredUnits.length) {
+      results.push(...(await this.runInParallel(deferredUnits, maxJobs, options, totalUnits)));
+    }
+    const compileSec = ((Date.now() - compileStartMs) / 1000).toFixed(1);
+    this.lastCompileTimings = [...this.compileTimings];
+
     const failedCount = results.filter((r) => !r).length;
     if (failedCount > 0) {
       this.output.error(`[Code::Blocks] 目标 "${target.title}" 编译失败`);
@@ -376,6 +390,8 @@ export class BuildEngine {
         outputFilename: target.outputFilename,
       };
     }
+    // 编译阶段完成耗时（对齐 Code::Blocks 阶段化日志）
+    this.output.info(`[Code::Blocks] 编译完成 ${totalUnits} 个文件 (${compileSec}s)`);
 
     // 2. 链接（非 static lib 需要链接步骤；CommandsOnly 已在上面 return）
     let linkSuccess = true;
@@ -406,7 +422,9 @@ export class BuildEngine {
         if (linkCommand) {
           this.output.info(linkCommand);
           this.output.info(`[Linking] → ${target.outputFilename}`);
+          const linkStartMs = Date.now();
           const linkOk = await this.runCommand(linkCommand, this.project.basePath, options);
+          const linkSec = ((Date.now() - linkStartMs) / 1000).toFixed(1);
           if (!linkOk) {
             this.output.error(`[Code::Blocks] 目标 "${target.title}" 链接失败`);
             return {
@@ -419,6 +437,7 @@ export class BuildEngine {
               outputFilename: target.outputFilename,
             };
           }
+          this.output.info(`✓ [Linked] ${target.outputFilename} (${linkSec}s)`);
         }
       } else {
         this.output.info(`[Code::Blocks] 目标 "${target.title}" 链接已是最新，跳过链接`);
@@ -445,7 +464,9 @@ export class BuildEngine {
         if (arCmd) {
           this.output.info(arCmd);
           this.output.info(`[Archiving] → ${staticOut}`);
+          const arStartMs = Date.now();
           const ok = await this.runCommand(arCmd, this.project.basePath, options);
+          const arSec = ((Date.now() - arStartMs) / 1000).toFixed(1);
           if (!ok) {
             return {
               success: false,
@@ -457,6 +478,7 @@ export class BuildEngine {
               outputFilename: target.outputFilename,
             };
           }
+          this.output.info(`✓ [Archived] ${staticOut} (${arSec}s)`);
         }
       } else {
         this.output.info(`[Code::Blocks] 目标 "${target.title}" 静态库已是最新，跳过打包`);
@@ -789,21 +811,43 @@ export class BuildEngine {
     for (const file of files) {
       if (file.compile === false) continue;
       if (!file.buildTargets.includes(target.title) && file.buildTargets.length > 0) continue;
-      if (this.removeFileIfExists(this.objectPathFor(target, file))) removed++;
+      const objAbs = this.objectPathFor(target, file);
+      if (this.removeFileIfExists(objAbs)) {
+        removed++;
+        // 详细输出：逐文件删除列表（对齐 Code::Blocks Clean 逐条删除命令）
+        if (this.verboseOutput()) {
+          this.output.info(`[Clean] ${path.relative(this.project.basePath, objAbs)}`);
+        }
+      }
       // 自动生成文件：同时删除本体（对齐 GetTargetCleanCommands：if (pf->AutoGeneratedBy()) ret.Add(pf->file.GetFullPath())）
       if (file.autoGeneratedBy) {
-        if (this.removeFileIfExists(file.absolutePath)) removed++;
+        if (this.removeFileIfExists(file.absolutePath)) {
+          removed++;
+          if (this.verboseOutput()) {
+            this.output.info(`[Clean] ${path.relative(this.project.basePath, file.absolutePath)}`);
+          }
+        }
       }
     }
     // 输出文件（含 Windows 无扩展名输出自动追加的 .exe 变体）
     if (target.outputFilename) {
       const out = this.resolveOutputFile(target);
-      if (this.removeFileIfExists(out)) removed++;
+      if (this.removeFileIfExists(out)) {
+        removed++;
+        if (this.verboseOutput()) {
+          this.output.info(`[Clean] ${path.relative(this.project.basePath, out)}`);
+        }
+      }
       if (process.platform === 'win32' && !out.toLowerCase().endsWith('.exe')) {
-        if (this.removeFileIfExists(out + '.exe')) removed++;
+        if (this.removeFileIfExists(out + '.exe')) {
+          removed++;
+          if (this.verboseOutput()) {
+            this.output.info(`[Clean] ${path.relative(this.project.basePath, out + '.exe')}`);
+          }
+        }
       }
     }
-    this.output.info(`[Code::Blocks] 清理目标 "${target.title}": 删除 ${removed} 个文件`);
+    this.output.info(`[Code::Blocks] 清理完成 目标 "${target.title}": 删除 ${removed} 个文件`);
   }
 
   /** 删除存在的文件，返回是否真的删除了 */
@@ -816,6 +860,11 @@ export class BuildEngine {
       this.output.error(`[Code::Blocks] 删除失败: ${p}: ${(e as Error).message}`);
       return false;
     }
+  }
+
+  /** 详细输出开关（codeblocks.build.verboseOutput，默认 false） */
+  private verboseOutput(): boolean {
+    return vscode.workspace.getConfiguration('codeblocks').get<boolean>('build.verboseOutput', false);
   }
 
   /** 对象文件的绝对路径（增量判断用） */
@@ -938,7 +987,7 @@ export class BuildEngine {
     return Math.max(1, os.cpus().length || 2);
   }
 
-  private async runInParallel(units: CompileUnit[], maxJobs: number, options: BuildOptions): Promise<boolean[]> {
+  private async runInParallel(units: CompileUnit[], maxJobs: number, options: BuildOptions, totalCount: number): Promise<boolean[]> {
     const results: boolean[] = new Array(units.length).fill(false);
     // 按 weight 分组执行：同 weight 并行，跨 weight 串行（对齐 GetCompileCommands 的 COMPILER_WAIT 屏障）
     let groupStart = 0;
@@ -951,8 +1000,8 @@ export class BuildEngine {
       const group = units.slice(groupStart, groupEnd);
       const pchIdx = group.map((u, i) => (u.isPch ? i : -1)).filter((i) => i >= 0);
       const normalIdx = group.map((u, i) => (!u.isPch ? i : -1)).filter((i) => i >= 0);
-      await this.runGroupSubset(group, pchIdx, groupStart, maxJobs, options, results);
-      await this.runGroupSubset(group, normalIdx, groupStart, maxJobs, options, results);
+      await this.runGroupSubset(group, pchIdx, groupStart, maxJobs, options, results, totalCount);
+      await this.runGroupSubset(group, normalIdx, groupStart, maxJobs, options, results, totalCount);
 
       groupStart = groupEnd;
     }
@@ -962,7 +1011,7 @@ export class BuildEngine {
   /** 编译一组单元（按 maxJobs 并行），结果写回全局 results（baseGlobalIdx + 组内下标） */
   private async runGroupSubset(
     group: CompileUnit[], localIdx: number[], baseGlobalIdx: number,
-    maxJobs: number, options: BuildOptions, results: boolean[],
+    maxJobs: number, options: BuildOptions, results: boolean[], totalCount: number,
   ): Promise<void> {
     if (!localIdx.length) return;
     let cursor = 0;
@@ -971,9 +1020,25 @@ export class BuildEngine {
         const pos = cursor++;
         const li = localIdx[pos];
         const u = group[li];
-        this.output.info(`[Compiling] ${u.file.relativeFilename}`);
-        this.output.debug(u.command);
-        results[baseGlobalIdx + li] = await this.runCommand(u.command, u.cwd, options);
+        const startMs = Date.now();
+        const ok = await this.runCommand(u.command, u.cwd, options);
+        const elapsedMs = Date.now() - startMs;
+        const elapsedSec = (elapsedMs / 1000).toFixed(1);
+        // 详细输出：完整编译命令行（对齐 Code::Blocks clogFull 模式）
+        if (this.verboseOutput()) {
+          this.output.info(u.command);
+        } else {
+          this.output.debug(u.command);
+        }
+        // 单行完成式：无交错、含进度序号与耗时（序号用连字符避免 Output 面板误判为路径链接）
+        const idx = baseGlobalIdx + li + 1;
+        if (ok) {
+          this.output.info(`✓ [Compiled] ${idx}-${totalCount} ${u.file.relativeFilename} (${elapsedSec}s)`);
+        } else {
+          this.output.error(`✗ [Failed] ${idx}-${totalCount} ${u.file.relativeFilename} (${elapsedSec}s)`);
+        }
+        this.compileTimings.push({ file: u.file.relativeFilename, ms: elapsedMs });
+        results[baseGlobalIdx + li] = ok;
       }
     });
     await Promise.all(workers);

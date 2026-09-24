@@ -98,12 +98,16 @@ export async function runScriptCommands(
   extraPath?: string,
 ): Promise<boolean> {
   let ok = true;
-  for (const cmd of commands) {
-    if (onLog) onLog(`[script] ${cmd}`);
+  const total = commands.length;
+  for (let i = 0; i < total; i++) {
+    const cmd = commands[i];
+    // 脚本命令编号（[script 1-5]，连字符避免 Output 面板误判为路径链接）
+    if (onLog) onLog(`[script ${i + 1}-${total}] ${cmd}`);
     const r = await runScriptCommand(cmd, cwd, vars, extraPath);
     if (r.output) {
+      // 子进程输出缩进两空格，与脚本命令区分层次
       for (const line of r.output.split(/\r?\n/)) {
-        if (line) onLog?.(line);
+        if (line) onLog?.(`  ${line}`);
       }
     }
     if (!r.success) ok = false;
