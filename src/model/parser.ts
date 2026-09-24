@@ -584,17 +584,29 @@ export class WorkspaceParser {
       basePath,
       filename,
       projectPaths: [],
+      dependencies: {},
     };
 
-    let projects = root.Project;
+    let projects = root.Workspace?.Project;
     if (projects !== undefined) {
       if (!Array.isArray(projects)) projects = [projects];
       for (const p of projects) {
         const f = p['@_filename'];
-        if (f) {
-          const rel = toUnix(String(f));
-          ws.projectPaths.push(rel);
-          if (p['@_active'] === '1' || p['@_active'] === 'true') ws.activeProject = rel;
+        if (!f) continue;
+        const rel = toUnix(String(f));
+        ws.projectPaths.push(rel);
+        if (p['@_active'] === '1' || p['@_active'] === 'true') ws.activeProject = rel;
+
+        // 解析 <Depends filename="...">（对齐 workspaceloader.cpp 第二遍循环建立依赖）
+        let depends = p.Depends;
+        if (depends !== undefined) {
+          if (!Array.isArray(depends)) depends = [depends];
+          const deps: string[] = [];
+          for (const d of depends) {
+            const df = d['@_filename'];
+            if (df) deps.push(toUnix(String(df)));
+          }
+          if (deps.length) ws.dependencies[rel] = deps;
         }
       }
     }

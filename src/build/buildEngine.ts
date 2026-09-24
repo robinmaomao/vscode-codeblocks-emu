@@ -377,6 +377,8 @@ export class BuildEngine {
       const linkObjectsAbs = linkFiles.map((f) => this.objectPathFor(target, f));
       // 增量：静态库已存在且比所有对象新 → 跳过打包
       if (options.rebuild || !this.linkObjectsUpToDate(staticOutAbs, linkObjectsAbs)) {
+        // 创建静态库输出目录（如 bin\Debug），否则 ar 无法写 libdep_lib.a
+        this.ensureDir(path.join(this.project.basePath, path.dirname(staticOut)));
         const arCmd = generator.generate(CommandType.LinkStaticCmd, {
           target,
           pf: null,

@@ -5,3 +5,8 @@ dist/
 codeblocks-src/
 *.log
 *.zip
+
+# 测试工程构建产物
+test-project/**/bin/
+test-project/**/obj/
+.git-msg.txt

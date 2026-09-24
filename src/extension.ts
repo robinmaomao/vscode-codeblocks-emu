@@ -33,6 +33,8 @@ import { formatActiveDocument } from './tools/astyle';
 
 /** 已打开的项目列表（顺序即编译顺序） */
 let openProjects: Project[] = [];
+/** 工作区项目依赖（工程绝对路径 → 依赖的绝对路径列表，来自 .workspace 的 <Depends>） */
+let workspaceDeps: Record<string, string[]> = {};
 /** 当前活动项目（状态栏 Target/Compiler 针对的对象） */
 let activeProject: Project | undefined;
 let outputChannel: vscode.LogOutputChannel;
@@ -739,9 +741,21 @@ async function openProject(filename: string): Promise<void> {
   try {
     if (filename.endsWith('.workspace')) {
       const ws = new WorkspaceParser().parse(filename);
-      const active = ws.activeProject ?? ws.projectPaths[0];
-      if (active) {
-        await openProject(path.join(ws.basePath, active));
+      // 依赖解析为绝对路径（相对 .workspace 目录），供构建时拓扑排序
+      const depsAbs: Record<string, string[]> = {};
+      for (const [proj, deps] of Object.entries(ws.dependencies)) {
+        depsAbs[path.join(ws.basePath, proj)] = deps.map((d) => path.join(ws.basePath, d));
+      }
+      workspaceDeps = depsAbs;
+      // 打开全部项目（对齐 CodeBlocks workspaceloader 第一遍循环）
+      for (const rel of ws.projectPaths) {
+        await openProject(path.join(ws.basePath, rel));
+      }
+      // 设置激活项目（active="1"），缺省保持第一个打开的项目
+      if (ws.activeProject) {
+        const activeAbs = path.join(ws.basePath, ws.activeProject);
+        const activeProj = openProjects.find((p) => p.filename === activeAbs);
+        if (activeProj) setActiveProject(activeProj, { persist: true });
       }
       return;
     }
@@ -1893,6 +1907,29 @@ async function promptSelectTarget(): Promise<void> {
   await promptSelectTargetForProject(project);
 }
 
+/** 按 .workspace 依赖拓扑排序构建顺序（依赖先；无依赖保持原顺序；环则跳过避免死循环） */
+function topologicalBuildOrder(projects: Project[]): Project[] {
+  if (!Object.keys(workspaceDeps).length) return [...projects];
+  const byName = new Map(projects.map((p) => [p.filename, p]));
+  const visited = new Set<string>();
+  const visiting = new Set<string>();
+  const result: Project[] = [];
+  const visit = (p: Project): void => {
+    const key = p.filename;
+    if (visited.has(key) || visiting.has(key)) return;
+    visiting.add(key);
+    for (const depAbs of workspaceDeps[key] ?? []) {
+      const dep = byName.get(depAbs);
+      if (dep) visit(dep);
+    }
+    visiting.delete(key);
+    visited.add(key);
+    result.push(p);
+  };
+  for (const p of projects) visit(p);
+  return result;
+}
+
 async function build(rebuild: boolean): Promise<boolean> {
   if (openProjects.length === 0) {
     vscode.window.showWarningMessage('请先打开一个 Code::Blocks 项目 (.cbp)');
@@ -1920,7 +1957,8 @@ async function build(rebuild: boolean): Promise<boolean> {
     { location: vscode.ProgressLocation.Notification, title: `Code::Blocks ${rebuild ? '重新构建' : '构建'}中...`, cancellable: false },
     async (progress) => {
       // 工作区构建：每个工程构建它自己的活动目标（对齐 CodeBlocks Build Workspace 语义）
-      for (const project of openProjects) {
+      // 依赖排序：依赖工程先构建（.workspace 的 <Depends>，DFS 拓扑排序）
+      for (const project of topologicalBuildOrder(openProjects)) {
         const targetTitle = getSelectedTarget(project) ?? project.buildTargets[0]?.title;
         if (!targetTitle) {
           outputChannel.warn(`[Code::Blocks] 项目 "${project.title}" 没有构建目标，跳过`);
