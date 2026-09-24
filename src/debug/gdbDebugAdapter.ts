@@ -12,6 +12,7 @@ interface BpInfo {
   line: number;
   gdbNum?: string; // GDB 分配的断点编号
   verified: boolean;
+  condition?: string; // 条件断点表达式
 }
 
 /** DAP 消息（自定义最小类型，替代 @vscode/debugadapter 的 DebugProtocol） */
@@ -49,6 +50,7 @@ export class GdbDebugAdapter implements vscode.DebugAdapter {
   private emitter = new vscode.EventEmitter<vscode.DebugProtocolMessage>();
   private seq = 0;
   private breakpoints = new Map<string, BpInfo[]>(); // source path -> breakpoints
+  private functionBreakpoints = new Map<string, BpInfo[]>(); // function name -> breakpoints
   private threads: { id: number; name: string }[] = [];
   private stackFrames: { id: number; name: string; file?: string; line?: number }[] = [];
   private gdbPath = 'gdb';
@@ -68,6 +70,8 @@ export class GdbDebugAdapter implements vscode.DebugAdapter {
       case 'initialize': this.onInitialize(msg); break;
       case 'launch': this.onLaunch(msg); break;
       case 'setBreakpoints': this.onSetBreakpoints(msg); break;
+      case 'setFunctionBreakpoints': this.onSetFunctionBreakpoints(msg); break;
+      case 'setVariable': this.onSetVariable(msg); break;
       case 'configurationDone': this.onConfigurationDone(msg); break;
       case 'threads': this.onThreads(msg); break;
       case 'stackTrace': this.onStackTrace(msg); break;
@@ -121,9 +125,9 @@ export class GdbDebugAdapter implements vscode.DebugAdapter {
     this.sendResponse(req, true, {
       supportsConfigurationDoneRequest: true,
       supportsEvaluateForHovers: true,
-      supportsSetVariable: false,
-      supportsConditionalBreakpoints: false,
-      supportsFunctionBreakpoints: false,
+      supportsSetVariable: true,
+      supportsConditionalBreakpoints: true,
+      supportsFunctionBreakpoints: true,
       supportsTerminateRequest: true,
     });
     this.sendEvent('initialized', {});
@@ -165,26 +169,27 @@ export class GdbDebugAdapter implements vscode.DebugAdapter {
   private async onSetBreakpoints(req: DapRequest): Promise<void> {
     const args = (req as any).arguments;
     const sourcePath: string = args.source?.path ?? '';
-    const lines: number[] = args.breakpoints?.map((b: any) => b.line) ?? [];
+    const requested: { line: number; condition?: string }[] = args.breakpoints ?? [];
     if (!this.session || !sourcePath) {
-      this.sendResponse(req, true, { breakpoints: lines.map((l) => ({ verified: false, line: l })) });
+      this.sendResponse(req, true, { breakpoints: requested.map((b) => ({ verified: false, line: b.line })) });
       return;
     }
 
-    // 清除该文件的旧断点
+    // 清除该文件的旧断点（按编号逐个删除）
     const old = this.breakpoints.get(sourcePath) ?? [];
     for (const bp of old) {
-      if (bp.gdbNum) { try { await this.session.send('-break-delete', {}) } catch { /* ignore */ } }
+      if (bp.gdbNum) { try { await this.session.sendMi('-break-delete', {}, [bp.gdbNum]); } catch { /* ignore */ } }
     }
 
     const result: BpInfo[] = [];
-    for (const line of lines) {
-      const bp: BpInfo = { line, verified: false };
+    for (const br of requested) {
+      const line = br.line;
+      const condition = br.condition;
+      const bp: BpInfo = { line, verified: false, condition };
       try {
-        const r = await this.session.send('-break-insert', {
-          f: sourcePath,
-          l: String(line),
-        });
+        const opts: Record<string, string> = { f: sourcePath, l: String(line) };
+        if (condition) opts['c'] = condition;
+        const r = await this.session.sendMi('-break-insert', opts);
         // MI 结果：^done,bkpt={number="1",...}
         bp.gdbNum = r.attrs['bkpt'] ? this.extractField(r.attrs['bkpt'], 'number') : undefined;
         bp.verified = true;
@@ -197,6 +202,85 @@ export class GdbDebugAdapter implements vscode.DebugAdapter {
     this.sendResponse(req, true, {
       breakpoints: result.map((b) => ({ verified: b.verified, line: b.line })),
     });
+  }
+
+  /** 设置函数断点（-break-insert 函数名，可选条件） */
+  private async onSetFunctionBreakpoints(req: DapRequest): Promise<void> {
+    const args = (req as any).arguments;
+    const requested: { name: string; condition?: string }[] = args.breakpoints ?? [];
+    if (!this.session) {
+      this.sendResponse(req, true, { breakpoints: requested.map(() => ({ verified: false })) });
+      return;
+    }
+
+    // 清除旧函数断点
+    for (const list of this.functionBreakpoints.values()) {
+      for (const bp of list) {
+        if (bp.gdbNum) { try { await this.session.sendMi('-break-delete', {}, [bp.gdbNum]); } catch { /* ignore */ } }
+      }
+    }
+    this.functionBreakpoints.clear();
+
+    const result: { verified: boolean }[] = [];
+    for (const br of requested) {
+      const name = br.name;
+      let verified = false;
+      if (name) {
+        try {
+          const opts: Record<string, string> = {};
+          if (br.condition) opts['c'] = br.condition;
+          const r = await this.session.sendMi('-break-insert', opts, [name]);
+          const gdbNum = r.attrs['bkpt'] ? this.extractField(r.attrs['bkpt'], 'number') : undefined;
+          verified = true;
+          if (gdbNum) {
+            let list = this.functionBreakpoints.get(name);
+            if (!list) { list = []; this.functionBreakpoints.set(name, list); }
+            list.push({ line: 0, gdbNum, verified: true, condition: br.condition });
+          }
+        } catch {
+          verified = false;
+        }
+      }
+      result.push({ verified });
+    }
+    this.sendResponse(req, true, { breakpoints: result });
+  }
+
+  /** 修改变量值：-var-create 临时 varobj + -var-assign + -var-delete */
+  private async onSetVariable(req: DapRequest): Promise<void> {
+    const args = (req as any).arguments;
+    const ref: number = args.variablesReference ?? 0;
+    const name: string = args.name ?? '';
+    const value: string = args.value ?? '';
+    if (!this.session || !name) {
+      this.sendResponse(req, false, {}, '未提供变量名');
+      return;
+    }
+
+    try {
+      if (ref === 1000 || ref === 2000) {
+        // 顶层变量：临时 varobj 赋值
+        const tmp = `var_${++this.varSeq}`;
+        try {
+          await this.session.sendMi('-var-create', {}, [tmp, '@', name]);
+          await this.session.sendMi('-var-assign', {}, [tmp, value]);
+          this.sendResponse(req, true, { value });
+        } finally {
+          try { await this.session.sendMi('-var-delete', {}, [tmp]); } catch { /* ignore */ }
+        }
+      } else {
+        // 子节点成员：父 varobj 名 + 成员名（GDB child varobj 命名约定 parent.member）
+        const parentVar = this.varRefToName.get(ref);
+        if (!parentVar) {
+          this.sendResponse(req, false, {}, '找不到变量引用');
+          return;
+        }
+        await this.session.sendMi('-var-assign', {}, [`${parentVar}.${name}`, value]);
+        this.sendResponse(req, true, { value });
+      }
+    } catch (err) {
+      this.sendResponse(req, false, {}, `修改变量失败: ${(err as Error).message}`);
+    }
   }
 
   private async onConfigurationDone(req: DapRequest): Promise<void> {
@@ -262,7 +346,7 @@ export class GdbDebugAdapter implements vscode.DebugAdapter {
       } else if (ref === 1000 || ref === 2000) {
         // 本地变量 / 全局变量
         const printValues = ref === 1000 ? '1' : '0';
-        const r = await this.session.send('-stack-list-variables', { print_values: printValues });
+        const r = await this.session.sendMi('-stack-list-variables', {}, [printValues]);
         vars = await this.parseVariables(r.attrs['variables'] ?? '', ref === 1000);
       } else {
         // 子节点：按 varobj 名列出 children
@@ -296,7 +380,7 @@ export class GdbDebugAdapter implements vscode.DebugAdapter {
     const expr: string = args.expression ?? '';
     if (!this.session) { this.sendResponse(req, true, { result: '', variablesReference: 0 }); return; }
     try {
-      const r = await this.session.send('-data-evaluate-expression', { expr });
+      const r = await this.session.sendMi('-data-evaluate-expression', {}, [expr]);
       const value = r.attrs['value'] ?? '';
       this.sendResponse(req, true, { result: value, variablesReference: 0 });
     } catch {

@@ -130,6 +130,32 @@ export class GdbMiSession {
     });
   }
 
+  /**
+   * 发送「选项参数 + 位置参数」混合的 MI 命令。
+   * 选项（如 -break-insert 的 -f/-l/-c）序列化为 ` -key value`；
+   * 位置参数（如函数名、表达式）序列化为 ` value`。
+   */
+  sendMi(command: string, options: Record<string, string> = {}, positionalArgs: string[] = []): Promise<MiResult> {
+    if (!this.proc) return Promise.reject(new Error('GDB 未启动'));
+    const token = ++this.token;
+    const optStr = Object.entries(options)
+      .map(([k, v]) => ` -${k} ${this.miQuote(v)}`)
+      .join('');
+    const posStr = positionalArgs.map((a) => ` ${this.miQuote(a)}`).join('');
+    const line = `${token}${command}${optStr}${posStr}\n`;
+    this.proc.stdin?.write(line);
+
+    return new Promise<MiResult>((resolve, reject) => {
+      this.pending.set(token, { resolve, reject });
+      setTimeout(() => {
+        if (this.pending.has(token)) {
+          this.pending.delete(token);
+          reject(new Error(`GDB 命令超时: ${command}`));
+        }
+      }, this.timeoutMs);
+    });
+  }
+
   private feed(chunk: string): void {
     this.buffer += chunk;
     let idx;
