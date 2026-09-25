@@ -2266,6 +2266,27 @@ async function confirmRebuild(): Promise<boolean> {
   return choice === '重新构建';
 }
 
+/**
+ * 构建前停止调试会话 —— 对齐 StopRunningDebugger（compilergcc.cpp:879-905）：
+ * 调试器运行中 → 模态询问；确认则停止并继续，否则记录 Aborting (re-)build. 并中止构建。
+ */
+async function stopDebuggerIfRunning(): Promise<boolean> {
+  const session = vscode.debug.activeDebugSession;
+  if (!session) return true;
+  const choice = await vscode.window.showWarningMessage(
+    'The debugger must be stopped to do a (re-)build.\nDo you want to stop the debugger now?',
+    { modal: true },
+    '停止调试并构建',
+  );
+  if (choice !== '停止调试并构建') {
+    outputChannel.info('[Code::Blocks] Aborting (re-)build.');
+    return false;
+  }
+  outputChannel.info('[Code::Blocks] Stopping debugger...');
+  await vscode.debug.stopDebugging(session);
+  return true;
+}
+
 async function build(rebuild: boolean): Promise<boolean> {
   // 构建互斥：进行中时忽略新的构建命令（防止双开构建进程打架）
   if (buildInProgress) {
@@ -2274,6 +2295,11 @@ async function build(rebuild: boolean): Promise<boolean> {
   }
   if (openProjects.length === 0) {
     vscode.window.showWarningMessage('请先打开一个 Code::Blocks 项目 (.cbp)');
+    return false;
+  }
+
+  // 对齐 DoBuild:2897：构建/重建/清理前须先停止调试会话
+  if (!(await stopDebuggerIfRunning())) {
     return false;
   }
 
@@ -2380,6 +2406,11 @@ async function buildSingleProject(filename: string, rebuild: boolean): Promise<v
   // 构建互斥：进行中时忽略新的构建命令
   if (buildInProgress) {
     vscode.window.showWarningMessage('已有构建正在进行，请等待完成或先停止');
+    return;
+  }
+
+  // 对齐 DoBuild:2897：构建前须先停止调试会话
+  if (!(await stopDebuggerIfRunning())) {
     return;
   }
 
@@ -2736,6 +2767,10 @@ function finishBuildSummary(allOk: boolean, buildStartMs: number): void {
 async function clean(): Promise<void> {
   const project = requireProject();
   if (!project) return;
+  // 对齐 DoBuild:2897：清理前须先停止调试会话
+  if (!(await stopDebuggerIfRunning())) {
+    return;
+  }
   // 清理前自动保存
   await saveAllBeforeBuild();
   // 逐文件删除构建产物（对齐 CodeBlocks GetTargetCleanCommands：对象文件 + 输出文件，不删目录）

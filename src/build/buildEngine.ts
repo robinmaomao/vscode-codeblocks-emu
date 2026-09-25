@@ -295,6 +295,8 @@ export class BuildEngine {
     const entries: { directory: string; command: string; file: string }[] = [];
 
     for (const target of targets) {
+      // 平台过滤（对齐 GenerateCommandLine:238：目标不支持当前平台 → 不生成编译命令）
+      if (!supportsCurrentPlatform(target.platforms)) continue;
       // 每目标编译器（对齐 GetCompiler(target->GetCompilerID())）
       this.switchCompiler(target);
       const generator = new CommandGenerator(this.project, this.compiler);
