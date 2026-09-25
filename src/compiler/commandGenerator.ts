@@ -713,19 +713,23 @@ export class CommandGenerator {
     return expandBackticks(macro);
   }
 
-  /** 获取指定 CommandType 的命令模板（按扩展名匹配，通配兜底） */
+  /** 获取指定 CommandType 的命令模板 —— 对齐 Compiler::GetCommand（compiler.cpp:306-332）：
+   * 扩展名为空（链接/打包）→ vec[0]（首条，无论其是否声明扩展名）；
+   * 扩展名精确匹配 → 该条；不匹配 → 最后一条空扩展名条目（无则 vec[0]）。 */
   private getCommandTemplate(ct: CommandType, fileExt: string): string {
     const vec = this.compiler.commands[ct];
     if (!vec || vec.length === 0) return '';
-    let catchAll = '';
-    for (const tool of vec) {
-      if (tool.extensions.length === 0) {
-        catchAll = tool.command;
-        continue;
+    let catchAll = 0;
+    if (fileExt) {
+      for (let i = 0; i < vec.length; i++) {
+        if (vec[i].extensions.length === 0) {
+          catchAll = i;
+          continue;
+        }
+        if (vec[i].extensions.includes(fileExt)) return vec[i].command;
       }
-      if (tool.extensions.includes(fileExt)) return tool.command;
     }
-    return catchAll;
+    return vec[catchAll].command;
   }
 
   /**
