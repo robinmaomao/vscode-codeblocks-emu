@@ -281,7 +281,7 @@ export class BuildEngine {
 
   /** 目标宏变量（内置 + 项目自定义变量，对齐 macrosmanager RecalcVars + cbProject SetVariable） */
   private targetMacroVars(target: BuildTarget): Record<string, string> {
-    const vars = buildMacroVars(this.project.basePath, target.outputFilename, target.title, target.objectOutput, this.project.title, this.project.filename);
+    const vars = buildMacroVars(this.project.basePath, target.outputFilename, target.title, target.objectOutput, this.project.title, this.project.filename, this.compiler.masterPath);
     return { ...vars, ...this.project.customVariables };
   }
 
