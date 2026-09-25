@@ -722,8 +722,16 @@ export class BuildEngine {
         // 链接对象 = 所有参与链接的标准源文件对象（不论本次是否重编译）
         // （ram.ld → ram.o 是链接脚本、app.xm → appxm.o 是资源，均不参与链接）
         // 逐对象加引号（对齐 pfDetails::Update:579-583 QuoteStringIfNeeded + GetTargetLinkCommands objectSeparator 拼接）
+        const isOw = (target.compilerId || '').toLowerCase() === 'ow';
         const linkObjects = linkFiles.map((f) => quoteIfNeeded(this.linkObjectRelative(target, f)));
         const resObjects = resFiles.map((f) => quoteIfNeeded(this.objectPathRelative(target, f)));
+        // OpenWatcom 特例（对齐 GetTargetLinkCommands:752-753/785-788）：链接对象前加 "file "、资源对象改 "option resource="、空格拼接
+        const linkObjectStr = isOw
+          ? (linkObjects.length ? 'file ' : '') + linkObjects.join(' ')
+          : linkObjects.join(this.compiler.switches.objectSeparator);
+        const resObjectStr = isOw
+          ? resObjects.map((o) => 'option resource=' + o).join(' ')
+          : resObjects.join(this.compiler.switches.objectSeparator);
         const linkObjectsAbs = linkFiles.map((f) => this.linkObjectAbs(target, f));
         // 资源对象同样参与增量判断（对齐 GetTargetLinkCommands 的时间戳检查遍历所有对象）
         const allObjectsAbs = [...linkObjectsAbs, ...resFiles.map((f) => this.objectPathFor(target, f))];
@@ -758,9 +766,9 @@ export class BuildEngine {
             target,
             pf: null,
             file: '',
-            object: linkObjects.join(this.compiler.switches.objectSeparator),
-            flatObject: linkObjects.join(this.compiler.switches.objectSeparator),
-            deps: resObjects.join(this.compiler.switches.objectSeparator),
+            object: linkObjectStr,
+            flatObject: linkObjectStr,
+            deps: resObjectStr,
             hasCppFilesToLink: hasCpp,
           });
           if (linkCommand) {
@@ -804,8 +812,13 @@ export class BuildEngine {
         this.output.info('[Code::Blocks] Linking stage skipped (build target has no object files to link)');
       } else {
         // 静态库用 ar 打包（对齐 Code::Blocks LinkStatic 模板，含 $lib_linker 引号与多行命令拆分）
-        // 逐对象加引号（同链接阶段，对齐 pfDetails::Update 的 QuoteStringIfNeeded）
-        const objects = linkFiles.map((f) => quoteIfNeeded(this.linkObjectRelative(target, f)));
+        // 逐对象加引号（同链接阶段，对齐 pfDetails::Update 的 QuoteStringIfNeeded）；
+        // $±link_objects prependHack（对齐 GetTargetLinkCommands:724-742）：bcc/dmc 等模板要求对象前加 -/+；
+        // OpenWatcom 特例：空格拼接（对齐 GetTargetLinkCommands:795-804）
+        const isOw = (target.compilerId || '').toLowerCase() === 'ow';
+        const hack = generator.linkObjectsPrependHack();
+        const objects = linkFiles.map((f) => hack + quoteIfNeeded(this.linkObjectRelative(target, f)));
+        const objectSep = isOw ? ' ' : this.compiler.switches.objectSeparator;
         const staticOut = computeStaticOutput(
           this.expandedOutputFilename(target),
           this.compiler.switches,
@@ -841,8 +854,8 @@ export class BuildEngine {
             target,
             pf: null,
             file: '',
-            object: objects.join(this.compiler.switches.objectSeparator),
-            flatObject: objects.join(this.compiler.switches.objectSeparator),
+            object: objects.join(objectSep),
+            flatObject: objects.join(objectSep),
             deps: '',
             hasCppFilesToLink: false,
           });

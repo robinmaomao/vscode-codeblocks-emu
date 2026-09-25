@@ -97,8 +97,14 @@ export interface Compiler {
   libDirs: string[];
   /** 编译器全局资源 include 目录（/res_include_dirs） */
   resIncludeDirs: string[];
-  /** 编译器全局链接库（/link_libs，供外部依赖检查） */
+  /** 编译器全局链接库（/libraries，供外部依赖检查与 $libs 追加） */
   linkLibs: string[];
+  /** 编译器全局编译选项（/compiler_options，SetupCompilerOptions:1017 追加在项目/目标之后） */
+  compilerOptions: string[];
+  /** 编译器全局链接选项（/linker_options，SetupLinkerOptions:1046） */
+  linkerOptions: string[];
+  /** 编译器全局资源编译选项（/resource_compiler_options，SetupResourceCompilerOptions:1161） */
+  resourceCompilerOptions: string[];
 }
 
 /** 每个 CommandType 下的命令模板数组（按扩展名匹配） */
@@ -195,5 +201,8 @@ export function createGccCompiler(platform: NodeJS.Platform, masterPath = ''): C
     libDirs: [],
     resIncludeDirs: [],
     linkLibs: [],
+    compilerOptions: [],
+    linkerOptions: [],
+    resourceCompilerOptions: [],
   };
 }

@@ -1,4 +1,4 @@
-/**
+﻿/**
  * 扩展入口 —— 注册命令、管理项目/构建生命周期
  *
  * 对应 Code::Blocks 的 pluginmanager / compilergcc 插件入口角色。
@@ -1954,6 +1954,9 @@ function getCompiler(compilerId?: string): Compiler {
       compiler.libDirs = sd.libDirs;
       compiler.resIncludeDirs = sd.resIncludeDirs;
       compiler.linkLibs = sd.linkLibs;
+      compiler.compilerOptions = sd.compilerOptions;
+      compiler.linkerOptions = sd.linkerOptions;
+      compiler.resourceCompilerOptions = sd.resourceCompilerOptions;
     }
     // 用户自定义错误正则按索引覆盖/追加（对齐 Compiler::LoadSettings:699-737）
     codeBlocksConfig?.applyUserRegexes(id, compiler.regexes);
