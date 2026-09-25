@@ -152,11 +152,15 @@ export class BuildEngine {
     // 对齐 Build()/Rebuild()/BuildWorkspace()：每轮构建清空反引号缓存（cbClearBackticksCache，Clean 单命令不清）
     clearBackticksCache();
 
-    // 编译/链接子进程 PATH 注入：编译器 bin 目录前置 + 实时系统 PATH（对齐 CodeBlocks Init 的 PATH 重构）
-    // 编译/链接子进程 PATH 注入：编译器 bin 目录 + masterPath + extra_paths + 实时系统 PATH（对齐 CodeBlocks SetupEnvironment:795-830 的 PATH 重构，去重）
+    // 编译/链接子进程 PATH 注入：bin + masterPath + extra_paths + 系统 PATH（对齐 SetupEnvironment:795-830：ReplaceMacros 展开 + 去尾分隔符 + 去重）
+    const expandEnvPath = (p: string): string =>
+      replaceCbMacros(p, { customVars: this.project.customVariables ?? {}, basePath: this.project.basePath })
+        .replace(/[\\/]+$/, '');
+    const masterPath = this.compiler.masterPath ? expandEnvPath(this.compiler.masterPath) : '';
+    const extraPaths = (this.compiler.extraPaths ?? []).map(expandEnvPath);
     const parts = process.platform === 'win32'
-      ? [this.compilerBinPath(), this.compiler.masterPath, ...(this.compiler.extraPaths ?? []), getWindowsSystemPath(), process.env.PATH ?? '']
-      : [this.compilerBinPath(), this.compiler.masterPath, ...(this.compiler.extraPaths ?? []), process.env.PATH ?? ''];
+      ? [this.compilerBinPath(), masterPath, ...extraPaths, getWindowsSystemPath(), process.env.PATH ?? '']
+      : [this.compilerBinPath(), masterPath, ...extraPaths, process.env.PATH ?? ''];
     const sep = process.platform === 'win32' ? ';' : ':';
     const seen = new Set<string>();
     const merged = parts.filter(Boolean).filter((p) => {
