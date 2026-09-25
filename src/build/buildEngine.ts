@@ -1457,7 +1457,7 @@ export class BuildEngine {
         }
       }
     }
-    this.output.info(`[Code::Blocks] 清理完成 目标 "${target.title}": 删除 ${removed} 个文件`);
+    this.output.info(`[Code::Blocks] Cleaned "${this.project.title} - ${target.title}": 删除 ${removed} 个文件`);
   }
 
   /** 删除存在的文件，返回是否真的删除了 */

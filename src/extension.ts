@@ -26,6 +26,7 @@ import { BuildCancelSource, BuildCancelHandle } from './build/cancelToken';
 import { expandMacros } from './build/scriptRunner';
 import { applyGeneratedFiles } from './build/generatedFiles';
 import { cbBuiltinVars } from './compiler/cbMacros';
+import { clearBackticksCache } from './compiler/commandGenerator';
 import { OutputParser } from './build/outputParser';
 import { collectClangdEntries, writeClangdDatabase, CompileCommandEntry } from './build/compileCommands';
 import { detectClangd, queryCompilerSystemIncludes, queryCompilerTarget, updateClangdUserConfig, clangdUserConfigPath } from './tools/clangd';
@@ -470,6 +471,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   context.subscriptions.push(
     vscode.commands.registerCommand('codeblocks.cleanWorkspace', async () => {
       await cleanWorkspace();
+    }),
+  );
+
+  // 重新构建工作区（全部工程：clean 遍 + build 遍，对齐 OnRebuildAll → RebuildWorkspace）
+  context.subscriptions.push(
+    vscode.commands.registerCommand('codeblocks.rebuildWorkspace', async () => {
+      await rebuildWorkspace();
     }),
   );
 
@@ -2305,7 +2313,7 @@ async function stopDebuggerIfRunning(): Promise<boolean> {
   return true;
 }
 
-async function build(rebuild: boolean): Promise<boolean> {
+async function build(rebuild: boolean, clearLog = true): Promise<boolean> {
   // 构建互斥：进行中时忽略新的构建命令（防止双开构建进程打架）
   if (buildInProgress) {
     vscode.window.showWarningMessage('已有构建正在进行，请等待完成或先停止');
@@ -2329,8 +2337,10 @@ async function build(rebuild: boolean): Promise<boolean> {
   // 构建前自动保存工作区未保存文件
   await saveAllBeforeBuild();
 
-  diagnosticCollection.clear();
-  outputChannel.clear();
+  if (clearLog) {
+    diagnosticCollection.clear();
+    outputChannel.clear();
+  }
   outputChannel.show(true);
   outputChannel.info(`[Code::Blocks] 开始构建 ${rebuild ? '(重新构建)' : ''}...（共 ${openProjects.length} 个项目）`);
 
@@ -2851,6 +2861,49 @@ async function cleanWorkspace(): Promise<void> {
     await cleanTargets(project, targetTitle);
   }
   outputChannel.info('[Code::Blocks] 清理完成');
+}
+
+/**
+ * Rebuild Workspace —— 对齐 OnRebuildAll → RebuildWorkspace（compilergcc.cpp:3009-3019）：
+ * 确认对话框 → cbClearBackticksCache → clean 遍（DoWorkspaceBuild true,false）+ build 遍（DoWorkspaceBuild false,true,clearLog=false）。
+ * rebuild_seperately 配置未移植：扩展固定走「先全清后全建」两遍式（= CB 默认 false 分支）。
+ */
+async function rebuildWorkspace(): Promise<void> {
+  if (openProjects.length === 0) {
+    vscode.window.showWarningMessage('请先打开一个 Code::Blocks 项目 (.cbp)');
+    return;
+  }
+  if (buildInProgress) {
+    vscode.window.showWarningMessage('已有构建正在进行，请等待完成或先停止');
+    return;
+  }
+  const choice = await vscode.window.showWarningMessage(
+    '重新构建全部已打开工程将删除所有对象文件并全量重新编译。\n确定继续？',
+    { modal: true },
+    '重新构建全部',
+  );
+  if (choice !== '重新构建全部') return;
+  if (!(await stopDebuggerIfRunning())) return;
+  await saveAllBeforeBuild();
+  clearBackticksCache();
+  outputChannel.clear();
+  outputChannel.show(true);
+  // clean 遍：对齐 DoWorkspaceBuild(target, true, false)——依赖拓扑顺序清理全部工程选中目标
+  for (const project of topologicalBuildOrder(openProjects)) {
+    if (!supportsCurrentPlatform(project.platforms)) {
+      outputChannel.warn(`[Code::Blocks] 项目 "${project.title}" 不支持当前平台，跳过`);
+      continue;
+    }
+    const targetTitle = getSelectedTarget(project) ?? project.buildTargets.find((t) => supportsCurrentPlatform(t.platforms))?.title;
+    if (!targetTitle) {
+      outputChannel.warn(`[Code::Blocks] 项目 "${project.title}" 没有构建目标，跳过`);
+      continue;
+    }
+    await cleanTargets(project, targetTitle);
+  }
+  outputChannel.info('[Code::Blocks] 清理完成');
+  // build 遍：对齐 DoWorkspaceBuild(target, false, true, false)——clearLog=false 保留 clean 遍日志
+  await build(false, false);
 }
 
 async function run(): Promise<void> {
