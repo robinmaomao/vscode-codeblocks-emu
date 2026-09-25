@@ -465,6 +465,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     }),
   );
 
+  // 清理工作区（全部工程选中目标）
+  context.subscriptions.push(
+    vscode.commands.registerCommand('codeblocks.cleanWorkspace', async () => {
+      await cleanWorkspace();
+    }),
+  );
+
   // 运行
   context.subscriptions.push(
     vscode.commands.registerCommand('codeblocks.run', async () => {
@@ -2767,17 +2774,70 @@ function finishBuildSummary(allOk: boolean, buildStartMs: number): void {
 async function clean(): Promise<void> {
   const project = requireProject();
   if (!project) return;
+  // 对齐 OnClean:3385-3397：清理前确认
+  if (!(await confirmClean('清理目标/项目'))) return;
   // 对齐 DoBuild:2897：清理前须先停止调试会话
   if (!(await stopDebuggerIfRunning())) {
     return;
   }
   // 清理前自动保存
   await saveAllBeforeBuild();
-  // 逐文件删除构建产物（对齐 CodeBlocks GetTargetCleanCommands：对象文件 + 输出文件，不删目录）
-  for (const target of project.buildTargets) {
+  outputChannel.show(true);
+  // 对齐 OnClean → Clean("") → GetTargetString：只清理选中目标（虚拟目标展开组）
+  const targetTitle = getSelectedTarget(project) ?? project.buildTargets.find((t) => supportsCurrentPlatform(t.platforms))?.title;
+  if (!targetTitle) {
+    vscode.window.showWarningMessage('项目没有构建目标');
+    return;
+  }
+  await cleanTargets(project, targetTitle);
+  outputChannel.info('[Code::Blocks] 清理完成');
+}
+
+/** Clean 确认对话框 —— 对齐 OnClean/OnCleanAll 的 AnnoyingDialog */
+async function confirmClean(scope: string): Promise<boolean> {
+  const choice = await vscode.window.showWarningMessage(
+    `${scope} 将删除所有相关对象文件，下次构建需要从头编译。\n是否继续清理？`,
+    { modal: true },
+    '清理',
+  );
+  return choice === '清理';
+}
+
+/** 清理选中目标（虚拟目标展开组逐个 cleanTarget）——对齐 ExpandTargets + bsTargetClean */
+async function cleanTargets(project: Project, targetTitle: string): Promise<void> {
+  const vt = project.virtualTargets.find((v) => v.title === targetTitle);
+  const titles: string[] = vt ? vt.targets : [targetTitle];
+  for (const title of titles) {
+    const target = project.buildTargets.find((t) => t.title === title);
+    if (!target) continue;
     const compiler = getCompiler(target.compilerId || project.compilerId);
-    const engine = new BuildEngine(project, compiler, outputChannel, (id) => resolveTargetCompiler(id));
-    engine.cleanTarget(target);
+    new BuildEngine(project, compiler, outputChannel, (id) => resolveTargetCompiler(id)).cleanTarget(target);
+  }
+}
+
+/** Clean Workspace —— 对齐 OnCleanAll → CleanWorkspace：全部已打开工程各自的选中目标，依赖拓扑排序 */
+async function cleanWorkspace(): Promise<void> {
+  if (openProjects.length === 0) {
+    vscode.window.showWarningMessage('请先打开一个 Code::Blocks 项目 (.cbp)');
+    return;
+  }
+  if (!(await confirmClean('清理全部已打开工程'))) return;
+  if (!(await stopDebuggerIfRunning())) {
+    return;
+  }
+  await saveAllBeforeBuild();
+  outputChannel.show(true);
+  for (const project of topologicalBuildOrder(openProjects)) {
+    if (!supportsCurrentPlatform(project.platforms)) {
+      outputChannel.warn(`[Code::Blocks] 项目 "${project.title}" 不支持当前平台，跳过`);
+      continue;
+    }
+    const targetTitle = getSelectedTarget(project) ?? project.buildTargets.find((t) => supportsCurrentPlatform(t.platforms))?.title;
+    if (!targetTitle) {
+      outputChannel.warn(`[Code::Blocks] 项目 "${project.title}" 没有构建目标，跳过`);
+      continue;
+    }
+    await cleanTargets(project, targetTitle);
   }
   outputChannel.info('[Code::Blocks] 清理完成');
 }
