@@ -2,7 +2,7 @@
   "name": "codeblocks-vscode",
   "displayName": "Code::Blocks for VS Code",
   "description": "原生移植 Code::Blocks 核心功能到 VS Code：项目模型、构建引擎、编译器管理与调试引擎",
-  "version": "0.8.42-dev",
+  "version": "0.8.43-dev",
   "icon": "resources/icon.png",
   "publisher": "robinmaomao",
   "author": {
@@ -72,6 +72,11 @@
       {
         "command": "codeblocks.clean",
         "title": "Code::Blocks: Clean",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "codeblocks.cleanWorkspace",
+        "title": "Code::Blocks: Clean Workspace",
         "icon": "$(trash)"
       },
       {
@@ -406,9 +411,14 @@
           "group": "navigation@9"
         },
         {
-          "command": "codeblocks.codeStats",
+          "command": "codeblocks.cleanWorkspace",
           "when": "view == codeblocks.projectTree",
           "group": "navigation@10"
+        },
+        {
+          "command": "codeblocks.codeStats",
+          "when": "view == codeblocks.projectTree",
+          "group": "navigation@11"
         }
       ],
       "view/item/context": [
