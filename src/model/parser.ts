@@ -647,7 +647,12 @@ export class ProjectParser {
           if (o['@_compilerVar'] !== undefined) file.compilerVar = String(o['@_compilerVar']);
           if (o['@_compile'] !== undefined) file.compile = String(o['@_compile']) !== '0';
           if (o['@_link'] !== undefined) file.link = String(o['@_link']) !== '0';
-          if (o['@_weight'] !== undefined) file.weight = Number(o['@_weight']) || 50;
+          // 对齐 projectloader.cpp:1307 QueryIntAttribute 直接赋值：weight 0-100 全合法（0 排最前），
+          // 勿用 `Number(x) || 50`（0 是合法值会被吞成默认 50）
+          if (o['@_weight'] !== undefined) {
+            const w = Number(o['@_weight']);
+            if (Number.isFinite(w) && w >= 0 && w <= 100) file.weight = w;
+          }
           if (o['@_virtualFolder'] !== undefined) file.virtualFolder = toUnix(String(o['@_virtualFolder']));
           // custom build command：<Option compiler="id" use="1" buildCommand="..."/>
           // 对齐 DoUnitOptions：compiler 与 buildCommand 均非空（不 trim）才记录；
