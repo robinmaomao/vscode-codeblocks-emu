@@ -15,6 +15,7 @@ import { decodeText } from '../tools/encoding';
 import { getWindowsSystemPath } from '../tools/windowsPath';
 import { upperDrive } from '../tools/pathCase';
 import { BuildCancelHandle } from './cancelToken';
+import { replaceCbMacros } from '../compiler/cbMacros';
 
 /** 展开命令中的宏（Code::Blocks 变量风格） */
 export function expandMacros(cmd: string, vars: Record<string, string>): string {
@@ -83,7 +84,7 @@ export function runScriptCommand(
       resolve({ success: false, output: '' });
       return;
     }
-    const expanded = expandMacros(command, vars);
+    const expanded = replaceCbMacros(command, { vars });
     const env: Record<string, string> = { ...(process.env as Record<string, string>) };
     if (process.platform === 'win32') {
       // Windows：实时读取系统 PATH（注册表 Machine+User），宿主进程 PATH 快照可能过期
@@ -151,7 +152,7 @@ export function buildMacroVars(
   basePath: string,
   outputFilename: string,
   targetTitle: string,
-  objectOutput = 'obj/',
+  objectOutput = '.objs/',
   projectTitle = targetTitle,
   projectFilename = outputFilename,
 ): Record<string, string> {

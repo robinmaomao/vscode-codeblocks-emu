@@ -15,6 +15,7 @@ import { Compiler } from '../compiler/compiler';
 import { CommandGenerator, computeStaticOutput, quoteIfNeeded } from '../compiler/commandGenerator';
 import { OutputParser } from './outputParser';
 import { runScriptCommands, buildMacroVars, replaceAllMacros } from './scriptRunner';
+import { replaceCbMacros } from '../compiler/cbMacros';
 import { BuildCancelHandle } from './cancelToken';
 import { decodeText } from '../tools/encoding';
 import { applyResponseFile, compareFilesByWeight } from './commandLine';
@@ -538,7 +539,9 @@ export class BuildEngine {
     const hasCpp = sortedFiles.some((f) => isCppSource(f.relativeFilename));
 
     // 头文件依赖扫描（增量编译）：include 目录先展开宏（含项目自定义变量，对齐 DepsSearchStart 的 ReplaceMacros）
-    const includeDirs = this.getIncludeDirs(target).map((d) => replaceAllMacros(d, macroVars));
+    const includeDirs = this.getIncludeDirs(target).map((d) =>
+      replaceCbMacros(d, { vars: macroVars, customVars: this.project.customVariables ?? {} }),
+    );
     const depsCache = new Map<string, number>();
 
     // 1a. 链接对象集合（独立于编译，对应 GetTargetLinkCommands：link=true 且可链接类型。
@@ -1038,7 +1041,10 @@ export class BuildEngine {
 
   /** 输出文件名宏展开（对齐 ReplaceMacros(target->GetOutputFilename(), target)） */
   private expandedOutputFilename(target: BuildTarget): string {
-    return replaceAllMacros(target.outputFilename, this.targetMacroVars(target));
+    return replaceCbMacros(target.outputFilename, {
+      vars: this.targetMacroVars(target),
+      customVars: this.project.customVariables ?? {},
+    });
   }
 
   /** 文件 mtime（毫秒，失败返回 0，对齐 depsTimeStamp 语义） */
@@ -1071,14 +1077,17 @@ export class BuildEngine {
           if (!lib) continue;
           // 用户直接指向带路径的库：不经过库目录直接检查（ReplaceMacros + UnixFilename）
           if (lib.includes('/') || lib.includes('\\')) {
-            lib = replaceAllMacros(lib, macros).replace(/\\/g, '/');
+            lib = replaceCbMacros(lib, { vars: macros, customVars: this.project.customVariables ?? {} }).replace(/\\/g, '/');
             if (this.fileMtime(absFromProject(lib)) > timeOutput) return true;
             continue;
           }
           if (!lib.startsWith(this.compiler.switches.libPrefix)) lib = this.compiler.switches.libPrefix + lib;
           if (!lib.endsWith('.' + this.compiler.switches.libExtension)) lib += '.' + this.compiler.switches.libExtension;
           for (const dir of libDirs) {
-            const cand = replaceAllMacros(path.join(absFromProject(dir), lib), macros).replace(/\\/g, '/');
+            const cand = replaceCbMacros(path.join(absFromProject(dir), lib), {
+              vars: macros,
+              customVars: this.project.customVariables ?? {},
+            }).replace(/\\/g, '/');
             if (this.fileMtime(cand) > timeOutput) return true;
           }
         }
@@ -1089,7 +1098,7 @@ export class BuildEngine {
     const macros = this.targetMacroVars(target);
     for (const dep of target.externalDeps) {
       if (!dep) continue;
-      const depExp = absFromProject(replaceAllMacros(dep, macros));
+      const depExp = absFromProject(replaceCbMacros(dep, { vars: macros, customVars: this.project.customVariables ?? {} }));
       const timeExtDep = this.fileMtime(depExp);
       // 依赖缺失：不需重链接，但记录 WARNING
       if (timeExtDep <= 0) {
@@ -1099,7 +1108,7 @@ export class BuildEngine {
       // 检查附加输出文件
       for (const add of target.additionalOutput) {
         if (!add) continue;
-        const addExp = absFromProject(replaceAllMacros(add, macros));
+        const addExp = absFromProject(replaceCbMacros(add, { vars: macros, customVars: this.project.customVariables ?? {} }));
         const timeAdd = this.fileMtime(addExp);
         if (timeAdd <= 0) {
           filesMissing.push(addExp);
