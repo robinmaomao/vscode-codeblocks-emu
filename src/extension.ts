@@ -25,7 +25,7 @@ import { BuildEngine } from './build/buildEngine';
 import { BuildCancelSource, BuildCancelHandle } from './build/cancelToken';
 import { expandMacros } from './build/scriptRunner';
 import { applyGeneratedFiles } from './build/generatedFiles';
-import { cbBuiltinVars } from './compiler/cbMacros';
+import { cbBuiltinVars, replaceCbMacros } from './compiler/cbMacros';
 import { clearBackticksCache } from './compiler/commandGenerator';
 import { OutputParser } from './build/outputParser';
 import { collectClangdEntries, writeClangdDatabase, CompileCommandEntry } from './build/compileCommands';
@@ -1471,6 +1471,7 @@ function createEmptyTarget(): BuildTarget {
     objectOutput: '',
     depsOutput: '',
     executionParameters: '',
+    workingDir: '',
     optionRelations: {
       [OptionsRelationType.CompilerOptions]: OptionsRelation.AppendToParentOptions,
       [OptionsRelationType.LinkerOptions]: OptionsRelation.AppendToParentOptions,
@@ -2907,6 +2908,31 @@ async function rebuildWorkspace(): Promise<void> {
   await build(false, false);
 }
 
+/**
+ * 运行工作目录 —— 对齐 CB Run() 的 m_CdRun = target->GetWorkingDir()（compilergcc.cpp:2020-2025 + compiletargetbase.cpp:190-201）：
+ * working_dir 非空 → 环境变量展开（CB ReplaceEnvVars）→ 相对路径按项目根解析；
+ * 为空且目标类型为控制台/可执行/动态库 → 输出文件所在目录；其余目标类型 → 项目根。
+ */
+function runWorkingDir(project: Project, target: BuildTarget, vars: Record<string, string>): string {
+  const tt = target.targetType;
+  if (tt !== TargetType.ConsoleOnly && tt !== TargetType.Executable && tt !== TargetType.DynamicLib) {
+    return project.basePath;
+  }
+  const wd = (target.workingDir ?? '').trim();
+  if (wd) {
+    const envExp = wd.replace(/\$\(([A-Za-z_][A-Za-z0-9_]*)\)/g, (_m, n: string) => process.env[n] ?? '');
+    return path.resolve(project.basePath, envExp);
+  }
+  // 默认：输出文件所在目录（GetOutputFilename → wxFileName::GetPath）
+  const expOut = replaceCbMacros(target.outputFilename, {
+    vars,
+    customVars: project.customVariables ?? {},
+  }).replace(/\\/g, '/');
+  const idx = expOut.lastIndexOf('/');
+  if (idx < 0) return project.basePath;
+  return path.resolve(project.basePath, expOut.slice(0, idx));
+}
+
 async function run(): Promise<void> {
   const project = requireProject();
   if (!project) return;
@@ -2933,7 +2959,7 @@ async function run(): Promise<void> {
 
   const terminal = vscode.window.createTerminal({
     name: `Run: ${target.title}`,
-    cwd: project.basePath,
+    cwd: runWorkingDir(project, target, vars),
     env: Object.keys(env).length ? { ...(process.env as Record<string, string>), ...env } : undefined,
   });
   terminal.show();
