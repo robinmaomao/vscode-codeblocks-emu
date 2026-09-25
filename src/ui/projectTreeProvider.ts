@@ -8,7 +8,6 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
 import { Project, ProjectFile } from '../model/types';
-import { fileTypeOf, FileType } from '../model/fileTypes';
 import { upperDrive } from '../tools/pathCase';
 import { LruCache } from '../tools/lru';
 
@@ -19,19 +18,6 @@ interface DirIndex {
 }
 
 /** 树节点 */
-/** 文件类型图标映射（B2） */
-function fileTypeIcon(ft: FileType): vscode.ThemeIcon {
-  switch (ft) {
-    case FileType.Header: return new vscode.ThemeIcon('file');
-    case FileType.Resource: return new vscode.ThemeIcon('file-media');
-    case FileType.Object:
-    case FileType.StaticLib:
-    case FileType.DynamicLib: return new vscode.ThemeIcon('file-binary');
-    case FileType.Script: return new vscode.ThemeIcon('file-symlink-file');
-    default: return new vscode.ThemeIcon('file-code');
-  }
-}
-
 class TreeNode extends vscode.TreeItem {
   /** 目录/分组节点的直接子节点（懒加载：childrenLoaded=false 时为空，展开时按需构建） */
   children: TreeNode[] = [];
@@ -164,10 +150,7 @@ export class ProjectTreeProvider implements vscode.TreeDataProvider<TreeNode> {
         ? (this.activeIconPath ?? new vscode.ThemeIcon('circle-filled'))
         : (this.inactiveIconPath ?? new vscode.ThemeIcon('circle-outline'));
     }
-    // 文件节点：按类型 codicon（B2，覆盖文件图标主题的默认渲染）
-    if (element.kind === 'file') {
-      element.iconPath = fileTypeIcon(fileTypeOf(element.file?.relativeFilename ?? element.label ?? ''));
-    }
+    // 文件节点：不显式设置 iconPath，交由 VS Code 依据 resourceUri 使用文件图标主题渲染
     return element;
   }
 

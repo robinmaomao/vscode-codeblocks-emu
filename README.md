@@ -4,7 +4,7 @@
 
 直接在 VS Code 中打开 `.cbp` / `.workspace` 工程，即可获得与 Code::Blocks 对齐的构建、调试与工程浏览体验。
 
-> **作者**：Robinmaomao ｜ **版本**：0.8.46-dev
+> **作者**：Robinmaomao ｜ **版本**：0.8.62-dev
 
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE.md)
 
@@ -75,7 +75,7 @@ npx tsc -p ./
 npx vsce package --allow-missing-repository
 
 # 4. 安装
-code --install-extension codeblocks-vscode-0.8.46-dev.vsix --force
+code --install-extension codeblocks-vscode-0.8.62-dev.vsix --force
 ```
 
 > Windows 下建议使用 `npm.cmd` / `npx.cmd`（PSReadLine 执行策略）。
@@ -94,9 +94,11 @@ code --extensionDevelopmentPath="." --disable-extensions --new-window
 2. 左侧活动栏点击 **Code::Blocks** 图标，展开面板：
    - **Menu**：模拟 Code::Blocks 菜单栏（File / Build / Debug / Tools…）
    - **Project**：工程树（多项目 + 嵌套目录 + 文件浏览）
-   - **Build Log**：结构化构建摘要
    - **Symbols**：符号浏览器（函数 / 宏 / 类型 / 变量分组，点击跳转）
+   - **Build Log**：结构化构建摘要，位于**底部 Panel 的「Build Log」标签页**（`Ctrl+J` 打开）
 3. 底部状态栏显示当前 **构建目标（Target）**、**编译器（Compiler）**，并提供 **Build / Rebuild** 快捷按钮。
+
+> 视图位置、大小可自由拖动，VS Code 自动保存并恢复；命令 **`Code::Blocks: Reset View Layout`** 一键恢复默认排布。
 
 ### 构建
 
