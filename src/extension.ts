@@ -434,6 +434,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     }),
   );
 
+  // 构建工作区（全部工程）
+  context.subscriptions.push(
+    vscode.commands.registerCommand('codeblocks.buildWorkspace', async () => {
+      await buildWorkspace(false);
+    }),
+  );
+
   // 重新构建
   context.subscriptions.push(
     vscode.commands.registerCommand('codeblocks.rebuild', async () => {
@@ -2315,7 +2322,35 @@ async function stopDebuggerIfRunning(): Promise<boolean> {
   return true;
 }
 
-async function build(rebuild: boolean, clearLog = true): Promise<boolean> {
+/** 主 Build —— 对齐 CB OnBuild：仅活动项目；多工程且无活动项目时询问（AskForActiveProject:1080） */
+async function build(rebuild: boolean): Promise<boolean> {
+  // 构建互斥：进行中时忽略新的构建命令（防止双开构建进程打架）
+  if (buildInProgress) {
+    vscode.window.showWarningMessage('已有构建正在进行，请等待完成或先停止');
+    return false;
+  }
+  if (openProjects.length === 0) {
+    vscode.window.showWarningMessage('请先打开一个 Code::Blocks 项目 (.cbp)');
+    return false;
+  }
+
+  let project = activeProject && openProjects.includes(activeProject)
+    ? activeProject
+    : openProjects.length === 1 ? openProjects[0] : undefined;
+  if (!project) {
+    // 对齐 AskForActiveProject：多工程且无活动项目 → 询问选择
+    const title = await vscode.window.showQuickPick(openProjects.map((p) => p.title), {
+      placeHolder: '选择要构建的工程（设为活动项目）',
+    });
+    project = openProjects.find((p) => p.title === title);
+    if (!project) return false;
+    setActiveProject(project, { persist: true });
+  }
+  return await buildSingleProject(project.filename, rebuild);
+}
+
+/** Build Workspace —— 对齐 CB OnBuildWorkspace：全部工程选中目标，依赖拓扑排序 */
+async function buildWorkspace(rebuild: boolean, clearLog = true): Promise<boolean> {
   // 构建互斥：进行中时忽略新的构建命令（防止双开构建进程打架）
   if (buildInProgress) {
     vscode.window.showWarningMessage('已有构建正在进行，请等待完成或先停止');
@@ -2431,28 +2466,28 @@ async function build(rebuild: boolean, clearLog = true): Promise<boolean> {
   return allOk && !cancelled;
 }
 
-/** 构建单个项目（右键菜单的 Build/Rebuild 使用） */
-async function buildSingleProject(filename: string, rebuild: boolean): Promise<void> {
+/** 构建单个项目（右键菜单的 Build/Rebuild 与主 Build 命令使用，对齐 CB 单活动项目 Build） */
+async function buildSingleProject(filename: string, rebuild: boolean): Promise<boolean> {
   // 构建互斥：进行中时忽略新的构建命令
   if (buildInProgress) {
     vscode.window.showWarningMessage('已有构建正在进行，请等待完成或先停止');
-    return;
+    return false;
   }
 
   // 对齐 DoBuild:2897：构建前须先停止调试会话
   if (!(await stopDebuggerIfRunning())) {
-    return;
+    return false;
   }
 
   // Rebuild 前由用户确认（对齐 Code::Blocks 的 Rebuild 确认对话框）
   if (rebuild && !(await confirmRebuild())) {
-    return;
+    return false;
   }
 
   const project = openProjects.find((p) => p.filename === filename);
   if (!project) {
     vscode.window.showWarningMessage('项目未找到');
-    return;
+    return false;
   }
   // 单工程编译时，活动工程也切换为该工程（状态栏 / 后续构建 / clangd 随之更新）
   setActiveProject(project, { persist: true });
@@ -2462,13 +2497,13 @@ async function buildSingleProject(filename: string, rebuild: boolean): Promise<v
   if (!supportsCurrentPlatform(project.platforms)) {
     outputChannel.warn(`[Code::Blocks] 项目 "${project.title}" 不支持当前平台，跳过`);
     vscode.window.showWarningMessage(`项目 "${project.title}" 不支持当前平台`);
-    return;
+    return false;
   }
 
   const targetTitle = getSelectedTarget(project) ?? project.buildTargets.find((t) => supportsCurrentPlatform(t.platforms))?.title;
   if (!targetTitle) {
     vscode.window.showWarningMessage('项目没有构建目标');
-    return;
+    return false;
   }
 
   diagnosticCollection.clear();
@@ -2523,6 +2558,7 @@ async function buildSingleProject(filename: string, rebuild: boolean): Promise<v
     vscode.window.showErrorMessage(`❌ 构建失败 · ${errorCount} 错误 · ${warningCount} 警告`);
   }
   finishBuildSummary(ok && !cancelled, buildStartMs);
+  return ok && !cancelled;
 }
 
 /** 单文件编译（对齐 Code::Blocks Build file：CompileFile，只编译不链接） */
@@ -2905,7 +2941,7 @@ async function rebuildWorkspace(): Promise<void> {
   }
   outputChannel.info('[Code::Blocks] 清理完成');
   // build 遍：对齐 DoWorkspaceBuild(target, false, true, false)——clearLog=false 保留 clean 遍日志
-  await build(false, false);
+  await buildWorkspace(false, false);
 }
 
 /**
@@ -2940,7 +2976,10 @@ async function run(): Promise<void> {
   // 运行前自动保存
   await saveAllBeforeBuild();
 
-  const selectedTitle = await selectTarget();
+  // 对齐 CB OnRun：默认活动目标（m_LastTargetName），仅无选中目标时弹选择器
+  const selectedTitle = getSelectedTarget(project)
+    ?? project.buildTargets.find((t) => supportsCurrentPlatform(t.platforms))?.title
+    ?? await selectTarget();
   const target = project.buildTargets.find((t) => t.title === selectedTitle);
   if (!target) return;
 
@@ -2973,7 +3012,10 @@ async function debug(): Promise<void> {
   // 调试前自动保存
   await saveAllBeforeBuild();
 
-  const selectedTitle = await selectTarget();
+  // 对齐 CB：默认活动目标，仅无选中目标时弹选择器
+  const selectedTitle = getSelectedTarget(project)
+    ?? project.buildTargets.find((t) => supportsCurrentPlatform(t.platforms))?.title
+    ?? await selectTarget();
   const target = project.buildTargets.find((t) => t.title === selectedTitle);
   if (!target) return;
 
