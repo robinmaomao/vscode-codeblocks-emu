@@ -105,6 +105,7 @@ function makeTarget(name: string, title: string, type: TargetType, compilerOptio
     objectOutput: `obj/${title}/`,
     depsOutput: '',
     executionParameters: '',
+    workingDir: '',
     optionRelations: defaultRelations(),
     compilerOptions,
     linkerOptions: [],

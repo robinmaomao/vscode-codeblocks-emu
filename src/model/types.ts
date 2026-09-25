@@ -167,6 +167,8 @@ export interface BuildTarget {
   depsOutput: string;
   /** 执行参数（<Option parameters>，Run/Debug 用，对齐 GetExecutionParameters） */
   executionParameters: string;
+  /** 运行工作目录（<Option working_dir>，Run 用，对齐 GetWorkingDir：空 = 输出文件目录；仅控制台/可执行/动态库目标生效） */
+  workingDir: string;
   /** 外部依赖（<Option external_deps>，分号列表；比输出新时强制重链接，对齐 AreExternalDepsOutdated） */
   externalDeps: string[];
   /** 附加输出文件（<Option additional_output>，分号列表；外部依赖比它新时强制重链接） */

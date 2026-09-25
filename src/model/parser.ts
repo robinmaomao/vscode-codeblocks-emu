@@ -414,6 +414,7 @@ export class ProjectParser {
         objectOutput: '',
         depsOutput: '',
         executionParameters: '',
+        workingDir: '',
         optionRelations: defaultRelations(),
         compilerOptions: [],
         linkerOptions: [],
@@ -518,6 +519,7 @@ export class ProjectParser {
       if (node['@_object_output'] !== undefined) target.objectOutput = toUnix(String(node['@_object_output']));
       if (node['@_deps_output'] !== undefined) target.depsOutput = toUnix(String(node['@_deps_output']));
       if (node['@_parameters'] !== undefined) target.executionParameters = String(node['@_parameters']);
+      if (node['@_working_dir'] !== undefined) target.workingDir = toUnix(String(node['@_working_dir']));
       // 外部依赖 / 附加输出（projectloader.cpp:594-598：分号分隔列表，Unix 路径）
       if (node['@_external_deps'] !== undefined) target.externalDeps = splitList(String(node['@_external_deps']));
       if (node['@_additional_output'] !== undefined) target.additionalOutput = splitList(String(node['@_additional_output']));
