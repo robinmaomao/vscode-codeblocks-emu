@@ -76,6 +76,8 @@ const SELECTED_TARGETS_KEY = 'codeblocks.selectedTargets';
 let buildStatusBar: vscode.StatusBarItem | undefined;
 /** 底部状态栏：全量编译 */
 let rebuildStatusBar: vscode.StatusBarItem | undefined;
+let buildWorkspaceStatusBar: vscode.StatusBarItem | undefined;
+let rebuildWorkspaceStatusBar: vscode.StatusBarItem | undefined;
 /** 底部状态栏：编译器选择 */
 let compilerStatusBar: vscode.StatusBarItem | undefined;
 /** 底部状态栏：检测到未打开的 Code::Blocks 项目入口 */
@@ -350,6 +352,38 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   rebuildStatusBar.command = 'codeblocks.rebuild';
   rebuildStatusBar.tooltip = '全量编译（Ctrl+F11）';
   context.subscriptions.push(rebuildStatusBar);
+
+  // 底部状态栏：构建工作区 / 重建工作区（设置 codeblocks.ui.workspaceStatusBar 控制显隐）
+  buildWorkspaceStatusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 78);
+  buildWorkspaceStatusBar.text = '$(multiple-windows) Build WS';
+  buildWorkspaceStatusBar.command = 'codeblocks.buildWorkspace';
+  buildWorkspaceStatusBar.tooltip = '构建工作区（全部工程增量编译）';
+  context.subscriptions.push(buildWorkspaceStatusBar);
+
+  rebuildWorkspaceStatusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 76);
+  rebuildWorkspaceStatusBar.text = '$(multiple-windows) Rebuild WS';
+  rebuildWorkspaceStatusBar.command = 'codeblocks.rebuildWorkspace';
+  rebuildWorkspaceStatusBar.tooltip = '重建工作区（全部工程 Clean + Build，会弹确认）';
+  context.subscriptions.push(rebuildWorkspaceStatusBar);
+
+  const updateWorkspaceStatusBars = (): void => {
+    const enabled = vscode.workspace.getConfiguration('codeblocks').get<boolean>('ui.workspaceStatusBar', true);
+    if (enabled) {
+      buildWorkspaceStatusBar?.show();
+      rebuildWorkspaceStatusBar?.show();
+    } else {
+      buildWorkspaceStatusBar?.hide();
+      rebuildWorkspaceStatusBar?.hide();
+    }
+  };
+  updateWorkspaceStatusBars();
+  context.subscriptions.push(
+    vscode.workspace.onDidChangeConfiguration((e) => {
+      if (e.affectsConfiguration('codeblocks.ui.workspaceStatusBar')) {
+        updateWorkspaceStatusBars();
+      }
+    }),
+  );
 
   // 底部状态栏：编译器选择
   compilerStatusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 70);

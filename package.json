@@ -2,7 +2,7 @@
   "name": "codeblocks-vscode",
   "displayName": "Code::Blocks for VS Code",
   "description": "原生移植 Code::Blocks 核心功能到 VS Code：项目模型、构建引擎、编译器管理与调试引擎",
-  "version": "0.8.62-dev",
+  "version": "0.8.63-dev",
   "icon": "resources/icon.png",
   "publisher": "robinmaomao",
   "author": {
@@ -306,6 +306,11 @@
           "type": "boolean",
           "default": false,
           "description": "构建成功静默模式：不弹成功 toast，仅输出日志与状态栏诊断徽标"
+        },
+        "codeblocks.ui.workspaceStatusBar": {
+          "type": "boolean",
+          "default": true,
+          "description": "状态栏显示 Build WS / Rebuild WS（构建工作区 / 重建工作区）按钮"
         },
         "codeblocks.compilerPrograms": {
           "type": "object",
