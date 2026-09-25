@@ -578,8 +578,20 @@ export class BuildEngine {
           for (const m of missing) this.output.debug(`        ${m}`);
         }
         if (forceLink) {
-          // 创建输出目录（如 Output\bin），否则链接器无法写 app.rv32
-          this.ensureDir(path.dirname(outputAbs));
+          // 创建输出目录（如 Output\bin），否则链接器无法写 app.rv32；失败则中止本目标（对齐 GetTargetLinkCommands 的目录错误提示，用日志替代阻塞弹窗）
+          if (!this.ensureDir(path.dirname(outputAbs))) {
+            this.output.error(`[Code::Blocks] 无法创建输出目录，目标 "${target.title}" 中止`);
+            return {
+              success: false,
+              compiledCount: totalUnits,
+              skippedCount,
+              failedCount: 0,
+              linkSuccess: false,
+              linkSkipped: false,
+              hadCommands: true,
+              outputFilename: target.outputFilename,
+            };
+          }
 
           const linkCommand = generator.generate(this.linkCommandType(target), {
             target,
@@ -644,8 +656,20 @@ export class BuildEngine {
           for (const m of missing) this.output.debug(`        ${m}`);
         }
         if (forceArchive) {
-          // 创建静态库输出目录（如 bin\Debug），否则 ar 无法写 libdep_lib.a
-          this.ensureDir(path.dirname(staticOutAbs));
+          // 创建静态库输出目录（如 bin\Debug），否则 ar 无法写 libdep_lib.a；失败则中止本目标
+          if (!this.ensureDir(path.dirname(staticOutAbs))) {
+            this.output.error(`[Code::Blocks] 无法创建输出目录，目标 "${target.title}" 中止`);
+            return {
+              success: false,
+              compiledCount: totalUnits,
+              skippedCount,
+              failedCount: 0,
+              linkSuccess: false,
+              linkSkipped: true,
+              hadCommands: true,
+              outputFilename: target.outputFilename,
+            };
+          }
           const arCmd = generator.generate(CommandType.LinkStaticCmd, {
             target,
             pf: null,
@@ -1260,17 +1284,22 @@ export class BuildEngine {
       dirs.add(objDir);
     }
     for (const dir of dirs) {
-      this.ensureDir(dir);
+      // 对象目录失败：debug 日志 + 继续（对齐 GetCompileFileCommand 的 DebugLog，让编译器报真实错误）
+      this.ensureDir(dir, 'debug');
     }
   }
 
-  /** 递归创建目录（静默失败） */
-  private ensureDir(dir: string): void {
-    if (!dir) return;
+  /** 递归创建目录，返回是否成功（失败按级别记录：error = 构建中止点，debug = 对齐 CB DebugLog 继续执行） */
+  private ensureDir(dir: string, logLevel: 'debug' | 'error' = 'error'): boolean {
+    if (!dir) return true;
     try {
       fs.mkdirSync(dir, { recursive: true });
+      return true;
     } catch (e) {
-      this.output.error(`[Code::Blocks] 无法创建目录 ${dir}: ${(e as Error).message}`);
+      const msg = `[Code::Blocks] 无法创建目录 ${dir}: ${(e as Error).message}`;
+      if (logLevel === 'error') this.output.error(msg);
+      else this.output.debug(msg);
+      return false;
     }
   }
 
