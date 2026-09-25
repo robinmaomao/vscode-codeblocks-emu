@@ -65,7 +65,7 @@ async function buildOne(cbp) {
   const project = new ProjectParser().parse(cbp);
   applyGeneratedFiles(project, getCompiler);
   const compiler = getCompiler(project.buildTargets[0]?.compilerId || project.compilerId);
-  const engine = new BuildEngine(project, compiler, out);
+  const engine = new BuildEngine(project, compiler, out, (id) => getCompiler(id));
   const ok = await engine.build(undefined, {
     onLine: (l, sev) => console.log('[' + (sev || 'i') + '] ' + l),
   });
@@ -79,7 +79,7 @@ async function singleFileCheck(cbp) {
   const project = new ProjectParser().parse(cbp);
   applyGeneratedFiles(project, getCompiler);
   const compiler = getCompiler(project.buildTargets[0]?.compilerId || project.compilerId);
-  const engine = new BuildEngine(project, compiler, out);
+  const engine = new BuildEngine(project, compiler, out, (id) => getCompiler(id));
   const targetTitle = project.buildTargets[0].title;
   // hello-cb.cbp：object_output=obj/Debug/，main.c 对象 = obj/Debug/main.o
   const objAbs = path.join(project.basePath, 'obj', 'Debug', 'main.o');
