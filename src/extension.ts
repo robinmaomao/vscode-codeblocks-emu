@@ -8,7 +8,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 import * as crypto from 'crypto';
 import { ProjectParser, WorkspaceParser } from './model/parser';
-import { Project, BuildTarget, ProjectFile, TargetType, OptionsRelation, OptionsRelationType, LinkerExecutableOption } from './model/types';
+import { Project, BuildTarget, ProjectFile, TargetType, OptionsRelation, OptionsRelationType, LinkerExecutableOption, supportsCurrentPlatform } from './model/types';
 import { serializeProject } from './model/projectWriter';
 import { createProjectFromTemplate, PROJECT_TEMPLATES } from './project/newProject';
 import { Compiler } from './compiler/compiler';
@@ -963,8 +963,8 @@ async function openProject(filename: string): Promise<void> {
     // 重建兜底符号索引（clangd 不可用时提供项目内补全）
     rebuildFallbackIndex();
 
-    // 每个工程各自默认选中第一个目标（对齐 CodeBlocks m_ActiveTarget = GetFirstValidBuildTargetName()）
-    const titles = project.buildTargets.map((t) => t.title);
+    // 每个工程各自默认选中第一个目标（对齐 CodeBlocks m_ActiveTarget = GetFirstValidBuildTargetName()，跳过不支持平台的目标）
+    const titles = project.buildTargets.filter((t) => supportsCurrentPlatform(t.platforms)).map((t) => t.title);
     if (titles.length && !getSelectedTarget(project)) {
       setSelectedTarget(project, titles[0]);
     }
@@ -1457,6 +1457,7 @@ function createEmptyTarget(): BuildTarget {
     defFile: '',
     useConsoleRunner: true,
     includeInTargetAll: true,
+    platforms: 0xff,
     commandsBeforeBuild: [],
     commandsAfterBuild: [],
     commandsBeforeClean: [],
@@ -2139,8 +2140,9 @@ function refreshStatusBars(): void {
 async function selectTarget(): Promise<string | undefined> {
   const project = requireProject();
   if (!project) return undefined;
+  // 目标列表排除不支持当前平台的目标（对齐 UpdateProjectTargets）
   const titles = [
-    ...project.buildTargets.map((t) => t.title),
+    ...project.buildTargets.filter((t) => supportsCurrentPlatform(t.platforms)).map((t) => t.title),
     ...project.virtualTargets.map((v) => v.title),
   ];
   if (titles.length === 0) {
@@ -2161,7 +2163,7 @@ async function selectTarget(): Promise<string | undefined> {
 /** 强制弹出选择框切换指定工程的构建目标 */
 async function promptSelectTargetForProject(project: Project): Promise<void> {
   const titles = [
-    ...project.buildTargets.map((t) => t.title),
+    ...project.buildTargets.filter((t) => supportsCurrentPlatform(t.platforms)).map((t) => t.title),
     ...project.virtualTargets.map((v) => v.title),
   ];
   if (titles.length === 0) {
@@ -2266,7 +2268,15 @@ async function build(rebuild: boolean): Promise<boolean> {
           // 工作区构建：每个工程构建它自己的活动目标（对齐 CodeBlocks Build Workspace 语义）
           // 依赖排序：依赖工程先构建（.workspace 的 <Depends>，DFS 拓扑排序）
           for (const project of topologicalBuildOrder(openProjects)) {
-            const targetTitle = getSelectedTarget(project) ?? project.buildTargets[0]?.title;
+            // 项目级平台过滤（对齐 compilergcc.cpp:2724：项目不支持当前平台 → 整个跳过）
+            if (!supportsCurrentPlatform(project.platforms)) {
+              outputChannel.warn(`[Code::Blocks] 项目 "${project.title}" 不支持当前平台，跳过`);
+              done++;
+              progress.report({ increment: 100 / total });
+              continue;
+            }
+            // 默认目标跳过不支持平台的目标（对齐 GetFirstValidBuildTargetName）
+            const targetTitle = getSelectedTarget(project) ?? project.buildTargets.find((t) => supportsCurrentPlatform(t.platforms))?.title;
             if (!targetTitle) {
               outputChannel.warn(`[Code::Blocks] 项目 "${project.title}" 没有构建目标，跳过`);
               done++;
@@ -2343,7 +2353,14 @@ async function buildSingleProject(filename: string, rebuild: boolean): Promise<v
   setActiveProject(project, { persist: true });
   await saveAllBeforeBuild();
 
-  const targetTitle = getSelectedTarget(project) ?? project.buildTargets[0]?.title;
+  // 项目级平台过滤（对齐 compilergcc.cpp:2724）
+  if (!supportsCurrentPlatform(project.platforms)) {
+    outputChannel.warn(`[Code::Blocks] 项目 "${project.title}" 不支持当前平台，跳过`);
+    vscode.window.showWarningMessage(`项目 "${project.title}" 不支持当前平台`);
+    return;
+  }
+
+  const targetTitle = getSelectedTarget(project) ?? project.buildTargets.find((t) => supportsCurrentPlatform(t.platforms))?.title;
   if (!targetTitle) {
     vscode.window.showWarningMessage('项目没有构建目标');
     return;
@@ -2413,8 +2430,8 @@ async function buildOneProject(project: Project, targetTitle: string, rebuild: b
   const target = vt
     ? project.buildTargets.find((t) => vt.targets.includes(t.title))
     : project.buildTargets.find((t) => t.title === targetTitle);
-  if (!target) {
-    outputChannel.warn(`[Code::Blocks] 项目 "${project.title}" 无目标 "${targetTitle}"，跳过`);
+  if (!target || !supportsCurrentPlatform(target.platforms)) {
+    outputChannel.warn(`[Code::Blocks] 项目 "${project.title}" 无目标 "${targetTitle}"（或不支持当前平台），跳过`);
     return true;
   }
 

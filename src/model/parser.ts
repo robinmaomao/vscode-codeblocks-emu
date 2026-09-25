@@ -126,6 +126,15 @@ function splitList(v: string): string[] {
   return v.split(';').map((s) => s.trim().replace(/^"|"$/g, '')).filter(Boolean);
 }
 
+/** 平台属性解析 —— 对齐 globals.cpp GetPlatformsFromString（子串语义：含 All 或 W+U+M → spAll，否则按含 Windows/Unix/Mac 置位） */
+function parsePlatforms(s: string): number {
+  const pW = s.includes('Windows');
+  const pU = s.includes('Unix');
+  const pM = s.includes('Mac');
+  if (s.includes('All') || (pW && pU && pM)) return 0xff;
+  return (pW ? 0x04 : 0) | (pU ? 0x02 : 0) | (pM ? 0x01 : 0);
+}
+
 /** 从 <Compiler>/<Linker> 的 <Add directory="..."/> 提取目录（对应 DoCompilerOptions/DoLinkerOptions） */
 function collectAddDirectories(parent: any): string[] {
   const out: string[] = [];
@@ -182,6 +191,7 @@ export class ProjectParser {
       commonTopLevelPath: basePath,
       pchMode: 1,
       extendedObjNames: false,
+      platforms: 0xff,
       filename,
       compilerId: '',
       compilerOptions: [],
@@ -328,6 +338,10 @@ export class ProjectParser {
       if (node['@_extended_obj_names'] !== undefined) {
         project.extendedObjNames = node['@_extended_obj_names'] === '1' || node['@_extended_obj_names'] === 'true';
       }
+      // 项目级平台过滤（projectloader.cpp:399-463：<Option platforms>，默认 spAll）
+      if (node['@_platforms'] !== undefined) {
+        project.platforms = parsePlatforms(String(node['@_platforms']));
+      }
       // 项目备注：<Option show_notes="1"><notes><![CDATA[...]]></notes></Option>
       if (node['@_show_notes'] !== undefined) {
         project.showNotesOnLoad = String(node['@_show_notes']) !== '0';
@@ -416,6 +430,7 @@ export class ProjectParser {
         defFile: '',
         useConsoleRunner: true,
         includeInTargetAll: true,
+        platforms: 0xff,
         commandsBeforeBuild: [],
         commandsAfterBuild: [],
         commandsBeforeClean: [],
@@ -511,6 +526,8 @@ export class ProjectParser {
       if (node['@_use_console_runner'] !== undefined) target.useConsoleRunner = node['@_use_console_runner'] === '1' || node['@_use_console_runner'] === 'true';
       // <Option include_in_target_all="0/1">（DoBuildTargetOptions，默认 true）
       if (node['@_include_in_target_all'] !== undefined) target.includeInTargetAll = node['@_include_in_target_all'] !== '0';
+      // 目标级平台过滤（projectloader.cpp:546-663：<Option platforms>，默认 spAll）
+      if (node['@_platforms'] !== undefined) target.platforms = parsePlatforms(String(node['@_platforms']));
       // 关系属性（projectCompilerOptionsRelation 等）
       this.parseRelation(node['@_projectCompilerOptionsRelation'], OptionsRelationType.CompilerOptions, target);
       this.parseRelation(node['@_projectLinkerOptionsRelation'], OptionsRelationType.LinkerOptions, target);

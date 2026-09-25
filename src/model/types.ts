@@ -40,6 +40,16 @@ export enum LinkerExecutableOption {
   Linker = 3,
 }
 
+/** 平台位掩码（对齐 globals.h SupportedPlatforms：spMac=0x01 spUnix=0x02 spWindows=0x04 spAll=0xff） */
+export const PLATFORM_ALL = 0xff;
+
+/** 是否支持当前运行平台（对齐 CompileOptionsBase::SupportsCurrentPlatform） */
+export function supportsCurrentPlatform(platforms: number): boolean {
+  if (process.platform === 'win32') return (platforms & 0x04) !== 0;
+  if (process.platform === 'darwin') return (platforms & 0x01) !== 0;
+  return (platforms & 0x02) !== 0; // linux/freebsd 等按 Unix
+}
+
 /** 命令类型 —— compiler.h CommandType */
 export enum CommandType {
   CompileObjectCmd = 0,  // ctCompileObjectCmd
@@ -146,6 +156,8 @@ export interface BuildTarget {
   useConsoleRunner: boolean;
   /** 是否纳入 "All" 虚拟目标 */
   includeInTargetAll: boolean;
+  /** 平台位掩码（<Option platforms>，对齐 SetPlatforms，默认 spAll=0xff） */
+  platforms: number;
 
   /** deps 输出目录（<Option deps_output>，默认 .deps，对齐 GetDepsOutput） */
   depsOutput: string;
@@ -191,6 +203,8 @@ export interface Project {
   pchMode: number;
   /** 扩展对象命名（<Option extended_obj_names="1">：foo.c → foo.c.o，默认 false） */
   extendedObjNames: boolean;
+  /** 平台位掩码（<Option platforms>，对齐 SetPlatforms，默认 spAll=0xff） */
+  platforms: number;
   /** .cbp 文件绝对路径 */
   filename: string;
   /** 默认编译器 ID */

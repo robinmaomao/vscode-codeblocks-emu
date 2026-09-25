@@ -9,7 +9,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 import * as os from 'os';
 import { spawn } from 'child_process';
-import { Project, BuildTarget, ProjectFile, TargetType, CommandType, CompilerLineType } from '../model/types';
+import { Project, BuildTarget, ProjectFile, TargetType, CommandType, CompilerLineType, supportsCurrentPlatform } from '../model/types';
 import { FileType, fileTypeOf, isCompilableFileType, isLinkableFileType, isCppSource, isClangdIndexable } from '../model/fileTypes';
 import { Compiler } from '../compiler/compiler';
 import { CommandGenerator, computeStaticOutput } from '../compiler/commandGenerator';
@@ -116,6 +116,9 @@ export class BuildEngine {
     if (!titles && targets.length === 0) {
       targets = this.project.buildTargets;
     }
+
+    // 平台过滤（对齐 compilergcc.cpp:2749：不支持当前平台的目标不构建）
+    targets = targets.filter((t) => supportsCurrentPlatform(t.platforms));
 
     if (targets.length === 0) {
       vscode.window.showWarningMessage('没有可构建的目标');

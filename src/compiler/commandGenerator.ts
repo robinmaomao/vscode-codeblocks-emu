@@ -493,9 +493,9 @@ export class CommandGenerator {
     macro = macro.replace(/\$file/g, quoteIfNeeded(fname));
     macro = macro.replace(/\$dep_object/g, quoteIfNeeded(deps));
 
-    // 4. objects_output_dir 必须在 $object 之前
+    // 4. objects_output_dir 必须在 $object 之前（对齐 CB：GetObjectOutput + FixPathSeparators，原生分隔符）
     if (params.target) {
-      macro = macro.replace(/\$objects_output_dir/g, toUnix(params.target.objectOutput));
+      macro = macro.replace(/\$objects_output_dir/g, this.fixSep(params.target.objectOutput));
     }
     // 5. object / resource_output
     macro = macro.replace(/\$object/g, quoteIfNeeded(object));
