@@ -230,6 +230,9 @@ export class CommandGenerator {
         compilerSearchDirs: this.getOrderedIncludeDirs(target),
         linkerSearchDirs: this.getOrderedLibDirs(target),
       };
+      // 依赖扫描目录追加 cwd 类目录（对齐 CB GetIncludeDirs:808-811）
+      if (this.compiler.includePrjCwd) c.compilerSearchDirs.push(this.project.basePath);
+      if (this.compiler.includeFileCwd) c.compilerSearchDirs.push('.');
       this.cache.set(target.title, c);
     }
   }
@@ -325,9 +328,50 @@ export class CommandGenerator {
     );
     // 追加编译器全局目录（对齐 GetOrderedIncludeDirs：项目/目标后追加 compiler->GetIncludeDirs()）
     dirs.push(...(this.compiler.includeDirs ?? []));
-    return dirs
-      .map((d) => this.compiler.switches.includeDirs + quoteIfNeeded(this.finalizeDir(d, target)))
-      .join(this.compiler.switches.includeDirSeparator);
+    return this.joinIncludeEntries(dirs.map((d) => quoteIfNeeded(this.finalizeDir(d, target))));
+  }
+
+  /** 按编译器开关拼接 include 条目：includeDirs 以 '(' 结尾 → INCDIR(path1;path2) 风格（对齐 CB GenerateCommandLine:361-367/389-395） */
+  private joinIncludeEntries(entries: string[]): string {
+    const s = this.compiler.switches;
+    const sep = s.includeDirSeparator;
+    if (s.includeDirs.endsWith('(')) {
+      return s.includeDirs + entries.join(sep) + ')';
+    }
+    return entries.map((e) => s.includeDirs + e).join(sep);
+  }
+
+  /**
+   * 追加 cwd 类 include（对齐 GenerateCommandLine:347-403）：
+   * include_file_cwd → 当前编译文件目录；include_prj_cwd → 项目公共顶层目录；INCDIR 风格同样特判。
+   */
+  private applyCwdIncludes(inc: string, resInc: string, params: GenerateParams): { inc: string; resInc: string } {
+    const s = this.compiler.switches;
+    const paren = s.includeDirs.endsWith('(');
+    const appendOne = (cur: string, entry: string): string => {
+      if (!entry) return cur;
+      const q = quoteIfNeeded(this.fixSep(entry));
+      if (paren) {
+        const base = cur.endsWith(')') ? cur.slice(0, -1) : cur;
+        return base + s.includeDirSeparator + q + ')';
+      }
+      const sep = cur ? s.includeDirSeparator : '';
+      return cur + sep + s.includeDirs + q;
+    };
+    let ni = inc;
+    let nr = resInc;
+    if (this.compiler.includeFileCwd && params.file) {
+      const dir = path.dirname(unquote(params.file));
+      const entry = dir && dir !== '.' ? dir : '';
+      ni = appendOne(ni, entry);
+      nr = appendOne(nr, entry);
+    }
+    if (this.compiler.includePrjCwd) {
+      const entry = this.project.commonTopLevelPath || this.project.basePath;
+      ni = appendOne(ni, entry);
+      nr = appendOne(nr, entry);
+    }
+    return { inc: ni, resInc: nr };
   }
 
   private setupLibDirs(target: BuildTarget): string {
@@ -349,9 +393,7 @@ export class CommandGenerator {
       this.getRelation(target, this.rel.ResDirs),
     );
     dirs.push(...(this.compiler.resIncludeDirs ?? []));
-    return dirs
-      .map((d) => this.compiler.switches.includeDirs + quoteIfNeeded(this.finalizeDir(d, target)))
-      .join(this.compiler.switches.includeDirSeparator);
+    return this.joinIncludeEntries(dirs.map((d) => quoteIfNeeded(this.finalizeDir(d, target))));
   }
 
   /**
@@ -613,8 +655,10 @@ export class CommandGenerator {
     }
 
     let cFlags = (cache?.cFlags ?? '').trim();
-    const inc = cache?.inc ?? '';
-    const resInc = cache?.rc ?? '';
+    let inc = cache?.inc ?? '';
+    let resInc = cache?.rc ?? '';
+    // 对齐 GenerateCommandLine:347-403：include_file_cwd / include_prj_cwd 追加（INCDIR 风格同样特判）
+    ({ inc, resInc } = this.applyCwdIncludes(inc, resInc, params));
     const lib = cache?.lib ?? '';
     const ldAdd = cache?.ldAdd ?? '';
     const ldFlags = cache?.ldFlags ?? '';

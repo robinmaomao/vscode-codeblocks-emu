@@ -29,5 +29,9 @@ check('TO_ABSOLUTE_PATH', replaceCbMacros('$TO_ABSOLUTE_PATH{src/x.c}', opts) ==
 check('REMOVE_QUOTES 剥引号', replaceCbMacros('$REMOVE_QUOTES{"a b"}', opts) === 'a b', replaceCbMacros('$REMOVE_QUOTES{"a b"}', opts), 'a b');
 check('REMOVE_QUOTES 内宏展开', replaceCbMacros('$REMOVE_QUOTES{"$(AMP)x"}', opts) === '&x', replaceCbMacros('$REMOVE_QUOTES{"$(AMP)x"}', opts), '&x');
 
+// E4 函数式宏嵌套（MatchBrace 配对 + 内容递归展开）
+check('TO_ABSOLUTE_PATH 嵌套 REMOVE_QUOTES', replaceCbMacros('$TO_ABSOLUTE_PATH{$REMOVE_QUOTES{"src/a b.c"}}', opts) === 'C:\\proj\\src\\a b.c', replaceCbMacros('$TO_ABSOLUTE_PATH{$REMOVE_QUOTES{"src/a b.c"}}', opts), 'C:\\proj\\src\\a b.c');
+check('TO_ABSOLUTE_PATH 内容宏展开', replaceCbMacros('$TO_ABSOLUTE_PATH{src/$(PROJECT_NAME)}', { ...opts, vars: { PROJECT_NAME: 'my' } }) === 'C:\\proj\\src\\my', replaceCbMacros('$TO_ABSOLUTE_PATH{src/$(PROJECT_NAME)}', { ...opts, vars: { PROJECT_NAME: 'my' } }), 'C:\\proj\\src\\my');
+
 console.log(`内置宏 + 函数式宏: ${pass} pass, ${fail} fail`);
 process.exit(fail ? 1 : 0);

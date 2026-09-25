@@ -187,14 +187,27 @@ export function cbBuiltinVars(
 }
 
 /**
- * 展开命令中的 Code::Blocks 宏（对齐 macrosmanager ReplaceMacros 语义）。
- * @param vars 预构造的内置宏（cbBuiltinVars 输出）
- * @param customVars 项目自定义变量（codeblocks_project_custom_variables）
- * @param gcv 全局编译器变量（缺省读 default.conf）
+ * 函数式宏内容提取：大括号配对（对齐 macrosmanager MatchBrace，支持 {} 嵌套）。
+ * @param openBraceIdx '{' 字符下标
  */
-export function replaceCbMacros(
+function takeBrace(s: string, openBraceIdx: number): { inner: string; end: number } | null {
+  let depth = 0;
+  for (let i = openBraceIdx; i < s.length; i++) {
+    const ch = s[i];
+    if (ch === '{') depth++;
+    else if (ch === '}') {
+      depth--;
+      if (depth === 0) return { inner: s.slice(openBraceIdx + 1, i), end: i };
+    }
+  }
+  return null;
+}
+
+/** 展开命令中的 Code::Blocks 宏（对齐 macrosmanager ReplaceMacros 语义），内部实现带递归深度护栏 */
+function replaceCbMacrosInner(
   cmd: string,
   opts: { vars?: Record<string, string>; customVars?: Record<string, string>; gcv?: Record<string, Record<string, string>>; basePath?: string },
+  depth: number,
 ): string {
   const vars = opts.vars ?? {};
   const customVars = opts.customVars ?? {};
@@ -227,30 +240,42 @@ export function replaceCbMacros(
   };
 
   let cur = cmd.replace(/\$\$/g, '\u0001CBDOLLAR\u0001');
-  // 函数式宏（macrosmanager.cpp:610-628/655-667）在变量替换之前处理（CB 顺序，否则 $TO_... 会被变量正则吞掉）：
-  // $TO_ABSOLUTE_PATH{} / $TO_83_PATH{} / $REMOVE_QUOTES{}
-  if (cur.includes('$TO_ABSOLUTE_PATH{')) {
-    cur = cur.replace(/\$TO_ABSOLUTE_PATH\{([^}]*)\}/g, (_m, p: string) => path.resolve(basePath, p.trim()));
-  }
-  if (cur.includes('$TO_83_PATH{')) {
-    cur = cur.replace(/\$TO_83_PATH\{([^}]*)\}/g, (_m, p: string) => {
-      const abs = path.resolve(basePath, p.trim());
-      return process.platform === 'win32' ? shortPathWin(abs) : abs;
-    });
-  }
-  if (cur.includes('$REMOVE_QUOTES{')) {
+  // 函数式宏（macrosmanager.cpp:610-628/655-667）在变量替换之前处理（CB 顺序）：
+  // $TO_ABSOLUTE_PATH{} / $TO_83_PATH{} / $REMOVE_QUOTES{}；
+  // 大括号配对匹配（MatchBrace），内容递归做完整宏展开（630-653 递归）。
+  const applyFunc = (s: string, name: string, fn: (inner: string) => string): string => {
+    let out = '';
+    let i = 0;
     let guard = 0;
-    while (guard++ < 8 && cur.includes('$REMOVE_QUOTES{')) {
-      cur = cur.replace(/\$REMOVE_QUOTES\{([^}]*)\}/g, (_m, p: string) => {
-        let content = p.trim();
-        // 对齐 CB：内容以 $ 开头时先做一次完整宏展开（659-660）
-        if (content.startsWith('$')) content = replaceCbMacros(content, opts);
-        // 仅当首尾均为引号时剥除（661-664）
-        if (content.length > 2 && content.startsWith('"') && content.endsWith('"')) return content.slice(1, -1);
-        return content;
-      });
+    while (guard++ < 128) {
+      const idx = s.indexOf(name + '{', i);
+      if (idx === -1) {
+        out += s.slice(i);
+        break;
+      }
+      const b = takeBrace(s, idx + name.length);
+      if (!b) {
+        out += s.slice(i);
+        break;
+      }
+      out += s.slice(i, idx);
+      const inner = depth < 8 ? replaceCbMacrosInner(b.inner, opts, depth + 1) : b.inner;
+      out += fn(inner);
+      i = b.end + 1;
     }
-  }
+    return out;
+  };
+  cur = applyFunc(cur, '$TO_ABSOLUTE_PATH', (p) => path.resolve(basePath, p.trim()));
+  cur = applyFunc(cur, '$TO_83_PATH', (p) => {
+    const abs = path.resolve(basePath, p.trim());
+    return process.platform === 'win32' ? shortPathWin(abs) : abs;
+  });
+  cur = applyFunc(cur, '$REMOVE_QUOTES', (content) => {
+    const c = content.trim();
+    // 仅当首尾均为引号时剥除（661-664）
+    if (c.length > 2 && c.startsWith('"') && c.endsWith('"')) return c.slice(1, -1);
+    return c;
+  });
   for (let i = 0; i < 5; i++) {
     const next = cur
       .replace(/\$\(([#]?[A-Za-z_][A-Za-z0-9_.]*)\)/g, (_m: string, n: string) => resolve(n))
@@ -260,4 +285,17 @@ export function replaceCbMacros(
   }
   // 反转义（CB 非子请求时：$$→$、%%→%）
   return cur.replace(/\u0001CBDOLLAR\u0001/g, '$').replace(/%%/g, '%');
+}
+
+/**
+ * 展开命令中的 Code::Blocks 宏（对齐 macrosmanager ReplaceMacros 语义）。
+ * @param vars 预构造的内置宏（cbBuiltinVars 输出）
+ * @param customVars 项目自定义变量（codeblocks_project_custom_variables）
+ * @param gcv 全局编译器变量（缺省读 default.conf）
+ */
+export function replaceCbMacros(
+  cmd: string,
+  opts: { vars?: Record<string, string>; customVars?: Record<string, string>; gcv?: Record<string, Record<string, string>>; basePath?: string },
+): string {
+  return replaceCbMacrosInner(cmd, opts, 0);
 }
