@@ -730,7 +730,7 @@ export class BuildEngine {
         // CommandsOnly 已在上方 return，此处目标必为可链接类型
         const externalForce = this.areExternalDepsOutdated(target, outAbs, []);
         if (!externalForce) {
-          this.output.info(`[Code::Blocks] 目标 "${target.title}" 已是最新`);
+          this.output.info('[Code::Blocks] Nothing to be done (all items are up-to-date).');
           // 目标已最新（hasCommands=false）：仅当 alwaysRunPostBuildSteps 为真时才执行 post-build（对齐 CodeBlocks）
           if (!(await this.runPostBuild(target, macroVars, expandScriptMacros, false, options))) {
             if (options.cancel?.isCancelled()) {
