@@ -2,7 +2,7 @@
   "name": "codeblocks-vscode",
   "displayName": "Code::Blocks for VS Code",
   "description": "原生移植 Code::Blocks 核心功能到 VS Code：项目模型、构建引擎、编译器管理与调试引擎",
-  "version": "0.8.26-dev",
+  "version": "0.8.27-dev",
   "icon": "resources/icon.png",
   "publisher": "robinmaomao",
   "author": {
@@ -171,6 +171,14 @@
       {
         "command": "codeblocks.toggleLink",
         "title": "Link File"
+      },
+      {
+        "command": "codeblocks.compileFile",
+        "title": "Build File"
+      },
+      {
+        "command": "codeblocks.cleanFile",
+        "title": "Clean File"
       },
       {
         "command": "codeblocks.editFileBuildCommand",
@@ -448,6 +456,16 @@
           "command": "codeblocks.toggleLink",
           "when": "view == codeblocks.projectTree && viewItem =~ /^file/",
           "group": "1_file@2"
+        },
+        {
+          "command": "codeblocks.compileFile",
+          "when": "view == codeblocks.projectTree && viewItem =~ /^file/",
+          "group": "2_file@1"
+        },
+        {
+          "command": "codeblocks.cleanFile",
+          "when": "view == codeblocks.projectTree && viewItem =~ /^file/",
+          "group": "2_file@2"
         },
         {
           "command": "codeblocks.editFileBuildCommand",

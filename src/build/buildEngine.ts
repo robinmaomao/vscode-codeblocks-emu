@@ -277,6 +277,174 @@ export class BuildEngine {
   }
 
   /**
+   * 构造单个文件的编译单元 —— 对齐 GetCompileFileCommand（directcommands.cpp:262）。
+   * 整目标构建（1b 循环）与单文件编译（compileFile）复用本方法，保证两条路径产出的命令字节级一致。
+   * - compile=false / compilerVar 为空由调用方先行过滤；
+   * - not-compilable：非自定义命令、非可编译类型、非 PCH 头文件、非生成器文件；
+   * - no-command：命令展开后为空/纯空白（工具未匹配/程序缺失）。
+   */
+  private makeCompileUnit(
+    target: BuildTarget,
+    file: ProjectFile,
+    generator: CommandGenerator,
+    hasCpp: boolean,
+  ): { unit?: CompileUnit; reason: 'ok' | 'not-compilable' | 'no-command' } {
+    const custom = file.customBuildCommands?.[target.compilerId];
+    const isCustom = custom !== undefined && custom.use;
+    const ft = fileTypeOf(file.relativeFilename);
+    const isHeader = ft === FileType.Header;
+    const hasGenerated = (file.generatedFiles?.length ?? 0) > 0;
+    // 自定义命令文件（ram.ld/app.xm 等）或可编译类型（源文件/资源文件）才编译；
+    // 头文件在编译器 supportsPCH 时也编译为 .gch（对齐 GetCompileFileCommand 的 is_header && supportsPCH）；
+    // 生成器文件（编译器工具 gen 属性声明生成文件）也编译（对齐 AddFile localCompile 的 !GenFilesHackMap.empty()）
+    if (!isCustom && !isCompilableFileType(ft) && !(isHeader && this.compiler.switches.supportsPCH) && !hasGenerated) {
+      return { reason: 'not-compilable' };
+    }
+
+    // 绝对对象路径用于增量判断/响应文件基础名，相对对象路径用于命令行（避免含空格路径）
+    const objectRel = this.objectPathRelative(target, file);
+    const object = this.objectPathFor(target, file);
+    const deps = this.depsPathFor(target, file);
+
+    let command: string;
+    if (isCustom) {
+      // 自定义编译命令：直接展开 $compiler/$file 等内置宏 + $(...) 变量
+      command = this.expandCustomCommand(custom.command, generator, target, file, objectRel);
+    } else {
+      // 源文件路径（对齐 GetCompileFileCommand：UseFullSourcePaths 时绝对路径（资源文件再转短路径），否则相对路径）
+      const srcFile = this.compiler.switches.useFullSourcePaths
+        ? (ft === FileType.Resource && process.platform === 'win32'
+            ? shortPathWin(file.absolutePath)
+            : file.absolutePath)
+        : file.relativeFilename;
+      // 资源文件走 CompileResourceCmd（windres），其余走 CompileObjectCmd（对齐 GetCompileFileCommand）
+      const cmdType = ft === FileType.Resource ? CommandType.CompileResourceCmd : CommandType.CompileObjectCmd;
+      command = generator.generate(cmdType, {
+        target,
+        pf: file,
+        file: srcFile,
+        object: objectRel,
+        flatObject: objectRel,
+        deps,
+        hasCppFilesToLink: hasCpp,
+      });
+    }
+    // PCH 头文件：编译前删除旧 .gch（对齐 directcommands.cpp 的 wxRemoveFile，避免陈旧产物）
+    if (isHeader) {
+      command = `cmd /c if exist "${objectRel}" del "${objectRel}"\n${command}`;
+    }
+    // 对齐 AddCommandsToArray：展开后为空/纯空白的命令（如 buildCommand=" " 的 no-op）不执行
+    if (!command || command.trim() === '') {
+      return { reason: 'no-command' };
+    }
+    return {
+      reason: 'ok',
+      unit: {
+        target,
+        file,
+        command,
+        cwd: this.project.basePath,
+        isPch: isHeader,
+        // 响应文件基础名对齐 CheckForToLongCommandLine：对象目录 + 源文件名（含扩展）→ <对象目录>/<源文件名>.respFile
+        respBase: path.join(path.dirname(object), path.basename(file.relativeFilename)),
+      },
+    };
+  }
+
+  /**
+   * 单文件编译 —— 对齐 directcommands.cpp CompileFile：只编译指定源文件
+   * （自定义 buildCommand 文件同样支持；增量判断与整目标构建一致）。返回是否成功。
+   */
+  async compileFile(targetTitle: string, fileRel: string, options: BuildOptions): Promise<boolean> {
+    const target = this.project.buildTargets.find((t) => t.title === targetTitle);
+    if (!target) {
+      this.output.error(`[Code::Blocks] 未找到构建目标: ${targetTitle}`);
+      return false;
+    }
+    const files = target.files.length ? target.files : this.project.files;
+    const file = files.find((f) => f.relativeFilename === fileRel);
+    if (!file) {
+      this.output.error(`[Code::Blocks] 文件不在目标 "${targetTitle}" 中: ${fileRel}`);
+      return false;
+    }
+    if (file.compile === false) {
+      this.output.warn(`[Code::Blocks] 文件被排除编译（compile="0"），跳过: ${fileRel}`);
+      return false;
+    }
+    if (!file.compilerVar) {
+      this.output.warn(`[Code::Blocks] Cannot resolve compiler var for project file: ${fileRel}`);
+      return false;
+    }
+
+    const generator = new CommandGenerator(this.project, this.compiler);
+    const hasCpp = files.some((f) => isCppSource(f.relativeFilename));
+    const made = this.makeCompileUnit(target, file, generator, hasCpp);
+    if (made.reason === 'not-compilable') {
+      this.output.info(`[Code::Blocks] 跳过（非可编译文件）: ${fileRel}`);
+      return false;
+    }
+    if (made.reason === 'no-command') {
+      this.output.warn(`[Code::Blocks] Skipping file (no compiler program set): ${fileRel}`);
+      return false;
+    }
+    const unit = made.unit!;
+
+    // 增量判断（对齐 CompileFile 的 IsObjectOutdated 前置检查）
+    const object = this.objectPathFor(target, file);
+    if (!options.rebuild && this.isUpToDate(file.absolutePath, object, this.getIncludeDirs(target), new Map())) {
+      this.output.info(`[Code::Blocks] ${fileRel} 已是最新`);
+      return true;
+    }
+
+    // 对象父目录缺失则创建（对齐 CompileFile 的 CreateDirRecursively）
+    const objectDir = path.dirname(object);
+    if (objectDir && !this.ensureDir(objectDir, 'debug')) {
+      this.output.error(`[Code::Blocks] 创建对象目录失败: ${objectDir}`);
+      return false;
+    }
+
+    this.output.info(`[Code::Blocks] 编译文件: ${fileRel}`);
+    if (this.verboseOutput()) {
+      this.output.info(unit.command);
+    }
+    return this.runSingleCommand(unit.command, unit.cwd, options, unit.respBase);
+  }
+
+  /**
+   * 单文件清理 —— 对齐 GetCleanSingleFileCommand：删除对象文件，
+   * 编译器 needDependencies 时顺带删除 .depend 依赖文件（与对象路径不同时）。
+   */
+  cleanFile(targetTitle: string, fileRel: string): void {
+    const target = this.project.buildTargets.find((t) => t.title === targetTitle);
+    if (!target) return;
+    const files = target.files.length ? target.files : this.project.files;
+    const file = files.find((f) => f.relativeFilename === fileRel);
+    if (!file) return;
+    if (!file.compilerVar) {
+      this.output.warn(`[Code::Blocks] Cannot resolve compiler var for project file: ${fileRel}`);
+      return;
+    }
+    const objectRel = this.objectPathRelative(target, file);
+    if (objectRel && objectRel !== fileRel) {
+      const objAbs = this.objectPathFor(target, file);
+      if (this.removeFileIfExists(objAbs)) {
+        this.output.info(`[Code::Blocks] Deleted: ${objectRel}`);
+      } else {
+        this.output.debug(`[Code::Blocks] 无对象文件可清理: ${fileRel}`);
+      }
+    } else {
+      this.output.debug(`[Code::Blocks] 无对象文件可清理: ${fileRel}`);
+    }
+    // 对齐 GetCleanSingleFileCommand：needDependencies 且依赖文件与对象文件不同名时一并删除
+    const depsRel = this.depsPathFor(target, file);
+    if (this.compiler.switches.needDependencies && depsRel && depsRel !== objectRel) {
+      if (this.removeFileIfExists(depsRel)) {
+        this.output.info(`[Code::Blocks] Deleted: ${path.relative(this.project.basePath, depsRel)}`);
+      }
+    }
+  }
+
+  /**
    * 构造「已取消」统计对象 —— 取消不是失败：
    * failedCount 不计被强杀的编译进程，success=false 但 cancelled=true 供上层区分。
    */
@@ -408,21 +576,26 @@ export class BuildEngine {
     for (const file of sortedFiles) {
       // 跳过不参与编译的文件（<Option compile="0"/>）
       if (file.compile === false) continue;
+      // 对齐 GetCompileFileCommand：compilerVar 为空 → 跳过（Cannot resolve compiler var）
+      if (!file.compilerVar) {
+        this.output.debug(`[Code::Blocks] Cannot resolve compiler var for project file: ${file.relativeFilename}`);
+        continue;
+      }
 
-      const custom = file.customBuildCommands?.[target.compilerId];
-      const isCustom = custom !== undefined && custom.use;
-      const ft = fileTypeOf(file.relativeFilename);
-      const isHeader = ft === FileType.Header;
-      const hasGenerated = (file.generatedFiles?.length ?? 0) > 0;
-      // 自定义命令文件（ram.ld/app.xm 等）或可编译类型（源文件/资源文件）才编译；
-      // 头文件在编译器 supportsPCH 时也编译为 .gch（对齐 GetCompileFileCommand 的 is_header && supportsPCH）；
-      // 生成器文件（编译器工具 gen 属性声明生成文件）也编译（对齐 AddFile localCompile 的 !GenFilesHackMap.empty()）
-      if (!isCustom && !isCompilableFileType(ft) && !(isHeader && this.compiler.switches.supportsPCH) && !hasGenerated) continue;
+      const isHeader = fileTypeOf(file.relativeFilename) === FileType.Header;
+      const made = this.makeCompileUnit(target, file, generator, hasCpp);
+      if (made.reason === 'not-compilable') continue;
+      if (made.reason === 'no-command') {
+        if (!isHeader) {
+          // 对齐 GetCompileFileCommand：命令为空（工具未匹配/程序缺失）→ 跳过日志（头文件除外）
+          this.output.debug(`[Code::Blocks] Skipping file (no compiler program set): ${file.relativeFilename}`);
+        }
+        continue;
+      }
+      const unit = made.unit!;
 
       // 绝对对象路径用于增量判断，相对对象路径用于命令行（避免含空格路径）
       const object = this.objectPathFor(target, file);
-      const objectRel = this.objectPathRelative(target, file);
-      const deps = this.depsPathFor(target, file);
 
       // 增量编译：源/头文件未变更且对象文件存在时跳过（rebuild 强制重编译）
       // （Code::Blocks 对自定义 buildCommand 文件同样执行 IsObjectOutdated 判断）
@@ -436,51 +609,9 @@ export class BuildEngine {
         continue;
       }
 
-      let command: string;
-      if (isCustom) {
-        // 自定义编译命令：直接展开 $compiler/$file 等内置宏 + $(...) 变量
-        command = this.expandCustomCommand(custom.command, generator, target, file, objectRel);
-      } else {
-        // 源文件路径（对齐 GetCompileFileCommand：UseFullSourcePaths 时绝对路径（资源文件再转短路径），否则相对路径）
-        const srcFile = this.compiler.switches.useFullSourcePaths
-          ? (ft === FileType.Resource && process.platform === 'win32'
-              ? shortPathWin(file.absolutePath)
-              : file.absolutePath)
-          : file.relativeFilename;
-        // 资源文件走 CompileResourceCmd（windres），其余走 CompileObjectCmd（对齐 GetCompileFileCommand）
-        const cmdType = ft === FileType.Resource ? CommandType.CompileResourceCmd : CommandType.CompileObjectCmd;
-        command = generator.generate(cmdType, {
-          target,
-          pf: file,
-          file: srcFile,
-          object: objectRel,
-          flatObject: objectRel,
-          deps,
-          hasCppFilesToLink: hasCpp,
-        });
-      }
-      // PCH 头文件：编译前删除旧 .gch（对齐 directcommands.cpp 的 wxRemoveFile，避免陈旧产物）
-      if (isHeader) {
-        command = `cmd /c if exist "${objectRel}" del "${objectRel}"\n${command}`;
-      }
-      // 对齐 AddCommandsToArray：展开后为空/纯空白的命令（如 buildCommand=" " 的 no-op）不执行
-      if (command && command.trim() !== '') {
-        const unit: CompileUnit = {
-          target,
-          file,
-          command,
-          cwd: this.project.basePath,
-          isPch: isHeader,
-          // 响应文件基础名对齐 CheckForToLongCommandLine：对象目录 + 源文件名（含扩展）→ <对象目录>/<源文件名>.respFile
-          respBase: path.join(path.dirname(object), path.basename(file.relativeFilename)),
-        };
-        // 生成文件延后到所有常规编译之后（保证生成器已产出源文件）
-        if (file.autoGeneratedBy) deferredUnits.push(unit);
-        else units.push(unit);
-      } else if (!isHeader) {
-        // 对齐 GetCompileFileCommand：命令为空（工具未匹配/程序缺失）→ 跳过日志（头文件除外）
-        this.output.debug(`[Code::Blocks] Skipping file (no compiler program set): ${file.relativeFilename}`);
-      }
+      // 生成文件延后到所有常规编译之后（保证生成器已产出源文件）
+      if (file.autoGeneratedBy) deferredUnits.push(unit);
+      else units.push(unit);
     }
 
     // 创建所有对象文件的父目录（对应 CodeBlocks 的 CreateDirRecursively）
