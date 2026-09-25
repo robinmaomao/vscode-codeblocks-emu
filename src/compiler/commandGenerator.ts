@@ -10,7 +10,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 import { Compiler } from '../compiler/compiler';
 import { upperDrive, shortPathWin } from '../tools/pathCase';
-import { replaceAllMacros } from '../build/scriptRunner';
+import { replaceCbMacros, cbBuiltinVars } from './cbMacros';
 import {
   Project,
   BuildTarget,
@@ -185,18 +185,36 @@ export class CommandGenerator {
     return target.optionRelations[type] ?? OptionsRelation.AppendToParentOptions;
   }
 
+  /** 内置构建宏（目标上下文） */
+  private cbVars(target: BuildTarget): Record<string, string> {
+    return cbBuiltinVars(
+      this.project.basePath,
+      target.outputFilename,
+      target.title,
+      target.objectOutput,
+      this.project.title,
+      this.project.filename,
+    );
+  }
+
+  /** 对齐 CB ReplaceMacros（含 $(#var)、日期/时间、env 回退、反转义；compilercommandgenerator.cpp:579/806-1163） */
+  private expandCb(s: string, target: BuildTarget): string {
+    return replaceCbMacros(s, { vars: this.cbVars(target), customVars: this.project.customVariables ?? {} });
+  }
+
   private setupOutputFilenames(target: BuildTarget): string {
-    // 对齐 CodeBlocks SetupOutputFilenames：保留原生分隔符
-    // （FixPathSeparators 仅在 forceFwdSlashes=true 时转正斜杠，默认保持反斜杠）
-    return quoteIfNeeded(target.outputFilename);
+    // 对齐 CodeBlocks SetupOutputFilenames（compilercommandgenerator.cpp:739 先 ReplaceMacros）：
+    // 保留原生分隔符（FixPathSeparators 仅在 forceFwdSlashes=true 时转正斜杠，默认保持反斜杠）
+    return quoteIfNeeded(this.expandCb(target.outputFilename, target));
   }
 
   private setupStaticOutput(target: BuildTarget): string {
-    // DynamicLib import 库：优先自定义 imp_lib，否则由 output 推导（对齐 GetDynamicLibImportFilename）；
+    // DynamicLib import 库：优先自定义 imp_lib，否则由 output 推导（对齐 GetDynamicLibImportFilename，673 先 ReplaceMacros）；
     // 对齐 SetupOutputFilenames：ttDynamicLib 的 import 库**强制**平台默认前缀/扩展（策略无视）
     const force = target.targetType === TargetType.DynamicLib;
+    const base = this.expandCb(target.impLib || target.outputFilename, target);
     return quoteIfNeeded(computeStaticOutput(
-      target.impLib || target.outputFilename,
+      base,
       this.compiler.switches,
       force ? true : target.prefixAuto,
       force ? true : target.extensionAuto,
@@ -204,9 +222,10 @@ export class CommandGenerator {
   }
 
   private setupDefOutput(target: BuildTarget): string {
-    // def 文件名：优先自定义 def_file，否则由 output 推导，前缀/扩展按目标策略（对齐 SetupOutputFilenames）
+    // def 文件名：优先自定义 def_file，否则由 output 推导（对齐 GetDynamicLibDefFilename，700 先 ReplaceMacros）；前缀/扩展按目标策略
+    const base = this.expandCb(target.defFile || target.outputFilename, target);
     return quoteIfNeeded(computeLibOutput(
-      target.defFile || target.outputFilename,
+      base,
       this.compiler.switches.libPrefix,
       'def',
       target.prefixAuto,
@@ -256,8 +275,8 @@ export class CommandGenerator {
    * ReplaceMacros（含项目自定义变量）→ Use83Paths 短路径（目录存在时）→ 保留原生分隔符。
    */
   private finalizeDir(dir: string, target: BuildTarget): string {
-    let out = replaceAllMacros(dir, this.project.customVariables ?? {});
-    out = expandBuildVars(out, this.project.basePath, target, this.project.title, this.project.filename);
+    // 对齐 GetOrdered*Dirs 尾部循环：ReplaceMacros（含 $(#var)/项目自定义变量）→ Use83Paths → 原生分隔符
+    let out = this.expandCb(dir, target);
     if (process.platform === 'win32' && this.compiler.switches.use83Paths) {
       const unquoted = unquote(out);
       if (fs.existsSync(unquoted)) {
@@ -274,7 +293,8 @@ export class CommandGenerator {
       target.compilerOptions,
       this.getRelation(target, this.rel.CompilerOptions),
     );
-    return opts.join(' ');
+    // 对齐 SetupCompilerOptions:1019：合并后整体 ReplaceMacros
+    return this.expandCb(opts.join(' '), target);
   }
 
   private setupResourceCompilerOptions(target: BuildTarget): string {
@@ -283,7 +303,8 @@ export class CommandGenerator {
       target.resourceCompilerOptions,
       this.getRelation(target, this.rel.CompilerOptions),
     );
-    return opts.join(' ');
+    // 对齐 SetupResourceCompilerOptions:1163：合并后整体 ReplaceMacros
+    return this.expandCb(opts.join(' '), target);
   }
 
   private setupLinkerOptions(target: BuildTarget): string {
@@ -292,7 +313,8 @@ export class CommandGenerator {
       target.linkerOptions,
       this.getRelation(target, this.rel.LinkerOptions),
     );
-    return opts.join(' ');
+    // 对齐 SetupLinkerOptions:1048：合并后整体 ReplaceMacros
+    return this.expandCb(opts.join(' '), target);
   }
 
   /**
@@ -585,10 +607,13 @@ export class CommandGenerator {
     macro = macro.replace(/\$TO_WINDOWS_PATH\{([^}]*)\}/g, (_, p: string) => p.replace(/\//g, '\\'));
     macro = macro.replace(/\$TO_UNIX_PATH\{([^}]*)\}/g, (_, p: string) => p.replace(/\\/g, '/'));
 
-    // 9. 展开 Code::Blocks 构建变量宏（$(TARGET_OBJECT_DIR)、$(PROJECT_NAME) 等）+ 项目自定义变量
+    // 9. 对齐 GenerateCommandLine:579：最终命令整体 ReplaceMacros
+    // （内置宏 + 项目自定义变量 + $(#全局编译器变量) + 环境变量回退 + $$/%% 反转义）
     if (params.target) {
-      macro = replaceAllMacros(macro, this.project.customVariables ?? {});
-      macro = expandBuildVars(macro, this.project.basePath, params.target, this.project.title, this.project.filename);
+      macro = replaceCbMacros(macro, {
+        vars: this.cbVars(params.target),
+        customVars: this.project.customVariables ?? {},
+      });
     }
     return macro;
   }
@@ -638,7 +663,7 @@ export function expandBuildVars(cmd: string, basePath: string, target: BuildTarg
     TARGET_OUTPUT_BASENAME: stem,
     TARGET_OUTPUT_DIR: outDir,
     TARGET_NAME: target.title,
-    TARGET_OBJECT_DIR: toNative(target.objectOutput || 'obj/'),
+    TARGET_OBJECT_DIR: toNative(target.objectOutput || '.objs/'),
     // 项目根目录宏：对齐 Code::Blocks GetBasePath()（wxPATH_GET_SEPARATOR，带结尾分隔符）+ 原生分隔符
     PROJECT_DIR: (win ? upperDrive(basePath) : basePath).replace(/[\\/]$/, '') + (win ? '\\' : '/'),
     PROJECT_DIRECTORY: (win ? upperDrive(basePath) : basePath).replace(/[\\/]$/, '') + (win ? '\\' : '/'),

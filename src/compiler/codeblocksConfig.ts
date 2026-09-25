@@ -42,6 +42,8 @@ export class CodeBlocksConfig {
   private userCompilers = new Map<string, UserCompilerConfig>();
   /** 编译器全局搜索目录（default.conf /compiler_sets/<id>：include_dirs/library_dirs/res_include_dirs/link_libs + 用户正则） */
   private compilerSets = new Map<string, { includeDirs: string[]; libDirs: string[]; resIncludeDirs: string[]; linkLibs: string[]; regexes: UserRegexConfig[] }>();
+  /** 全局编译器变量（default.conf /gcv/sets/<set>/<var>/<member>，对齐 uservarmanager） */
+  private globalVars = new Map<string, Record<string, string>>();
 
   /** 加载 default.conf（若存在） */
   load(defaultConfPath?: string): void {
@@ -63,6 +65,9 @@ export class CodeBlocksConfig {
     }
 
     const userSets = root?.CodeBlocksConfig?.compiler?.user_sets;
+
+    // 全局编译器变量（/gcv/sets/<set>/<var>/<member>，默认集优先；旧版 /global_uservars）
+    this.parseGlobalVariables(root);
 
     // 编译器设置集合（/compiler_sets/<id>：全局搜索目录 + 链接库，对齐 Compiler::LoadSettings:645-647）
     const sets = root?.CodeBlocksConfig?.compiler?.compiler_sets;
@@ -167,6 +172,54 @@ export class CodeBlocksConfig {
   find(compilerId: string): UserCompilerConfig | undefined {
     const lower = compilerId.toLowerCase();
     return this.userCompilers.get(lower);
+  }
+
+  /** 全局编译器变量：变量名 → { base/include/lib/obj/bin/cflags/lflags... }（默认集优先合并） */
+  globalVariables(): Record<string, Record<string, string>> {
+    const out: Record<string, Record<string, string>> = {};
+    // 默认集最后合并（覆盖其它集，对齐 GetMemberValue：活动集优先）
+    const names = [...this.globalVars.keys()];
+    for (const name of names) out[name] = { ...this.globalVars.get(name) };
+    return out;
+  }
+
+  /** 解析 /gcv/sets/<set>/<var>/<member> 与旧版 /global_uservars（uservarmanager.cpp:459-490） */
+  private parseGlobalVariables(root: any): void {
+    this.globalVars.clear();
+    const readMembers = (v: any): Record<string, string> | undefined => {
+      if (!v || typeof v !== 'object') return undefined;
+      const members: Record<string, string> = {};
+      for (const key of Object.keys(v)) {
+        if (key.startsWith('@_')) continue;
+        const node = v[key];
+        if (node === undefined || node === null) continue;
+        members[key] = typeof node === 'object' ? String(node['str'] ?? node['#text'] ?? '') : String(node);
+      }
+      return Object.keys(members).length ? members : undefined;
+    };
+    const mergeSet = (sets: any): void => {
+      if (!sets || typeof sets !== 'object') return;
+      // 默认集最后合并（活动集优先，对齐 GetMemberValue）
+      const keys = Object.keys(sets).filter((k) => !k.startsWith('@_'));
+      const ordered = [...keys.filter((k) => k !== 'default'), ...keys.filter((k) => k === 'default')];
+      for (const setName of ordered) {
+        const set = sets[setName];
+        if (!set || typeof set !== 'object') continue;
+        for (const varName of Object.keys(set)) {
+          if (varName.startsWith('@_')) continue;
+          const members = readMembers(set[varName]);
+          if (!members) continue;
+          const existing = this.globalVars.get(varName) ?? {};
+          this.globalVars.set(varName, { ...existing, ...members });
+        }
+      }
+    };
+    const top = root?.CodeBlocksConfig;
+    mergeSet(top?.gcv?.sets);
+    mergeSet(root?.gcv?.sets);
+    // 旧版 /global_uservars：<var>/<member> 直接挂在根下
+    mergeSet(top?.global_uservars);
+    mergeSet(root?.global_uservars);
   }
 
   /** 按 masterPath（安装目录）查找用户编译器，用于区分同名工具链的不同版本（如 RV32-V1 / RV32-V2） */
