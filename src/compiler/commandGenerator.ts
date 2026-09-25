@@ -797,37 +797,3 @@ export class CommandGenerator {
     return out.trim();
   }
 }
-
-/** 展开 Code::Blocks 构建变量宏（$(TARGET_OBJECT_DIR)、$(PROJECT_NAME) 等） */
-export function expandBuildVars(cmd: string, basePath: string, target: BuildTarget, projectTitle: string, projectFilename: string): string {
-  // Windows 下宏值用原生分隔符 + 大写盘符（= CB UnixFilename 后 FixPathSeparators 的净效果）
-  const win = process.platform === 'win32';
-  const toNative = (s: string): string => (win ? s.replace(/\//g, '\\') : s);
-  const out = toNative(target.outputFilename);
-  const sepIdx = Math.max(out.lastIndexOf('/'), out.lastIndexOf('\\'));
-  const outDir = sepIdx >= 0 ? out.slice(0, sepIdx + 1) : '';
-  const baseName = sepIdx >= 0 ? out.slice(sepIdx + 1) : out;
-  const stem = baseName.replace(/\.[^.]+$/, '');
-
-  const vars: Record<string, string> = {
-    TARGET_OUTPUT_FILE: out,
-    TARGET_OUTPUT_FILENAME: baseName,
-    TARGET_OUTPUT_BASENAME: stem,
-    TARGET_OUTPUT_DIR: outDir,
-    TARGET_NAME: target.title,
-    TARGET_OBJECT_DIR: toNative(target.objectOutput || '.objs/'),
-    // 项目根目录宏：对齐 Code::Blocks GetBasePath()（wxPATH_GET_SEPARATOR，带结尾分隔符）+ 原生分隔符
-    PROJECT_DIR: (win ? upperDrive(basePath) : basePath).replace(/[\\/]$/, '') + (win ? '\\' : '/'),
-    PROJECT_DIRECTORY: (win ? upperDrive(basePath) : basePath).replace(/[\\/]$/, '') + (win ? '\\' : '/'),
-    PROJECT_NAME: projectTitle,
-    PROJECTNAME: projectTitle,
-    PROJECT_FILENAME: projectFilename,
-  };
-
-  let result = cmd;
-  for (const [key, value] of Object.entries(vars)) {
-    result = result.replace(new RegExp('\\$\\(' + key + '\\)', 'g'), value);
-    result = result.replace(new RegExp('\\$' + key + '(?![A-Za-z0-9_])', 'g'), value);
-  }
-  return result;
-}

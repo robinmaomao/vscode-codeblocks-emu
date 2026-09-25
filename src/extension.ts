@@ -23,8 +23,9 @@ import { BuildLogTreeProvider, BuildLogProject, BuildLogDiagnostic } from './ui/
 import { SymbolTreeProvider } from './ui/symbolTreeProvider';
 import { BuildEngine } from './build/buildEngine';
 import { BuildCancelSource, BuildCancelHandle } from './build/cancelToken';
-import { buildMacroVars, expandMacros } from './build/scriptRunner';
+import { expandMacros } from './build/scriptRunner';
 import { applyGeneratedFiles } from './build/generatedFiles';
+import { cbBuiltinVars } from './compiler/cbMacros';
 import { OutputParser } from './build/outputParser';
 import { collectClangdEntries, writeClangdDatabase, CompileCommandEntry } from './build/compileCommands';
 import { detectClangd, queryCompilerSystemIncludes, queryCompilerTarget, updateClangdUserConfig, clangdUserConfigPath } from './tools/clangd';
@@ -2869,8 +2870,8 @@ async function run(): Promise<void> {
     return;
   }
 
-  // 执行参数宏展开（对齐 GetExecutionParameters：$(TARGET_OUTPUT_FILE) 等）
-  const vars = buildMacroVars(project.basePath, target.outputFilename, target.title, target.objectOutput, project.title, project.filename);
+  // 执行参数宏展开（对齐 GetExecutionParameters → GetFullCompilerVarsSet 全集：$(TARGET_OUTPUT_FILE) 等）
+  const vars = cbBuiltinVars(project.basePath, target.outputFilename, target.title, target.objectOutput, project.title, project.filename, getCompiler(target.compilerId)?.masterPath ?? '');
   const args = target.executionParameters ? expandMacros(target.executionParameters, vars) : '';
   // 环境变量（项目级 + 目标级 <Environment><Variable name value>）
   const env: Record<string, string> = {};
@@ -2910,7 +2911,7 @@ async function debug(): Promise<void> {
   }
 
   // 执行参数与环境变量（对齐 GetExecutionParameters + <Environment>）
-  const vars = buildMacroVars(project.basePath, target.outputFilename, target.title, target.objectOutput, project.title, project.filename);
+  const vars = cbBuiltinVars(project.basePath, target.outputFilename, target.title, target.objectOutput, project.title, project.filename, getCompiler(target.compilerId)?.masterPath ?? '');
   const argsStr = target.executionParameters ? expandMacros(target.executionParameters, vars) : '';
   const env: Record<string, string> = {};
   for (const ev of [...project.envVars, ...target.envVars]) env[ev.name] = ev.value;
