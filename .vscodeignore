@@ -42,5 +42,6 @@ test-lru.js
 test-strip-comments.js
 test-generated-files.js
 test-cancel-token.js
+test-external-deps.js
 .git-msg.txt
 *.vsix

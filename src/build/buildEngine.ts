@@ -14,11 +14,11 @@ import { FileType, fileTypeOf, isCompilableFileType, isLinkableFileType, isCppSo
 import { Compiler } from '../compiler/compiler';
 import { CommandGenerator, computeStaticOutput } from '../compiler/commandGenerator';
 import { OutputParser } from './outputParser';
-import { runScriptCommands, buildMacroVars } from './scriptRunner';
+import { runScriptCommands, buildMacroVars, replaceAllMacros } from './scriptRunner';
 import { BuildCancelHandle } from './cancelToken';
 import { decodeText } from '../tools/encoding';
 import { applyResponseFile, compareFilesByWeight } from './commandLine';
-import { upperDrive } from '../tools/pathCase';
+import { upperDrive, shortPathWin } from '../tools/pathCase';
 import { getWindowsSystemPath } from '../tools/windowsPath';
 import { LruCache } from '../tools/lru';
 
@@ -53,6 +53,8 @@ export interface BuildTargetStats {
   linkSkipped: boolean;   // static lib 无链接步骤
   /** 构建是否被用户取消（取消 ≠ 失败：failedCount 不计被强杀的编译进程） */
   cancelled?: boolean;
+  /** 本目标是否产生了实际命令（编译/链接/打包；对齐状态机 bsTargetBuild 的 hasCommands，门控项目 post-build） */
+  hadCommands: boolean;
   outputFilename?: string;
 }
 
@@ -64,6 +66,8 @@ interface CompileUnit {
   cwd: string;
   /** 是否为 PCH 头文件（需先于同组其它文件编译） */
   isPch: boolean;
+  /** 响应文件基础路径（对齐 CheckForToLongCommandLine 命名：对象目录/源文件名） */
+  respBase?: string;
 }
 
 /** 跨构建持久化的 include 依赖缓存（BuildEngine 每次构建新建实例，故用模块级静态缓存；LRU 上限防无界增长） */
@@ -94,8 +98,8 @@ export class BuildEngine {
     this.parser = new OutputParser(compiler.regexes.length ? compiler.regexes : undefined);
   }
 
-  /** 构建主循环 —— 对应 GetCompileCommands + GetTargetLinkCommands */
-  async build(targetTitle?: string, options: BuildOptions = {}): Promise<boolean> {
+  /** 构建主循环 —— 对应 GetCompileCommands + GetTargetLinkCommands；项目级 pre/post 在目标循环外各执行一次（对齐状态机 bsProjectPreBuild/bsProjectPostBuild） */
+  async build(targetTitle?: string | string[], options: BuildOptions = {}): Promise<boolean> {
     // 编译/链接子进程 PATH 注入：编译器 bin 目录前置 + 实时系统 PATH（对齐 CodeBlocks Init 的 PATH 重构）
     if (process.platform === 'win32') {
       const extraPath = this.compilerBinPath();
@@ -104,17 +108,42 @@ export class BuildEngine {
     }
 
     // 无目标标题：只构建纳入 All 的目标（对齐 GetCompileCommands(target=null) 的 includeInTargetAll 过滤）
-    let targets = targetTitle
-      ? this.project.buildTargets.filter((t) => t.title === targetTitle)
+    const titles = targetTitle ? (Array.isArray(targetTitle) ? targetTitle : [targetTitle]) : undefined;
+    let targets = titles
+      ? this.project.buildTargets.filter((t) => titles.includes(t.title))
       : this.project.buildTargets.filter((t) => t.includeInTargetAll !== false);
     // 没有任何目标纳入 All 时回退构建全部（防御，避免 Build 无动作）
-    if (!targetTitle && targets.length === 0) {
+    if (!titles && targets.length === 0) {
       targets = this.project.buildTargets;
     }
 
     if (targets.length === 0) {
       vscode.window.showWarningMessage('没有可构建的目标');
       return false;
+    }
+
+    // 项目级 pre-build（bsProjectPreBuild）：目标循环前执行一次；
+    // 宏按第一个目标上下文展开（对齐 GetPreBuildCommands(0) 用 GetCurrentlyCompilingTarget()）
+    if (this.project.commandsBeforeBuild.length) {
+      const first = targets[0];
+      this.output.info('[Code::Blocks] 执行项目 pre-build 脚本...');
+      const preOk = await runScriptCommands(
+        this.project.commandsBeforeBuild.map((c) => this.expandScriptMacros(first, c)),
+        this.project.basePath,
+        this.targetMacroVars(first),
+        (l) => this.output.info(l),
+        this.compilerBinPath(),
+        options.cancel,
+      );
+      if (options.cancel?.isCancelled()) {
+        this.lastStats = { success: false, cancelled: true, compiledCount: 0, skippedCount: 0, failedCount: 0, linkSuccess: false, linkSkipped: true, hadCommands: false };
+        return false;
+      }
+      if (!preOk) {
+        this.output.error('[Code::Blocks] 项目 pre-build 脚本失败');
+        this.lastStats = { success: false, compiledCount: 0, skippedCount: 0, failedCount: 0, linkSuccess: false, linkSkipped: true, hadCommands: false };
+        return false;
+      }
     }
 
     // 累计各目标的统计结果（供 Build Log 视图）
@@ -127,14 +156,21 @@ export class BuildEngine {
 
     let ok = true;
     let cancelled = false;
+    let lastHadCommands = false;
     for (const target of targets) {
       // 取消检查点：目标之间（多目标 / 工作区多项目构建）
       if (options.cancel?.isCancelled()) {
         cancelled = true;
         break;
       }
+      // 构建 Banner —— 对齐 PrintBanner（bsTargetPreBuild，每个目标构建前打印；位于项目 pre-build 之后）
+      const sep = '-'.repeat(14);
+      this.output.info('');
+      this.output.info(`${sep} Build: ${target.title} in ${this.project.title} (compiler: ${this.compiler.name})${sep}`);
+      this.output.info(`  编译器程序: ${this.compiler.programs.C}`);
       const result = await this.buildTarget(target, options);
       // 无论成功失败都累加统计（失败时统计已累计的部分）
+      lastHadCommands = result.hadCommands;
       compiledCount += result.compiledCount;
       skippedCount += result.skippedCount;
       failedCount += result.failedCount;
@@ -151,8 +187,41 @@ export class BuildEngine {
       }
     }
 
-    this.lastStats = { success: ok, cancelled, compiledCount, skippedCount, failedCount, linkSuccess, linkSkipped, outputFilename };
+    // 项目级 post-build（bsProjectPostBuild）：全部目标成功后执行一次（最后一个目标上下文展开）；
+    // 门控对齐状态机：m_RunProjectPostBuild = 最后一个目标 hasCommands，除非项目级 alwaysRunPostBuildSteps
+    if (ok && !cancelled && this.project.commandsAfterBuild.length && (lastHadCommands || this.project.alwaysRunPostBuildSteps)) {
+      const last = targets[targets.length - 1];
+      this.output.info('[Code::Blocks] 执行项目 post-build 脚本...');
+      const postOk = await runScriptCommands(
+        this.project.commandsAfterBuild.map((c) => this.expandScriptMacros(last, c)),
+        this.project.basePath,
+        this.targetMacroVars(last),
+        (l) => this.output.info(l),
+        this.compilerBinPath(),
+        options.cancel,
+      );
+      if (options.cancel?.isCancelled()) {
+        cancelled = true;
+      } else if (!postOk) {
+        this.output.error('[Code::Blocks] 项目 post-build 脚本失败');
+        ok = false;
+      }
+    }
+
+    this.lastStats = { success: ok, cancelled, compiledCount, skippedCount, failedCount, linkSuccess, linkSkipped, hadCommands: lastHadCommands, outputFilename };
     return ok;
+  }
+
+  /** 目标宏变量（内置 + 项目自定义变量，对齐 macrosmanager RecalcVars + cbProject SetVariable） */
+  private targetMacroVars(target: BuildTarget): Record<string, string> {
+    const vars = buildMacroVars(this.project.basePath, target.outputFilename, target.title, target.objectOutput, this.project.title, this.project.filename);
+    return { ...vars, ...this.project.customVariables };
+  }
+
+  /** 展开 pre/post 命令中的编译宏（$compiler/$options/$includes 等），对齐 GenerateCommandLine */
+  private expandScriptMacros(target: BuildTarget, cmd: string): string {
+    const generator = new CommandGenerator(this.project, this.compiler);
+    return generator.generateFromTemplate(cmd, { target, pf: null, file: '', object: '', flatObject: '', deps: '' });
   }
 
   /**
@@ -217,6 +286,7 @@ export class BuildEngine {
       failedCount: 0,
       linkSuccess: false,
       linkSkipped: target.targetType === TargetType.StaticLib,
+      hadCommands: compiledCount > 0,
       outputFilename: target.outputFilename,
     };
   }
@@ -226,7 +296,7 @@ export class BuildEngine {
     // 本次目标构建的耗时记录（提前 return 路径也要清空，避免汇总显示上次构建的 Top3）
     this.compileTimings = [];
     this.lastCompileTimings = [];
-    const macroVars = buildMacroVars(this.project.basePath, target.outputFilename, target.title, target.objectOutput, this.project.title, this.project.filename);
+    const macroVars = this.targetMacroVars(target);
     const generator = new CommandGenerator(this.project, this.compiler);
 
     // 展开 pre/post 命令中的编译宏（$compiler/$options/$includes 等），对齐 Code::Blocks GenerateCommandLine
@@ -241,27 +311,30 @@ export class BuildEngine {
     }
 
     if (target.targetType === TargetType.CommandsOnly) {
-      // 仅执行 pre/post build 命令（项目级 + 目标级）
-      const cmds = [
-        ...this.project.commandsBeforeBuild, ...target.commandsBeforeBuild,
-        ...target.commandsAfterBuild, ...this.project.commandsAfterBuild,
-      ].map(expandScriptMacros);
-      const ok = await runScriptCommands(
-        cmds,
-        this.project.basePath,
-        macroVars,
-        (l) => this.output.info(l),
-        this.compilerBinPath(),
-        options.cancel,
-      );
-      if (!ok) {
-        // 取消优先判定（被强杀的脚本进程返回失败，但语义是取消）
-        if (options.cancel?.isCancelled()) {
-          return this.cancelledStats(target, 0, 0);
-        }
-        return { success: false, compiledCount: 0, skippedCount: 0, failedCount: 0, linkSuccess: false, linkSkipped: true, outputFilename: target.outputFilename };
+      // 仅执行目标级 pre/post build 命令（项目级在 build() 层各执行一次，对齐状态机 bsProjectPreBuild/bsProjectPostBuild）
+      const runAndCheck = async (cmds: string[], phase: 'pre' | 'post'): Promise<boolean | undefined> => {
+        if (!cmds.length) return true;
+        this.output.info(`[Code::Blocks] 执行目标 ${phase}-build 脚本 (${target.title})...`);
+        const r = await runScriptCommands(cmds, this.project.basePath, macroVars, (l) => this.output.info(l), this.compilerBinPath(), options.cancel);
+        if (r) return true;
+        if (options.cancel?.isCancelled()) return undefined;
+        this.output.error(`[Code::Blocks] 目标 "${target.title}" ${phase}-build 脚本失败`);
+        return false;
+      };
+      const pre = target.commandsBeforeBuild.map(expandScriptMacros);
+      const post = target.commandsAfterBuild.map(expandScriptMacros);
+      const preR = await runAndCheck(pre, 'pre');
+      if (preR === undefined) return this.cancelledStats(target, 0, 0);
+      if (preR === false) {
+        return { success: false, compiledCount: 0, skippedCount: 0, failedCount: 0, linkSuccess: false, linkSkipped: true, hadCommands: false, outputFilename: target.outputFilename };
       }
-      return { success: true, compiledCount: 0, skippedCount: 0, failedCount: 0, linkSuccess: true, linkSkipped: true };
+      const postR = await runAndCheck(post, 'post');
+      if (postR === undefined) return this.cancelledStats(target, 0, 0);
+      if (postR === false) {
+        return { success: false, compiledCount: 0, skippedCount: 0, failedCount: 0, linkSuccess: false, linkSkipped: true, hadCommands: false, outputFilename: target.outputFilename };
+      }
+      // CommandsOnly 目标的「命令」= 目标级 post 命令（对齐 GetTargetLinkCommands ttCommandsOnly 分支把 post 命令作为链接命令产出）
+      return { success: true, compiledCount: 0, skippedCount: 0, failedCount: 0, linkSuccess: true, linkSkipped: true, hadCommands: target.commandsAfterBuild.length > 0 };
     }
 
     // 全量编译（rebuild）对齐 CodeBlocks Rebuild：先删除对象输出目录，再全量编译
@@ -269,12 +342,12 @@ export class BuildEngine {
       this.cleanTarget(target);
     }
 
-    // 项目级 + 目标级 pre-build 脚本（项目级先执行），先展开编译宏再执行
-    const preCommands = [...this.project.commandsBeforeBuild, ...target.commandsBeforeBuild].map(expandScriptMacros);
+    // 目标级 pre-build 脚本（项目级在 build() 层执行一次，对齐状态机）
+    const preCommands = [...target.commandsBeforeBuild].map(expandScriptMacros);
 
     // 0. pre-build 脚本
     if (preCommands.length) {
-      this.output.info(`[Code::Blocks] 执行 pre-build 脚本 (${target.title})...`);
+      this.output.info(`[Code::Blocks] 执行目标 pre-build 脚本 (${target.title})...`);
       const preOk = await runScriptCommands(preCommands, this.project.basePath, macroVars, (l) => this.output.info(l), this.compilerBinPath(), options.cancel);
       if (!preOk) {
         // 取消优先判定（被强杀的脚本进程返回失败，但语义是取消）
@@ -282,7 +355,7 @@ export class BuildEngine {
           return this.cancelledStats(target, 0, 0);
         }
         this.output.error(`[Code::Blocks] 目标 "${target.title}" pre-build 脚本失败`);
-        return { success: false, compiledCount: 0, skippedCount: 0, failedCount: 0, linkSuccess: false, linkSkipped: target.targetType === TargetType.StaticLib, outputFilename: target.outputFilename };
+        return { success: false, compiledCount: 0, skippedCount: 0, failedCount: 0, linkSuccess: false, linkSkipped: target.targetType === TargetType.StaticLib, hadCommands: false, outputFilename: target.outputFilename };
       }
     }
 
@@ -293,8 +366,8 @@ export class BuildEngine {
     const sortedFiles = [...files].sort(compareFilesByWeight);
     const hasCpp = sortedFiles.some((f) => isCppSource(f.relativeFilename));
 
-    // 头文件依赖扫描（增量编译）：收集 include 搜索目录与依赖 mtime 缓存（跨文件复用）
-    const includeDirs = this.getIncludeDirs(target);
+    // 头文件依赖扫描（增量编译）：include 目录先展开宏（含项目自定义变量，对齐 DepsSearchStart 的 ReplaceMacros）
+    const includeDirs = this.getIncludeDirs(target).map((d) => replaceAllMacros(d, macroVars));
     const depsCache = new Map<string, number>();
 
     // 1a. 链接对象集合（独立于编译，对应 GetTargetLinkCommands：link=true 且可链接类型。
@@ -307,8 +380,17 @@ export class BuildEngine {
     const resFiles: ProjectFile[] = [];
     for (const file of sortedFiles) {
       if (file.link === false) continue;
-      if (!isLinkableFileType(fileTypeOf(file.relativeFilename))) continue;
-      if (fileTypeOf(file.relativeFilename) === FileType.Resource) {
+      const ftL = fileTypeOf(file.relativeFilename);
+      if (!isLinkableFileType(ftL)) continue;
+      // 对齐 GetTargetLinkCommands：$compiler 宏为空（对应文件编译器程序缺失）→ 跳过并提示
+      const prog = ftL === FileType.Resource
+        ? this.compiler.programs.WINDRES
+        : file.compilerVar === 'CPP' ? this.compiler.programs.CPP : this.compiler.programs.C;
+      if (!prog) {
+        this.output.debug(`[Code::Blocks] Skipping file (no compiler program set): ${file.relativeFilename}`);
+        continue;
+      }
+      if (ftL === FileType.Resource) {
         resFiles.push(file);
       } else {
         linkFiles.push(file);
@@ -356,12 +438,16 @@ export class BuildEngine {
         // 自定义编译命令：直接展开 $compiler/$file 等内置宏 + $(...) 变量
         command = this.expandCustomCommand(custom.command, generator, target, file, objectRel);
       } else {
+        // 资源文件短路径（对齐 GetCompileFileCommand：windres 空格路径 bug，UseFullSourcePaths 时用 GetShortPath）
+        const srcFile = ft === FileType.Resource && this.compiler.switches.useFullSourcePaths && process.platform === 'win32'
+          ? shortPathWin(file.absolutePath)
+          : file.absolutePath;
         // 资源文件走 CompileResourceCmd（windres），其余走 CompileObjectCmd（对齐 GetCompileFileCommand）
         const cmdType = ft === FileType.Resource ? CommandType.CompileResourceCmd : CommandType.CompileObjectCmd;
         command = generator.generate(cmdType, {
           target,
           pf: file,
-          file: file.absolutePath,
+          file: srcFile,
           object: objectRel,
           flatObject: objectRel,
           deps,
@@ -374,7 +460,15 @@ export class BuildEngine {
       }
       // 对齐 AddCommandsToArray：展开后为空/纯空白的命令（如 buildCommand=" " 的 no-op）不执行
       if (command && command.trim() !== '') {
-        const unit: CompileUnit = { target, file, command, cwd: this.project.basePath, isPch: isHeader };
+        const unit: CompileUnit = {
+          target,
+          file,
+          command,
+          cwd: this.project.basePath,
+          isPch: isHeader,
+          // 响应文件基础名对齐 CheckForToLongCommandLine：对象目录 + 源文件名（含扩展）→ <对象目录>/<源文件名>.respFile
+          respBase: path.join(path.dirname(object), path.basename(file.relativeFilename)),
+        };
         // 生成文件延后到所有常规编译之后（保证生成器已产出源文件）
         if (file.autoGeneratedBy) deferredUnits.push(unit);
         else units.push(unit);
@@ -385,27 +479,32 @@ export class BuildEngine {
     // 否则 GCC 无法创建 Output\obj\plugin\xxx.o 等子目录下的对象文件
     this.ensureObjectDirs([...units, ...deferredUnits]);
 
-    // 无需要编译的文件（且输出已存在）→ 跳过
+    // 无需要编译的文件（且输出已存在）→ 目标已最新；但外部依赖更新仍需重链接（对齐 GetTargetLinkCommands：AreExternalDepsOutdated 先于 !force 返回）
     if (units.length === 0 && deferredUnits.length === 0) {
       const outAbs = this.resolveOutputFile(target);
       if (fs.existsSync(outAbs)) {
-        this.output.info(`[Code::Blocks] 目标 "${target.title}" 已是最新`);
-        // 目标已最新（hasCommands=false）：仅当 alwaysRunPostBuildSteps 为真时才执行 post-build（对齐 CodeBlocks）
-        if (!(await this.runPostBuild(target, macroVars, expandScriptMacros, false, options))) {
-          if (options.cancel?.isCancelled()) {
-            return this.cancelledStats(target, 0, skippedCount);
+        // CommandsOnly 已在上方 return，此处目标必为可链接类型
+        const externalForce = this.areExternalDepsOutdated(target, outAbs, []);
+        if (!externalForce) {
+          this.output.info(`[Code::Blocks] 目标 "${target.title}" 已是最新`);
+          // 目标已最新（hasCommands=false）：仅当 alwaysRunPostBuildSteps 为真时才执行 post-build（对齐 CodeBlocks）
+          if (!(await this.runPostBuild(target, macroVars, expandScriptMacros, false, options))) {
+            if (options.cancel?.isCancelled()) {
+              return this.cancelledStats(target, 0, skippedCount);
+            }
+            return {
+              success: false, compiledCount: 0, skippedCount, failedCount: 0,
+              linkSuccess: false, linkSkipped: target.targetType === TargetType.StaticLib,
+              hadCommands: false, outputFilename: target.outputFilename,
+            };
           }
           return {
-            success: false, compiledCount: 0, skippedCount, failedCount: 0,
-            linkSuccess: false, linkSkipped: target.targetType === TargetType.StaticLib,
-            outputFilename: target.outputFilename,
+            success: true, compiledCount: 0, skippedCount, failedCount: 0,
+            linkSuccess: true, linkSkipped: target.targetType === TargetType.StaticLib,
+            hadCommands: false, outputFilename: target.outputFilename,
           };
         }
-        return {
-          success: true, compiledCount: 0, skippedCount, failedCount: 0,
-          linkSuccess: true, linkSkipped: target.targetType === TargetType.StaticLib,
-          outputFilename: target.outputFilename,
-        };
+        // 外部依赖更新：继续执行链接/打包阶段（重新检查会输出 WARNING）
       }
       // 输出缺失但无新编译：仍尝试链接（对象可能已存在）
     }
@@ -436,6 +535,7 @@ export class BuildEngine {
         failedCount,
         linkSuccess: false,
         linkSkipped: target.targetType === TargetType.StaticLib,
+        hadCommands: totalUnits > 0,
         outputFilename: target.outputFilename,
       };
     }
@@ -444,105 +544,145 @@ export class BuildEngine {
 
     // 2. 链接（非 static lib 需要链接步骤；CommandsOnly 已在上面 return）
     let linkSuccess = true;
+    let linkExecuted = false;
+    let archiveExecuted = false;
     if (target.targetType !== TargetType.StaticLib) {
-      // 链接对象 = 所有参与链接的标准源文件对象（不论本次是否重编译）
-      // （ram.ld → ram.o 是链接脚本、app.xm → appxm.o 是资源，均不参与链接）
-      const linkObjects = linkFiles.map((f) => this.linkObjectRelative(target, f));
-      const resObjects = resFiles.map((f) => this.objectPathRelative(target, f));
-      const linkObjectsAbs = linkFiles.map((f) => this.linkObjectAbs(target, f));
-      // 资源对象同样参与增量判断（对齐 GetTargetLinkCommands 的时间戳检查遍历所有对象）
-      const allObjectsAbs = [...linkObjectsAbs, ...resFiles.map((f) => this.objectPathFor(target, f))];
-
-      // 增量：输出已存在且比所有链接对象新 → 跳过链接（对应 GetTargetLinkCommands 时间戳检查）
-      const outputAbs = this.resolveOutputFile(target);
-      if (options.rebuild || !this.linkObjectsUpToDate(outputAbs, allObjectsAbs)) {
-        // 创建输出目录（如 Output\bin），否则链接器无法写 app.rv32
-        this.ensureDir(path.join(this.project.basePath, path.dirname(target.outputFilename)));
-
-        const linkCommand = generator.generate(this.linkCommandType(target), {
-          target,
-          pf: null,
-          file: '',
-          object: linkObjects.join(this.compiler.switches.objectSeparator),
-          flatObject: linkObjects.join(this.compiler.switches.objectSeparator),
-          deps: resObjects.join(this.compiler.switches.objectSeparator),
-          hasCppFilesToLink: hasCpp,
-        });
-        if (linkCommand) {
-          this.output.info(linkCommand);
-          this.output.info(`[Linking] → ${target.outputFilename}`);
-          const linkStartMs = Date.now();
-          const linkOk = await this.runCommand(linkCommand, this.project.basePath, options);
-          const linkSec = ((Date.now() - linkStartMs) / 1000).toFixed(1);
-          if (!linkOk) {
-            // 取消优先判定（被强杀的链接器返回失败，但语义是取消）
-            if (options.cancel?.isCancelled()) {
-              return this.cancelledStats(target, totalUnits, skippedCount);
-            }
-            this.output.error(`[Code::Blocks] 目标 "${target.title}" 链接失败`);
-            return {
-              success: false,
-              compiledCount: totalUnits,
-              skippedCount,
-              failedCount: 0,
-              linkSuccess: false,
-              linkSkipped: false,
-              outputFilename: target.outputFilename,
-            };
-          }
-          this.output.info(`✓ [Linked] ${target.outputFilename} (${linkSec}s)`);
-        }
+      // 对齐 GetTargetLinkCommands：无可链接对象文件 → 跳过链接阶段（即使输出缺失也不链接）
+      if (linkFiles.length === 0 && resFiles.length === 0) {
+        this.output.info('[Code::Blocks] Linking stage skipped (build target has no object files to link)');
       } else {
-        this.output.info(`[Code::Blocks] 目标 "${target.title}" 链接已是最新，跳过链接`);
+        // 链接对象 = 所有参与链接的标准源文件对象（不论本次是否重编译）
+        // （ram.ld → ram.o 是链接脚本、app.xm → appxm.o 是资源，均不参与链接）
+        const linkObjects = linkFiles.map((f) => this.linkObjectRelative(target, f));
+        const resObjects = resFiles.map((f) => this.objectPathRelative(target, f));
+        const linkObjectsAbs = linkFiles.map((f) => this.linkObjectAbs(target, f));
+        // 资源对象同样参与增量判断（对齐 GetTargetLinkCommands 的时间戳检查遍历所有对象）
+        const allObjectsAbs = [...linkObjectsAbs, ...resFiles.map((f) => this.objectPathFor(target, f))];
+
+        // 增量：输出已存在且比所有链接对象新 → 跳过链接（对应 GetTargetLinkCommands 时间戳检查）；
+        // 外部依赖检查（对齐 AreExternalDepsOutdated：库/外部依赖/附加输出更新 → 强制重链接）
+        const outputAbs = this.resolveOutputFile(target);
+        let forceLink = options.rebuild || !this.linkObjectsUpToDate(outputAbs, allObjectsAbs);
+        const missing: string[] = [];
+        if (this.areExternalDepsOutdated(target, outputAbs, missing)) forceLink = true;
+        if (missing.length) {
+          this.output.warn(`WARNING: Target '${this.project.title}/${target.title}': Unable to resolve ${missing.length} external dependency/ies:`);
+          for (const m of missing) this.output.debug(`        ${m}`);
+        }
+        if (forceLink) {
+          // 创建输出目录（如 Output\bin），否则链接器无法写 app.rv32
+          this.ensureDir(path.dirname(outputAbs));
+
+          const linkCommand = generator.generate(this.linkCommandType(target), {
+            target,
+            pf: null,
+            file: '',
+            object: linkObjects.join(this.compiler.switches.objectSeparator),
+            flatObject: linkObjects.join(this.compiler.switches.objectSeparator),
+            deps: resObjects.join(this.compiler.switches.objectSeparator),
+            hasCppFilesToLink: hasCpp,
+          });
+          if (linkCommand) {
+            this.output.info(linkCommand);
+            this.output.info(`[Linking] → ${path.relative(this.project.basePath, outputAbs)}`);
+            const linkStartMs = Date.now();
+            linkExecuted = true;
+            // 链接响应文件基础名对齐 CheckForToLongCommandLine：对象输出目录 + <title>_link.respFile
+            const respBase = path.join(this.project.basePath, target.objectOutput, `${target.title}_link`);
+            const linkOk = await this.runCommand(linkCommand, this.project.basePath, options, respBase);
+            const linkSec = ((Date.now() - linkStartMs) / 1000).toFixed(1);
+            if (!linkOk) {
+              // 取消优先判定（被强杀的链接器返回失败，但语义是取消）
+              if (options.cancel?.isCancelled()) {
+                return this.cancelledStats(target, totalUnits, skippedCount);
+              }
+              this.output.error(`[Code::Blocks] 目标 "${target.title}" 链接失败`);
+              return {
+                success: false,
+                compiledCount: totalUnits,
+                skippedCount,
+                failedCount: 0,
+                linkSuccess: false,
+                linkSkipped: false,
+                hadCommands: true,
+                outputFilename: target.outputFilename,
+              };
+            }
+            this.output.info(`✓ [Linked] ${path.relative(this.project.basePath, outputAbs)} (${linkSec}s)`);
+          } else {
+            // 对齐 GetTargetLinkCommands：无链接器程序时提示跳过
+            this.output.debug(`[Code::Blocks] Skipping linking (no linker program set): ${outputAbs}`);
+          }
+        } else {
+          this.output.info(`[Code::Blocks] 目标 "${target.title}" 链接已是最新，跳过链接`);
+        }
       }
     } else if (target.targetType === TargetType.StaticLib) {
-      // 静态库用 ar 打包（对齐 Code::Blocks LinkStatic 模板，含 $lib_linker 引号与多行命令拆分）
-      const objects = linkFiles.map((f) => this.linkObjectRelative(target, f));
-      const staticOut = computeStaticOutput(target.outputFilename, this.compiler.switches);
-      const staticOutAbs = path.join(this.project.basePath, staticOut);
-      const linkObjectsAbs = linkFiles.map((f) => this.linkObjectAbs(target, f));
-      // 增量：静态库已存在且比所有对象新 → 跳过打包
-      if (options.rebuild || !this.linkObjectsUpToDate(staticOutAbs, linkObjectsAbs)) {
-        // 创建静态库输出目录（如 bin\Debug），否则 ar 无法写 libdep_lib.a
-        this.ensureDir(path.join(this.project.basePath, path.dirname(staticOut)));
-        const arCmd = generator.generate(CommandType.LinkStaticCmd, {
-          target,
-          pf: null,
-          file: '',
-          object: objects.join(this.compiler.switches.objectSeparator),
-          flatObject: objects.join(this.compiler.switches.objectSeparator),
-          deps: '',
-          hasCppFilesToLink: false,
-        });
-        if (arCmd) {
-          this.output.info(arCmd);
-          this.output.info(`[Archiving] → ${staticOut}`);
-          const arStartMs = Date.now();
-          const ok = await this.runCommand(arCmd, this.project.basePath, options);
-          const arSec = ((Date.now() - arStartMs) / 1000).toFixed(1);
-          if (!ok) {
-            // 取消优先判定（被强杀的 ar 返回失败，但语义是取消）
-            if (options.cancel?.isCancelled()) {
-              return this.cancelledStats(target, totalUnits, skippedCount);
-            }
-            return {
-              success: false,
-              compiledCount: totalUnits,
-              skippedCount,
-              failedCount: 0,
-              linkSuccess: false,
-              linkSkipped: true,
-              outputFilename: target.outputFilename,
-            };
-          }
-          this.output.info(`✓ [Archived] ${staticOut} (${arSec}s)`);
-        }
+      // 对齐 GetTargetLinkCommands：无可链接对象文件 → 跳过打包阶段
+      if (linkFiles.length === 0 && resFiles.length === 0) {
+        this.output.info('[Code::Blocks] Linking stage skipped (build target has no object files to link)');
       } else {
-        this.output.info(`[Code::Blocks] 目标 "${target.title}" 静态库已是最新，跳过打包`);
+        // 静态库用 ar 打包（对齐 Code::Blocks LinkStatic 模板，含 $lib_linker 引号与多行命令拆分）
+        const objects = linkFiles.map((f) => this.linkObjectRelative(target, f));
+        const staticOut = computeStaticOutput(this.expandedOutputFilename(target), this.compiler.switches);
+        const staticOutAbs = path.join(this.project.basePath, staticOut);
+        const linkObjectsAbs = linkFiles.map((f) => this.linkObjectAbs(target, f));
+        // 增量：静态库已存在且比所有对象新 → 跳过打包；外部依赖更新 → 强制重新打包
+        let forceArchive = options.rebuild || !this.linkObjectsUpToDate(staticOutAbs, linkObjectsAbs);
+        const missing: string[] = [];
+        if (this.areExternalDepsOutdated(target, staticOutAbs, missing)) forceArchive = true;
+        if (missing.length) {
+          this.output.warn(`WARNING: Target '${this.project.title}/${target.title}': Unable to resolve ${missing.length} external dependency/ies:`);
+          for (const m of missing) this.output.debug(`        ${m}`);
+        }
+        if (forceArchive) {
+          // 创建静态库输出目录（如 bin\Debug），否则 ar 无法写 libdep_lib.a
+          this.ensureDir(path.dirname(staticOutAbs));
+          const arCmd = generator.generate(CommandType.LinkStaticCmd, {
+            target,
+            pf: null,
+            file: '',
+            object: objects.join(this.compiler.switches.objectSeparator),
+            flatObject: objects.join(this.compiler.switches.objectSeparator),
+            deps: '',
+            hasCppFilesToLink: false,
+          });
+          if (arCmd) {
+            this.output.info(arCmd);
+            this.output.info(`[Archiving] → ${staticOut}`);
+            const arStartMs = Date.now();
+            archiveExecuted = true;
+            const respBase = path.join(this.project.basePath, target.objectOutput, `${target.title}_link`);
+            const ok = await this.runCommand(arCmd, this.project.basePath, options, respBase);
+            const arSec = ((Date.now() - arStartMs) / 1000).toFixed(1);
+            if (!ok) {
+              // 取消优先判定（被强杀的 ar 返回失败，但语义是取消）
+              if (options.cancel?.isCancelled()) {
+                return this.cancelledStats(target, totalUnits, skippedCount);
+              }
+              return {
+                success: false,
+                compiledCount: totalUnits,
+                skippedCount,
+                failedCount: 0,
+                linkSuccess: false,
+                linkSkipped: true,
+                hadCommands: true,
+                outputFilename: target.outputFilename,
+              };
+            }
+            this.output.info(`✓ [Archived] ${staticOut} (${arSec}s)`);
+          } else {
+            // 对齐 GetTargetLinkCommands：无打包程序时提示跳过
+            this.output.debug(`[Code::Blocks] Skipping linking (no linker program set): ${staticOutAbs}`);
+          }
+        } else {
+          this.output.info(`[Code::Blocks] 目标 "${target.title}" 静态库已是最新，跳过打包`);
+        }
       }
     }
 
-    // 3. post-build 脚本（对齐 CodeBlocks：目标 post → 项目 post；hasCommands=true 时执行）
+    // 3. 目标级 post-build 脚本（对齐 CodeBlocks 状态机 bsTargetPostBuild；项目级在 build() 层执行）
     if (!(await this.runPostBuild(target, macroVars, expandScriptMacros, true, options))) {
       if (options.cancel?.isCancelled()) {
         return this.cancelledStats(target, totalUnits, skippedCount);
@@ -554,6 +694,7 @@ export class BuildEngine {
         failedCount: 0,
         linkSuccess,
         linkSkipped: target.targetType === TargetType.StaticLib,
+        hadCommands: totalUnits > 0 || linkExecuted || archiveExecuted,
         outputFilename: target.outputFilename,
       };
     }
@@ -565,14 +706,15 @@ export class BuildEngine {
       failedCount: 0,
       linkSuccess,
       linkSkipped: target.targetType === TargetType.StaticLib,
+      hadCommands: totalUnits > 0 || linkExecuted || archiveExecuted,
       outputFilename: target.outputFilename,
     };
   }
 
   /**
-   * 执行 post-build 步骤 —— 对齐 CodeBlocks 状态机（bsTargetPostBuild → bsProjectPostBuild）：
-   * 1. 顺序：目标级 post-build 先执行，项目级 post-build 后执行；
-   * 2. 条件：hasCommands（有编译/链接动作）或 alwaysRunPostBuildSteps 标志为真时才执行。
+   * 执行目标级 post-build 步骤 —— 对齐 CodeBlocks 状态机 bsTargetPostBuild：
+   * 条件：hasCommands（有编译/链接动作）或 alwaysRunPostBuildSteps 标志为真时才执行。
+   * 项目级 post-build 在 build() 层执行（bsProjectPostBuild，每次构建一次）。
    */
   private async runPostBuild(
     target: BuildTarget,
@@ -582,7 +724,6 @@ export class BuildEngine {
     options: BuildOptions,
   ): Promise<boolean> {
     const targetPost = [...target.commandsAfterBuild].map(expandScriptMacros);
-    const projectPost = [...this.project.commandsAfterBuild].map(expandScriptMacros);
     const extraPath = this.compilerBinPath();
 
     if (targetPost.length && (hasCommands || target.alwaysRunPostBuildSteps)) {
@@ -591,15 +732,6 @@ export class BuildEngine {
       if (!ok) {
         if (options.cancel?.isCancelled()) return false;
         this.output.error(`[Code::Blocks] 目标 "${target.title}" post-build 脚本失败`);
-        return false;
-      }
-    }
-    if (projectPost.length && (hasCommands || this.project.alwaysRunPostBuildSteps)) {
-      this.output.info('[Code::Blocks] 执行项目 post-build 脚本...');
-      const ok = await runScriptCommands(projectPost, this.project.basePath, macroVars, (l) => this.output.info(l), extraPath, options.cancel);
-      if (!ok) {
-        if (options.cancel?.isCancelled()) return false;
-        this.output.error('[Code::Blocks] 项目 post-build 脚本失败');
         return false;
       }
     }
@@ -664,8 +796,8 @@ export class BuildEngine {
     try {
       srcStat = fs.statSync(sourceFile);
     } catch {
-      // 源文件不存在：跳过编译（对齐 IsObjectOutdated：!timeSrc 且文件不存在 → 不编译）
-      return true;
+      // 对齐 IsObjectOutdated：源文件不存在 → 不编译；存在但时间戳读取失败 → 回退编译
+      return !fs.existsSync(sourceFile);
     }
     try {
       objStat = fs.statSync(objectFile);
@@ -690,11 +822,13 @@ export class BuildEngine {
    * 因此时间戳判断需先解析出真实存在的文件。
    */
   private resolveOutputFile(target: BuildTarget): string {
+    // 输出文件名宏展开（对齐 GetTargetLinkCommands/GetTargetCleanCommands 的 ReplaceMacros）
+    const output = this.expandedOutputFilename(target);
     // 静态库实际输出带 lib 前缀 + .a（computeStaticOutput），而非原始 outputFilename
     if (target.targetType === TargetType.StaticLib) {
-      return path.join(this.project.basePath, computeStaticOutput(target.outputFilename, this.compiler.switches));
+      return path.join(this.project.basePath, computeStaticOutput(output, this.compiler.switches));
     }
-    const out = path.join(this.project.basePath, target.outputFilename);
+    const out = path.join(this.project.basePath, output);
     if (fs.existsSync(out)) return out;
     if (process.platform === 'win32') {
       const isExeType =
@@ -722,6 +856,87 @@ export class BuildEngine {
       // 输出或任一对象不存在 → 需要链接
       return false;
     }
+  }
+
+  /** 输出文件名宏展开（对齐 ReplaceMacros(target->GetOutputFilename(), target)） */
+  private expandedOutputFilename(target: BuildTarget): string {
+    return replaceAllMacros(target.outputFilename, this.targetMacroVars(target));
+  }
+
+  /** 文件 mtime（毫秒，失败返回 0，对齐 depsTimeStamp 语义） */
+  private fileMtime(p: string): number {
+    if (!p) return 0;
+    try {
+      return fs.statSync(p).mtimeMs;
+    } catch {
+      return 0;
+    }
+  }
+
+  /**
+   * 外部依赖过期检查 —— 对齐 AreExternalDepsOutdated（directcommands.cpp:1007）：
+   * 1. 输出存在时：链接库（目标+项目+编译器全局）在库目录中找到的 .a/.lib 比输出新 → 强制重链接；
+   * 2. external_deps 比 additional_output 或输出新 → 强制重链接；缺失依赖计入 filesMissing（WARNING）。
+   */
+  private areExternalDepsOutdated(target: BuildTarget, buildOutput: string, filesMissing: string[]): boolean {
+    // CB 构建时 CWD 已切到项目目录；扩展在宿主进程做时间戳检查，相对路径须以项目根为基准
+    const absFromProject = (p: string): string => (path.isAbsolute(p) ? p : path.join(this.project.basePath, p));
+    let timeOutput = 0;
+    if (buildOutput) {
+      timeOutput = this.fileMtime(buildOutput);
+      if (timeOutput > 0) {
+        // 库列表：目标 + 项目 + 编译器全局（对齐 AppendArray 顺序）
+        const libs = [...target.linkLibs, ...this.project.linkLibs, ...(this.compiler.linkLibs ?? [])];
+        const libDirs = [...target.libDirs, ...this.project.libDirs, ...(this.compiler.libDirs ?? [])];
+        const macros = this.targetMacroVars(target);
+        for (let lib of libs) {
+          if (!lib) continue;
+          // 用户直接指向带路径的库：不经过库目录直接检查（ReplaceMacros + UnixFilename）
+          if (lib.includes('/') || lib.includes('\\')) {
+            lib = replaceAllMacros(lib, macros).replace(/\\/g, '/');
+            if (this.fileMtime(absFromProject(lib)) > timeOutput) return true;
+            continue;
+          }
+          if (!lib.startsWith(this.compiler.switches.libPrefix)) lib = this.compiler.switches.libPrefix + lib;
+          if (!lib.endsWith('.' + this.compiler.switches.libExtension)) lib += '.' + this.compiler.switches.libExtension;
+          for (const dir of libDirs) {
+            const cand = replaceAllMacros(path.join(absFromProject(dir), lib), macros).replace(/\\/g, '/');
+            if (this.fileMtime(cand) > timeOutput) return true;
+          }
+        }
+      }
+    }
+
+    // 外部依赖 / 附加输出（cbp 中为分号分隔列表）
+    const macros = this.targetMacroVars(target);
+    for (const dep of target.externalDeps) {
+      if (!dep) continue;
+      const depExp = absFromProject(replaceAllMacros(dep, macros));
+      const timeExtDep = this.fileMtime(depExp);
+      // 依赖缺失：不需重链接，但记录 WARNING
+      if (timeExtDep <= 0) {
+        filesMissing.push(depExp);
+        continue;
+      }
+      // 检查附加输出文件
+      for (const add of target.additionalOutput) {
+        if (!add) continue;
+        const addExp = absFromProject(replaceAllMacros(add, macros));
+        const timeAdd = this.fileMtime(addExp);
+        if (timeAdd <= 0) {
+          filesMissing.push(addExp);
+          continue;
+        }
+        if (timeExtDep > timeAdd) return true;
+      }
+      // 无输出（commands-only）时继续检查其它依赖
+      if (!buildOutput) continue;
+      // 输出不存在 → 重链接
+      if (timeOutput <= 0) return true;
+      // 外部依赖比输出新 → 重链接
+      if (timeExtDep > timeOutput) return true;
+    }
+    return false;
   }
 
   /** 收集目标的 include 搜索目录（项目级 + 目标级，默认 Append 关系） */
@@ -892,8 +1107,8 @@ export class BuildEngine {
         }
       }
     }
-    // 输出文件（含 Windows 无扩展名输出自动追加的 .exe 变体）
-    if (target.outputFilename) {
+    // 输出文件（含 Windows 无扩展名输出自动追加的 .exe 变体；CommandsOnly 无输出，对齐 GetTargetCleanCommands）
+    if (target.targetType !== TargetType.CommandsOnly && target.outputFilename) {
       const out = this.resolveOutputFile(target);
       if (this.removeFileIfExists(out)) {
         removed++;
@@ -906,6 +1121,19 @@ export class BuildEngine {
           removed++;
           if (this.verboseOutput()) {
             this.output.info(`[Clean] ${path.relative(this.project.basePath, out + '.exe')}`);
+          }
+        }
+      }
+      // 动态库：同时删除 import 库（对齐 GetTargetCleanCommands ttDynamicLib → GetStaticLibFilename）
+      if (target.targetType === TargetType.DynamicLib) {
+        const imp = path.join(
+          this.project.basePath,
+          computeStaticOutput(target.impLib || this.expandedOutputFilename(target), this.compiler.switches),
+        );
+        if (this.removeFileIfExists(imp)) {
+          removed++;
+          if (this.verboseOutput()) {
+            this.output.info(`[Clean] ${path.relative(this.project.basePath, imp)}`);
           }
         }
       }
@@ -1086,7 +1314,7 @@ export class BuildEngine {
         const li = localIdx[pos];
         const u = group[li];
         const startMs = Date.now();
-        const ok = await this.runCommand(u.command, u.cwd, options);
+        const ok = await this.runCommand(u.command, u.cwd, options, u.respBase);
         const elapsedMs = Date.now() - startMs;
         const elapsedSec = (elapsedMs / 1000).toFixed(1);
         // 详细输出：完整编译命令行（对齐 Code::Blocks clogFull 模式）
@@ -1114,11 +1342,11 @@ export class BuildEngine {
     await Promise.all(workers);
   }
 
-  private async runCommand(command: string, cwd: string, options: BuildOptions): Promise<boolean> {
+  private async runCommand(command: string, cwd: string, options: BuildOptions, respBase?: string): Promise<boolean> {
     // 多行命令（模板含 \n）逐条执行，对齐 Code::Blocks AddCommandsToArray
     const lines = command.split('\n').map((s) => s.trim()).filter(Boolean);
     if (lines.length <= 1) {
-      return this.runSingleCommand(command, cwd, options);
+      return this.runSingleCommand(command, cwd, options, respBase);
     }
     let ok = true;
     for (const line of lines) {
@@ -1127,19 +1355,19 @@ export class BuildEngine {
         ok = false;
         break;
       }
-      if (!(await this.runSingleCommand(line, cwd, options))) ok = false;
+      if (!(await this.runSingleCommand(line, cwd, options, respBase))) ok = false;
     }
     return ok;
   }
 
-  private async runSingleCommand(command: string, cwd: string, options: BuildOptions): Promise<boolean> {
+  private async runSingleCommand(command: string, cwd: string, options: BuildOptions, respBase?: string): Promise<boolean> {
     return new Promise<boolean>((resolve) => {
       // 取消检查点：spawn 前（已取消则不再派生新进程）
       if (options.cancel?.isCancelled()) {
         resolve(false);
         return;
       }
-      const resp = applyResponseFile(command);
+      const resp = applyResponseFile(command, respBase);
       if (resp.respFile) {
         this.output.debug(`[Code::Blocks] 命令行过长，改用响应文件: ${resp.respFile}`);
       }

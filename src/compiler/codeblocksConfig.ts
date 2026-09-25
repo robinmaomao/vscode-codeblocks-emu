@@ -25,6 +25,8 @@ export interface UserCompilerConfig {
 export class CodeBlocksConfig {
   private parser = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: '@_' });
   private userCompilers = new Map<string, UserCompilerConfig>();
+  /** 编译器全局搜索目录（default.conf /compiler_sets/<id>：include_dirs/library_dirs/res_include_dirs/link_libs） */
+  private compilerSets = new Map<string, { includeDirs: string[]; libDirs: string[]; resIncludeDirs: string[]; linkLibs: string[] }>();
 
   /** 加载 default.conf（若存在） */
   load(defaultConfPath?: string): void {
@@ -46,6 +48,33 @@ export class CodeBlocksConfig {
     }
 
     const userSets = root?.CodeBlocksConfig?.compiler?.user_sets;
+
+    // 编译器设置集合（/compiler_sets/<id>：全局搜索目录 + 链接库，对齐 Compiler::LoadSettings:645-647）
+    const sets = root?.CodeBlocksConfig?.compiler?.compiler_sets;
+    if (sets && typeof sets === 'object') {
+      for (const key of Object.keys(sets)) {
+        if (key.startsWith('@_')) continue;
+        const cc = sets[key];
+        if (!cc || typeof cc !== 'object') continue;
+        const get = (n: string): string => {
+          const node = cc[n];
+          if (node === undefined || node === null) return '';
+          if (typeof node === 'object') return String(node['str'] ?? node['#text'] ?? '');
+          return String(node);
+        };
+        const id = String(key).toLowerCase();
+        const entry = {
+          includeDirs: splitCfgList(get('include_dirs')),
+          libDirs: splitCfgList(get('library_dirs')),
+          resIncludeDirs: splitCfgList(get('res_include_dirs')),
+          linkLibs: splitCfgList(get('link_libs')),
+        };
+        this.compilerSets.set(id, entry);
+        this.compilerSets.set(id.replace(/_/g, '-'), entry);
+        this.compilerSets.set(id.replace(/-/g, '_'), entry);
+      }
+    }
+
     if (!userSets) return;
 
     for (const key of Object.keys(userSets)) {
@@ -117,6 +146,29 @@ export class CodeBlocksConfig {
     };
   }
 
+  /**
+   * 编译器全局搜索目录 + 链接库（对齐 Compiler::LoadSettings 的 include_dirs/library_dirs/res_include_dirs/link_libs）。
+   * 优先 compiler_sets（设置集合），缺失时回退 user_sets（用户编译器节点同样可能携带这些字段）。
+   */
+  searchDirs(compilerId: string): { includeDirs: string[]; libDirs: string[]; resIncludeDirs: string[]; linkLibs: string[] } {
+    const lower = compilerId.toLowerCase();
+    const sets = this.compilerSets.get(lower);
+    if (sets) return sets;
+    const uc = this.find(compilerId);
+    if (uc) {
+      // user_sets 节点里的同名字段（旧版 CB 把搜索目录存在用户编译器定义里）
+      const raw = (uc as unknown as Record<string, unknown>);
+      const get = (n: string): string => String(raw[n] ?? '');
+      return {
+        includeDirs: splitCfgList(get('include_dirs')),
+        libDirs: splitCfgList(get('library_dirs')),
+        resIncludeDirs: splitCfgList(get('res_include_dirs')),
+        linkLibs: splitCfgList(get('link_libs')),
+      };
+    }
+    return { includeDirs: [], libDirs: [], resIncludeDirs: [], linkLibs: [] };
+  }
+
   /** default.conf 常见位置 */
   private defaultConfLocation(): string | undefined {
     const win = process.platform === 'win32';
@@ -129,4 +181,9 @@ export class CodeBlocksConfig {
     if (home) return path.join(home, '.codeblocks', 'default.conf');
     return undefined;
   }
+}
+
+/** 分号分隔列表（对齐 wx GetArrayFromString：去引号、忽略空项） */
+function splitCfgList(v: string): string[] {
+  return v.split(';').map((s) => s.trim().replace(/^"|"$/g, '')).filter(Boolean);
 }

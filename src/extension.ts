@@ -1464,6 +1464,8 @@ function createEmptyTarget(): BuildTarget {
     buildScripts: [],
     envVars: [],
     alwaysRunPostBuildSteps: false,
+    externalDeps: [],
+    additionalOutput: [],
   };
 }
 
@@ -1921,6 +1923,19 @@ function getCompiler(compilerId?: string): Compiler {
   const cfg = vscode.workspace.getConfiguration('codeblocks');
   const id = compilerId ?? cfg.get<string>('compilerId', 'gcc');
   const masterPath = cfg.get<string>('masterPath', '');
+  // 编译器全局搜索目录 + 链接库（default.conf /compiler_sets/<id>，对齐 Compiler::LoadSettings）
+  const applyGlobalDirs = (compiler: Compiler): Compiler => {
+    const uc = codeBlocksConfig?.find(id);
+    if (uc?.name) compiler.name = uc.name; // 显示名对齐 CB（如 default.conf NAME=RISCV32-V3）
+    const sd = codeBlocksConfig?.searchDirs(id);
+    if (sd) {
+      compiler.includeDirs = sd.includeDirs;
+      compiler.libDirs = sd.libDirs;
+      compiler.resIncludeDirs = sd.resIncludeDirs;
+      compiler.linkLibs = sd.linkLibs;
+    }
+    return compiler;
+  };
   if (compilerLoader) {
     const compiler = compilerLoader.load(id);
     compiler.masterPath = masterPath;
@@ -1939,7 +1954,7 @@ function getCompiler(compilerId?: string): Compiler {
         DBGconfig: compiler.programs.DBGconfig || 'gdb_debugger:Default',
       };
       compiler.masterPath = userPrograms.masterPath;
-      return compiler;
+      return applyGlobalDirs(compiler);
     }
 
     // 次优：探测到的完整程序路径（交叉编译器如 RISC-V）
@@ -1947,11 +1962,11 @@ function getCompiler(compilerId?: string): Compiler {
     if (programs && programs.C) {
       compiler.programs = { ...compiler.programs, ...programs } as any;
     }
-    return compiler;
+    return applyGlobalDirs(compiler);
   }
   // 回退：内置 GCC
   const { createGccCompiler } = require('./compiler/compiler');
-  return createGccCompiler(process.platform, masterPath);
+  return applyGlobalDirs(createGccCompiler(process.platform, masterPath));
 }
 
 async function detectCompilers(): Promise<void> {
@@ -2390,44 +2405,28 @@ async function buildSingleProject(filename: string, rebuild: boolean): Promise<v
 
 /** 构建单个项目的一个目标（被 build / buildSingleProject 复用）；支持虚拟目标展开 */
 async function buildOneProject(project: Project, targetTitle: string, rebuild: boolean, cancel?: BuildCancelHandle): Promise<boolean> {
-  // 虚拟目标：展开为其包含的物理目标逐个构建（对齐 CodeBlocks VirtualTarget）
+  // 虚拟目标：展开为其包含的物理目标，在同一个 engine.build 调用里逐个构建
+  // （项目级 pre/post 只执行一次，对齐 CodeBlocks 状态机 bsProjectPreBuild/bsProjectPostBuild）
   const vt = project.virtualTargets.find((v) => v.title === targetTitle);
-  if (vt) {
-    let ok = true;
-    for (const t of vt.targets) {
-      // 取消检查点：虚拟目标各子目标之间
-      if (cancel?.isCancelled()) {
-        ok = false;
-        break;
-      }
-      const one = await buildOneProject(project, t, rebuild, cancel);
-      if (!one) {
-        ok = false;
-        break;
-      }
-    }
-    return ok;
-  }
+  const targetTitles: string[] = vt ? vt.targets : [targetTitle];
 
-  const target = project.buildTargets.find((t) => t.title === targetTitle);
+  const target = vt
+    ? project.buildTargets.find((t) => vt.targets.includes(t.title))
+    : project.buildTargets.find((t) => t.title === targetTitle);
   if (!target) {
     outputChannel.warn(`[Code::Blocks] 项目 "${project.title}" 无目标 "${targetTitle}"，跳过`);
     return true;
   }
 
   const compiler = getCompiler(target.compilerId || project.compilerId);
-  outputChannel.info('');
-  // 构建 Banner（对齐 Code::Blocks PrintBanner：Build: <target> in <project> (compiler: <显示名>)）
-  const sep = '='.repeat(14);
-  outputChannel.info(`[Code::Blocks] ${sep} Build: ${targetTitle} in ${project.title} (compiler: ${compiler.name}) ${sep}`);
-  outputChannel.info(`  编译器程序: ${compiler.programs.C}`);
+  // 构建 Banner 由引擎在项目 pre-build 之后、每个目标构建前打印（对齐 bsTargetPreBuild 的 PrintBanner）
 
   // 本次项目构建的摘要数据（供 Build Log 视图）
   const diagnostics: BuildLogDiagnostic[] = [];
   const startMs = Date.now();
 
   const engine = new BuildEngine(project, compiler, outputChannel);
-  const ok = await engine.build(targetTitle, {
+  const ok = await engine.build(targetTitles, {
     rebuild,
     cancel,
     onLine: (line, severity) => {
@@ -2460,7 +2459,7 @@ async function buildOneProject(project: Project, targetTitle: string, rebuild: b
   });
 
   const durationMs = Date.now() - startMs;
-  const stats = engine.lastStats ?? { success: ok, compiledCount: 0, skippedCount: 0, failedCount: 0, linkSuccess: ok, linkSkipped: true, outputFilename: undefined };
+  const stats = engine.lastStats ?? { success: ok, compiledCount: 0, skippedCount: 0, failedCount: 0, linkSuccess: ok, linkSkipped: true, hadCommands: false, outputFilename: undefined };
   // 取消判定：引擎统计标记或取消源已置位（用户中途停止）
   const cancelled = !!stats.cancelled || !!cancel?.isCancelled();
   const projectName = path.basename(path.dirname(project.filename));

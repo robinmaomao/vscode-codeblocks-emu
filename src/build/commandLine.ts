@@ -39,13 +39,18 @@ export interface RespResult {
 /**
  * 命令过长时改用响应文件；未超长或无法分割时原样返回。
  * @param command 待执行的命令字符串
+ * @param respBase 响应文件基础路径（对齐 CB CheckForToLongCommandLine 命名：
+ *                 编译 = 对象目录/源文件名.respFile，链接 = 对象输出目录/目标名_link.respFile）
  */
-export function applyResponseFile(command: string): RespResult {
+export function applyResponseFile(command: string, respBase?: string): RespResult {
   if (process.platform !== 'win32' || command.length <= MAX_CMD_LENGTH) {
     return { command };
   }
 
-  const respFile = path.join(os.tmpdir(), `codeblocks-resp-${process.pid}-${++respFileCounter}.respFile`);
+  // 对齐 CB：responseFileName.SetName(basename).SetExt("respFile")
+  const respFile = respBase
+    ? path.resolve(respBase + '.respFile')
+    : path.join(os.tmpdir(), `codeblocks-resp-${process.pid}-${++respFileCounter}.respFile`);
   const respAbs = path.resolve(respFile);
   const responseFileLength = respAbs.length + 5;
 
@@ -56,6 +61,9 @@ export function applyResponseFile(command: string): RespResult {
 
   const rest = command.slice(startPos + 1);
   try {
+    // 对齐 CB：响应文件路径的目录结构需存在（CreateDirRecursively）
+    const dir = path.dirname(respAbs);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
     // 响应文件内 \ 转义为 \\（MinGW/gcc 要求）
     fs.writeFileSync(respAbs, rest.replace(/\\/g, '\\\\'), 'utf-8');
   } catch {

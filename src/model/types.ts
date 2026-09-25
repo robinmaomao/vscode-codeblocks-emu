@@ -151,6 +151,10 @@ export interface BuildTarget {
   depsOutput: string;
   /** 执行参数（<Option parameters>，Run/Debug 用，对齐 GetExecutionParameters） */
   executionParameters: string;
+  /** 外部依赖（<Option external_deps>，分号列表；比输出新时强制重链接，对齐 AreExternalDepsOutdated） */
+  externalDeps: string[];
+  /** 附加输出文件（<Option additional_output>，分号列表；外部依赖比它新时强制重链接） */
+  additionalOutput: string[];
 
   /** pre/post build 命令 */
   commandsBeforeBuild: string[];
@@ -223,6 +227,8 @@ export interface Project {
   envVars: EnvVariable[];
   /** 项目级是否始终运行 post build 步骤（<ExtraCommands><Mode after="always">） */
   alwaysRunPostBuildSteps: boolean;
+  /** 项目自定义变量（<Extensions><codeblocks_project_custom_variables>，宏展开时参与替换） */
+  customVariables: Record<string, string>;
 
   /** 所有文件（含未归属具体目标的） */
   files: ProjectFile[];

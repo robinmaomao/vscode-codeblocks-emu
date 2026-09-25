@@ -28,6 +28,20 @@ export function expandMacros(cmd: string, vars: Record<string, string>): string 
   return out;
 }
 
+/**
+ * 递归展开宏（对齐 Code::Blocks macrosmanager ReplaceMacros 的迭代替换：
+ * 变量值里可以引用其它变量，最多迭代 5 轮直到稳定）。
+ */
+export function replaceAllMacros(cmd: string, vars: Record<string, string>): string {
+  let cur = cmd;
+  for (let i = 0; i < 5; i++) {
+    const next = expandMacros(cur, vars);
+    if (next === cur) return cur;
+    cur = next;
+  }
+  return cur;
+}
+
 export interface ScriptResult {
   success: boolean;
   output: string;
@@ -141,14 +155,17 @@ export function buildMacroVars(
   projectTitle = targetTitle,
   projectFilename = outputFilename,
 ): Record<string, string> {
-  const toUnix = (s: string) => s.replace(/\\/g, '/');
-  const out = toUnix(outputFilename);
-  // 去掉文件名，保留目录（含结尾斜杠）；无目录则为空
-  const outDir = out.includes('/') ? out.slice(0, out.lastIndexOf('/') + 1) : '';
-  const baseName = out.includes('/') ? out.slice(out.lastIndexOf('/') + 1) : out;
+  // Windows 下宏值用原生分隔符 + 大写盘符（= CB UnixFilename 后 FixPathSeparators 的净效果），其它平台保持原生分隔符。
+  const win = process.platform === 'win32';
+  const toNative = (s: string): string => (win ? s.replace(/\//g, '\\') : s);
+  const out = toNative(outputFilename);
+  // 去掉文件名，保留目录（含结尾分隔符）；无目录则为空
+  const sepIdx = Math.max(out.lastIndexOf('/'), out.lastIndexOf('\\'));
+  const outDir = sepIdx >= 0 ? out.slice(0, sepIdx + 1) : '';
+  const baseName = sepIdx >= 0 ? out.slice(sepIdx + 1) : out;
   const stem = baseName.replace(/\.[^.]+$/, '');
-  // 项目根目录宏：对齐 Code::Blocks GetBasePath()（wxPATH_GET_SEPARATOR，带结尾分隔符）+ UnixFilename（正斜杠）
-  const projDir = toUnix(basePath).replace(/\/?$/, '/');
+  // 项目根目录宏：对齐 Code::Blocks GetBasePath()（带结尾分隔符）+ FixPathSeparators（原生分隔符）
+  const projDir = (win ? upperDrive(basePath) : basePath.replace(/\\/g, '/')).replace(/[\\/]$/, '') + (win ? '\\' : '/');
 
   return {
     // 目标相关（macrosmanager.cpp）
@@ -157,7 +174,7 @@ export function buildMacroVars(
     TARGET_OUTPUT_BASENAME: stem,
     TARGET_OUTPUT_DIR: outDir,
     TARGET_NAME: targetTitle,
-    TARGET_OBJECT_DIR: toUnix(objectOutput),
+    TARGET_OBJECT_DIR: win ? objectOutput : objectOutput.replace(/\\/g, '/'),
     // 项目相关（对齐 cbProject::GetTitle / GetFilename 语义）
     PROJECT_DIR: projDir,
     PROJECT_DIRECTORY: projDir,

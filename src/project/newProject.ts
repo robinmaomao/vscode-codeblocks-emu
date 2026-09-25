@@ -128,6 +128,8 @@ function makeTarget(name: string, title: string, type: TargetType, compilerOptio
     buildScripts: [],
     envVars: [],
     alwaysRunPostBuildSteps: false,
+    externalDeps: [],
+    additionalOutput: [],
   };
 }
 
@@ -186,6 +188,7 @@ export function createProjectFromTemplate(
     showNotesOnLoad: false,
     envVars: [],
     alwaysRunPostBuildSteps: false,
+    customVariables: {},
     files: tpl.skeleton.map((f) => makeFile(projectDir, f.name, targetTitles)),
     extensions: null,
   };
