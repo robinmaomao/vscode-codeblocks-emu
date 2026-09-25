@@ -12,7 +12,7 @@ import { spawn } from 'child_process';
 import { Project, BuildTarget, ProjectFile, TargetType, CommandType, CompilerLineType, supportsCurrentPlatform } from '../model/types';
 import { FileType, fileTypeOf, isCompilableFileType, isLinkableFileType, isCppSource, isClangdIndexable } from '../model/fileTypes';
 import { Compiler } from '../compiler/compiler';
-import { CommandGenerator, computeStaticOutput } from '../compiler/commandGenerator';
+import { CommandGenerator, computeStaticOutput, quoteIfNeeded } from '../compiler/commandGenerator';
 import { OutputParser } from './outputParser';
 import { runScriptCommands, buildMacroVars, replaceAllMacros } from './scriptRunner';
 import { BuildCancelHandle } from './cancelToken';
@@ -692,8 +692,9 @@ export class BuildEngine {
       } else {
         // 链接对象 = 所有参与链接的标准源文件对象（不论本次是否重编译）
         // （ram.ld → ram.o 是链接脚本、app.xm → appxm.o 是资源，均不参与链接）
-        const linkObjects = linkFiles.map((f) => this.linkObjectRelative(target, f));
-        const resObjects = resFiles.map((f) => this.objectPathRelative(target, f));
+        // 逐对象加引号（对齐 pfDetails::Update:579-583 QuoteStringIfNeeded + GetTargetLinkCommands objectSeparator 拼接）
+        const linkObjects = linkFiles.map((f) => quoteIfNeeded(this.linkObjectRelative(target, f)));
+        const resObjects = resFiles.map((f) => quoteIfNeeded(this.objectPathRelative(target, f)));
         const linkObjectsAbs = linkFiles.map((f) => this.linkObjectAbs(target, f));
         // 资源对象同样参与增量判断（对齐 GetTargetLinkCommands 的时间戳检查遍历所有对象）
         const allObjectsAbs = [...linkObjectsAbs, ...resFiles.map((f) => this.objectPathFor(target, f))];
@@ -774,7 +775,8 @@ export class BuildEngine {
         this.output.info('[Code::Blocks] Linking stage skipped (build target has no object files to link)');
       } else {
         // 静态库用 ar 打包（对齐 Code::Blocks LinkStatic 模板，含 $lib_linker 引号与多行命令拆分）
-        const objects = linkFiles.map((f) => this.linkObjectRelative(target, f));
+        // 逐对象加引号（同链接阶段，对齐 pfDetails::Update 的 QuoteStringIfNeeded）
+        const objects = linkFiles.map((f) => quoteIfNeeded(this.linkObjectRelative(target, f)));
         const staticOut = computeStaticOutput(
           this.expandedOutputFilename(target),
           this.compiler.switches,
@@ -1356,7 +1358,7 @@ export class BuildEngine {
     if (ft === FileType.Header && this.compiler.switches.supportsPCH) {
       return this.pchObjectRelative(target, file);
     }
-    const objDir = target.objectOutput || 'obj';
+    const objDir = target.objectOutput || '.objs';
     const rel = file.relativeToCommonTopLevelPath || file.relativeFilename;
     const parsed = path.parse(rel);
     const ext = ft === FileType.Resource ? 'res' : this.compiler.switches.objectExtension;
@@ -1385,8 +1387,8 @@ export class BuildEngine {
         .replace(/\./g, '_');
       return path.join(dir, fullName + '.' + gch, inner);
     }
-    // pchObjectDir（默认）：obj 目录 + <原名>.gch（如 include/all.h.gch）
-    const objDir = target.objectOutput || 'obj';
+    // pchObjectDir（默认）：对象输出目录 + <原名>.gch（如 include/all.h.gch）
+    const objDir = target.objectOutput || '.objs';
     const rel = toUnix(file.relativeToCommonTopLevelPath || file.relativeFilename);
     return path.join(objDir, rel + '.' + gch);
   }
