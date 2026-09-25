@@ -14,8 +14,8 @@ import { FileType, fileTypeOf, isCompilableFileType, isLinkableFileType, isCppSo
 import { Compiler } from '../compiler/compiler';
 import { CommandGenerator, computeStaticOutput, quoteIfNeeded, clearBackticksCache } from '../compiler/commandGenerator';
 import { OutputParser } from './outputParser';
-import { runScriptCommands, buildMacroVars, replaceAllMacros } from './scriptRunner';
-import { replaceCbMacros } from '../compiler/cbMacros';
+import { runScriptCommands } from './scriptRunner';
+import { replaceCbMacros, cbBuiltinVars } from '../compiler/cbMacros';
 import { BuildCancelHandle } from './cancelToken';
 import { decodeText } from '../tools/encoding';
 import { applyResponseFile, compareFilesByWeight } from './commandLine';
@@ -279,9 +279,9 @@ export class BuildEngine {
     return ok;
   }
 
-  /** 目标宏变量（内置 + 项目自定义变量，对齐 macrosmanager RecalcVars + cbProject SetVariable） */
+  /** 目标宏变量（内置全集 + 项目自定义变量，对齐 macrosmanager RecalcVars + cbProject SetVariable） */
   private targetMacroVars(target: BuildTarget): Record<string, string> {
-    const vars = buildMacroVars(this.project.basePath, target.outputFilename, target.title, target.objectOutput, this.project.title, this.project.filename, this.compiler.masterPath);
+    const vars = cbBuiltinVars(this.project.basePath, target.outputFilename, target.title, target.objectOutput, this.project.title, this.project.filename, this.compiler.masterPath);
     return { ...vars, ...this.project.customVariables };
   }
 
