@@ -119,6 +119,8 @@ function makeTarget(name: string, title: string, type: TargetType, compilerOptio
     createStaticLib: false,
     impLib: '',
     defFile: '',
+    prefixAuto: true,
+    extensionAuto: true,
     useConsoleRunner: true,
     includeInTargetAll: false,
     platforms: 0xff,

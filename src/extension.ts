@@ -1473,6 +1473,8 @@ function createEmptyTarget(): BuildTarget {
     createStaticLib: false,
     impLib: '',
     defFile: '',
+    prefixAuto: true,
+    extensionAuto: true,
     useConsoleRunner: true,
     includeInTargetAll: true,
     platforms: 0xff,

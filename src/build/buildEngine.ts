@@ -775,7 +775,12 @@ export class BuildEngine {
       } else {
         // 静态库用 ar 打包（对齐 Code::Blocks LinkStatic 模板，含 $lib_linker 引号与多行命令拆分）
         const objects = linkFiles.map((f) => this.linkObjectRelative(target, f));
-        const staticOut = computeStaticOutput(this.expandedOutputFilename(target), this.compiler.switches);
+        const staticOut = computeStaticOutput(
+          this.expandedOutputFilename(target),
+          this.compiler.switches,
+          target.prefixAuto,
+          target.extensionAuto,
+        );
         const staticOutAbs = path.join(this.project.basePath, staticOut);
         const linkObjectsAbs = linkFiles.map((f) => this.linkObjectAbs(target, f));
         // 增量：静态库已存在且比所有对象新 → 跳过打包；外部依赖更新 → 强制重新打包
@@ -994,7 +999,10 @@ export class BuildEngine {
     const output = this.expandedOutputFilename(target);
     // 静态库实际输出带 lib 前缀 + .a（computeStaticOutput），而非原始 outputFilename
     if (target.targetType === TargetType.StaticLib) {
-      return path.join(this.project.basePath, computeStaticOutput(output, this.compiler.switches));
+      return path.join(
+        this.project.basePath,
+        computeStaticOutput(output, this.compiler.switches, target.prefixAuto, target.extensionAuto),
+      );
     }
     const out = path.join(this.project.basePath, output);
     if (fs.existsSync(out)) return out;
@@ -1292,11 +1300,12 @@ export class BuildEngine {
           }
         }
       }
-      // 动态库：同时删除 import 库（对齐 GetTargetCleanCommands ttDynamicLib → GetStaticLibFilename）
+      // 动态库：同时删除 import 库（对齐 GetTargetCleanCommands ttDynamicLib → GetStaticLibFilename；
+      // ttDynamicLib 的 import 库强制平台默认前缀/扩展，对齐 SetupOutputFilenames）
       if (target.targetType === TargetType.DynamicLib) {
         const imp = path.join(
           this.project.basePath,
-          computeStaticOutput(target.impLib || this.expandedOutputFilename(target), this.compiler.switches),
+          computeStaticOutput(target.impLib || this.expandedOutputFilename(target), this.compiler.switches, true, true),
         );
         if (this.removeFileIfExists(imp)) {
           removed++;
