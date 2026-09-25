@@ -172,7 +172,7 @@ function writeTarget(L: string[], t: BuildTarget, rawProject: unknown): void {
   }
   const impLibAttr = t.impLib ? ` imp_lib="${esc(unix(t.impLib))}"` : '';
   const defFileAttr = t.defFile ? ` def_file="${esc(unix(t.defFile))}"` : '';
-  L.push(`\t\t\t\t<Option output="${esc(unix(t.outputFilename))}" prefix_auto="1" extension_auto="1"${impLibAttr}${defFileAttr} />`);
+  L.push(`\t\t\t\t<Option output="${esc(unix(t.outputFilename))}" prefix_auto="${t.prefixAuto ? 1 : 0}" extension_auto="${t.extensionAuto ? 1 : 0}"${impLibAttr}${defFileAttr} />`);
   if (t.objectOutput && t.objectOutput !== '.objs') {
     L.push(`\t\t\t\t<Option object_output="${esc(unix(t.objectOutput))}" />`);
   }

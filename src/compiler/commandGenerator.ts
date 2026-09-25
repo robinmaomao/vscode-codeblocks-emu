@@ -41,26 +41,46 @@ export function quoteIfNeeded(s: string): string {
 }
 
 /**
- * 计算库输出文件名（对齐 SetupOutputFilenames，compilercommandgenerator.cpp:747 / 773）：
- * prefix_auto（平台默认）时 basename 不以 libPrefix 开头则加 lib 前缀；
- * extension_auto（平台默认）时扩展名不是指定扩展名则追加。
+ * 计算库输出文件名（对齐 SetupOutputFilenames，compilercommandgenerator.cpp:648）：
+ * prefixAuto（平台默认）时 basename 不以 libPrefix 开头则加 lib 前缀；
+ * extensionAuto（平台默认）时扩展名不是指定扩展名则追加（对齐 CB：追加到完整文件名，
+ * multi-dot 安全——foo.d → libfoo.d.a；Windows 扩展名比较大小写不敏感，Linux 敏感）。
  */
-export function computeLibOutput(outputFilename: string, libPrefix: string, extension: string): string {
-  const parsed = path.parse(outputFilename);
-  let name = parsed.name;
-  if (libPrefix && !name.startsWith(libPrefix)) {
-    name = libPrefix + name;
+export function computeLibOutput(
+  outputFilename: string,
+  libPrefix: string,
+  extension: string,
+  prefixAuto = true,
+  extensionAuto = true,
+): string {
+  const dir = path.dirname(outputFilename);
+  let fullName = path.basename(outputFilename);
+  const name = path.basename(fullName, path.extname(fullName));
+  const curExt = path.extname(fullName).replace('.', '');
+  // 前缀策略（对齐 CB：检查 GetName() 是否以 libPrefix 开头）
+  if (prefixAuto && libPrefix && !name.startsWith(libPrefix)) {
+    fullName = libPrefix + fullName;
   }
-  let result = path.join(parsed.dir, name);
-  if (!result.endsWith('.' + extension)) {
-    result = result + '.' + extension;
+  // 扩展名策略（对齐 CB：Windows IsSameAs(ext, false) 大小写不敏感，其余大小写敏感）
+  if (extensionAuto && extension) {
+    const same = process.platform === 'win32'
+      ? curExt.toLowerCase() === extension.toLowerCase()
+      : curExt === extension;
+    if (!same) {
+      fullName += '.' + extension;
+    }
   }
-  return result;
+  return path.join(dir, fullName);
 }
 
-/** 静态库/import 库输出（.a），复用 computeLibOutput */
-export function computeStaticOutput(outputFilename: string, switches: { libPrefix: string; libExtension: string }): string {
-  return computeLibOutput(outputFilename, switches.libPrefix, switches.libExtension);
+/** 静态库/import 库输出（.a），复用 computeLibOutput（策略默认平台默认，ttDynamicLib 调用方强制） */
+export function computeStaticOutput(
+  outputFilename: string,
+  switches: { libPrefix: string; libExtension: string },
+  prefixAuto = true,
+  extensionAuto = true,
+): string {
+  return computeLibOutput(outputFilename, switches.libPrefix, switches.libExtension, prefixAuto, extensionAuto);
 }
 
 function unquote(s: string): string {
@@ -172,14 +192,26 @@ export class CommandGenerator {
   }
 
   private setupStaticOutput(target: BuildTarget): string {
-    // DynamicLib import 库：优先自定义 imp_lib，否则由 output 推导（对齐 GetDynamicLibImportFilename）
-    return quoteIfNeeded(computeStaticOutput(target.impLib || target.outputFilename, this.compiler.switches));
+    // DynamicLib import 库：优先自定义 imp_lib，否则由 output 推导（对齐 GetDynamicLibImportFilename）；
+    // 对齐 SetupOutputFilenames：ttDynamicLib 的 import 库**强制**平台默认前缀/扩展（策略无视）
+    const force = target.targetType === TargetType.DynamicLib;
+    return quoteIfNeeded(computeStaticOutput(
+      target.impLib || target.outputFilename,
+      this.compiler.switches,
+      force ? true : target.prefixAuto,
+      force ? true : target.extensionAuto,
+    ));
   }
 
   private setupDefOutput(target: BuildTarget): string {
-    // def 文件名同样加 lib 前缀（对齐 SetupOutputFilenames 第 773 行的 fname.SetExt("def")）；
-    // 优先自定义 def_file，否则由 output 推导（对齐 GetDynamicLibDefFilename）
-    return quoteIfNeeded(computeLibOutput(target.defFile || target.outputFilename, this.compiler.switches.libPrefix, 'def'));
+    // def 文件名：优先自定义 def_file，否则由 output 推导，前缀/扩展按目标策略（对齐 SetupOutputFilenames）
+    return quoteIfNeeded(computeLibOutput(
+      target.defFile || target.outputFilename,
+      this.compiler.switches.libPrefix,
+      'def',
+      target.prefixAuto,
+      target.extensionAuto,
+    ));
   }
 
   private setupIncludeDirs(target: BuildTarget): string {

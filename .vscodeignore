@@ -46,5 +46,6 @@ test-external-deps.js
 test-fixup-link-libs.js
 test-platforms.js
 test-user-regexes.js
+test-filename-policy.js
 .git-msg.txt
 *.vsix

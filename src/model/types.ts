@@ -152,6 +152,10 @@ export interface BuildTarget {
   impLib: string;
   /** 动态库 def 文件名（<Option output def_file="...">，空 = 由 output 推导） */
   defFile: string;
+  /** 自动生成 lib 前缀（<Option output prefix_auto="1/0">，默认 true；对齐 tgfpPlatformDefault/tgfpNone） */
+  prefixAuto: boolean;
+  /** 自动生成扩展名（<Option output extension_auto="1/0">，默认 true） */
+  extensionAuto: boolean;
   /** 是否使用 console runner */
   useConsoleRunner: boolean;
   /** 是否纳入 "All" 虚拟目标 */

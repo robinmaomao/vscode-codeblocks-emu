@@ -428,6 +428,8 @@ export class ProjectParser {
         createStaticLib: false,
         impLib: '',
         defFile: '',
+        prefixAuto: true,
+        extensionAuto: true,
         useConsoleRunner: true,
         includeInTargetAll: true,
         platforms: 0xff,
@@ -523,6 +525,9 @@ export class ProjectParser {
       if (node['@_createStaticLib'] !== undefined) target.createStaticLib = node['@_createStaticLib'] === '1' || node['@_createStaticLib'] === 'true';
       if (node['@_imp_lib'] !== undefined) target.impLib = toNativeSeparator(String(node['@_imp_lib']));
       if (node['@_def_file'] !== undefined) target.defFile = toNativeSeparator(String(node['@_def_file']));
+      // 文件名生成策略（projectloader.cpp:579-583：atoi==1 → 平台默认，否则 tgfpNone）
+      if (node['@_prefix_auto'] !== undefined) target.prefixAuto = String(node['@_prefix_auto']) !== '0';
+      if (node['@_extension_auto'] !== undefined) target.extensionAuto = String(node['@_extension_auto']) !== '0';
       if (node['@_use_console_runner'] !== undefined) target.useConsoleRunner = node['@_use_console_runner'] === '1' || node['@_use_console_runner'] === 'true';
       // <Option include_in_target_all="0/1">（DoBuildTargetOptions，默认 true）
       if (node['@_include_in_target_all'] !== undefined) target.includeInTargetAll = node['@_include_in_target_all'] !== '0';

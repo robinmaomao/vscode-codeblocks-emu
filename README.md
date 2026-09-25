@@ -4,7 +4,7 @@
 
 直接在 VS Code 中打开 `.cbp` / `.workspace` 工程，即可获得与 Code::Blocks 对齐的构建、调试与工程浏览体验。
 
-> **作者**：Robinmaomao ｜ **版本**：0.8.27-dev
+> **作者**：Robinmaomao ｜ **版本**：0.8.28-dev
 
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE.md)
 
@@ -37,6 +37,7 @@
   - 目标类型数字映射（`type="1"` = 控制台应用，正确区分 `-mwindows`）
   - `max_reported_errors` 错误数截断（防构建日志卡顿）
   - 路径分隔符对齐 Code::Blocks（`UnixFilename(wxPATH_NATIVE)`）：Windows 下 `directory`/`library`/`output` 属性用反斜杠，保证 `map.txt` 等构建产物与 Code::Blocks 一致
+  - 库输出文件名生成策略对齐 `SetupOutputFilenames`：`prefix_auto` / `extension_auto` 按 `.cbp` 属性控制 lib 前缀与扩展名（动态库 import 库强制平台默认）；Windows 扩展名比较大小写不敏感、multi-dot 全名追加
   - 外部依赖强制重链（`external_deps` / `additional_output` / 链接库 mtime 比对，缺失 WARNING）+ 编译器全局搜索目录（`default.conf`）+ 项目自定义变量（`codeblocks_project_custom_variables`）宏展开
   - 构建 Banner 顺序/文案、up-to-date 判定与 post-build 门控对齐 Code::Blocks 状态机
 - ⏹️ **编译随时停止**：构建通知上的 ❌ 按钮或命令 `Code::Blocks: Stop Build` 一键停止；Windows 下 `taskkill /T /F` 强杀整棵进程树（cmd → gcc → cc1/as/ld 无残留），取消不计入失败
@@ -72,7 +73,7 @@ npx tsc -p ./
 npx vsce package --allow-missing-repository
 
 # 4. 安装
-code --install-extension codeblocks-vscode-0.8.27-dev.vsix --force
+code --install-extension codeblocks-vscode-0.8.28-dev.vsix --force
 ```
 
 > Windows 下建议使用 `npm.cmd` / `npx.cmd`（PSReadLine 执行策略）。
