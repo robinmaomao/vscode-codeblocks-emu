@@ -47,5 +47,6 @@ test-fixup-link-libs.js
 test-platforms.js
 test-user-regexes.js
 test-filename-policy.js
+test-link-object-quote.js
 .git-msg.txt
 *.vsix
