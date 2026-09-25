@@ -108,6 +108,17 @@ async function singleFileCheck(cbp) {
     console.log('[e] cleanFile 未删除编译后的对象: ' + objAbs);
     return false;
   }
+  // 4. 目标级 Clean 范围（distclean）：预置 .depend 后 cleanTarget 应一并删除 deps 文件
+  //    （depsPathFor = basePath/.deps/<相对目录>/<名称>.depend；根目录文件 → .deps/util.depend）
+  const depAbs = path.join(project.basePath, '.deps', 'util.depend');
+  fs.mkdirSync(path.dirname(depAbs), { recursive: true });
+  fs.writeFileSync(depAbs, 'util.o: util.c util.h\n', 'utf-8');
+  engine.cleanTarget(project.buildTargets[0]);
+  if (fs.existsSync(depAbs)) {
+    console.log('[e] cleanTarget 未删除 deps 文件: ' + depAbs);
+    return false;
+  }
+  console.log('[i] cleanTarget distclean OK');
   console.log('==== SINGLE FILE OK ====');
   return true;
 }
