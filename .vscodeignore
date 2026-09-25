@@ -50,5 +50,6 @@ test-filename-policy.js
 test-link-object-quote.js
 test-cb-macros.js
 test-flag-filter.js
+test-weight-zero.js
 .git-msg.txt
 *.vsix
