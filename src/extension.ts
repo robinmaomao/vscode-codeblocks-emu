@@ -2469,7 +2469,7 @@ async function buildSingleFile(project: Project, file: ProjectFile): Promise<voi
   const compiler = getCompiler(target.compilerId || project.compilerId);
 
   outputChannel.show(true);
-  const engine = new BuildEngine(project, compiler, outputChannel);
+  const engine = new BuildEngine(project, compiler, outputChannel, (id) => getCompiler(id));
   const cancelSource = new BuildCancelSource();
   currentBuildCancel = cancelSource;
   buildInProgress = true;
@@ -2534,7 +2534,7 @@ async function cleanSingleFile(project: Project, file: ProjectFile): Promise<voi
   if (!target) return;
   const compiler = getCompiler(target.compilerId || project.compilerId);
   outputChannel.show(true);
-  new BuildEngine(project, compiler, outputChannel).cleanFile(targetTitle, file.relativeFilename);
+  new BuildEngine(project, compiler, outputChannel, (id) => getCompiler(id)).cleanFile(targetTitle, file.relativeFilename);
 }
 
 /** 构建单个项目的一个目标（被 build / buildSingleProject 复用）；支持虚拟目标展开 */
@@ -2559,7 +2559,7 @@ async function buildOneProject(project: Project, targetTitle: string, rebuild: b
   const diagnostics: BuildLogDiagnostic[] = [];
   const startMs = Date.now();
 
-  const engine = new BuildEngine(project, compiler, outputChannel);
+  const engine = new BuildEngine(project, compiler, outputChannel, (id) => getCompiler(id));
   const ok = await engine.build(targetTitles, {
     rebuild,
     cancel,
@@ -2719,7 +2719,7 @@ async function clean(): Promise<void> {
   // 逐文件删除构建产物（对齐 CodeBlocks GetTargetCleanCommands：对象文件 + 输出文件，不删目录）
   for (const target of project.buildTargets) {
     const compiler = getCompiler(target.compilerId || project.compilerId);
-    const engine = new BuildEngine(project, compiler, outputChannel);
+    const engine = new BuildEngine(project, compiler, outputChannel, (id) => getCompiler(id));
     engine.cleanTarget(target);
   }
   outputChannel.info('[Code::Blocks] 清理完成');

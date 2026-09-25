@@ -94,9 +94,23 @@ export class BuildEngine {
     private project: Project,
     private compiler: Compiler,
     private output: vscode.LogOutputChannel,
+    private resolveCompiler?: (id: string) => Compiler,
   ) {
     // 使用编译器 XML 加载的正则；若为空则回退内置正则
     this.parser = new OutputParser(compiler.regexes.length ? compiler.regexes : undefined);
+  }
+
+  /**
+   * 切换到目标声明编译器 —— 对齐 directcommands 各处 CompilerFactory::GetCompiler(target->GetCompilerID())
+   * （593/634/722/965/1011/1167：模板/开关/程序/错误正则全套按目标切换）
+   */
+  private switchCompiler(target: BuildTarget): void {
+    if (!this.resolveCompiler) return;
+    const c = this.resolveCompiler(target.compilerId || this.project.compilerId);
+    if (!c || c === this.compiler) return;
+    this.compiler = c;
+    // 错误/警告正则随编译器切换（对齐 CB 按 job 编译器 ParseOutput）
+    this.parser = new OutputParser(c.regexes.length ? c.regexes : undefined);
   }
 
   /** 构建主循环 —— 对应 GetCompileCommands + GetTargetLinkCommands；项目级 pre/post 在目标循环外各执行一次（对齐状态机 bsProjectPreBuild/bsProjectPostBuild） */
@@ -130,6 +144,7 @@ export class BuildEngine {
     // 宏按第一个目标上下文展开（对齐 GetPreBuildCommands(0) 用 GetCurrentlyCompilingTarget()）
     if (this.project.commandsBeforeBuild.length) {
       const first = targets[0];
+      this.switchCompiler(first);
       this.output.info('[Code::Blocks] 执行项目 pre-build 脚本...');
       const preOk = await runScriptCommands(
         this.project.commandsBeforeBuild.map((c) => this.expandScriptMacros(first, c)),
@@ -167,7 +182,9 @@ export class BuildEngine {
         cancelled = true;
         break;
       }
-      // 构建 Banner —— 对齐 PrintBanner（bsTargetPreBuild，每个目标构建前打印；位于项目 pre-build 之后）
+      // 构建 Banner —— 对齐 PrintBanner（bsTargetPreBuild，每个目标构建前打印；位于项目 pre-build 之后）；
+      // 编译器显示名按目标编译器（对齐 GetCompiler(target->GetCompilerID())）
+      this.switchCompiler(target);
       const sep = '-'.repeat(14);
       this.output.info('');
       this.output.info(`${sep} Build: ${target.title} in ${this.project.title} (compiler: ${this.compiler.name})${sep}`);
@@ -195,6 +212,7 @@ export class BuildEngine {
     // 门控对齐状态机：m_RunProjectPostBuild = 最后一个目标 hasCommands，除非项目级 alwaysRunPostBuildSteps
     if (ok && !cancelled && this.project.commandsAfterBuild.length && (lastHadCommands || this.project.alwaysRunPostBuildSteps)) {
       const last = targets[targets.length - 1];
+      this.switchCompiler(last);
       this.output.info('[Code::Blocks] 执行项目 post-build 脚本...');
       const postOk = await runScriptCommands(
         this.project.commandsAfterBuild.map((c) => this.expandScriptMacros(last, c)),
@@ -238,10 +256,12 @@ export class BuildEngine {
       ? this.project.buildTargets.filter((t) => t.title === targetTitle)
       : this.project.buildTargets;
 
-    const generator = new CommandGenerator(this.project, this.compiler);
     const entries: { directory: string; command: string; file: string }[] = [];
 
     for (const target of targets) {
+      // 每目标编译器（对齐 GetCompiler(target->GetCompilerID())）
+      this.switchCompiler(target);
+      const generator = new CommandGenerator(this.project, this.compiler);
       const files = target.files.length ? target.files : this.project.files;
       const hasCpp = files.some((f) => isCppSource(f.relativeFilename));
 
@@ -362,6 +382,8 @@ export class BuildEngine {
       this.output.error(`[Code::Blocks] 未找到构建目标: ${targetTitle}`);
       return false;
     }
+    // 每目标编译器（对齐 GetCompiler(target->GetCompilerID())）
+    this.switchCompiler(target);
     const files = target.files.length ? target.files : this.project.files;
     const file = files.find((f) => f.relativeFilename === fileRel);
     if (!file) {
@@ -418,6 +440,8 @@ export class BuildEngine {
   cleanFile(targetTitle: string, fileRel: string): void {
     const target = this.project.buildTargets.find((t) => t.title === targetTitle);
     if (!target) return;
+    // 每目标编译器（对齐 GetCompiler(target->GetCompilerID())）
+    this.switchCompiler(target);
     const files = target.files.length ? target.files : this.project.files;
     const file = files.find((f) => f.relativeFilename === fileRel);
     if (!file) return;
@@ -465,6 +489,8 @@ export class BuildEngine {
 
   /** 构建单个目标（始终返回统计对象，用 success 标记成败） */
   private async buildTarget(target: BuildTarget, options: BuildOptions): Promise<BuildTargetStats> {
+    // 每目标编译器（对齐 GetCompiler(target->GetCompilerID())；banner 已在 build() 切换，此处幂等）
+    this.switchCompiler(target);
     // 本次目标构建的耗时记录（提前 return 路径也要清空，避免汇总显示上次构建的 Top3）
     this.compileTimings = [];
     this.lastCompileTimings = [];
@@ -1271,6 +1297,8 @@ export class BuildEngine {
    * 供 rebuild（先 Clean 再 Build）与 Clean 命令复用。
    */
   cleanTarget(target: BuildTarget): void {
+    // 每目标编译器（对齐 GetCompiler(target->GetCompilerID())，needDependencies 随目标编译器取）
+    this.switchCompiler(target);
     let removed = 0;
     const files = target.files.length ? target.files : this.project.files;
     for (const file of files) {

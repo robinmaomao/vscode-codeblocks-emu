@@ -54,3 +54,4 @@ test-weight-zero.js
 test-force-fwd-output.js
 .git-msg.txt
 *.vsix
+test-mixed-compiler.js
