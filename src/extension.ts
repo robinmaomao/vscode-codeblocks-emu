@@ -470,6 +470,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     }),
   );
 
+  // 无项目单文件编译（对齐 CompileFileWithoutProject 语义，VS Code 任务系统执行）
+  context.subscriptions.push(
+    vscode.commands.registerCommand('codeblocks.compileFileWithoutProject', async () => {
+      await compileFileWithoutProject();
+    }),
+  );
+
   // 清理
   context.subscriptions.push(
     vscode.commands.registerCommand('codeblocks.clean', async () => {
@@ -3102,6 +3109,63 @@ function runWorkingDir(project: Project, target: BuildTarget, vars: Record<strin
   const idx = expOut.lastIndexOf('/');
   if (idx < 0) return project.basePath;
   return path.resolve(project.basePath, expOut.slice(0, idx));
+}
+
+/**
+ * 无项目单文件编译 —— 对齐 CB CompileFileWithoutProject（compilergcc.cpp:3174-3191：默认编译器 + 控制台模板 + 编译后询问运行），
+ * 改用 VS Code 任务系统执行（ShellExecution + $gcc 问题匹配器，集成终端展示）。
+ */
+async function compileFileWithoutProject(): Promise<void> {
+  const editor = vscode.window.activeTextEditor;
+  if (!editor) {
+    vscode.window.showWarningMessage('没有打开的文件');
+    return;
+  }
+  const filePath = editor.document.uri.fsPath;
+  const ext = path.extname(filePath).toLowerCase();
+  if (!['.c', '.cpp', '.cc', '.cxx'].includes(ext)) {
+    vscode.window.showWarningMessage('仅支持编译 C/C++ 源文件（.c/.cpp/.cc/.cxx）');
+    return;
+  }
+  // 对齐 CB：切换默认编译器（SwitchCompiler(GetDefaultCompilerID)）
+  const compiler = getCompiler(vscode.workspace.getConfiguration('codeblocks').get<string>('compilerId', 'gcc'));
+  const prog = ext === '.c' ? compiler.programs.C : compiler.programs.CPP;
+  if (!prog) {
+    vscode.window.showErrorMessage('默认编译器不可用，请先探测/配置编译器');
+    return;
+  }
+  await saveAllBeforeBuild();
+  const fileDir = path.dirname(filePath);
+  const base = path.basename(filePath, ext);
+  const outName = process.platform === 'win32' ? `${base}.exe` : base;
+  const cc = compiler.masterPath ? path.join(compiler.masterPath, 'bin', prog) : prog;
+  const cmd = `"${cc}" -g -Wall "${filePath}" -o "${path.join(fileDir, outName)}"`;
+  const exec = new vscode.ShellExecution(cmd, { cwd: fileDir });
+  const task = new vscode.Task(
+    { type: 'shell' },
+    vscode.TaskScope.Workspace,
+    'Compile File (Without Project)',
+    'codeblocks',
+    exec,
+    ['$gcc'],
+  );
+  task.group = vscode.TaskGroup.Build;
+  task.presentationOptions = { reveal: vscode.TaskRevealKind.Always, clear: true, panel: vscode.TaskPanelKind.Shared };
+  // 编译成功后询问运行（对齐 CB GetCompileSingleFileCommand 流程）
+  const onEnd = vscode.tasks.onDidEndTaskProcess((e) => {
+    if (e.execution.task !== task) return;
+    onEnd.dispose();
+    if (e.exitCode === 0) {
+      vscode.window.showInformationMessage('编译成功，是否运行生成的可执行文件？', '运行').then((pick) => {
+        if (pick === '运行') {
+          const t = vscode.window.createTerminal({ name: 'Run (no project)', cwd: fileDir });
+          t.show();
+          t.sendText(`"${path.join(fileDir, outName)}"`);
+        }
+      });
+    }
+  });
+  await vscode.tasks.executeTask(task);
 }
 
 async function run(): Promise<void> {
