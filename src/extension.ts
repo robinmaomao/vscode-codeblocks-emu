@@ -2013,10 +2013,20 @@ function getCompiler(compilerId?: string): Compiler {
 function resolveTargetCompiler(compilerId: string): Compiler | undefined {
   if (!compilerId) return undefined;
   const cfg = vscode.workspace.getConfiguration('codeblocks');
-  if (compilerId === cfg.get<string>('compilerId', 'gcc')) return getCompiler(compilerId);
-  if (codeBlocksConfig?.find(compilerId)) return getCompiler(compilerId);
-  if (compilerResourcesDir && fs.existsSync(path.join(compilerResourcesDir, `options_${compilerId}.xml`))) {
-    return getCompiler(compilerId);
+  // 对齐 CompilerFactory::GetCompiler（compilerfactory.cpp:42-58）：大小写不敏感 + 去 '-' 旧 ID 格式二次匹配
+  const candidates: string[] = [];
+  for (const c of [compilerId, compilerId.toLowerCase(), compilerId.replace(/-/g, '')]) {
+    if (c && !candidates.includes(c)) candidates.push(c);
+  }
+  for (const c of candidates) {
+    if (c === cfg.get<string>('compilerId', 'gcc')) return getCompiler(c);
+    if (codeBlocksConfig?.find(c)) return getCompiler(c);
+    if (compilerResourcesDir) {
+      const lower = c.toLowerCase();
+      for (const name of [`options_${c}.xml`, `options_${lower}.xml`]) {
+        if (fs.existsSync(path.join(compilerResourcesDir, name))) return getCompiler(c);
+      }
+    }
   }
   return undefined;
 }

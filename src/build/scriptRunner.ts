@@ -84,7 +84,7 @@ export function runScriptCommand(
       resolve({ success: false, output: '' });
       return;
     }
-    const expanded = replaceCbMacros(command, { vars });
+    const expanded = replaceCbMacros(command, { vars, basePath: cwd });
     const env: Record<string, string> = { ...(process.env as Record<string, string>) };
     if (process.platform === 'win32') {
       // Windows：实时读取系统 PATH（注册表 Machine+User），宿主进程 PATH 快照可能过期
@@ -155,6 +155,7 @@ export function buildMacroVars(
   objectOutput = '.objs/',
   projectTitle = targetTitle,
   projectFilename = outputFilename,
+  compilerDir = '',
 ): Record<string, string> {
   // Windows 下宏值用原生分隔符 + 大写盘符（= CB UnixFilename 后 FixPathSeparators 的净效果），其它平台保持原生分隔符。
   const win = process.platform === 'win32';
@@ -182,5 +183,16 @@ export function buildMacroVars(
     PROJECT_NAME: projectTitle,
     PROJECTNAME: projectTitle,
     PROJECT_FILENAME: projectFilename,
+    // 目标编译器目录（macrosmanager.cpp:396 MasterPath.GetPathWithSep）
+    TARGET_COMPILER_DIR: compilerDir ? toNative(compilerDir.replace(/[\\/]$/, '') + (win ? '\\' : '/')) : '',
+    // 静态宏（macrosmanager.cpp:128-163）
+    AMP: '&',
+    PLATFORM: win ? 'msw' : 'unix',
+    CMD_NULL: win ? 'NUL' : '/dev/null',
+    CMD_CP: win ? 'cmd /c copy' : 'cp --preserve=timestamps',
+    CMD_RM: win ? 'cmd /c del' : 'rm',
+    CMD_MV: win ? 'cmd /c move' : 'mv',
+    CMD_MKDIR: win ? 'cmd /c md' : 'mkdir -p',
+    CMD_RMDIR: win ? 'cmd /c rd' : 'rmdir',
   };
 }

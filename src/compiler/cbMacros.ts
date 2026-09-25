@@ -5,7 +5,9 @@
  * - 未命中宏回退环境变量（wxGetEnv 语义；仍无 → 空替换，CB 同）
  * - `$$` → `$`、`%%` → `%` 反转义（CB 非子请求时）
  */
+import * as path from 'path';
 import { CodeBlocksConfig } from './codeblocksConfig';
+import { shortPathWin } from '../tools/pathCase';
 
 /** 懒加载 vscode（无宿主环境时返回 undefined，保证无头测试/脚本可用） */
 let vscodeCache: any = null;
@@ -71,6 +73,7 @@ export function cbBuiltinVars(
   objectOutput: string,
   projectTitle: string,
   projectFilename: string,
+  compilerDir = '',
 ): Record<string, string> {
   const win = process.platform === 'win32';
   const toNative = (s: string): string => (win ? s.replace(/\//g, '\\') : s);
@@ -84,6 +87,8 @@ export function cbBuiltinVars(
 
   // 工作区目录：多根时取第一个（VS Code 无「当前工作区目录」概念，取首个文件夹回退工程目录）
   let workspaceDir = '';
+  let workspaceFilename = '';
+  let workspaceName = '';
   let appPath = '';
   let dataPath = '';
   let active: { filename: string; dirname: string; stem: string; ext: string; line: string; column: string } = {
@@ -93,6 +98,11 @@ export function cbBuiltinVars(
     const vs = getVscode();
     const wf = vs?.workspace?.workspaceFolders;
     workspaceDir = (wf && wf.length ? String(wf[0].uri.fsPath) : basePath).replace(/[\\/]$/, '') + (win ? '\\' : '/');
+    const wsFile = vs?.workspace?.workspaceFile?.fsPath;
+    if (wsFile) {
+      workspaceFilename = toNative(String(wsFile));
+      workspaceName = path.basename(workspaceFilename, path.extname(workspaceFilename));
+    }
     appPath = String(vs?.env?.appRoot ?? '');
     dataPath = String(vs?.env?.globalStorageUri?.fsPath ?? '');
     const editor = vs?.window?.activeTextEditor;
@@ -128,6 +138,15 @@ export function cbBuiltinVars(
     PROJECT_NAME: projectTitle,
     PROJECTNAME: projectTitle,
     PROJECT_FILENAME: projectFilename,
+    // 目标编译器目录（macrosmanager.cpp:396 MasterPath.GetPathWithSep）
+    TARGET_COMPILER_DIR: compilerDir ? toNative(compilerDir.replace(/[\\/]$/, '') + (win ? '\\' : '/')) : '',
+    // 工作区（macrosmanager.cpp:180-187）
+    WORKSPACE_FILE: workspaceFilename,
+    WORKSPACE_FILENAME: workspaceFilename,
+    WORKSPACE_FILE_NAME: workspaceFilename,
+    WORKSPACEFILE: workspaceFilename,
+    WORKSPACEFILENAME: workspaceFilename,
+    WORKSPACE_NAME: workspaceName,
     // 工作区（macrosmanager.cpp:187-188）
     WORKSPACE_DIR: toNative(workspaceDir),
     WORKSPACE_DIRECTORY: toNative(workspaceDir),
@@ -137,6 +156,20 @@ export function cbBuiltinVars(
     'APP-PATH': toNative(appPath),
     APPPATH: toNative(appPath),
     DATA_PATH: toNative(dataPath),
+    'DATA-PATH': toNative(dataPath),
+    DATAPATH: toNative(dataPath),
+    PLUGINS: appPath ? toNative(path.join(appPath, 'plugins')) : '',
+    // 静态宏（macrosmanager.cpp:128-163 ClearProjectKeys）
+    AMP: '&',
+    PLATFORM: win ? 'msw' : 'unix',
+    CMD_NULL: win ? 'NUL' : '/dev/null',
+    CMD_CP: win ? 'cmd /c copy' : 'cp --preserve=timestamps',
+    CMD_RM: win ? 'cmd /c del' : 'rm',
+    CMD_MV: win ? 'cmd /c move' : 'mv',
+    CMD_MKDIR: win ? 'cmd /c md' : 'mkdir -p',
+    CMD_RMDIR: win ? 'cmd /c rd' : 'rmdir',
+    LANGUAGE: (() => { try { return Intl.DateTimeFormat().resolvedOptions().locale; } catch { return ''; } })(),
+    ENCODING: win ? ((() => { try { return Intl.DateTimeFormat().resolvedOptions().locale.startsWith('zh') ? 'GBK' : 'windows-1252'; } catch { return 'windows-1252'; } })()) : 'UTF-8',
     // 活动编辑器（macrosmanager.cpp:411-426）
     ACTIVE_EDITOR_FILENAME: toNative(active.filename),
     ACTIVE_EDITOR_DIRNAME: toNative(active.dirname),
@@ -157,11 +190,12 @@ export function cbBuiltinVars(
  */
 export function replaceCbMacros(
   cmd: string,
-  opts: { vars?: Record<string, string>; customVars?: Record<string, string>; gcv?: Record<string, Record<string, string>> },
+  opts: { vars?: Record<string, string>; customVars?: Record<string, string>; gcv?: Record<string, Record<string, string>>; basePath?: string },
 ): string {
   const vars = opts.vars ?? {};
   const customVars = opts.customVars ?? {};
   const gcv = opts.gcv ?? globalVariables();
+  const basePath = opts.basePath ?? process.cwd();
   const dyn = dateVars(new Date());
 
   const lookup = (raw: string): string => {
@@ -189,6 +223,30 @@ export function replaceCbMacros(
   };
 
   let cur = cmd.replace(/\$\$/g, '\u0001CBDOLLAR\u0001');
+  // 函数式宏（macrosmanager.cpp:610-628/655-667）在变量替换之前处理（CB 顺序，否则 $TO_... 会被变量正则吞掉）：
+  // $TO_ABSOLUTE_PATH{} / $TO_83_PATH{} / $REMOVE_QUOTES{}
+  if (cur.includes('$TO_ABSOLUTE_PATH{')) {
+    cur = cur.replace(/\$TO_ABSOLUTE_PATH\{([^}]*)\}/g, (_m, p: string) => path.resolve(basePath, p.trim()));
+  }
+  if (cur.includes('$TO_83_PATH{')) {
+    cur = cur.replace(/\$TO_83_PATH\{([^}]*)\}/g, (_m, p: string) => {
+      const abs = path.resolve(basePath, p.trim());
+      return process.platform === 'win32' ? shortPathWin(abs) : abs;
+    });
+  }
+  if (cur.includes('$REMOVE_QUOTES{')) {
+    let guard = 0;
+    while (guard++ < 8 && cur.includes('$REMOVE_QUOTES{')) {
+      cur = cur.replace(/\$REMOVE_QUOTES\{([^}]*)\}/g, (_m, p: string) => {
+        let content = p.trim();
+        // 对齐 CB：内容以 $ 开头时先做一次完整宏展开（659-660）
+        if (content.startsWith('$')) content = replaceCbMacros(content, opts);
+        // 仅当首尾均为引号时剥除（661-664）
+        if (content.length > 2 && content.startsWith('"') && content.endsWith('"')) return content.slice(1, -1);
+        return content;
+      });
+    }
+  }
   for (let i = 0; i < 5; i++) {
     const next = cur
       .replace(/\$\(([#]?[A-Za-z_][A-Za-z0-9_.]*)\)/g, (_m: string, n: string) => resolve(n))

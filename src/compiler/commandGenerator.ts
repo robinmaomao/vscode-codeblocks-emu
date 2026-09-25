@@ -246,12 +246,13 @@ export class CommandGenerator {
       target.objectOutput,
       this.project.title,
       this.project.filename,
+      this.compiler.masterPath,
     );
   }
 
   /** 对齐 CB ReplaceMacros（含 $(#var)、日期/时间、env 回退、反转义；compilercommandgenerator.cpp:579/806-1163） */
   private expandCb(s: string, target: BuildTarget): string {
-    return replaceCbMacros(s, { vars: this.cbVars(target), customVars: this.project.customVariables ?? {} });
+    return replaceCbMacros(s, { vars: this.cbVars(target), customVars: this.project.customVariables ?? {}, basePath: this.project.basePath });
   }
 
   private setupOutputFilenames(target: BuildTarget): string {
@@ -377,7 +378,7 @@ export class CommandGenerator {
 
   private setupResourceCompilerOptions(target: BuildTarget): string {
     const opts = combineOptions(
-      (this.project as any).resourceCompilerOptions ?? [],
+      this.project.resourceCompilerOptions ?? [],
       target.resourceCompilerOptions,
       this.getRelation(target, this.rel.CompilerOptions),
     );
@@ -742,6 +743,7 @@ export class CommandGenerator {
       macro = replaceCbMacros(macro, {
         vars: this.cbVars(params.target),
         customVars: this.project.customVariables ?? {},
+        basePath: this.project.basePath,
       });
     }
     // 10. 对齐 compilergcc.cpp:1402：命令执行前整体 cbExpandBackticks
