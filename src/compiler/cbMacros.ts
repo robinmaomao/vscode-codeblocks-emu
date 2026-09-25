@@ -97,12 +97,16 @@ export function cbBuiltinVars(
   try {
     const vs = getVscode();
     const wf = vs?.workspace?.workspaceFolders;
-    workspaceDir = (wf && wf.length ? String(wf[0].uri.fsPath) : basePath).replace(/[\\/]$/, '') + (win ? '\\' : '/');
     const wsFile = vs?.workspace?.workspaceFile?.fsPath;
     if (wsFile) {
       workspaceFilename = toNative(String(wsFile));
       workspaceName = path.basename(workspaceFilename, path.extname(workspaceFilename));
     }
+    // WORKSPACE_DIR：优先 .code-workspace 文件所在目录（对齐 CB 单一 .workspace 语义），次首个工作区文件夹，回退工程目录
+    const wsRoot = wsFile
+      ? path.dirname(String(wsFile))
+      : wf && wf.length ? String(wf[0].uri.fsPath) : basePath;
+    workspaceDir = wsRoot.replace(/[\\/]$/, '') + (win ? '\\' : '/');
     appPath = String(vs?.env?.appRoot ?? '');
     dataPath = String(vs?.env?.globalStorageUri?.fsPath ?? '');
     const editor = vs?.window?.activeTextEditor;

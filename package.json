@@ -2,7 +2,7 @@
   "name": "codeblocks-vscode",
   "displayName": "Code::Blocks for VS Code",
   "description": "原生移植 Code::Blocks 核心功能到 VS Code：项目模型、构建引擎、编译器管理与调试引擎",
-  "version": "0.8.54-dev",
+  "version": "0.8.55-dev",
   "icon": "resources/icon.png",
   "publisher": "robinmaomao",
   "author": {
@@ -260,6 +260,21 @@
           "type": "boolean",
           "default": true,
           "description": "构建/运行/清理前自动保存工作区中未保存的文件（对齐 Code::Blocks 的 Save all files before build）"
+        },
+        "codeblocks.build.plainCbLog": {
+          "type": "boolean",
+          "default": false,
+          "description": "纯 Code::Blocks 日志模式：关闭脚本编号/单行完成式/Emoji 汇总块/最慢 Top3，构建结束输出 CB 风格 === Build finished === 行"
+        },
+        "codeblocks.log.english": {
+          "type": "boolean",
+          "default": false,
+          "description": "构建日志输出英文文案（汇总/状态类消息对齐 Code::Blocks 原文）"
+        },
+        "codeblocks.build.strictQuoting": {
+          "type": "boolean",
+          "default": false,
+          "description": "严格引号规则（对齐 Code::Blocks NeedQuotes：仅空格加引号）；默认关闭为宽规则（空格 + cmd 元字符，防 shell 二次解析）"
         },
         "codeblocks.compilerPrograms": {
           "type": "object",

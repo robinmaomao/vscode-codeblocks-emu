@@ -16,6 +16,7 @@ import { CommandGenerator, computeStaticOutput, quoteIfNeeded, clearBackticksCac
 import { OutputParser } from './outputParser';
 import { runScriptCommands } from './scriptRunner';
 import { replaceCbMacros, cbBuiltinVars } from '../compiler/cbMacros';
+import { buildLogPrefs, msg } from './logLang';
 import { BuildCancelHandle } from './cancelToken';
 import { decodeText } from '../tools/encoding';
 import { applyResponseFile, compareFilesByWeight } from './commandLine';
@@ -494,7 +495,7 @@ export class BuildEngine {
     // 增量判断（对齐 CompileFile 的 IsObjectOutdated 前置检查；deps 目录用关系合并后的有序目录，对齐 DepsSearchStart）
     const object = this.objectPathFor(target, file);
     if (!options.rebuild && this.isUpToDate(file.absolutePath, object, this.getIncludeDirs(target, generator), new Map())) {
-      this.output.info(`[Code::Blocks] ${fileRel} 已是最新`);
+      this.output.info(`[Code::Blocks] ${fileRel} ${msg('已是最新', 'is up to date')}`);
       return true;
     }
 
@@ -505,7 +506,7 @@ export class BuildEngine {
       return false;
     }
 
-    this.output.info(`[Code::Blocks] 编译文件: ${fileRel}`);
+    this.output.info(`[Code::Blocks] ${msg('编译文件', 'Compiling')}: ${fileRel}`);
     if (this.verboseOutput()) {
       this.output.info(unit.command);
     }
@@ -784,7 +785,7 @@ export class BuildEngine {
       };
     }
     // 编译阶段完成耗时（对齐 Code::Blocks 阶段化日志）
-    this.output.info(`[Code::Blocks] 编译完成 ${totalUnits} 个文件 (${compileSec}s)`);
+    this.output.info(`[Code::Blocks] ${msg(`编译完成 ${totalUnits} 个文件 (${compileSec}s)`, `Compiled ${totalUnits} files (${compileSec}s)`)}`);
 
     // 2. 链接（CommandsOnly/static lib 不链接；CommandsOnly 已在上面 return 或按开关跳过链接）
     let linkSuccess = true;
@@ -864,7 +865,7 @@ export class BuildEngine {
               if (options.cancel?.isCancelled()) {
                 return this.cancelledStats(target, totalUnits, skippedCount);
               }
-              this.output.error(`[Code::Blocks] 目标 "${target.title}" 链接失败`);
+              this.output.error(`[Code::Blocks] ${msg(`目标 "${target.title}" 链接失败`, `Target "${target.title}" failed to link`)}`);
               return {
                 success: false,
                 compiledCount: totalUnits,
@@ -876,13 +877,15 @@ export class BuildEngine {
                 outputFilename: target.outputFilename,
               };
             }
-            this.output.info(`✓ [Linked] ${path.relative(this.project.basePath, outputAbs)} (${linkSec}s)`);
+            if (!buildLogPrefs().plain) {
+              this.output.info(`✓ [Linked] ${path.relative(this.project.basePath, outputAbs)} (${linkSec}s)`);
+            }
           } else {
             // 对齐 GetTargetLinkCommands：无链接器程序时提示跳过
             this.output.debug(`[Code::Blocks] Skipping linking (no linker program set): ${outputAbs}`);
           }
         } else {
-          this.output.info(`[Code::Blocks] 目标 "${target.title}" 链接已是最新，跳过链接`);
+          this.output.info(`[Code::Blocks] ${msg(`目标 "${target.title}" 链接已是最新，跳过链接`, `Target "${target.title}" is up to date, linking skipped`)}`);
         }
       }
     } else if (target.targetType === TargetType.StaticLib) {
@@ -964,13 +967,15 @@ export class BuildEngine {
                 outputFilename: target.outputFilename,
               };
             }
-            this.output.info(`✓ [Archived] ${staticOut} (${arSec}s)`);
+            if (!buildLogPrefs().plain) {
+              this.output.info(`✓ [Archived] ${staticOut} (${arSec}s)`);
+            }
           } else {
             // 对齐 GetTargetLinkCommands：无打包程序时提示跳过
             this.output.debug(`[Code::Blocks] Skipping linking (no linker program set): ${staticOutAbs}`);
           }
         } else {
-          this.output.info(`[Code::Blocks] 目标 "${target.title}" 静态库已是最新，跳过打包`);
+          this.output.info(`[Code::Blocks] ${msg(`目标 "${target.title}" 静态库已是最新，跳过打包`, `Target "${target.title}" is up to date, archiving skipped`)}`);
         }
       }
     }
@@ -1706,7 +1711,9 @@ export class BuildEngine {
         // 单行完成式：无交错、含进度序号与耗时（序号用连字符避免 Output 面板误判为路径链接）
         const idx = baseGlobalIdx + li + 1;
         if (ok) {
-          this.output.info(`✓ [Compiled] ${idx}-${totalCount} ${u.file.relativeFilename} (${elapsedSec}s)`);
+          if (!buildLogPrefs().plain) {
+            this.output.info(`✓ [Compiled] ${idx}-${totalCount} ${u.file.relativeFilename} (${elapsedSec}s)`);
+          }
         } else if (options.cancel?.isCancelled()) {
           // 取消导致的失败不是错误：不打印红色 Failed，不参与最慢 Top3 统计
           this.output.warn(`⚠ [Interrupted] ${idx}-${totalCount} ${u.file.relativeFilename}`);
@@ -1795,7 +1802,7 @@ export class BuildEngine {
       });
       proc.on('error', (err) => {
         options.cancel?.unregister(proc);
-        this.output.error(`[Code::Blocks] 无法执行: ${err.message}`);
+        this.output.error(`[Code::Blocks] ${msg('无法执行', 'Failed to execute')}: ${err.message}`);
         resolve(false);
       });
     });

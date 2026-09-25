@@ -16,6 +16,7 @@ import { getWindowsSystemPath } from '../tools/windowsPath';
 import { upperDrive } from '../tools/pathCase';
 import { BuildCancelHandle } from './cancelToken';
 import { replaceCbMacros } from '../compiler/cbMacros';
+import { buildLogPrefs } from './logLang';
 
 /** 展开命令中的宏（Code::Blocks 变量风格） */
 export function expandMacros(cmd: string, vars: Record<string, string>): string {
@@ -133,8 +134,8 @@ export async function runScriptCommands(
       break;
     }
     const cmd = commands[i];
-    // 脚本命令编号（[script 1-5]，连字符避免 Output 面板误判为路径链接）
-    if (onLog) onLog(`[script ${i + 1}-${total}] ${cmd}`);
+    // 脚本命令编号（[script 1-5]，连字符避免 Output 面板误判为路径链接；plainCbLog 模式关闭编号）
+    if (onLog) onLog(buildLogPrefs().plain ? cmd : `[script ${i + 1}-${total}] ${cmd}`);
     const r = await runScriptCommand(cmd, cwd, vars, extraPath, cancel);
     if (r.output) {
       // 子进程输出缩进两空格，与脚本命令区分层次
