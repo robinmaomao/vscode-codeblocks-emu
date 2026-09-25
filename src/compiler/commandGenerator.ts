@@ -203,34 +203,34 @@ export class CommandGenerator {
   }
 
   private setupOutputFilenames(target: BuildTarget): string {
-    // 对齐 CodeBlocks SetupOutputFilenames（compilercommandgenerator.cpp:739 先 ReplaceMacros）：
-    // 保留原生分隔符（FixPathSeparators 仅在 forceFwdSlashes=true 时转正斜杠，默认保持反斜杠）
-    return quoteIfNeeded(this.expandCb(target.outputFilename, target));
+    // 对齐 CodeBlocks SetupOutputFilenames（compilercommandgenerator.cpp:654-656 先 ReplaceMacros，Quote 后 FixPathSeparators）：
+    // 保留原生分隔符（forceFwdSlashes=true 时 \ → /，默认保持反斜杠）
+    return quoteIfNeeded(this.fixSep(this.expandCb(target.outputFilename, target)));
   }
 
   private setupStaticOutput(target: BuildTarget): string {
     // DynamicLib import 库：优先自定义 imp_lib，否则由 output 推导（对齐 GetDynamicLibImportFilename，673 先 ReplaceMacros）；
-    // 对齐 SetupOutputFilenames：ttDynamicLib 的 import 库**强制**平台默认前缀/扩展（策略无视）
+    // 对齐 SetupOutputFilenames：ttDynamicLib 的 import 库**强制**平台默认前缀/扩展（策略无视）；Quote 后 FixPathSeparators
     const force = target.targetType === TargetType.DynamicLib;
     const base = this.expandCb(target.impLib || target.outputFilename, target);
-    return quoteIfNeeded(computeStaticOutput(
+    return quoteIfNeeded(this.fixSep(computeStaticOutput(
       base,
       this.compiler.switches,
       force ? true : target.prefixAuto,
       force ? true : target.extensionAuto,
-    ));
+    )));
   }
 
   private setupDefOutput(target: BuildTarget): string {
-    // def 文件名：优先自定义 def_file，否则由 output 推导（对齐 GetDynamicLibDefFilename，700 先 ReplaceMacros）；前缀/扩展按目标策略
+    // def 文件名：优先自定义 def_file，否则由 output 推导（对齐 GetDynamicLibDefFilename，700 先 ReplaceMacros）；前缀/扩展按目标策略；Quote 后 FixPathSeparators
     const base = this.expandCb(target.defFile || target.outputFilename, target);
-    return quoteIfNeeded(computeLibOutput(
+    return quoteIfNeeded(this.fixSep(computeLibOutput(
       base,
       this.compiler.switches.libPrefix,
       'def',
       target.prefixAuto,
       target.extensionAuto,
-    ));
+    )));
   }
 
   private setupIncludeDirs(target: BuildTarget): string {
