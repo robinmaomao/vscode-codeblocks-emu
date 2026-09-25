@@ -195,6 +195,17 @@ export class CommandGenerator {
   /** 对应 CompilerCommandGenerator::Init() */
   private init(): void {
     for (const target of this.project.buildTargets) {
+      // CommandsOnly 目标：空存根（对齐 Init:130-144——m_Output/m_Inc/m_CFlags 等全空，
+      // 编译命令不带选项/include/lib 目录）
+      if (target.targetType === TargetType.CommandsOnly) {
+        this.cache.set(target.title, {
+          output: '', staticOutput: '', defOutput: '',
+          inc: '', lib: '', rc: '',
+          cFlags: '', rcFlags: '', ldFlags: '', ldAdd: '',
+          compilerSearchDirs: [], linkerSearchDirs: [],
+        });
+        continue;
+      }
       const c: PregenCache = {
         output: this.setupOutputFilenames(target),
         staticOutput: this.setupStaticOutput(target),

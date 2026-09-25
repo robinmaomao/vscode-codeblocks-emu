@@ -2,7 +2,7 @@
   "name": "codeblocks-vscode",
   "displayName": "Code::Blocks for VS Code",
   "description": "原生移植 Code::Blocks 核心功能到 VS Code：项目模型、构建引擎、编译器管理与调试引擎",
-  "version": "0.8.40-dev",
+  "version": "0.8.41-dev",
   "icon": "resources/icon.png",
   "publisher": "robinmaomao",
   "author": {
@@ -235,6 +235,11 @@
           "type": "boolean",
           "default": false,
           "description": "详细构建输出：完整编译命令行（对齐 Code::Blocks 详细模式）、clean/rebuild 逐文件列表、增量跳过文件列表"
+        },
+        "codeblocks.build.compileCommandsOnlyTargets": {
+          "type": "boolean",
+          "default": false,
+          "description": "CommandsOnly 目标（type=4）是否编译其文件（对齐 Code::Blocks：CB 以空选项/空 include 编译 CommandsOnly 目标的文件；默认关闭保持扩展原行为：仅执行 pre/post 脚本）"
         },
         "codeblocks.saveBeforeBuild": {
           "type": "boolean",

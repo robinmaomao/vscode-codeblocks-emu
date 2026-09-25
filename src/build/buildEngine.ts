@@ -121,6 +121,15 @@ export class BuildEngine {
     return fs.existsSync(path.join(c.masterPath, 'bin', c.programs.C)) || fs.existsSync(path.join(c.masterPath, c.programs.C));
   }
 
+  /** CommandsOnly 目标是否编译其文件（设置 codeblocks.build.compileCommandsOnlyTargets；默认 false 保持扩展原行为，true 对齐 CB 的空存根编译） */
+  private compileCommandsOnlyTargets(): boolean {
+    try {
+      return vscode.workspace.getConfiguration('codeblocks').get<boolean>('build.compileCommandsOnlyTargets', false) === true;
+    } catch {
+      return false;
+    }
+  }
+
   /**
    * 构建/清理 Banner —— 对齐 PrintBanner（compilergcc.cpp:1786-1830）：
    * "-------------- <Action>: <target> in <project> (compiler: <name>)---------------"（左 14 连字符+空格，右 15 连字符）。
@@ -297,6 +306,8 @@ export class BuildEngine {
     for (const target of targets) {
       // 平台过滤（对齐 GenerateCommandLine:238：目标不支持当前平台 → 不生成编译命令）
       if (!supportsCurrentPlatform(target.platforms)) continue;
+      // CommandsOnly 目标默认不编译（开关关闭时同样不生成 clangd 条目）
+      if (target.targetType === TargetType.CommandsOnly && !this.compileCommandsOnlyTargets()) continue;
       // 每目标编译器（对齐 GetCompiler(target->GetCompilerID())）
       this.switchCompiler(target);
       const generator = new CommandGenerator(this.project, this.compiler);
@@ -433,6 +444,11 @@ export class BuildEngine {
       this.output.error(`[Code::Blocks] error: Cannot find target for file: ${fileRel}`);
       return false;
     }
+    // CommandsOnly 目标默认不编译文件（对齐扩展默认行为；开启 codeblocks.build.compileCommandsOnlyTargets 时按 CB 空存根编译）
+    if (target.targetType === TargetType.CommandsOnly && !this.compileCommandsOnlyTargets()) {
+      this.output.warn(`[Code::Blocks] CommandsOnly 目标 "${targetTitle}" 默认不编译文件（可开启设置 codeblocks.build.compileCommandsOnlyTargets 对齐 CB）`);
+      return false;
+    }
     // 单文件编译 Banner —— 对齐 PrintBanner(baBuildFile)（CompileFile:3156）
     this.printBanner('Build file', target);
     if (file.compile === false) {
@@ -548,8 +564,9 @@ export class BuildEngine {
       this.output.warn(`[Code::Blocks] 暂不支持 Squirrel 构建脚本，已跳过: ${s}`);
     }
 
-    if (target.targetType === TargetType.CommandsOnly) {
-      // 仅执行目标级 pre/post build 命令（项目级在 build() 层各执行一次，对齐状态机 bsProjectPreBuild/bsProjectPostBuild）
+    if (target.targetType === TargetType.CommandsOnly && !this.compileCommandsOnlyTargets()) {
+      // 默认行为：仅执行目标级 pre/post build 命令（项目级在 build() 层各执行一次，对齐状态机 bsProjectPreBuild/bsProjectPostBuild）
+      // （开启 codeblocks.build.compileCommandsOnlyTargets 时对齐 CB：照常编译文件，命令不带选项/include）
       const runAndCheck = async (cmds: string[], phase: 'pre' | 'post'): Promise<boolean | undefined> => {
         if (!cmds.length) return true;
         this.output.info(`[Code::Blocks] 执行目标 ${phase}-build 脚本 (${target.title})...`);
@@ -751,11 +768,11 @@ export class BuildEngine {
     // 编译阶段完成耗时（对齐 Code::Blocks 阶段化日志）
     this.output.info(`[Code::Blocks] 编译完成 ${totalUnits} 个文件 (${compileSec}s)`);
 
-    // 2. 链接（非 static lib 需要链接步骤；CommandsOnly 已在上面 return）
+    // 2. 链接（CommandsOnly/static lib 不链接；CommandsOnly 已在上面 return 或按开关跳过链接）
     let linkSuccess = true;
     let linkExecuted = false;
     let archiveExecuted = false;
-    if (target.targetType !== TargetType.StaticLib) {
+    if (target.targetType !== TargetType.StaticLib && target.targetType !== TargetType.CommandsOnly) {
       // 对齐 GetTargetLinkCommands：无可链接对象文件 → 跳过链接阶段（即使输出缺失也不链接）
       if (linkFiles.length === 0 && resFiles.length === 0) {
         this.output.info('[Code::Blocks] Linking stage skipped (build target has no object files to link)');
