@@ -2,7 +2,7 @@
   "name": "codeblocks-vscode",
   "displayName": "Code::Blocks for VS Code",
   "description": "原生移植 Code::Blocks 核心功能到 VS Code：项目模型、构建引擎、编译器管理与调试引擎",
-  "version": "0.8.60-dev",
+  "version": "0.8.62-dev",
   "icon": "resources/icon.png",
   "publisher": "robinmaomao",
   "author": {
@@ -95,6 +95,10 @@
       {
         "command": "codeblocks.openRecentProject",
         "title": "Code::Blocks: Open Recent Project"
+      },
+      {
+        "command": "codeblocks.resetViewLayout",
+        "title": "Code::Blocks: Reset View Layout"
       },
       {
         "command": "codeblocks.clean",
@@ -379,6 +383,13 @@
           "title": "Code::Blocks",
           "icon": "resources/codeblocks.svg"
         }
+      ],
+      "panel": [
+        {
+          "id": "codeblocks-buildPanel",
+          "title": "Code::Blocks Build Log",
+          "icon": "resources/buildlog.svg"
+        }
       ]
     },
     "views": {
@@ -386,25 +397,36 @@
         {
           "id": "codeblocks.menu",
           "name": "Menu",
-          "icon": "resources/menu.svg"
+          "icon": "resources/menu.svg",
+          "initialSize": 7
         },
         {
           "id": "codeblocks.projectTree",
           "name": "Project",
-          "icon": "resources/project.svg"
-        },
-        {
-          "id": "codeblocks.buildLog",
-          "name": "Build Log",
-          "icon": "resources/buildlog.svg"
+          "icon": "resources/project.svg",
+          "initialSize": 38
         },
         {
           "id": "codeblocks.symbols",
           "name": "Symbols",
-          "icon": "resources/project.svg"
+          "icon": "resources/project.svg",
+          "initialSize": 9
+        }
+      ],
+      "codeblocks-buildPanel": [
+        {
+          "id": "codeblocks.buildLog",
+          "name": "Build Log",
+          "icon": "resources/buildlog.svg"
         }
       ]
     },
+    "viewsWelcome": [
+      {
+        "view": "codeblocks.projectTree",
+        "contents": "尚未打开 Code::Blocks 工程。\n[打开工程 / 工作区 (.cbp / .workspace)](command:codeblocks.openProject)\n[新建工程](command:codeblocks.newProject)\n[编译当前文件（无项目）](command:codeblocks.compileFileWithoutProject)\n[检测编译器](command:codeblocks.detectCompilers)"
+      }
+    ],
     "debuggers": [
       {
         "type": "codeblocks",

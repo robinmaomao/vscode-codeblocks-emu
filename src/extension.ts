@@ -80,8 +80,6 @@ let rebuildStatusBar: vscode.StatusBarItem | undefined;
 let compilerStatusBar: vscode.StatusBarItem | undefined;
 /** 底部状态栏：检测到未打开的 Code::Blocks 项目入口 */
 let cbpStatusBar: vscode.StatusBarItem | undefined;
-/** 诊断徽标状态栏（错误/警告计数，点击打开 Build Log） */
-let diagStatusBar: vscode.StatusBarItem | undefined;
 /** 检测到但未打开的 .cbp 文件（供状态栏入口重新打开） */
 let pendingCbpFiles: string[] = [];
 
@@ -182,13 +180,75 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   // 初始渲染动态区（最近工程 + 工作区构建顺序）
   updateMenuDynamicSections();
 
+  // 视图布局：升级/首次安装后一次性应用默认排布（Build Log → 底部 Panel；侧栏 Menu→Project→Symbols）。
+  // 应用后由 VS Code 原生持久化用户调整（拖动/分割/大小），本扩展不再干预。
+  const UI_LAYOUT_VERSION_KEY = 'codeblocks.uiLayoutVersion';
+  const UI_LAYOUT_VERSION = '3';
+  const applyDefaultViewLayout = async (restoreEditorFocus: boolean): Promise<boolean> => {
+    try {
+      const cmds = await vscode.commands.getCommands(true);
+      if (!cmds.includes('vscode.moveViews')) {
+        outputChannel.appendLine('[视图布局] vscode.moveViews 不可用（需要 VS Code ≥ 1.85），未应用默认布局');
+        return false;
+      }
+      const sidebarId = 'workbench.view.extension.codeblocks';
+      const panelId = 'workbench.view.extension.codeblocks-buildPanel';
+      // 顺序即最终排列：每次 move 追加到目标容器末尾
+      await vscode.commands.executeCommand('vscode.moveViews', { viewIds: ['codeblocks.buildLog'], destinationId: panelId });
+      await vscode.commands.executeCommand('vscode.moveViews', { viewIds: ['codeblocks.menu'], destinationId: sidebarId });
+      await vscode.commands.executeCommand('vscode.moveViews', { viewIds: ['codeblocks.projectTree'], destinationId: sidebarId });
+      await vscode.commands.executeCommand('vscode.moveViews', { viewIds: ['codeblocks.symbols'], destinationId: sidebarId });
+      if (restoreEditorFocus) {
+        // 激活路径：把键盘焦点还给编辑器，避免开机弹出侧栏
+        setTimeout(() => {
+          void vscode.commands.executeCommand('workbench.action.focusActiveEditorGroup');
+        }, 300);
+      }
+      outputChannel.appendLine('[视图布局] 已应用默认布局（Build Log → 底部 Panel；侧栏 Menu→Project→Symbols）');
+      return true;
+    } catch (e) {
+      outputChannel.appendLine(`[视图布局] 应用失败（本次会话将重试）: ${e instanceof Error ? e.message : String(e)}`);
+      return false;
+    }
+  };
+
+  // 升级后一次性应用默认布局；失败不写标记并重试（最多 3 次），成功后不再覆盖用户手动调整
+  let layoutApplyAttempts = 0;
+  const tryApplyDefaultLayout = (): void => {
+    void (async () => {
+      if (context.globalState.get<string>(UI_LAYOUT_VERSION_KEY) === UI_LAYOUT_VERSION) {
+        return;
+      }
+      layoutApplyAttempts++;
+      if (await applyDefaultViewLayout(true)) {
+        await context.globalState.update(UI_LAYOUT_VERSION_KEY, UI_LAYOUT_VERSION);
+      } else if (layoutApplyAttempts < 3) {
+        setTimeout(tryApplyDefaultLayout, 5000);
+      }
+    })();
+  };
+  setTimeout(tryApplyDefaultLayout, 1500);
+
+  // 手动重置视图布局（恢复默认：Build Log 底部 Panel，侧栏 Menu→Project→Symbols）
+  context.subscriptions.push(
+    vscode.commands.registerCommand('codeblocks.resetViewLayout', async () => {
+      const ok = await applyDefaultViewLayout(false);
+      await context.globalState.update(UI_LAYOUT_VERSION_KEY, UI_LAYOUT_VERSION);
+      vscode.window.showInformationMessage(
+        ok
+          ? '视图布局已重置：Build Log 位于底部面板，侧栏顺序为 Menu → Project → Symbols'
+          : '视图布局重置失败，请查看 Code::Blocks 输出通道',
+      );
+    }),
+  );
+
   // 兜底 IntelliSense（补全 / 悬停 / 跳转定义）：仅在 clangd 不可用时生效
   context.subscriptions.push(...registerFallbackIntelliSense(fallbackIndex, () => fallbackEnabled));
 
-  // 聚焦 Build Log 视图（菜单项 / 构建完成后引导）
+  // 聚焦 Build Log 视图（菜单项 / 构建完成后引导）——位于底部 Panel 容器
   context.subscriptions.push(
     vscode.commands.registerCommand('codeblocks.buildLog.focus', () => {
-      vscode.commands.executeCommand('workbench.view.extension.codeblocks');
+      vscode.commands.executeCommand('workbench.view.extension.codeblocks-buildPanel');
     }),
   );
 
@@ -268,13 +328,6 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   buildStatusBar.command = 'codeblocks.build';
   buildStatusBar.tooltip = '增量编译（Ctrl+F9）';
   context.subscriptions.push(buildStatusBar);
-
-  // 诊断徽标（错误/警告计数，构建结束后更新；无诊断时隐藏）
-  diagStatusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 55);
-  diagStatusBar.command = 'codeblocks.buildLog.focus';
-  diagStatusBar.tooltip = '点击打开 Build Log';
-  diagStatusBar.hide();
-  context.subscriptions.push(diagStatusBar);
 
   // 构建中旋转动画（buildInProgress 时 Build 项变 spinner + 点击变停止构建）
   const spinTimer = setInterval(() => {
@@ -2918,18 +2971,6 @@ function buildResultStats(): { errorCount: number; warningCount: number } {
   return { errorCount, warningCount };
 }
 
-/** 状态栏诊断徽标（A1：错误/警告计数，无诊断时隐藏） */
-function updateDiagnosticsBadge(errorCount: number, warningCount: number): void {
-  if (!diagStatusBar) return;
-  if (errorCount === 0 && warningCount === 0) {
-    diagStatusBar.hide();
-    return;
-  }
-  diagStatusBar.text = `$(error) ${errorCount} $(warning) ${warningCount}`;
-  diagStatusBar.tooltip = `本次构建：${errorCount} 错误 · ${warningCount} 警告（点击打开 Build Log）`;
-  diagStatusBar.show();
-}
-
 /** 记录最近打开工程（globalState，最多 8 个，E1） */
 function recordRecentProject(filename: string): void {
   try {
@@ -2976,8 +3017,6 @@ function finishBuildSummary(allOk: boolean, buildStartMs: number): void {
     warningCount,
     truncated: maxErrorsReached,
   });
-  // 状态栏诊断徽标（A1）
-  updateDiagnosticsBadge(errorCount, warningCount);
   // 达到上限时提示（CodeBlocks "More errors follow but not being shown"）
   if (maxErrorsReached) {
     outputChannel.warn('[Code::Blocks] 错误数达到上限，后续错误不再显示（可在设置 codeblocks.maxReportedErrors 调整）');

@@ -181,7 +181,7 @@ export class BuildLogTreeProvider implements vscode.TreeDataProvider<BuildLogNod
   private buildRootNode(s: BuildLogSummary): BuildLogNode {
     const node = new BuildLogNode(
       'root',
-      s.success ? '✅ 构建成功' : '❌ 构建失败',
+      s.success ? '构建成功' : '构建失败',
       vscode.TreeItemCollapsibleState.Expanded,
       s.success ? this.icon('log-success.svg', 'check') : this.icon('log-error.svg', 'error'),
     );
@@ -200,9 +200,8 @@ export class BuildLogTreeProvider implements vscode.TreeDataProvider<BuildLogNod
       p.success ? this.icon('log-project.svg', 'package') : this.icon('log-error.svg', 'error'),
     );
     const errCount = p.diagnostics.filter((d) => d.severity === 'error').length;
-    const warnCount = p.diagnostics.filter((d) => d.severity === 'warning').length;
     node.errorCount = errCount;
-    node.description = `${p.targetName} · ${p.success ? '成功' : '失败'} · ${(p.durationMs / 1000).toFixed(1)}s · ${errCount} 错误 · ${warnCount} 警告`;
+    node.description = `${p.targetName} · ${p.success ? '成功' : '失败'} · ${(p.durationMs / 1000).toFixed(1)}s`;
     node.tooltip = `${p.projectName} · 目标 ${p.targetName}`;
 
     const children: BuildLogNode[] = [];

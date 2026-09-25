@@ -29,6 +29,38 @@ class MenuNode extends vscode.TreeItem {
   }
 }
 
+/** 顶级菜单图标（V2） */
+const MENU_ICONS: Record<string, string> = {
+  'File': 'file',
+  'Edit': 'edit',
+  'View': 'eye',
+  'Search': 'search',
+  'Project': 'package',
+  'Build': 'tools',
+  'Debug': 'bug',
+  'Tools': 'wrench',
+  'Settings': 'gear',
+};
+
+/** 子项图标（V2，叶子命令） */
+const CHILD_ICONS: Record<string, string> = {
+  'New Project…': 'file-add',
+  'Open Project…': 'folder-opened',
+  'Save File': 'save',
+  'Build': 'package',
+  'Rebuild': 'sync',
+  'Clean': 'trash',
+  'Build and Run': 'run',
+  'Run': 'play',
+  'Start / Continue': 'debug-start',
+  'Detect Compilers…': 'search',
+  'Code Statistics…': 'graph',
+  'Format with AStyle': 'code',
+  'Compiler Options…': 'settings-gear',
+  'Find in Files…': 'search',
+  'TODO List': 'checklist',
+};
+
 /** 菜单结构 —— 对齐 Code::Blocks 菜单栏 */
 const MENU_STRUCTURE: MenuItemDef[] = [
   {
@@ -161,6 +193,9 @@ export class MenuTreeProvider implements vscode.TreeDataProvider<MenuNode> {
       : vscode.TreeItemCollapsibleState.None;
 
     const node = new MenuNode(def.label, collapsible, children);
+    // V2：菜单图标（顶级 + 部分子项）
+    const icon = children.length ? MENU_ICONS[def.label] : CHILD_ICONS[def.label];
+    if (icon) node.iconPath = new vscode.ThemeIcon(icon);
     if (def.command) {
       node.command = {
         command: def.command,
