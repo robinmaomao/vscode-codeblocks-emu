@@ -5,6 +5,7 @@
  * File/Edit 等编辑类菜单映射 VS Code 内建命令；Build/Debug/Tools 映射扩展命令。
  */
 import * as vscode from 'vscode';
+import * as path from 'path';
 
 /** 菜单项定义 */
 interface MenuItemDef {
@@ -114,9 +115,43 @@ export class MenuTreeProvider implements vscode.TreeDataProvider<MenuNode> {
   readonly onDidChangeTreeData = this._onDidChangeTreeData.event;
 
   private rootNodes: MenuNode[];
+  private dynamic: { recents: { label: string; file: string }[]; order: { label: string; file: string }[] } = { recents: [], order: [] };
 
   constructor() {
-    this.rootNodes = MENU_STRUCTURE.map((m) => this.buildNode(m));
+    this.rootNodes = this.buildRoot();
+  }
+
+  /** 更新动态区（最近工程 + 工作区构建顺序），E1/E2 */
+  setDynamic(d: { recents: { label: string; file: string }[]; order: { label: string; file: string }[] }): void {
+    this.dynamic = d;
+    this.rootNodes = this.buildRoot();
+    this._onDidChangeTreeData.fire(undefined);
+  }
+
+  private buildRoot(): MenuNode[] {
+    const nodes: MenuNode[] = [];
+    if (this.dynamic.order.length) {
+      const wsChildren = this.dynamic.order.map((o) => {
+        const n = new MenuNode(o.label, vscode.TreeItemCollapsibleState.None);
+        n.command = { command: 'codeblocks.setActiveProject', title: '设为活动项目', arguments: [o.file] };
+        n.iconPath = new vscode.ThemeIcon('layers');
+        n.tooltip = o.file;
+        return n;
+      });
+      nodes.push(new MenuNode('Workspace', vscode.TreeItemCollapsibleState.Expanded, wsChildren));
+    }
+    if (this.dynamic.recents.length) {
+      const rcChildren = this.dynamic.recents.map((r) => {
+        const n = new MenuNode(r.label, vscode.TreeItemCollapsibleState.None);
+        n.command = { command: 'codeblocks.openRecentProject', title: '打开工程', arguments: [r.file] };
+        n.iconPath = new vscode.ThemeIcon('history');
+        n.description = path.dirname(r.file);
+        return n;
+      });
+      nodes.push(new MenuNode('Recent Projects', vscode.TreeItemCollapsibleState.Collapsed, rcChildren));
+    }
+    nodes.push(...MENU_STRUCTURE.map((m) => this.buildNode(m)));
+    return nodes;
   }
 
   private buildNode(def: MenuItemDef): MenuNode {

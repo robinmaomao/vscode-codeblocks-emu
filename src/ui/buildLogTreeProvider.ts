@@ -58,6 +58,10 @@ type BuildLogKind = 'root' | 'project' | 'info' | 'group' | 'diagnostic';
 class BuildLogNode extends vscode.TreeItem {
   /** 子节点（覆盖默认，允许后续赋值） */
   declare children: BuildLogNode[];
+  /** 诊断数据（diagnostic 节点，供右键复制） */
+  diag?: BuildLogDiagnostic;
+  /** 项目节点的错误诊断数（errorsOnly 过滤用） */
+  errorCount = 0;
 
   constructor(
     public readonly kind: BuildLogKind,
@@ -76,6 +80,16 @@ export class BuildLogTreeProvider implements vscode.TreeDataProvider<BuildLogNod
   readonly onDidChangeTreeData = this._onDidChangeTreeData.event;
 
   private summary: BuildLogSummary | undefined;
+  /** 只看错误过滤（C2） */
+  private errorsOnly = false;
+
+  /** 切换「只看错误」过滤并刷新视图 */
+  setErrorsOnly(v: boolean): void {
+    this.errorsOnly = v;
+    this._onDidChangeTreeData.fire(undefined);
+  }
+
+  getErrorsOnly(): boolean { return this.errorsOnly; }
   /** 资源根目录（用于加载彩色图标） */
   private resourcesDir?: vscode.Uri;
   /** 彩色图标缓存：key = icons/ 下文件名，value = URI */
@@ -154,14 +168,20 @@ export class BuildLogTreeProvider implements vscode.TreeDataProvider<BuildLogNod
 
   getChildren(element?: BuildLogNode): BuildLogNode[] {
     if (!this.summary) return [];
-    if (!element) return [this.buildRootNode(this.summary)];
+    if (!element) {
+      const root = this.buildRootNode(this.summary);
+      if (!this.errorsOnly) return [root];
+      // 过滤模式下仅展示含错误的项目
+      root.children = root.children.filter((p) => p.errorCount > 0);
+      return root.children.length ? [root] : [root];
+    }
     return element.children;
   }
 
   private buildRootNode(s: BuildLogSummary): BuildLogNode {
     const node = new BuildLogNode(
       'root',
-      s.success ? '构建成功' : '构建失败',
+      s.success ? '✅ 构建成功' : '❌ 构建失败',
       vscode.TreeItemCollapsibleState.Expanded,
       s.success ? this.icon('log-success.svg', 'check') : this.icon('log-error.svg', 'error'),
     );
@@ -179,10 +199,28 @@ export class BuildLogTreeProvider implements vscode.TreeDataProvider<BuildLogNod
       vscode.TreeItemCollapsibleState.Expanded,
       p.success ? this.icon('log-project.svg', 'package') : this.icon('log-error.svg', 'error'),
     );
-    node.description = `${p.targetName} · ${p.success ? '成功' : '失败'} · ${(p.durationMs / 1000).toFixed(1)}s`;
+    const errCount = p.diagnostics.filter((d) => d.severity === 'error').length;
+    const warnCount = p.diagnostics.filter((d) => d.severity === 'warning').length;
+    node.errorCount = errCount;
+    node.description = `${p.targetName} · ${p.success ? '成功' : '失败'} · ${(p.durationMs / 1000).toFixed(1)}s · ${errCount} 错误 · ${warnCount} 警告`;
     node.tooltip = `${p.projectName} · 目标 ${p.targetName}`;
 
     const children: BuildLogNode[] = [];
+
+    // errorsOnly 过滤：仅保留错误分组（跳过编译器/统计/链接信息节点）
+    if (this.errorsOnly) {
+      const errors = p.diagnostics.filter((d) => d.severity === 'error');
+      const errorGroup = new BuildLogNode(
+        'group',
+        `错误 (${errors.length})`,
+        errors.length > 0 ? vscode.TreeItemCollapsibleState.Expanded : vscode.TreeItemCollapsibleState.None,
+        this.icon('log-error.svg', 'error'),
+      );
+      errorGroup.children = errors.map((d) => this.buildDiagnosticNode(d));
+      children.push(errorGroup);
+      node.children = children;
+      return node;
+    }
 
     // 编译器
     const compilerNode = new BuildLogNode('info', p.compilerPath, vscode.TreeItemCollapsibleState.None, this.icon('log-compiler.svg', 'tools'));
@@ -255,6 +293,10 @@ export class BuildLogTreeProvider implements vscode.TreeDataProvider<BuildLogNod
       isError ? this.icon('log-error.svg', 'error') : this.icon('log-warning.svg', 'warning'),
     );
     node.description = d.file ? d.message : undefined;
+    node.contextValue = isError ? 'diagnostic' : 'diagnostic-warning';
+    node.diag = d;
+    node.contextValue = isError ? 'diagnostic' : 'diagnostic-warning';
+    node.diag = d;
 
     const md = new vscode.MarkdownString();
     md.appendMarkdown(`**${d.message}**`);
