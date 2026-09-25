@@ -48,6 +48,7 @@ export class CodeBlocksConfig {
     libDirs: string[];
     resIncludeDirs: string[];
     linkLibs: string[];
+    extraPaths: string[];
     compilerOptions: string[];
     linkerOptions: string[];
     resourceCompilerOptions: string[];
@@ -99,6 +100,7 @@ export class CodeBlocksConfig {
           libDirs: splitCfgList(get('library_dirs')),
           resIncludeDirs: splitCfgList(get('res_include_dirs')),
           linkLibs: splitCfgList(get('libraries') || get('link_libs')),
+          extraPaths: splitCfgList(get('extra_paths')),
           compilerOptions: splitCfgList(get('compiler_options')),
           linkerOptions: splitCfgList(get('linker_options')),
           resourceCompilerOptions: splitCfgList(get('resource_compiler_options')),
@@ -279,6 +281,7 @@ export class CodeBlocksConfig {
     libDirs: string[];
     resIncludeDirs: string[];
     linkLibs: string[];
+    extraPaths: string[];
     compilerOptions: string[];
     linkerOptions: string[];
     resourceCompilerOptions: string[];
@@ -303,13 +306,14 @@ export class CodeBlocksConfig {
         resIncludeDirs: splitCfgList(get('res_include_dirs')),
         // CB 键名是 /libraries（compiler.cpp:466/648），非 link_libs；双键兼容
         linkLibs: splitCfgList(get('libraries') || get('link_libs')),
+        extraPaths: splitCfgList(get('extra_paths')),
         compilerOptions: splitCfgList(get('compiler_options')),
         linkerOptions: splitCfgList(get('linker_options')),
         resourceCompilerOptions: splitCfgList(get('resource_compiler_options')),
       };
     }
     return {
-      includeDirs: [], libDirs: [], resIncludeDirs: [], linkLibs: [],
+      includeDirs: [], libDirs: [], resIncludeDirs: [], linkLibs: [], extraPaths: [],
       compilerOptions: [], linkerOptions: [], resourceCompilerOptions: [],
     };
   }

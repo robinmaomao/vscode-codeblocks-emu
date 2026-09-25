@@ -69,6 +69,7 @@ export class CompilerOptionsLoader {
       libDirs: [],
       resIncludeDirs: [],
       linkLibs: [],
+      extraPaths: [],
       compilerOptions: [],
       linkerOptions: [],
       resourceCompilerOptions: [],

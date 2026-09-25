@@ -1972,6 +1972,7 @@ function getCompiler(compilerId?: string): Compiler {
       compiler.libDirs = sd.libDirs;
       compiler.resIncludeDirs = sd.resIncludeDirs;
       compiler.linkLibs = sd.linkLibs;
+      compiler.extraPaths = sd.extraPaths;
       compiler.compilerOptions = sd.compilerOptions;
       compiler.linkerOptions = sd.linkerOptions;
       compiler.resourceCompilerOptions = sd.resourceCompilerOptions;

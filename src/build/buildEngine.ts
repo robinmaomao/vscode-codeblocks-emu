@@ -118,7 +118,12 @@ export class BuildEngine {
     if (!c.programs.C) return false;
     if (!c.masterPath) return true;
     if (path.isAbsolute(c.programs.C)) return fs.existsSync(c.programs.C);
-    return fs.existsSync(path.join(c.masterPath, 'bin', c.programs.C)) || fs.existsSync(path.join(c.masterPath, c.programs.C));
+    if (fs.existsSync(path.join(c.masterPath, 'bin', c.programs.C)) || fs.existsSync(path.join(c.masterPath, c.programs.C))) return true;
+    // 对齐 Compiler::IsValid（compiler.cpp:218-229）：extra paths 也参与程序搜索
+    for (const ep of c.extraPaths ?? []) {
+      if (ep && fs.existsSync(path.join(ep, c.programs.C))) return true;
+    }
+    return false;
   }
 
   /** CommandsOnly 目标是否编译其文件（设置 codeblocks.build.compileCommandsOnlyTargets；默认 false 保持扩展原行为，true 对齐 CB 的空存根编译） */
@@ -148,11 +153,19 @@ export class BuildEngine {
     clearBackticksCache();
 
     // 编译/链接子进程 PATH 注入：编译器 bin 目录前置 + 实时系统 PATH（对齐 CodeBlocks Init 的 PATH 重构）
-    if (process.platform === 'win32') {
-      const extraPath = this.compilerBinPath();
-      const merged = [extraPath, getWindowsSystemPath(), process.env.PATH ?? ''].filter(Boolean).join(';');
-      this.buildEnv = { ...(process.env as NodeJS.ProcessEnv), PATH: merged };
-    }
+    // 编译/链接子进程 PATH 注入：编译器 bin 目录 + masterPath + extra_paths + 实时系统 PATH（对齐 CodeBlocks SetupEnvironment:795-830 的 PATH 重构，去重）
+    const parts = process.platform === 'win32'
+      ? [this.compilerBinPath(), this.compiler.masterPath, ...(this.compiler.extraPaths ?? []), getWindowsSystemPath(), process.env.PATH ?? '']
+      : [this.compilerBinPath(), this.compiler.masterPath, ...(this.compiler.extraPaths ?? []), process.env.PATH ?? ''];
+    const sep = process.platform === 'win32' ? ';' : ':';
+    const seen = new Set<string>();
+    const merged = parts.filter(Boolean).filter((p) => {
+      const k = process.platform === 'win32' ? p.toLowerCase() : p;
+      if (seen.has(k)) return false;
+      seen.add(k);
+      return true;
+    }).join(sep);
+    this.buildEnv = { ...(process.env as NodeJS.ProcessEnv), PATH: merged };
 
     // 无目标标题：只构建纳入 All 的目标（对齐 GetCompileCommands(target=null) 的 includeInTargetAll 过滤）
     const titles = targetTitle ? (Array.isArray(targetTitle) ? targetTitle : [targetTitle]) : undefined;
@@ -1760,7 +1773,7 @@ export class BuildEngine {
         options.cancel?.unregister(proc);
         if (stdoutChunks.length) processLines(decodeText(Buffer.concat(stdoutChunks)));
         if (stderrChunks.length) processLines(decodeText(Buffer.concat(stderrChunks)));
-        const success = code !== null && code <= this.compiler.switches.statusSuccess;
+        const success = code !== null && code >= 0 && code <= this.compiler.switches.statusSuccess;
         resolve(success);
       });
       proc.on('error', (err) => {
