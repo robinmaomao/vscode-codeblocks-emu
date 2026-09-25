@@ -333,7 +333,7 @@ export class BuildEngine {
           pf: file,
           file: file.absolutePath,
           object: objectRel,
-          flatObject: objectRel,
+          flatObject: this.objectPathRelativeFlat(target, file),
           deps: this.depsPathFor(target, file),
           hasCppFilesToLink: hasCpp,
           nativeSep: false,
@@ -394,7 +394,8 @@ export class BuildEngine {
         pf: file,
         file: srcFile,
         object: objectRel,
-        flatObject: objectRel,
+        // flatObject 恒为扁平命名（对齐 pfd.object_file_flat，与 useFlatObjects 无关）
+        flatObject: this.objectPathRelativeFlat(target, file),
         deps,
         hasCppFilesToLink: hasCpp,
       });
@@ -783,6 +784,8 @@ export class BuildEngine {
         const isOw = (target.compilerId || '').toLowerCase() === 'ow';
         const linkObjects = linkFiles.map((f) => quoteIfNeeded(this.linkObjectRelative(target, f)));
         const resObjects = resFiles.map((f) => quoteIfNeeded(this.objectPathRelative(target, f)));
+        // 扁平对象列表（对齐 GetTargetLinkCommands 的 FlatLinkFiles：恒为扁平命名，与 useFlatObjects 无关）
+        const linkObjectsFlat = linkFiles.map((f) => quoteIfNeeded(this.linkObjectRelativeFlat(target, f)));
         // OpenWatcom 特例（对齐 GetTargetLinkCommands:752-753/785-788）：链接对象前加 "file "、资源对象改 "option resource="、空格拼接
         const linkObjectStr = isOw
           ? (linkObjects.length ? 'file ' : '') + linkObjects.join(' ')
@@ -825,7 +828,7 @@ export class BuildEngine {
             pf: null,
             file: '',
             object: linkObjectStr,
-            flatObject: linkObjectStr,
+            flatObject: linkObjectsFlat.join(isOw ? ' ' : this.compiler.switches.objectSeparator),
             deps: resObjectStr,
             hasCppFilesToLink: hasCpp,
           });
@@ -876,6 +879,7 @@ export class BuildEngine {
         const isOw = (target.compilerId || '').toLowerCase() === 'ow';
         const hack = generator.linkObjectsPrependHack();
         const objects = linkFiles.map((f) => hack + quoteIfNeeded(this.linkObjectRelative(target, f)));
+        const objectsFlat = linkFiles.map((f) => hack + quoteIfNeeded(this.linkObjectRelativeFlat(target, f)));
         const objectSep = isOw ? ' ' : this.compiler.switches.objectSeparator;
         const staticOut = computeStaticOutput(
           this.expandedOutputFilename(target),
@@ -913,7 +917,7 @@ export class BuildEngine {
             pf: null,
             file: '',
             object: objects.join(objectSep),
-            flatObject: objects.join(objectSep),
+            flatObject: objectsFlat.join(objectSep),
             deps: '',
             hasCppFilesToLink: false,
           });
@@ -1046,7 +1050,8 @@ export class BuildEngine {
       // 对齐 GetCompileFileCommand 的源文件路径选择：UseFullSourcePaths 时绝对路径，否则相对路径
       file: this.compiler.switches.useFullSourcePaths ? file.absolutePath : file.relativeFilename,
       object,
-      flatObject: object,
+      // flatObject 恒为扁平命名（对齐 pfd.object_file_flat）
+      flatObject: this.objectPathRelativeFlat(target, file),
       deps: this.depsPathFor(target, file),
       hasCppFilesToLink: false,
     });
@@ -1529,6 +1534,32 @@ export class BuildEngine {
     const ft = fileTypeOf(file.relativeFilename);
     if (ft === FileType.Object || ft === FileType.StaticLib) return file.relativeFilename;
     return this.objectPathRelative(target, file);
+  }
+
+  /** 扁平对象路径 —— 对齐 pfd.object_file_flat（GetObjName useFlatObjects 强制扁平：对象目录 + 纯文件名，忽略源目录层级） */
+  private objectPathRelativeFlat(target: BuildTarget, file: ProjectFile): string {
+    // 生成器文件的对象 = 第一个生成文件的对象（与 objectPathRelative 同规则）
+    if ((file.generatedFiles?.length ?? 0) > 0) {
+      const first = this.project.files.find((f) => f.relativeFilename === file.generatedFiles[0]);
+      if (first) return this.objectPathRelativeFlat(target, first);
+    }
+    const ft = fileTypeOf(file.relativeFilename);
+    if (ft === FileType.Header && this.compiler.switches.supportsPCH) {
+      return this.pchObjectRelative(target, file);
+    }
+    const objDir = target.objectOutput || '.objs';
+    const ext = ft === FileType.Resource ? 'res' : this.compiler.switches.objectExtension;
+    const name = this.project.extendedObjNames
+      ? path.basename(file.relativeFilename) + '.' + ext
+      : path.parse(file.relativeFilename).name + '.' + ext;
+    return path.join(objDir, name);
+  }
+
+  /** 链接对象扁平路径（.o/.a 原路径，其余扁平命名；对齐 GetTargetLinkCommands 的 FlatLinkFiles） */
+  private linkObjectRelativeFlat(target: BuildTarget, file: ProjectFile): string {
+    const ft = fileTypeOf(file.relativeFilename);
+    if (ft === FileType.Object || ft === FileType.StaticLib) return file.relativeFilename;
+    return this.objectPathRelativeFlat(target, file);
   }
 
   /** 链接对象绝对路径（增量判断用） */
