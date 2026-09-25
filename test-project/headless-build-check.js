@@ -49,6 +49,9 @@ const getCompiler = (id) => {
     c.libDirs = sd.libDirs;
     c.resIncludeDirs = sd.resIncludeDirs;
     c.linkLibs = sd.linkLibs;
+    c.compilerOptions = sd.compilerOptions;
+    c.linkerOptions = sd.linkerOptions;
+    c.resourceCompilerOptions = sd.resourceCompilerOptions;
   }
   return c;
 };

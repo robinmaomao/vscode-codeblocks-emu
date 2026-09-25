@@ -55,3 +55,4 @@ test-force-fwd-output.js
 .git-msg.txt
 *.vsix
 test-mixed-compiler.js
+test-compiler-global-options.js

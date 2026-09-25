@@ -21,6 +21,8 @@ export interface UserCompilerConfig {
   CPP: string;
   LD: string;          // 链接器可执行名
   LIB: string;
+  /** 原始 XML 节点（供 searchDirs 读取 INCLUDE_DIRS/LIBRARIES 等大写键） */
+  raw: Record<string, unknown>;
 }
 
 /** 用户自定义错误正则（default.conf /compiler_sets/<id>/regex/reNNN，对齐 Compiler::LoadSettings:699） */
@@ -40,8 +42,17 @@ interface UserRegexConfig {
 export class CodeBlocksConfig {
   private parser = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: '@_' });
   private userCompilers = new Map<string, UserCompilerConfig>();
-  /** 编译器全局搜索目录（default.conf /compiler_sets/<id>：include_dirs/library_dirs/res_include_dirs/link_libs + 用户正则） */
-  private compilerSets = new Map<string, { includeDirs: string[]; libDirs: string[]; resIncludeDirs: string[]; linkLibs: string[]; regexes: UserRegexConfig[] }>();
+  /** 编译器全局搜索目录（default.conf /compiler_sets/<id>：include_dirs/library_dirs/res_include_dirs/libraries + 选项 + 用户正则） */
+  private compilerSets = new Map<string, {
+    includeDirs: string[];
+    libDirs: string[];
+    resIncludeDirs: string[];
+    linkLibs: string[];
+    compilerOptions: string[];
+    linkerOptions: string[];
+    resourceCompilerOptions: string[];
+    regexes: UserRegexConfig[];
+  }>();
   /** 全局编译器变量（default.conf /gcv/sets/<set>/<var>/<member>，对齐 uservarmanager） */
   private globalVars = new Map<string, Record<string, string>>();
 
@@ -77,7 +88,7 @@ export class CodeBlocksConfig {
         const cc = sets[key];
         if (!cc || typeof cc !== 'object') continue;
         const get = (n: string): string => {
-          const node = cc[n];
+          const node = cc[n] ?? cc[n.toUpperCase()];
           if (node === undefined || node === null) return '';
           if (typeof node === 'object') return String(node['str'] ?? node['#text'] ?? '');
           return String(node);
@@ -87,7 +98,10 @@ export class CodeBlocksConfig {
           includeDirs: splitCfgList(get('include_dirs')),
           libDirs: splitCfgList(get('library_dirs')),
           resIncludeDirs: splitCfgList(get('res_include_dirs')),
-          linkLibs: splitCfgList(get('link_libs')),
+          linkLibs: splitCfgList(get('libraries') || get('link_libs')),
+          compilerOptions: splitCfgList(get('compiler_options')),
+          linkerOptions: splitCfgList(get('linker_options')),
+          resourceCompilerOptions: splitCfgList(get('resource_compiler_options')),
           regexes: [] as UserRegexConfig[],
         };
         // 用户自定义错误正则（/compiler_sets/<id>/regex/reNNN，对齐 Compiler::LoadSettings:699-737）
@@ -160,6 +174,7 @@ export class CodeBlocksConfig {
         CPP: get('CPP_COMPILER'),
         LD: get('LINKER'),
         LIB: get('LIB_LINKER'),
+        raw: cc as Record<string, unknown>,
       };
       this.userCompilers.set(id, config);
       // 同时注册连字符变体（riscv32-v2 与 riscv32_v2 互相映射）
@@ -256,26 +271,47 @@ export class CodeBlocksConfig {
   }
 
   /**
-   * 编译器全局搜索目录 + 链接库（对齐 Compiler::LoadSettings 的 include_dirs/library_dirs/res_include_dirs/link_libs）。
-   * 优先 compiler_sets（设置集合），缺失时回退 user_sets（用户编译器节点同样可能携带这些字段）。
+   * 编译器全局搜索目录 + 链接库 + 全局选项（对齐 Compiler::LoadSettings 的 include_dirs/library_dirs/res_include_dirs/libraries/compiler_options/linker_options/resource_compiler_options）。
+   * 优先 compiler_sets（设置集合，CB 25.x 小写键），缺失时回退 user_sets（用户编译器节点，旧版 CB 大写键）。
    */
-  searchDirs(compilerId: string): { includeDirs: string[]; libDirs: string[]; resIncludeDirs: string[]; linkLibs: string[] } {
+  searchDirs(compilerId: string): {
+    includeDirs: string[];
+    libDirs: string[];
+    resIncludeDirs: string[];
+    linkLibs: string[];
+    compilerOptions: string[];
+    linkerOptions: string[];
+    resourceCompilerOptions: string[];
+  } {
     const lower = compilerId.toLowerCase();
     const sets = this.compilerSets.get(lower);
     if (sets) return sets;
     const uc = this.find(compilerId);
     if (uc) {
-      // user_sets 节点里的同名字段（旧版 CB 把搜索目录存在用户编译器定义里）
-      const raw = (uc as unknown as Record<string, unknown>);
-      const get = (n: string): string => String(raw[n] ?? '');
+      // user_sets 节点里的同名字段（旧版 CB 把搜索目录存在用户编译器定义里，且键名大写：
+      // INCLUDE_DIRS/LIBRARY_DIRS/RES_INCLUDE_DIRS/LIBRARIES/COMPILER_OPTIONS/LINKER_OPTIONS）
+      const raw = uc.raw;
+      const get = (n: string): string => {
+        const node = raw[n] ?? raw[n.toUpperCase()];
+        if (node === undefined || node === null) return '';
+        if (typeof node === 'object') return String((node as any)['str'] ?? (node as any)['#text'] ?? '');
+        return String(node);
+      };
       return {
         includeDirs: splitCfgList(get('include_dirs')),
         libDirs: splitCfgList(get('library_dirs')),
         resIncludeDirs: splitCfgList(get('res_include_dirs')),
-        linkLibs: splitCfgList(get('link_libs')),
+        // CB 键名是 /libraries（compiler.cpp:466/648），非 link_libs；双键兼容
+        linkLibs: splitCfgList(get('libraries') || get('link_libs')),
+        compilerOptions: splitCfgList(get('compiler_options')),
+        linkerOptions: splitCfgList(get('linker_options')),
+        resourceCompilerOptions: splitCfgList(get('resource_compiler_options')),
       };
     }
-    return { includeDirs: [], libDirs: [], resIncludeDirs: [], linkLibs: [] };
+    return {
+      includeDirs: [], libDirs: [], resIncludeDirs: [], linkLibs: [],
+      compilerOptions: [], linkerOptions: [], resourceCompilerOptions: [],
+    };
   }
 
   /**

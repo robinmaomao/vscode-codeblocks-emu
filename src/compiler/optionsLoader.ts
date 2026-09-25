@@ -69,6 +69,9 @@ export class CompilerOptionsLoader {
       libDirs: [],
       resIncludeDirs: [],
       linkLibs: [],
+      compilerOptions: [],
+      linkerOptions: [],
+      resourceCompilerOptions: [],
     };
 
     // 交叉编译器（如 riscv）无独立 XML，复用 GCC 的命令模板/选项/正则
