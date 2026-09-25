@@ -12,7 +12,7 @@ import { spawn } from 'child_process';
 import { Project, BuildTarget, ProjectFile, TargetType, CommandType, CompilerLineType, supportsCurrentPlatform } from '../model/types';
 import { FileType, fileTypeOf, isCompilableFileType, isLinkableFileType, isCppSource, isClangdIndexable } from '../model/fileTypes';
 import { Compiler } from '../compiler/compiler';
-import { CommandGenerator, computeStaticOutput, quoteIfNeeded } from '../compiler/commandGenerator';
+import { CommandGenerator, computeStaticOutput, quoteIfNeeded, clearBackticksCache } from '../compiler/commandGenerator';
 import { OutputParser } from './outputParser';
 import { runScriptCommands, buildMacroVars, replaceAllMacros } from './scriptRunner';
 import { replaceCbMacros } from '../compiler/cbMacros';
@@ -94,7 +94,7 @@ export class BuildEngine {
     private project: Project,
     private compiler: Compiler,
     private output: vscode.LogOutputChannel,
-    private resolveCompiler?: (id: string) => Compiler,
+    private resolveCompiler?: (id: string) => Compiler | undefined,
   ) {
     // 使用编译器 XML 加载的正则；若为空则回退内置正则
     this.parser = new OutputParser(compiler.regexes.length ? compiler.regexes : undefined);
@@ -113,8 +113,31 @@ export class BuildEngine {
     this.parser = new OutputParser(c.regexes.length ? c.regexes : undefined);
   }
 
+  /** 编译器是否可用 —— 对齐 Compiler::IsValid（compiler.cpp:191-231）：masterPath 设置时检查 C 程序存在性（bin/ 或根目录），未设置视为 PATH 查找 */
+  private isCompilerUsable(c: Compiler): boolean {
+    if (!c.programs.C) return false;
+    if (!c.masterPath) return true;
+    if (path.isAbsolute(c.programs.C)) return fs.existsSync(c.programs.C);
+    return fs.existsSync(path.join(c.masterPath, 'bin', c.programs.C)) || fs.existsSync(path.join(c.masterPath, c.programs.C));
+  }
+
+  /**
+   * 构建/清理 Banner —— 对齐 PrintBanner（compilergcc.cpp:1786-1830）：
+   * "-------------- <Action>: <target> in <project> (compiler: <name>)---------------"（左 14 连字符+空格，右 15 连字符）。
+   */
+  private printBanner(action: 'Build' | 'Clean' | 'Build file', target: BuildTarget): void {
+    this.output.info('');
+    this.output.info(
+      `-------------- ${action}: ${target.title} in ${this.project.title} (compiler: ${this.compiler.name})---------------`,
+    );
+    this.output.info(`  编译器程序: ${this.compiler.programs.C}`);
+  }
+
   /** 构建主循环 —— 对应 GetCompileCommands + GetTargetLinkCommands；项目级 pre/post 在目标循环外各执行一次（对齐状态机 bsProjectPreBuild/bsProjectPostBuild） */
   async build(targetTitle?: string | string[], options: BuildOptions = {}): Promise<boolean> {
+    // 对齐 Build()/Rebuild()/BuildWorkspace()：每轮构建清空反引号缓存（cbClearBackticksCache，Clean 单命令不清）
+    clearBackticksCache();
+
     // 编译/链接子进程 PATH 注入：编译器 bin 目录前置 + 实时系统 PATH（对齐 CodeBlocks Init 的 PATH 重构）
     if (process.platform === 'win32') {
       const extraPath = this.compilerBinPath();
@@ -134,6 +157,22 @@ export class BuildEngine {
 
     // 平台过滤（对齐 compilergcc.cpp:2749：不支持当前平台的目标不构建）
     targets = targets.filter((t) => supportsCurrentPlatform(t.platforms));
+
+    // 无效编译器过滤（对齐 PreprocessJob:2759-2764 CompilerValid + PrintInvalidCompiler）：
+    // 编译器 ID 未注册或 masterPath 指向的编译器程序缺失 → 报错并跳过该目标
+    targets = targets.filter((t) => {
+      const id = t.compilerId || this.project.compilerId;
+      const c = this.resolveCompiler ? this.resolveCompiler(id) : this.compiler;
+      if (c === undefined || !this.isCompilerUsable(c)) {
+        this.output.error(
+          `Project/Target: "${this.project.title} - ${t.title}":\n` +
+          `  The compiler's setup (${id || 'unknown'}) is invalid, so Code::Blocks cannot find/run the compiler.\n` +
+          `  Skipping...`,
+        );
+        return false;
+      }
+      return true;
+    });
 
     if (targets.length === 0) {
       vscode.window.showWarningMessage('没有可构建的目标');
@@ -185,10 +224,7 @@ export class BuildEngine {
       // 构建 Banner —— 对齐 PrintBanner（bsTargetPreBuild，每个目标构建前打印；位于项目 pre-build 之后）；
       // 编译器显示名按目标编译器（对齐 GetCompiler(target->GetCompilerID())）
       this.switchCompiler(target);
-      const sep = '-'.repeat(14);
-      this.output.info('');
-      this.output.info(`${sep} Build: ${target.title} in ${this.project.title} (compiler: ${this.compiler.name})${sep}`);
-      this.output.info(`  编译器程序: ${this.compiler.programs.C}`);
+      this.printBanner('Build', target);
       const result = await this.buildTarget(target, options);
       // 无论成功失败都累加统计（失败时统计已累计的部分）
       lastHadCommands = result.hadCommands;
@@ -395,6 +431,8 @@ export class BuildEngine {
       this.output.error(`[Code::Blocks] error: Cannot find target for file: ${fileRel}`);
       return false;
     }
+    // 单文件编译 Banner —— 对齐 PrintBanner(baBuildFile)（CompileFile:3156）
+    this.printBanner('Build file', target);
     if (file.compile === false) {
       this.output.warn(`[Code::Blocks] 文件被排除编译（compile="0"），跳过: ${fileRel}`);
       return false;
@@ -1314,6 +1352,8 @@ export class BuildEngine {
   cleanTarget(target: BuildTarget): void {
     // 每目标编译器（对齐 GetCompiler(target->GetCompilerID())，needDependencies 随目标编译器取）
     this.switchCompiler(target);
+    // Clean Banner —— 对齐状态机 bsTargetClean 的 PrintBanner(baClean)
+    this.printBanner('Clean', target);
     let removed = 0;
     const files = target.files.length ? target.files : this.project.files;
     for (const file of files) {

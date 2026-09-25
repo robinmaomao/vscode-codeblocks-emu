@@ -42,6 +42,7 @@ let activeProject: Project | undefined;
 let outputChannel: vscode.LogOutputChannel;
 let diagnosticCollection: vscode.DiagnosticCollection;
 let compilerLoader: CompilerOptionsLoader | undefined;
+let compilerResourcesDir = '';
 let codeBlocksConfig: CodeBlocksConfig | undefined;
 let projectTreeProvider: ProjectTreeProvider | undefined;
 let projectTreeView: vscode.TreeView<any> | undefined;
@@ -101,6 +102,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   // 初始化编译器选项加载器（resources/compilers 目录）
   const resourcesDir = path.join(context.extensionPath, 'resources', 'compilers');
   compilerLoader = new CompilerOptionsLoader(resourcesDir);
+  compilerResourcesDir = resourcesDir;
 
   // 读取 CodeBlocks 用户自定义编译器配置（如 riscv32-v2）
   codeBlocksConfig = new CodeBlocksConfig();
@@ -1995,6 +1997,23 @@ function getCompiler(compilerId?: string): Compiler {
   return applyGlobalDirs(createGccCompiler(process.platform, masterPath));
 }
 
+/**
+ * 构建用目标编译器解析器 —— 对齐 CompilerFactory::GetCompiler(target->GetCompilerID())：
+ * 编译器 ID 未注册（无 options_<id>.xml、非用户自定义编译器、非当前配置编译器）时返回 undefined，
+ * 由 BuildEngine 报「invalid compiler」并跳过该目标（对齐 PreprocessJob CompilerValid + PrintInvalidCompiler）。
+ * UI 路径（状态栏/面板）仍用 getCompiler（未注册时回退 GCC 模板）。
+ */
+function resolveTargetCompiler(compilerId: string): Compiler | undefined {
+  if (!compilerId) return undefined;
+  const cfg = vscode.workspace.getConfiguration('codeblocks');
+  if (compilerId === cfg.get<string>('compilerId', 'gcc')) return getCompiler(compilerId);
+  if (codeBlocksConfig?.find(compilerId)) return getCompiler(compilerId);
+  if (compilerResourcesDir && fs.existsSync(path.join(compilerResourcesDir, `options_${compilerId}.xml`))) {
+    return getCompiler(compilerId);
+  }
+  return undefined;
+}
+
 async function detectCompilers(): Promise<void> {
   const cfg = vscode.workspace.getConfiguration('codeblocks');
   const masterPath = cfg.get<string>('masterPath', '');
@@ -2472,7 +2491,7 @@ async function buildSingleFile(project: Project, file: ProjectFile): Promise<voi
   const compiler = getCompiler(target.compilerId || project.compilerId);
 
   outputChannel.show(true);
-  const engine = new BuildEngine(project, compiler, outputChannel, (id) => getCompiler(id));
+  const engine = new BuildEngine(project, compiler, outputChannel, (id) => resolveTargetCompiler(id));
   const cancelSource = new BuildCancelSource();
   currentBuildCancel = cancelSource;
   buildInProgress = true;
@@ -2537,7 +2556,7 @@ async function cleanSingleFile(project: Project, file: ProjectFile): Promise<voi
   if (!target) return;
   const compiler = getCompiler(target.compilerId || project.compilerId);
   outputChannel.show(true);
-  new BuildEngine(project, compiler, outputChannel, (id) => getCompiler(id)).cleanFile(targetTitle, file.relativeFilename);
+  new BuildEngine(project, compiler, outputChannel, (id) => resolveTargetCompiler(id)).cleanFile(targetTitle, file.relativeFilename);
 }
 
 /** 构建单个项目的一个目标（被 build / buildSingleProject 复用）；支持虚拟目标展开 */
@@ -2562,7 +2581,7 @@ async function buildOneProject(project: Project, targetTitle: string, rebuild: b
   const diagnostics: BuildLogDiagnostic[] = [];
   const startMs = Date.now();
 
-  const engine = new BuildEngine(project, compiler, outputChannel, (id) => getCompiler(id));
+  const engine = new BuildEngine(project, compiler, outputChannel, (id) => resolveTargetCompiler(id));
   const ok = await engine.build(targetTitles, {
     rebuild,
     cancel,
@@ -2722,7 +2741,7 @@ async function clean(): Promise<void> {
   // 逐文件删除构建产物（对齐 CodeBlocks GetTargetCleanCommands：对象文件 + 输出文件，不删目录）
   for (const target of project.buildTargets) {
     const compiler = getCompiler(target.compilerId || project.compilerId);
-    const engine = new BuildEngine(project, compiler, outputChannel, (id) => getCompiler(id));
+    const engine = new BuildEngine(project, compiler, outputChannel, (id) => resolveTargetCompiler(id));
     engine.cleanTarget(target);
   }
   outputChannel.info('[Code::Blocks] 清理完成');
