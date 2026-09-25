@@ -1443,7 +1443,7 @@ export class BuildEngine {
       if (target.targetType === TargetType.DynamicLib) {
         const imp = path.join(
           this.project.basePath,
-          computeStaticOutput(target.impLib || this.expandedOutputFilename(target), this.compiler.switches, true, true),
+          computeStaticOutput(target.impLib || this.expandedOutputFilename(target), this.compiler.switches, true, true, true),
         );
         if (this.removeFileIfExists(imp)) {
           removed++;
