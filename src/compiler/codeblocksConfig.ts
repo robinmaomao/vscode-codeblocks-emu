@@ -8,6 +8,8 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { XMLParser } from 'fast-xml-parser';
+import { RegExStruct } from './compiler';
+import { convertPosixRegex } from './posixRegex';
 
 /** 用户编译器配置（default.conf 里 /compiler/user_sets/<id>） */
 export interface UserCompilerConfig {
@@ -21,12 +23,25 @@ export interface UserCompilerConfig {
   LIB: string;
 }
 
+/** 用户自定义错误正则（default.conf /compiler_sets/<id>/regex/reNNN，对齐 Compiler::LoadSettings:699） */
+interface UserRegexConfig {
+  index: number;
+  description: string;
+  type: number;      // cltNormal=0/cltWarning=1/cltError=2/cltInfo=3
+  regex: string;
+  msg1: number;
+  msg2: number;
+  msg3: number;
+  filename: number;
+  line: number;
+}
+
 /** CodeBlocks 用户编译器注册表 */
 export class CodeBlocksConfig {
   private parser = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: '@_' });
   private userCompilers = new Map<string, UserCompilerConfig>();
-  /** 编译器全局搜索目录（default.conf /compiler_sets/<id>：include_dirs/library_dirs/res_include_dirs/link_libs） */
-  private compilerSets = new Map<string, { includeDirs: string[]; libDirs: string[]; resIncludeDirs: string[]; linkLibs: string[] }>();
+  /** 编译器全局搜索目录（default.conf /compiler_sets/<id>：include_dirs/library_dirs/res_include_dirs/link_libs + 用户正则） */
+  private compilerSets = new Map<string, { includeDirs: string[]; libDirs: string[]; resIncludeDirs: string[]; linkLibs: string[]; regexes: UserRegexConfig[] }>();
 
   /** 加载 default.conf（若存在） */
   load(defaultConfPath?: string): void {
@@ -68,7 +83,48 @@ export class CodeBlocksConfig {
           libDirs: splitCfgList(get('library_dirs')),
           resIncludeDirs: splitCfgList(get('res_include_dirs')),
           linkLibs: splitCfgList(get('link_libs')),
+          regexes: [] as UserRegexConfig[],
         };
+        // 用户自定义错误正则（/compiler_sets/<id>/regex/reNNN，对齐 Compiler::LoadSettings:699-737）
+        const reNode = cc['regex'];
+        if (reNode && typeof reNode === 'object') {
+          for (const rkey of Object.keys(reNode)) {
+            if (!/^re\d+$/.test(rkey)) continue;
+            const index = parseInt(rkey.slice(2), 10);
+            if (!Number.isFinite(index)) continue;
+            const r = reNode[rkey];
+            if (!r || typeof r !== 'object') continue;
+            const rget = (n: string): string => {
+              const nd = r[n];
+              if (nd === undefined || nd === null) return '';
+              if (typeof nd === 'object') return String(nd['str'] ?? nd['#text'] ?? '');
+              return String(nd);
+            };
+            // cbKeyBinder 的整数存为 <key int="2"/>，字符串存为 <key><str><![CDATA[...]]></str></key>（解析后 str 扁平为字符串）
+            const rint = (n: string): number => {
+              const nd = r[n];
+              if (nd === undefined || nd === null) return 0;
+              if (typeof nd === 'object') {
+                const raw = String(nd['@_int'] ?? nd['str'] ?? nd['#text'] ?? '0');
+                return parseInt(raw, 10) || 0;
+              }
+              return parseInt(String(nd), 10) || 0;
+            };
+            // 对齐 CB：无 description 节点跳过
+            if (!rget('description')) continue;
+            entry.regexes.push({
+              index,
+              description: rget('description'),
+              type: rint('type'),
+              regex: rget('regex'),
+              msg1: rint('msg1'),
+              msg2: rint('msg2'),
+              msg3: rint('msg3'),
+              filename: rint('filename'),
+              line: rint('line'),
+            });
+          }
+        }
         this.compilerSets.set(id, entry);
         this.compilerSets.set(id.replace(/_/g, '-'), entry);
         this.compilerSets.set(id.replace(/-/g, '_'), entry);
@@ -167,6 +223,29 @@ export class CodeBlocksConfig {
       };
     }
     return { includeDirs: [], libDirs: [], resIncludeDirs: [], linkLibs: [] };
+  }
+
+  /**
+   * 应用用户自定义错误正则 —— 对齐 Compiler::LoadSettings:699-737：
+   * index ≤ 现有正则数 → 按索引覆盖 XML 默认正则；否则追加。
+   */
+  applyUserRegexes(compilerId: string, regexes: RegExStruct[]): void {
+    const lower = compilerId.toLowerCase();
+    const entry = this.compilerSets.get(lower);
+    if (!entry || entry.regexes.length === 0) return;
+    for (const r of entry.regexes) {
+      const lt = r.type === 1 ? 'warning' : r.type === 3 ? 'info' : r.type === 0 ? 'normal' : 'error';
+      const rs: RegExStruct = {
+        desc: r.description,
+        lt,
+        msg: [r.msg1, r.msg2, r.msg3],
+        filename: r.filename,
+        line: r.line,
+        regex: convertPosixRegex(r.regex),
+      };
+      if (r.index <= regexes.length) regexes[r.index - 1] = rs;
+      else regexes.push(rs);
+    }
   }
 
   /** default.conf 常见位置 */

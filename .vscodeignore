@@ -45,5 +45,6 @@ test-cancel-token.js
 test-external-deps.js
 test-fixup-link-libs.js
 test-platforms.js
+test-user-regexes.js
 .git-msg.txt
 *.vsix
