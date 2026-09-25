@@ -173,6 +173,11 @@ export function expandBackticks(str: string, onOutput?: (bt: string) => void): s
   return out;
 }
 
+/** 清空反引号缓存 —— 对齐 cbClearBackticksCache（Build/Rebuild/BuildWorkspace 入口调用；单目标 Clean 不清） */
+export function clearBackticksCache(): void {
+  backticksCache.clear();
+}
+
 export class CommandGenerator {
   private project: Project;
   private compiler: Compiler;
