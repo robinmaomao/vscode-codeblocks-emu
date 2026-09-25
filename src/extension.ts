@@ -27,7 +27,7 @@ import { BuildCancelSource, BuildCancelHandle } from './build/cancelToken';
 import { expandMacros } from './build/scriptRunner';
 import { applyGeneratedFiles } from './build/generatedFiles';
 import { cbBuiltinVars, replaceCbMacros } from './compiler/cbMacros';
-import { buildLogPrefs, msg } from './build/logLang';
+import { buildLogPrefs, msg, quietSuccess } from './build/logLang';
 import { decodeText } from './tools/encoding';
 import { clearBackticksCache } from './compiler/commandGenerator';
 import { OutputParser } from './build/outputParser';
@@ -51,6 +51,7 @@ let compilerResourcesDir = '';
 let codeBlocksConfig: CodeBlocksConfig | undefined;
 let projectTreeProvider: ProjectTreeProvider | undefined;
 let projectTreeView: vscode.TreeView<any> | undefined;
+let menuTreeProvider: MenuTreeProvider | undefined;
 let buildLogTreeProvider: BuildLogTreeProvider | undefined;
 let symbolTreeProvider: SymbolTreeProvider | undefined;
 let extContext: vscode.ExtensionContext | undefined;
@@ -79,6 +80,8 @@ let rebuildStatusBar: vscode.StatusBarItem | undefined;
 let compilerStatusBar: vscode.StatusBarItem | undefined;
 /** 底部状态栏：检测到未打开的 Code::Blocks 项目入口 */
 let cbpStatusBar: vscode.StatusBarItem | undefined;
+/** 诊断徽标状态栏（错误/警告计数，点击打开 Build Log） */
+let diagStatusBar: vscode.StatusBarItem | undefined;
 /** 检测到但未打开的 .cbp 文件（供状态栏入口重新打开） */
 let pendingCbpFiles: string[] = [];
 
@@ -172,9 +175,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   context.subscriptions.push(symbolsTreeView);
 
   // 注册菜单树视图（File/Edit/View/Build 等，模拟 Code::Blocks 菜单栏）
+  menuTreeProvider = new MenuTreeProvider();
   context.subscriptions.push(
-    vscode.window.registerTreeDataProvider('codeblocks.menu', new MenuTreeProvider()),
+    vscode.window.registerTreeDataProvider('codeblocks.menu', menuTreeProvider),
   );
+  // 初始渲染动态区（最近工程 + 工作区构建顺序）
+  updateMenuDynamicSections();
 
   // 兜底 IntelliSense（补全 / 悬停 / 跳转定义）：仅在 clangd 不可用时生效
   context.subscriptions.push(...registerFallbackIntelliSense(fallbackIndex, () => fallbackEnabled));
@@ -222,6 +228,33 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     }),
   );
 
+  // Build Log「只看错误」过滤（C2）
+  context.subscriptions.push(
+    vscode.commands.registerCommand('codeblocks.buildLog.toggleErrorsOnly', () => {
+      const next = !(buildLogTreeProvider?.getErrorsOnly() ?? false);
+      buildLogTreeProvider?.setErrorsOnly(next);
+      vscode.commands.executeCommand('setContext', 'codeblocks.buildLog.errorsOnly', next);
+    }),
+  );
+
+  // 复制诊断（C3）
+  context.subscriptions.push(
+    vscode.commands.registerCommand('codeblocks.buildLog.copyMessage', (node?: any) => {
+      const diag = node?.diag;
+      if (diag?.message) vscode.env.clipboard.writeText(diag.message);
+    }),
+  );
+  context.subscriptions.push(
+    vscode.commands.registerCommand('codeblocks.buildLog.copyDiagnostic', (node?: any) => {
+      const diag = node?.diag;
+      if (diag) {
+        vscode.env.clipboard.writeText(
+          `${diag.file ?? ''}${diag.line ? `:${diag.line}` : ''}${diag.column ? `:${diag.column}` : ''}: ${diag.severity}: ${diag.message}`,
+        );
+      }
+    }),
+  );
+
   // 底部状态栏：构建目标切换项
   targetStatusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
   targetStatusBar.command = 'codeblocks.selectTarget';
@@ -236,6 +269,28 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   buildStatusBar.tooltip = '增量编译（Ctrl+F9）';
   context.subscriptions.push(buildStatusBar);
 
+  // 诊断徽标（错误/警告计数，构建结束后更新；无诊断时隐藏）
+  diagStatusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 55);
+  diagStatusBar.command = 'codeblocks.buildLog.focus';
+  diagStatusBar.tooltip = '点击打开 Build Log';
+  diagStatusBar.hide();
+  context.subscriptions.push(diagStatusBar);
+
+  // 构建中旋转动画（buildInProgress 时 Build 项变 spinner + 点击变停止构建）
+  const spinTimer = setInterval(() => {
+      if (!buildStatusBar) return;
+      if (buildInProgress) {
+        buildStatusBar.text = '$(sync~spin) Building...';
+        buildStatusBar.tooltip = '构建进行中（点击停止）';
+        buildStatusBar.command = 'codeblocks.build.stop';
+      } else {
+        buildStatusBar.text = '$(package) Build';
+        buildStatusBar.tooltip = '增量编译（Ctrl+F9）';
+        buildStatusBar.command = 'codeblocks.build';
+      }
+    }, 250);
+  context.subscriptions.push({ dispose: () => clearInterval(spinTimer) });
+
   // 底部状态栏：全量编译
   rebuildStatusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 80);
   rebuildStatusBar.text = '$(sync) Rebuild';
@@ -249,6 +304,19 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   compilerStatusBar.tooltip = '点击选择编译器';
   context.subscriptions.push(compilerStatusBar);
   updateCompilerStatusBar();
+
+  // 打开最近工程（E1）
+  context.subscriptions.push(
+    vscode.commands.registerCommand('codeblocks.openRecentProject', async (filename?: string) => {
+      if (!filename) return;
+      if (openProjects.some((p) => p.filename === filename)) {
+        const p = openProjects.find((x) => x.filename === filename);
+        if (p) setActiveProject(p, { persist: true });
+        return;
+      }
+      await openProject(filename);
+    }),
+  );
 
   // 设置活动项目（点击项目树中的项目节点时触发）
   context.subscriptions.push(
@@ -1001,6 +1069,9 @@ async function openProject(filename: string): Promise<void> {
     // 建立 生成器 → 生成文件 关系（对齐 cbProject::AddFile 的 GenFilesHackMap，来自编译器 XML gen 属性）
     applyGeneratedFiles(project, getCompiler);
     openProjects.push(project);
+    // 最近工程记录 + 菜单动态区刷新（E1/E2）
+    recordRecentProject(filename);
+    updateMenuDynamicSections();
     if (!activeProject) {
       // 优先恢复上次持久化的活动工程；否则默认第一个打开的工程
       const persisted = extContext?.workspaceState.get<string>('codeblocks.activeProject', '');
@@ -1467,6 +1538,7 @@ function applyPersistedOrder(): void {
   // 剩余（未在持久化顺序中的新项目）追加到末尾
   for (const p of byFilename.values()) reordered.push(p);
   openProjects = reordered;
+  updateMenuDynamicSections();
   projectTreeProvider?.setProjects(openProjects);
 }
 
@@ -2359,7 +2431,10 @@ function reportBuildResult(success: boolean, cancelled: boolean, buildStartMs: n
   }
   if (success) {
     outputChannel.info(msg('[Code::Blocks] 构建成功', '[Code::Blocks] Build finished'));
-    vscode.window.showInformationMessage(msg(`✅ 构建成功 · ${errorCount} 错误 · ${warningCount} 警告`, `Build finished: ${errorCount} error(s), ${warningCount} warning(s)`));
+    // quietSuccess 模式：不弹 toast，仅日志 + 状态栏徽标
+    if (!quietSuccess()) {
+      vscode.window.showInformationMessage(msg(`✅ 构建成功 · ${errorCount} 错误 · ${warningCount} 警告`, `Build finished: ${errorCount} error(s), ${warningCount} warning(s)`));
+    }
   } else {
     outputChannel.error(msg('[Code::Blocks] 构建失败', '[Code::Blocks] Build failed'));
     vscode.window.showErrorMessage(msg(`❌ 构建失败 · ${errorCount} 错误 · ${warningCount} 警告`, `Build failed: ${errorCount} error(s), ${warningCount} warning(s)`));
@@ -2843,6 +2918,43 @@ function buildResultStats(): { errorCount: number; warningCount: number } {
   return { errorCount, warningCount };
 }
 
+/** 状态栏诊断徽标（A1：错误/警告计数，无诊断时隐藏） */
+function updateDiagnosticsBadge(errorCount: number, warningCount: number): void {
+  if (!diagStatusBar) return;
+  if (errorCount === 0 && warningCount === 0) {
+    diagStatusBar.hide();
+    return;
+  }
+  diagStatusBar.text = `$(error) ${errorCount} $(warning) ${warningCount}`;
+  diagStatusBar.tooltip = `本次构建：${errorCount} 错误 · ${warningCount} 警告（点击打开 Build Log）`;
+  diagStatusBar.show();
+}
+
+/** 记录最近打开工程（globalState，最多 8 个，E1） */
+function recordRecentProject(filename: string): void {
+  try {
+    const list = extContext?.globalState.get<string[]>('codeblocks.recentProjects', []) ?? [];
+    const next = [filename, ...list.filter((f) => f !== filename)].slice(0, 8);
+    void extContext?.globalState.update('codeblocks.recentProjects', next);
+  } catch { /* 非关键 */ }
+}
+
+/** 刷新 Menu 视图动态区（最近工程 + 工作区拓扑构建顺序，E1/E2） */
+function updateMenuDynamicSections(): void {
+  if (!menuTreeProvider) return;
+  try {
+    const recents = (extContext?.globalState.get<string[]>('codeblocks.recentProjects', []) ?? [])
+      .filter((f) => fs.existsSync(f));
+    menuTreeProvider.setDynamic({
+      recents: recents.map((f) => ({ label: path.basename(f), file: f })),
+      order: topologicalBuildOrder(openProjects).map((p, i) => ({
+        label: `${i + 1}. ${path.basename(path.dirname(p.filename)) || p.title}`,
+        file: p.filename,
+      })),
+    });
+  } catch { /* 非关键 */ }
+}
+
 /** 构建结束：汇总所有项目摘要，写入 Build Log 树视图 */
 function finishBuildSummary(allOk: boolean, buildStartMs: number): void {
   if (!buildLogTreeProvider) return;
@@ -2864,6 +2976,8 @@ function finishBuildSummary(allOk: boolean, buildStartMs: number): void {
     warningCount,
     truncated: maxErrorsReached,
   });
+  // 状态栏诊断徽标（A1）
+  updateDiagnosticsBadge(errorCount, warningCount);
   // 达到上限时提示（CodeBlocks "More errors follow but not being shown"）
   if (maxErrorsReached) {
     outputChannel.warn('[Code::Blocks] 错误数达到上限，后续错误不再显示（可在设置 codeblocks.maxReportedErrors 调整）');

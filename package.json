@@ -2,7 +2,7 @@
   "name": "codeblocks-vscode",
   "displayName": "Code::Blocks for VS Code",
   "description": "原生移植 Code::Blocks 核心功能到 VS Code：项目模型、构建引擎、编译器管理与调试引擎",
-  "version": "0.8.59-dev",
+  "version": "0.8.60-dev",
   "icon": "resources/icon.png",
   "publisher": "robinmaomao",
   "author": {
@@ -78,6 +78,23 @@
         "command": "codeblocks.compileFileWithoutProject",
         "title": "Code::Blocks: Compile File (Without Project)",
         "icon": "$(run-above)"
+      },
+      {
+        "command": "codeblocks.buildLog.toggleErrorsOnly",
+        "title": "Code::Blocks: Toggle Errors Only (Build Log)",
+        "icon": "$(filter)"
+      },
+      {
+        "command": "codeblocks.buildLog.copyMessage",
+        "title": "Code::Blocks: Copy Diagnostic Message"
+      },
+      {
+        "command": "codeblocks.buildLog.copyDiagnostic",
+        "title": "Code::Blocks: Copy Full Diagnostic"
+      },
+      {
+        "command": "codeblocks.openRecentProject",
+        "title": "Code::Blocks: Open Recent Project"
       },
       {
         "command": "codeblocks.clean",
@@ -281,6 +298,11 @@
           "default": false,
           "description": "严格引号规则（对齐 Code::Blocks NeedQuotes：仅空格加引号）；默认关闭为宽规则（空格 + cmd 元字符，防 shell 二次解析）"
         },
+        "codeblocks.ui.quietSuccess": {
+          "type": "boolean",
+          "default": false,
+          "description": "构建成功静默模式：不弹成功 toast，仅输出日志与状态栏诊断徽标"
+        },
         "codeblocks.compilerPrograms": {
           "type": "object",
           "default": {},
@@ -459,9 +481,29 @@
           "command": "codeblocks.codeStats",
           "when": "view == codeblocks.projectTree",
           "group": "navigation@13"
+        },
+        {
+          "command": "codeblocks.buildLog.toggleErrorsOnly",
+          "when": "view == codeblocks.buildLog && !codeblocks.buildLog.errorsOnly",
+          "group": "navigation@1"
+        },
+        {
+          "command": "codeblocks.buildLog.toggleErrorsOnly",
+          "when": "view == codeblocks.buildLog && codeblocks.buildLog.errorsOnly",
+          "group": "navigation@1"
         }
       ],
       "view/item/context": [
+        {
+          "command": "codeblocks.buildLog.copyMessage",
+          "when": "view == codeblocks.buildLog && viewItem =~ /^diagnostic/",
+          "group": "9_copy@1"
+        },
+        {
+          "command": "codeblocks.buildLog.copyDiagnostic",
+          "when": "view == codeblocks.buildLog && viewItem =~ /^diagnostic/",
+          "group": "9_copy@2"
+        },
         {
           "command": "codeblocks.selectProjectTarget",
           "when": "view == codeblocks.projectTree && viewItem == project",

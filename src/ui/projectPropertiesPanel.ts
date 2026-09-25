@@ -383,6 +383,9 @@ export class ProjectPropertiesPanel {
     .inline-field .field-name { display: inline; margin-bottom: 0; }
     .form label.check { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
     .form label.check .field-name { display: inline; margin-bottom: 0; }
+    /* 表单分组折叠（D2） */
+    details.fg { border: 1px solid var(--cb-border); border-radius: 4px; padding: 6px 10px; margin-bottom: 10px; }
+    details.fg summary { cursor: pointer; font-weight: 600; margin: 2px 0 6px; color: var(--vscode-foreground); }
   </style>
 </head>
 <body>
@@ -393,6 +396,7 @@ export class ProjectPropertiesPanel {
   <div class="toolbar">
     <button id="save">保存</button>
     <button id="saveClose" class="secondary">保存并关闭</button>
+    <select id="targetSwitch" title="快速切换到该目标" style="max-width:240px;width:auto"></select>
     <span id="status"></span>
   </div>
   <div class="main">
@@ -520,17 +524,27 @@ export class ProjectPropertiesPanel {
       el.querySelectorAll('.item').forEach(div => {
         div.addEventListener('click', () => { selected = +div.dataset.i; renderList(); renderForm(); });
       });
+      // D1：工具栏目标下拉同步
+      const sel = document.getElementById('targetSwitch');
+      if (sel) {
+        sel.innerHTML = targets.map((t, i) => '<option value="' + i + '">' + esc(t.title) + '</option>').join('');
+        sel.value = String(selected);
+      }
     }
 
     function renderForm() {
       const el = document.getElementById('form');
       if (!targets.length) { el.innerHTML = ''; return; }
       const t = targets[selected];
+      // D2：基本信息 / 输出与编译器 两组折叠
       el.innerHTML =
+        '<details open class="fg"><summary>基本信息</summary>' +
         '<label><span class="field-name">目标标题</span>' +
         '<input id="f-title" value="' + escAttr(t.title) + '"></label>' +
         '<label><span class="field-name">目标类型</span>' +
         '<select id="f-type">${typeOptions}</select></label>' +
+        '</details>' +
+        '<details open class="fg"><summary>输出与编译器</summary>' +
         '<label><span class="field-name">输出文件</span>' +
         '<input id="f-output" value="' + escAttr(t.outputFilename) + '">' +
         '<div class="hint">相对项目根目录，如 bin/Debug/hello</div></label>' +
@@ -538,7 +552,8 @@ export class ProjectPropertiesPanel {
         '<input id="f-object" value="' + escAttr(t.objectOutput || '') + '">' +
         '<div class="hint">留空则使用默认 .objs</div></label>' +
         '<label><span class="field-name">编译器 ID</span>' +
-        '<input id="f-compiler" value="' + escAttr(t.compilerId) + '"></label>';
+        '<input id="f-compiler" value="' + escAttr(t.compilerId) + '"></label>' +
+        '</details>';
       document.getElementById('f-type').value = String(t.targetType);
       ['f-title', 'f-type', 'f-output', 'f-object', 'f-compiler'].forEach(id => {
         document.getElementById(id).addEventListener('change', () => collectTargetForm());
@@ -577,6 +592,13 @@ export class ProjectPropertiesPanel {
       targetDirs.push({ includeDirs: [], libDirs: [], resourceDirs: [] });
       targetScripts.push({ scripts: [], before: [], after: [] });
       selected = targets.length - 1;
+      renderList(); renderForm();
+    });
+
+    // D1：工具栏目标下拉切换
+    document.getElementById('targetSwitch').addEventListener('change', () => {
+      collectTargetForm();
+      selected = Number(document.getElementById('targetSwitch').value) || 0;
       renderList(); renderForm();
     });
 
