@@ -169,6 +169,10 @@ export interface BuildTarget {
   executionParameters: string;
   /** 运行工作目录（<Option working_dir>，Run 用，对齐 GetWorkingDir：空 = 输出文件目录；仅控制台/可执行/动态库目标生效） */
   workingDir: string;
+  /** 宿主程序（<Option host_application>，库/CommandsOnly 目标 Run 用，对齐 GetHostApplication，compilergcc.cpp:2091-2126） */
+  hostApplication: string;
+  /** 宿主程序是否在终端运行（<Option run_host_application_in_terminal>，默认 true，GetRunHostApplicationInTerminal） */
+  runHostApplicationInTerminal: boolean;
   /** 外部依赖（<Option external_deps>，分号列表；比输出新时强制重链接，对齐 AreExternalDepsOutdated） */
   externalDeps: string[];
   /** 附加输出文件（<Option additional_output>，分号列表；外部依赖比它新时强制重链接） */
@@ -188,6 +192,18 @@ export interface BuildTarget {
   envVars: EnvVariable[];
   /** 是否始终运行 post build 步骤（<ExtraCommands><Mode after="always">） */
   alwaysRunPostBuildSteps: boolean;
+  /** 目标级 make 命令（<MakeCommands>，GetMakeCommandFor 优先目标后项目） */
+  makeCommands: MakeCommandsMap;
+}
+
+/** makefile 项目 MakeCommands（<MakeCommands><Build command="..."/>，GetMakeCommandFor，MakeCommand 枚举） */
+export interface MakeCommandsMap {
+  build?: string;
+  compileFile?: string;
+  clean?: string;
+  distClean?: string;
+  askRebuildNeeded?: string;
+  silentBuild?: string;
 }
 
 /** 虚拟目标（如 "All"） */
@@ -247,6 +263,14 @@ export interface Project {
   envVars: EnvVariable[];
   /** 项目级是否始终运行 post build 步骤（<ExtraCommands><Mode after="always">） */
   alwaysRunPostBuildSteps: boolean;
+  /** makefile 项目模式（<Option makefile_is_custom="1">，UseMake 路径） */
+  makefileIsCustom: boolean;
+  /** makefile 文件名（<Option makefile>，默认 Makefile） */
+  makefile: string;
+  /** makefile 模式执行目录（<Option execution_dir>，GetMakefileExecutionDir；空 = 项目根） */
+  executionDir: string;
+  /** 项目级 make 命令（<MakeCommands>，GetMakeCommandFor） */
+  makeCommands: MakeCommandsMap;
   /** 项目自定义变量（<Extensions><codeblocks_project_custom_variables>，宏展开时参与替换） */
   customVariables: Record<string, string>;
 

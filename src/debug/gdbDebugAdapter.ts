@@ -271,13 +271,38 @@ export class GdbDebugAdapter implements vscode.DebugAdapter {
           try { await this.session.sendMi('-var-delete', {}, [tmp]); } catch { /* ignore */ }
         }
       } else {
-        // 子节点成员：父 varobj 名 + 成员名（GDB child varobj 命名约定 parent.member）
+        // 子节点成员（含深层 a.b.c）：直接按 parent.member 链赋值；中间节点未物化时逐层 -var-list-children 定位
         const parentVar = this.varRefToName.get(ref);
         if (!parentVar) {
           this.sendResponse(req, false, {}, '找不到变量引用');
           return;
         }
-        await this.session.sendMi('-var-assign', {}, [`${parentVar}.${name}`, value]);
+        const segs = name.split('.').filter(Boolean);
+        let target = `${parentVar}.${segs.join('.')}`;
+        try {
+          await this.session.sendMi('-var-assign', {}, [target, value]);
+        } catch {
+          // 中间子节点未物化：逐层物化后按 GDB child 命名约定（parent.member）定位
+          target = parentVar;
+          for (const seg of segs) {
+            const listRes = await this.session.sendPositional('-var-list-children', [target]);
+            const children = this.splitMiTuples(listRes.attrs['children'] ?? '');
+            let found: ChildVar | null = null;
+            for (const childStr of children) {
+              const child = this.parseChildVar(childStr);
+              if (child && (child.exp === seg || child.exp.endsWith('.' + seg) || child.name.endsWith('.' + seg))) {
+                found = child;
+                break;
+              }
+            }
+            if (!found) {
+              this.sendResponse(req, false, {}, `找不到成员: ${seg}`);
+              return;
+            }
+            target = found.name;
+          }
+          await this.session.sendMi('-var-assign', {}, [target, value]);
+        }
         this.sendResponse(req, true, { value });
       }
     } catch (err) {

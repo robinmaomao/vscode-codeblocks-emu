@@ -7,6 +7,7 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
 import * as crypto from 'crypto';
+import { spawn } from 'child_process';
 import { ProjectParser, WorkspaceParser } from './model/parser';
 import { Project, BuildTarget, ProjectFile, TargetType, OptionsRelation, OptionsRelationType, LinkerExecutableOption, supportsCurrentPlatform } from './model/types';
 import { serializeProject } from './model/projectWriter';
@@ -27,6 +28,7 @@ import { expandMacros } from './build/scriptRunner';
 import { applyGeneratedFiles } from './build/generatedFiles';
 import { cbBuiltinVars, replaceCbMacros } from './compiler/cbMacros';
 import { buildLogPrefs, msg } from './build/logLang';
+import { decodeText } from './tools/encoding';
 import { clearBackticksCache } from './compiler/commandGenerator';
 import { OutputParser } from './build/outputParser';
 import { collectClangdEntries, writeClangdDatabase, CompileCommandEntry } from './build/compileCommands';
@@ -1480,6 +1482,9 @@ function createEmptyTarget(): BuildTarget {
     depsOutput: '',
     executionParameters: '',
     workingDir: '',
+    hostApplication: '',
+    runHostApplicationInTerminal: true,
+    makeCommands: {},
     optionRelations: {
       [OptionsRelationType.CompilerOptions]: OptionsRelation.AppendToParentOptions,
       [OptionsRelationType.LinkerOptions]: OptionsRelation.AppendToParentOptions,
@@ -2685,6 +2690,20 @@ async function buildOneProject(project: Project, targetTitle: string, rebuild: b
     return true;
   }
 
+  // makefile 项目模式（对齐 UseMake：Build/Rebuild 走 make 命令而非内部引擎，GetMakeCommandFor:2178-2197）
+  if (project.makefileIsCustom) {
+    if (rebuild) {
+      const cleanCmd = getMakeCommand(project, target, 'clean');
+      if (cleanCmd && !(await runMakeBuild(project, cleanCmd, targetTitle))) return false;
+    }
+    const buildCmd = getMakeCommand(project, target, 'build');
+    if (!buildCmd) {
+      outputChannel.error(`[Code::Blocks] makefile 项目 "${project.title}" 未配置 <MakeCommands><Build command=...>`);
+      return false;
+    }
+    return await runMakeBuild(project, buildCmd, targetTitle);
+  }
+
   const compiler = getCompiler(target.compilerId || project.compilerId);
   // 构建 Banner 由引擎在项目 pre-build 之后、每个目标构建前打印（对齐 bsTargetPreBuild 的 PrintBanner）
 
@@ -2901,8 +2920,69 @@ async function cleanTargets(project: Project, targetTitle: string): Promise<void
   for (const title of titles) {
     const target = project.buildTargets.find((t) => t.title === title);
     if (!target) continue;
+    // makefile 项目模式：Clean 走 make clean（对齐 UseMake → DoCleanWithMake:2530-2531）
+    if (project.makefileIsCustom) {
+      const cleanCmd = getMakeCommand(project, target, 'clean');
+      if (cleanCmd) {
+        await runMakeBuild(project, cleanCmd, title);
+        continue;
+      }
+    }
     const compiler = getCompiler(target.compilerId || project.compilerId);
     new BuildEngine(project, compiler, outputChannel, (id) => resolveTargetCompiler(id)).cleanTarget(target);
+  }
+}
+
+/** makefile 项目模式：解析 make 命令（对齐 GetMakeCommandFor:2178-2197：目标优先项目，$makefile/$make/$target 替换 + ReplaceMacros） */
+function getMakeCommand(project: Project, target: BuildTarget | undefined, key: 'build' | 'compileFile' | 'clean' | 'distClean' | 'askRebuildNeeded' | 'silentBuild'): string | undefined {
+  const raw = (target?.makeCommands?.[key] ?? '') || project.makeCommands[key];
+  if (!raw) return undefined;
+  const compiler = getCompiler(target?.compilerId || project.compilerId);
+  const cmd = raw
+    .replace(/\$makefile/g, project.makefile || 'Makefile')
+    .replace(/\$make/g, compiler.programs.MAKE || 'make')
+    .replace(/\$target/g, target?.title ?? '');
+  const vars = cbBuiltinVars(project.basePath, target?.outputFilename ?? '', target?.title ?? '', target?.objectOutput ?? '', project.title, project.filename, compiler.masterPath);
+  return replaceCbMacros(cmd, { vars, customVars: project.customVariables ?? {}, basePath: project.basePath });
+}
+
+/** makefile 项目模式：执行 make 命令（工作目录 = GetExecutionDir 语义：execution_dir 或项目根；退出码按 statusSuccess 判定） */
+async function runMakeBuild(project: Project, command: string, targetTitle: string): Promise<boolean> {
+  const compiler = getCompiler(project.compilerId);
+  outputChannel.show(true);
+  outputChannel.info(`[Code::Blocks] Make: ${command}`);
+  const cwd = project.executionDir ? path.resolve(project.basePath, project.executionDir) : project.basePath;
+  const cancelSource = new BuildCancelSource();
+  currentBuildCancel = cancelSource;
+  buildInProgress = true;
+  try {
+    const code = await new Promise<number | null>((resolve, reject) => {
+      const proc = spawn(command, { cwd, shell: true, windowsHide: true });
+      cancelSource.register(proc);
+      const onData = (buf: Buffer): void => {
+        for (const line of decodeText(buf).split(/\r?\n/)) {
+          if (line.trim()) outputChannel.info(line);
+        }
+      };
+      proc.stdout?.on('data', onData);
+      proc.stderr?.on('data', onData);
+      proc.on('error', (err) => {
+        outputChannel.error(`[Code::Blocks] 无法执行: ${err.message}`);
+        reject(err);
+      });
+      proc.on('close', (c) => {
+        cancelSource.unregister(proc);
+        resolve(c);
+      });
+    });
+    const ok = code !== null && code >= 0 && code <= (compiler.switches.statusSuccess ?? 0);
+    if (!ok) outputChannel.error(`[Code::Blocks] make 失败 (exit ${code})`);
+    return ok;
+  } catch {
+    return false;
+  } finally {
+    buildInProgress = false;
+    currentBuildCancel = undefined;
   }
 }
 
@@ -3038,18 +3118,38 @@ async function run(): Promise<void> {
   const target = project.buildTargets.find((t) => t.title === selectedTitle);
   if (!target) return;
 
-  const exePath = path.join(project.basePath, target.outputFilename);
-  if (!fs.existsSync(exePath)) {
-    vscode.window.showErrorMessage('可执行文件不存在，请先构建');
-    return;
-  }
-
   // 执行参数宏展开（对齐 GetExecutionParameters → GetFullCompilerVarsSet 全集：$(TARGET_OUTPUT_FILE) 等）
   const vars = cbBuiltinVars(project.basePath, target.outputFilename, target.title, target.objectOutput, project.title, project.filename, getCompiler(target.compilerId)?.masterPath ?? '');
   const args = target.executionParameters ? expandMacros(target.executionParameters, vars) : '';
   // 环境变量（项目级 + 目标级 <Environment><Variable name value>）
   const env: Record<string, string> = {};
   for (const ev of [...project.envVars, ...target.envVars]) env[ev.name] = ev.value;
+
+  // 库/CommandsOnly 目标：宿主程序运行（对齐 compilergcc.cpp:2091-2126）
+  const tt = target.targetType;
+  if (tt === TargetType.DynamicLib || tt === TargetType.StaticLib || tt === TargetType.CommandsOnly) {
+    const host = target.hostApplication
+      ? replaceCbMacros(target.hostApplication, { vars, customVars: project.customVariables ?? {} })
+      : '';
+    if (!host) {
+      vscode.window.showErrorMessage('You must select a host application to "run" a library...');
+      return;
+    }
+    const terminalLib = vscode.window.createTerminal({
+      name: `Run: ${target.title}`,
+      cwd: runWorkingDir(project, target, vars),
+      env: Object.keys(env).length ? { ...(process.env as Record<string, string>), ...env } : undefined,
+    });
+    terminalLib.show();
+    terminalLib.sendText(`"${host}" ${args}`.trim());
+    return;
+  }
+
+  const exePath = path.join(project.basePath, target.outputFilename);
+  if (!fs.existsSync(exePath)) {
+    vscode.window.showErrorMessage('可执行文件不存在，请先构建');
+    return;
+  }
 
   const terminal = vscode.window.createTerminal({
     name: `Run: ${target.title}`,

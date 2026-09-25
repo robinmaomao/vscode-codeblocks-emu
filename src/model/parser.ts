@@ -18,6 +18,7 @@ import {
   OptionsRelationType,
   LinkerExecutableOption,
   EnvVariable,
+  MakeCommandsMap,
 } from './types';
 import { fileTypeOf, defaultCompilerVar, defaultCompile, defaultLink } from './fileTypes';
 import { upperDrive } from '../tools/pathCase';
@@ -211,6 +212,10 @@ export class ProjectParser {
       showNotesOnLoad: false,
       envVars: [],
       alwaysRunPostBuildSteps: false,
+      makefileIsCustom: false,
+      makefile: '',
+      executionDir: '',
+      makeCommands: {},
       customVariables: {},
       files: [],
       extensions: root.Extensions ?? null,
@@ -342,6 +347,12 @@ export class ProjectParser {
       if (node['@_platforms'] !== undefined) {
         project.platforms = parsePlatforms(String(node['@_platforms']));
       }
+      // makefile 模式（projectloader.cpp:418-425/464-466）
+      if (node['@_makefile_is_custom'] !== undefined) {
+        project.makefileIsCustom = node['@_makefile_is_custom'] === '1' || node['@_makefile_is_custom'] === 'true';
+      }
+      if (node['@_makefile'] !== undefined) project.makefile = toUnix(String(node['@_makefile']));
+      if (node['@_execution_dir'] !== undefined) project.executionDir = toUnix(String(node['@_execution_dir']));
       // 项目备注：<Option show_notes="1"><notes><![CDATA[...]]></notes></Option>
       if (node['@_show_notes'] !== undefined) {
         project.showNotesOnLoad = String(node['@_show_notes']) !== '0';
@@ -415,6 +426,9 @@ export class ProjectParser {
         depsOutput: '',
         executionParameters: '',
         workingDir: '',
+        hostApplication: '',
+        runHostApplicationInTerminal: true,
+        makeCommands: {},
         optionRelations: defaultRelations(),
         compilerOptions: [],
         linkerOptions: [],
@@ -520,6 +534,9 @@ export class ProjectParser {
       if (node['@_deps_output'] !== undefined) target.depsOutput = toUnix(String(node['@_deps_output']));
       if (node['@_parameters'] !== undefined) target.executionParameters = String(node['@_parameters']);
       if (node['@_working_dir'] !== undefined) target.workingDir = toUnix(String(node['@_working_dir']));
+      // 宿主程序（projectloader.cpp:609-614：host_application / run_host_application_in_terminal）
+      if (node['@_host_application'] !== undefined) target.hostApplication = toUnix(String(node['@_host_application']));
+      if (node['@_run_host_application_in_terminal'] !== undefined) target.runHostApplicationInTerminal = String(node['@_run_host_application_in_terminal']) !== '0';
       // 外部依赖 / 附加输出（projectloader.cpp:594-598：分号分隔列表，Unix 路径）
       if (node['@_external_deps'] !== undefined) target.externalDeps = splitList(String(node['@_external_deps']));
       if (node['@_additional_output'] !== undefined) target.additionalOutput = splitList(String(node['@_additional_output']));
@@ -553,7 +570,7 @@ export class ProjectParser {
   }
 
   /** 解析 pre/post build/clean 命令（DoExtraCommands + DoMakeCommands） */
-  private parseExtraCommands(node: any, sink: { commandsBeforeBuild: string[]; commandsAfterBuild: string[]; alwaysRunPostBuildSteps?: boolean }): void {
+  private parseExtraCommands(node: any, sink: { commandsBeforeBuild: string[]; commandsAfterBuild: string[]; alwaysRunPostBuildSteps?: boolean; makeCommands?: MakeCommandsMap }): void {
     if (!node) return;
     // <ExtraCommands><Mode after="always"> → AlwaysRunPostBuildSteps
     let modes = node.Mode;
@@ -574,6 +591,20 @@ export class ProjectParser {
       const after = String(add['@_after'] ?? '');
       if (before) sink.commandsBeforeBuild.push(before);
       if (after) sink.commandsAfterBuild.push(after);
+    }
+    // makefile 模式：<MakeCommands><Build command="..."/><Clean .../>（DoMakeCommands:329-358）
+    if (sink.makeCommands) {
+      const phases: Array<keyof MakeCommandsMap> = ['build', 'compileFile', 'clean', 'distClean', 'askRebuildNeeded', 'silentBuild'];
+      const phaseNames: Record<keyof MakeCommandsMap, string> = {
+        build: 'Build', compileFile: 'CompileFile', clean: 'Clean', distClean: 'DistClean', askRebuildNeeded: 'AskRebuildNeeded', silentBuild: 'SilentBuild',
+      };
+      for (const phase of phases) {
+        let el = node[phaseNames[phase]];
+        if (el === undefined) continue;
+        if (Array.isArray(el)) el = el[0];
+        const cmd = String(el['@_command'] ?? '');
+        if (cmd) sink.makeCommands[phase] = cmd;
+      }
     }
     // 兼容 <MakeCommands><Build><Option before=".."/></Build>...
     for (const phase of ['Build', 'Clean']) {
