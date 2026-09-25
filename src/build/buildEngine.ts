@@ -390,6 +390,11 @@ export class BuildEngine {
       this.output.error(`[Code::Blocks] 文件不在目标 "${targetTitle}" 中: ${fileRel}`);
       return false;
     }
+    // 对齐 GetBuildTargetForFile（compilergcc.cpp:3119-3145）：文件未归属当前目标（或未归属任何目标）→ 拒绝
+    if (!file.buildTargets.includes(targetTitle)) {
+      this.output.error(`[Code::Blocks] error: Cannot find target for file: ${fileRel}`);
+      return false;
+    }
     if (file.compile === false) {
       this.output.warn(`[Code::Blocks] 文件被排除编译（compile="0"），跳过: ${fileRel}`);
       return false;
@@ -412,9 +417,9 @@ export class BuildEngine {
     }
     const unit = made.unit!;
 
-    // 增量判断（对齐 CompileFile 的 IsObjectOutdated 前置检查）
+    // 增量判断（对齐 CompileFile 的 IsObjectOutdated 前置检查；deps 目录用关系合并后的有序目录，对齐 DepsSearchStart）
     const object = this.objectPathFor(target, file);
-    if (!options.rebuild && this.isUpToDate(file.absolutePath, object, this.getIncludeDirs(target), new Map())) {
+    if (!options.rebuild && this.isUpToDate(file.absolutePath, object, this.getIncludeDirs(target, generator), new Map())) {
       this.output.info(`[Code::Blocks] ${fileRel} 已是最新`);
       return true;
     }
@@ -434,8 +439,8 @@ export class BuildEngine {
   }
 
   /**
-   * 单文件清理 —— 对齐 GetCleanSingleFileCommand：删除对象文件，
-   * 编译器 needDependencies 时顺带删除 .depend 依赖文件（与对象路径不同时）。
+   * 单文件清理 —— 对齐 CB 25.03 OnCleanFile（compilergcc.cpp:3275-3312）：只删除对象文件。
+   * （GetCleanSingleFileCommand 在 25.03 中无调用方；.depend 仅全量 Clean 删除）
    */
   cleanFile(targetTitle: string, fileRel: string): void {
     const target = this.project.buildTargets.find((t) => t.title === targetTitle);
@@ -445,6 +450,8 @@ export class BuildEngine {
     const files = target.files.length ? target.files : this.project.files;
     const file = files.find((f) => f.relativeFilename === fileRel);
     if (!file) return;
+    // 对齐 GetBuildTargetForFile：文件未归属当前目标（或未归属任何目标）→ 静默跳过
+    if (!file.buildTargets.includes(targetTitle)) return;
     if (!file.compilerVar) {
       this.output.warn(`[Code::Blocks] Cannot resolve compiler var for project file: ${fileRel}`);
       return;
@@ -459,13 +466,6 @@ export class BuildEngine {
       }
     } else {
       this.output.debug(`[Code::Blocks] 无对象文件可清理: ${fileRel}`);
-    }
-    // 对齐 GetCleanSingleFileCommand：needDependencies 且依赖文件与对象文件不同名时一并删除
-    const depsRel = this.depsPathFor(target, file);
-    if (this.compiler.switches.needDependencies && depsRel && depsRel !== objectRel) {
-      if (this.removeFileIfExists(depsRel)) {
-        this.output.info(`[Code::Blocks] Deleted: ${path.relative(this.project.basePath, depsRel)}`);
-      }
     }
   }
 
@@ -564,8 +564,9 @@ export class BuildEngine {
     const sortedFiles = [...files].sort(compareFilesByWeight);
     const hasCpp = sortedFiles.some((f) => isCppSource(f.relativeFilename));
 
-    // 头文件依赖扫描（增量编译）：include 目录先展开宏（含项目自定义变量，对齐 DepsSearchStart 的 ReplaceMacros）
-    const includeDirs = this.getIncludeDirs(target).map((d) =>
+    // 头文件依赖扫描（增量编译）：目录集 = 关系合并后的有序 include 目录 + 反引号派生目录（对齐 DepsSearchStart），
+    // 再逐个展开宏（含项目自定义变量，对齐 depsAddSearchDir 前的 ReplaceMacros）
+    const includeDirs = this.getIncludeDirs(target, generator).map((d) =>
       replaceCbMacros(d, { vars: macroVars, customVars: this.project.customVariables ?? {} }),
     );
     const depsCache = new Map<string, number>();
@@ -1165,8 +1166,9 @@ export class BuildEngine {
     return false;
   }
 
-  /** 收集目标的 include 搜索目录（项目级 + 目标级，默认 Append 关系） */
-  private getIncludeDirs(target: BuildTarget): string[] {
+  /** 收集目标的 include 搜索目录（关系合并后的有序目录 + 反引号派生目录；对齐 DepsSearchStart 的 GetCompilerSearchDirs） */
+  private getIncludeDirs(target: BuildTarget, generator?: CommandGenerator): string[] {
+    if (generator) return generator.getCompilerSearchDirs(target.title);
     return [...this.project.includeDirs, ...target.includeDirs];
   }
 

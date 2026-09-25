@@ -137,13 +137,49 @@ interface PregenCache {
   linkerSearchDirs: string[];
 }
 
+/** 反引号命令缓存（对齐 globals.cpp m_Backticks：全局共享，CB 从不清理） */
+const backticksCache = new Map<string, string>();
+
+/**
+ * 反引号展开 —— 对齐 cbExpandBackticks（globals.cpp:867-927）：
+ * 逐对 `` `cmd` `` 执行 `cmd /c cmd`（Windows）并把输出（逐行 trim 后空格拼接）替换回原位置；
+ * 结果按 cmd 全局缓存（m_Backticks）。onOutput 收到每条展开输出（对齐 SearchDirsFromBackticks 扫描源）。
+ */
+export function expandBackticks(str: string, onOutput?: (bt: string) => void): string {
+  if (!str.includes('`')) return str;
+  let out = str;
+  let guard = 0;
+  while (guard++ < 32) {
+    const start = out.indexOf('`');
+    if (start < 0) break;
+    const end = out.indexOf('`', start + 1);
+    if (end < 0) break;
+    const cmd = out.slice(start + 1, end).trim();
+    if (!cmd) break;
+    let bt = backticksCache.get(cmd);
+    if (bt === undefined) {
+      try {
+        const r = spawnSync(cmd, { shell: true, timeout: 15000, maxBuffer: 1024 * 1024, encoding: 'utf8' });
+        const text = (r.stdout ?? '').replace(/\r/g, '');
+        bt = text.split('\n').map((l) => l.trim()).filter(Boolean).join(' ');
+      } catch {
+        bt = '';
+      }
+      backticksCache.set(cmd, bt);
+    }
+    if (bt && onOutput) onOutput(bt);
+    out = out.slice(0, start) + bt + out.slice(end + 1);
+  }
+  return out;
+}
+
 export class CommandGenerator {
   private project: Project;
   private compiler: Compiler;
   /** 按 target title 索引的预生成缓存 */
   private cache = new Map<string, PregenCache>();
-  /** 反引号命令缓存（对齐 globals.cpp m_Backticks） */
-  private backticksCache = new Map<string, string>();
+  /** 反引号派生搜索目录（SearchDirsFromBackticks 语义，供 deps 扫描） */
+  private backtickDirs = new Map<string, { inc: string[]; lib: string[] }>();
 
   constructor(project: Project, compiler: Compiler) {
     this.project = project;
@@ -198,39 +234,6 @@ export class CommandGenerator {
   /** 对齐 CB ReplaceMacros（含 $(#var)、日期/时间、env 回退、反转义；compilercommandgenerator.cpp:579/806-1163） */
   private expandCb(s: string, target: BuildTarget): string {
     return replaceCbMacros(s, { vars: this.cbVars(target), customVars: this.project.customVariables ?? {} });
-  }
-
-  /**
-   * 反引号展开 —— 对齐 cbExpandBackticks（globals.cpp:867-927）：
-   * 逐对 `` `cmd` `` 执行 `cmd /c cmd`（Windows）并把输出（逐行 trim 后空格拼接）替换回原位置；
-   * 结果按 cmd 缓存（m_Backticks）。CB 还有 SearchDirsFromBackticks（反引号输出里的 -I/-L 目录），
-   * 但那些目录只用于 CB 的「缺失 include 提示」特性（DepsSearchStart 并不用），不参与命令行，故不移植。
-   */
-  private expandBackticks(str: string): string {
-    if (!str.includes('`')) return str;
-    let out = str;
-    let guard = 0;
-    while (guard++ < 32) {
-      const start = out.indexOf('`');
-      if (start < 0) break;
-      const end = out.indexOf('`', start + 1);
-      if (end < 0) break;
-      const cmd = out.slice(start + 1, end).trim();
-      if (!cmd) break;
-      let bt = this.backticksCache.get(cmd);
-      if (bt === undefined) {
-        try {
-          const r = spawnSync(cmd, { shell: true, timeout: 15000, maxBuffer: 1024 * 1024, encoding: 'utf8' });
-          const text = (r.stdout ?? '').replace(/\r/g, '');
-          bt = text.split('\n').map((l) => l.trim()).filter(Boolean).join(' ');
-        } catch {
-          bt = '';
-        }
-        this.backticksCache.set(cmd, bt);
-      }
-      out = out.slice(0, start) + bt + out.slice(end + 1);
-    }
-    return out;
   }
 
   private setupOutputFilenames(target: BuildTarget): string {
@@ -326,8 +329,9 @@ export class CommandGenerator {
     );
     // 追加编译器全局选项（对齐 SetupCompilerOptions:1017：关系合并后追加 compiler->GetCompilerOptions()）
     opts.push(...(this.compiler.compilerOptions ?? []));
-    // 对齐 SetupCompilerOptions:1019-1022：合并后整体 ReplaceMacros → cbExpandBackticks
-    return this.expandBackticks(this.expandCb(opts.join(' '), target));
+    // 对齐 SetupCompilerOptions:1019-1022：合并后整体 ReplaceMacros → cbExpandBackticks → SearchDirsFromBackticks
+    const expanded = this.expandCb(opts.join(' '), target);
+    return expandBackticks(expanded, (bt) => this.collectBacktickDirs(target, bt));
   }
 
   private setupResourceCompilerOptions(target: BuildTarget): string {
@@ -338,8 +342,9 @@ export class CommandGenerator {
     );
     // 追加编译器全局资源选项（对齐 SetupResourceCompilerOptions:1161）
     opts.push(...(this.compiler.resourceCompilerOptions ?? []));
-    // 对齐 SetupResourceCompilerOptions:1163-1165：合并后整体 ReplaceMacros → cbExpandBackticks
-    return this.expandBackticks(this.expandCb(opts.join(' '), target));
+    // 对齐 SetupResourceCompilerOptions:1163-1166：合并后整体 ReplaceMacros → cbExpandBackticks → SearchDirsFromBackticks
+    const expanded = this.expandCb(opts.join(' '), target);
+    return expandBackticks(expanded, (bt) => this.collectBacktickDirs(target, bt));
   }
 
   private setupLinkerOptions(target: BuildTarget): string {
@@ -350,8 +355,9 @@ export class CommandGenerator {
     );
     // 追加编译器全局链接选项（对齐 SetupLinkerOptions:1046）
     opts.push(...(this.compiler.linkerOptions ?? []));
-    // 对齐 SetupLinkerOptions:1048-1051：合并后整体 ReplaceMacros → cbExpandBackticks
-    return this.expandBackticks(this.expandCb(opts.join(' '), target));
+    // 对齐 SetupLinkerOptions:1048-1051：合并后整体 ReplaceMacros → cbExpandBackticks → SearchDirsFromBackticks
+    const expanded = this.expandCb(opts.join(' '), target);
+    return expandBackticks(expanded, (bt) => this.collectBacktickDirs(target, bt));
   }
 
   /**
@@ -444,6 +450,42 @@ export class CommandGenerator {
       target.libDirs,
       this.getRelation(target, this.rel.LibDirs),
     );
+  }
+
+  /**
+   * 反引号输出中的 -I/-L 目录扫描 —— 对齐 SearchDirsFromBackticks（compilercommandgenerator.cpp:1286-1337）：
+   * 按 includeDirs/libDirs 开关定位，取其后至空格为止的 token 作为搜索目录（不含开关本身）。
+   * 结果并入该目标的编译器搜索目录（DepsSearchStart 使用）。
+   */
+  private collectBacktickDirs(target: BuildTarget, bt: string): void {
+    const scan = (sw: string): string[] => {
+      const out: string[] = [];
+      if (!sw) return out;
+      let pos = 0;
+      while ((pos = bt.indexOf(sw, pos)) !== -1) {
+        pos += sw.length;
+        const space = bt.indexOf(' ', pos);
+        const token = (space === -1 ? bt.slice(pos) : bt.slice(pos, space)).trim();
+        if (token) out.push(token);
+        pos++;
+      }
+      return out;
+    };
+    let entry = this.backtickDirs.get(target.title);
+    if (!entry) {
+      entry = { inc: [], lib: [] };
+      this.backtickDirs.set(target.title, entry);
+    }
+    entry.inc.push(...scan(this.compiler.switches.includeDirs));
+    entry.lib.push(...scan(this.compiler.switches.libDirs));
+  }
+
+  /** 目标的 deps 扫描目录 = 关系合并后的有序 include 目录 + 反引号派生目录（对齐 m_CompilerSearchDirs） */
+  getCompilerSearchDirs(targetTitle: string): string[] {
+    const c = this.cache.get(targetTitle);
+    const extra = this.backtickDirs.get(targetTitle);
+    if (!c) return [];
+    return [...c.compilerSearchDirs, ...(extra?.inc ?? [])];
   }
 
   /** 选择编译/链接器程序（对应 GenerateCommandLine 里的 compExec 逻辑） */
@@ -661,7 +703,9 @@ export class CommandGenerator {
         customVars: this.project.customVariables ?? {},
       });
     }
-    return macro;
+    // 10. 对齐 compilergcc.cpp:1402：命令执行前整体 cbExpandBackticks
+    // （覆盖命令模板/自定义 buildCommand/脚本命令里直接书写的反引号；选项里的反引号已在 setup* 阶段展开）
+    return expandBackticks(macro);
   }
 
   /** 获取指定 CommandType 的命令模板（按扩展名匹配，通配兜底） */

@@ -56,3 +56,4 @@ test-force-fwd-output.js
 *.vsix
 test-mixed-compiler.js
 test-compiler-global-options.js
+test-backticks-and-owner.js
