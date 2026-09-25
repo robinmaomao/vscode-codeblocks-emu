@@ -49,5 +49,6 @@ test-user-regexes.js
 test-filename-policy.js
 test-link-object-quote.js
 test-cb-macros.js
+test-flag-filter.js
 .git-msg.txt
 *.vsix

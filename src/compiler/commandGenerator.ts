@@ -638,9 +638,13 @@ export class CommandGenerator {
     if (!toRemove.length) return flags;
     let out = flags;
     for (const f of toRemove) {
+      // 对齐 CB GetCPPOnlyFlags/GetCOnlyFlags 过滤（aCflags.Index + RemoveAt）：仅移除首个匹配；
       // 匹配独立 flag（前有空白/行首，后有空白/行尾），避免误删带前缀/带值 flag，也不破坏带引号 flag
-      const re = new RegExp(`(^|\\s)${escapeRegExp(f)}(?=\\s|$)`, 'g');
-      out = out.replace(re, '$1');
+      const re = new RegExp(`(^|\\s)${escapeRegExp(f)}(?=\\s|$)`);
+      const m = out.match(re);
+      if (m && m.index !== undefined) {
+        out = out.slice(0, m.index + m[1].length) + out.slice(m.index + m[0].length);
+      }
     }
     return out.trim();
   }
