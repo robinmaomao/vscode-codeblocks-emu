@@ -121,6 +121,11 @@ function collectAddOptions(parent: any): string[] {
   return out;
 }
 
+/** 分号分隔列表（对齐 wx GetArrayFromString：去引号、忽略空项） */
+function splitList(v: string): string[] {
+  return v.split(';').map((s) => s.trim().replace(/^"|"$/g, '')).filter(Boolean);
+}
+
 /** 从 <Compiler>/<Linker> 的 <Add directory="..."/> 提取目录（对应 DoCompilerOptions/DoLinkerOptions） */
 function collectAddDirectories(parent: any): string[] {
   const out: string[] = [];
@@ -196,6 +201,7 @@ export class ProjectParser {
       showNotesOnLoad: false,
       envVars: [],
       alwaysRunPostBuildSteps: false,
+      customVariables: {},
       files: [],
       extensions: root.Extensions ?? null,
       rawProject: root.Project,
@@ -219,6 +225,8 @@ export class ProjectParser {
       this.parseBuildTargets(projNode.Build, project);
       // 文件
       this.parseUnits(root.Project, project);
+      // 项目自定义变量（<Extensions><codeblocks_project_custom_variables>）
+      this.parseProjectCustomVariables(root, project);
     }
 
     // 计算公共顶层路径并设置 relativeToCommonTopLevelPath（对应 CalculateCommonTopLevelPath）
@@ -273,6 +281,33 @@ export class ProjectParser {
   private relativeToCommonTopLevel(fileAbs: string, commonTopLevelPath: string): string {
     const rel = path.relative(commonTopLevelPath, fileAbs);
     return rel.replace(/\\/g, '/');
+  }
+
+  /**
+   * 项目自定义变量 —— 对应 cbProject 的 SetVariable（cbp <Extensions><codeblocks_project_custom_variables>）：
+   * 每个子节点名 = 变量名，value 属性 = 值；供构建宏展开（ReplaceMacros）使用。
+   */
+  private parseProjectCustomVariables(root: any, project: Project): void {
+    const ext = root.Extensions;
+    if (!ext || typeof ext !== 'object') return;
+    let node = ext['codeblocks_project_custom_variables'];
+    if (node === undefined) {
+      for (const key of Object.keys(ext)) {
+        if (key.toLowerCase().includes('custom_variables')) {
+          node = ext[key];
+          break;
+        }
+      }
+    }
+    if (!node) return;
+    if (Array.isArray(node)) node = node[0];
+    for (const key of Object.keys(node)) {
+      // 跳过属性前缀与 fast-xml-parser 的空白文本节点（#text）
+      if (key.startsWith('@_') || key.startsWith('#')) continue;
+      const v = node[key];
+      const val = v !== null && typeof v === 'object' ? String(v['@_value'] ?? '') : String(v ?? '');
+      project.customVariables[key] = val;
+    }
   }
 
   private parseProjectOptions(optNodes: any, project: Project): void {
@@ -388,6 +423,8 @@ export class ProjectParser {
         buildScripts: [],
         envVars: [],
         alwaysRunPostBuildSteps: false,
+        externalDeps: [],
+        additionalOutput: [],
       };
 
       this.parseTargetOptions(tnode.Option, target);
@@ -464,6 +501,9 @@ export class ProjectParser {
       if (node['@_object_output'] !== undefined) target.objectOutput = toUnix(String(node['@_object_output']));
       if (node['@_deps_output'] !== undefined) target.depsOutput = toUnix(String(node['@_deps_output']));
       if (node['@_parameters'] !== undefined) target.executionParameters = String(node['@_parameters']);
+      // 外部依赖 / 附加输出（projectloader.cpp:594-598：分号分隔列表，Unix 路径）
+      if (node['@_external_deps'] !== undefined) target.externalDeps = splitList(String(node['@_external_deps']));
+      if (node['@_additional_output'] !== undefined) target.additionalOutput = splitList(String(node['@_additional_output']));
       if (node['@_createDefFile'] !== undefined) target.createDefFile = node['@_createDefFile'] === '1' || node['@_createDefFile'] === 'true';
       if (node['@_createStaticLib'] !== undefined) target.createStaticLib = node['@_createStaticLib'] === '1' || node['@_createStaticLib'] === 'true';
       if (node['@_imp_lib'] !== undefined) target.impLib = toNativeSeparator(String(node['@_imp_lib']));

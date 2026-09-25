@@ -7,8 +7,10 @@
  * 宏替换顺序严格遵守 Code::Blocks 语义（$objects_output_dir 必须在 $object 之前）。
  */
 import * as path from 'path';
+import * as fs from 'fs';
 import { Compiler } from '../compiler/compiler';
-import { upperDrive } from '../tools/pathCase';
+import { upperDrive, shortPathWin } from '../tools/pathCase';
+import { replaceAllMacros } from '../build/scriptRunner';
 import {
   Project,
   BuildTarget,
@@ -181,7 +183,11 @@ export class CommandGenerator {
       target.includeDirs,
       this.getRelation(target, this.rel.IncludeDirs),
     );
-    return dirs.map((d) => this.compiler.switches.includeDirs + quoteIfNeeded(d)).join(this.compiler.switches.includeDirSeparator);
+    // 追加编译器全局目录（对齐 GetOrderedIncludeDirs：项目/目标后追加 compiler->GetIncludeDirs()）
+    dirs.push(...(this.compiler.includeDirs ?? []));
+    return dirs
+      .map((d) => this.compiler.switches.includeDirs + quoteIfNeeded(this.finalizeDir(d, target)))
+      .join(this.compiler.switches.includeDirSeparator);
   }
 
   private setupLibDirs(target: BuildTarget): string {
@@ -190,7 +196,10 @@ export class CommandGenerator {
       target.libDirs,
       this.getRelation(target, this.rel.LibDirs),
     );
-    return dirs.map((d) => this.compiler.switches.libDirs + quoteIfNeeded(d)).join(this.compiler.switches.libDirSeparator);
+    dirs.push(...(this.compiler.libDirs ?? []));
+    return dirs
+      .map((d) => this.compiler.switches.libDirs + quoteIfNeeded(this.finalizeDir(d, target)))
+      .join(this.compiler.switches.libDirSeparator);
   }
 
   private setupResourceIncludeDirs(target: BuildTarget): string {
@@ -199,7 +208,26 @@ export class CommandGenerator {
       target.resourceIncludeDirs,
       this.getRelation(target, this.rel.ResDirs),
     );
-    return dirs.map((d) => this.compiler.switches.includeDirs + quoteIfNeeded(d)).join(this.compiler.switches.includeDirSeparator);
+    dirs.push(...(this.compiler.resIncludeDirs ?? []));
+    return dirs
+      .map((d) => this.compiler.switches.includeDirs + quoteIfNeeded(this.finalizeDir(d, target)))
+      .join(this.compiler.switches.includeDirSeparator);
+  }
+
+  /**
+   * 目录宏展开 + 平台处理 —— 对齐 GetOrdered*Dirs 尾部循环：
+   * ReplaceMacros（含项目自定义变量）→ Use83Paths 短路径（目录存在时）→ 保留原生分隔符。
+   */
+  private finalizeDir(dir: string, target: BuildTarget): string {
+    let out = replaceAllMacros(dir, this.project.customVariables ?? {});
+    out = expandBuildVars(out, this.project.basePath, target, this.project.title, this.project.filename);
+    if (process.platform === 'win32' && this.compiler.switches.use83Paths) {
+      const unquoted = unquote(out);
+      if (fs.existsSync(unquoted)) {
+        out = shortPathWin(unquoted);
+      }
+    }
+    return out;
   }
 
   private setupCompilerOptions(target: BuildTarget): string {
@@ -462,8 +490,9 @@ export class CommandGenerator {
     macro = macro.replace(/\$TO_WINDOWS_PATH\{([^}]*)\}/g, (_, p: string) => p.replace(/\//g, '\\'));
     macro = macro.replace(/\$TO_UNIX_PATH\{([^}]*)\}/g, (_, p: string) => p.replace(/\\/g, '/'));
 
-    // 9. 展开 Code::Blocks 构建变量宏（$(TARGET_OBJECT_DIR)、$(PROJECT_NAME) 等）
+    // 9. 展开 Code::Blocks 构建变量宏（$(TARGET_OBJECT_DIR)、$(PROJECT_NAME) 等）+ 项目自定义变量
     if (params.target) {
+      macro = replaceAllMacros(macro, this.project.customVariables ?? {});
       macro = expandBuildVars(macro, this.project.basePath, params.target, this.project.title, this.project.filename);
     }
     return macro;
@@ -499,10 +528,13 @@ export class CommandGenerator {
 
 /** 展开 Code::Blocks 构建变量宏（$(TARGET_OBJECT_DIR)、$(PROJECT_NAME) 等） */
 export function expandBuildVars(cmd: string, basePath: string, target: BuildTarget, projectTitle: string, projectFilename: string): string {
-  const u = (s: string) => s.replace(/\\/g, '/');
-  const out = u(target.outputFilename);
-  const outDir = out.includes('/') ? out.slice(0, out.lastIndexOf('/') + 1) : '';
-  const baseName = out.includes('/') ? out.slice(out.lastIndexOf('/') + 1) : out;
+  // Windows 下宏值用原生分隔符 + 大写盘符（= CB UnixFilename 后 FixPathSeparators 的净效果）
+  const win = process.platform === 'win32';
+  const toNative = (s: string): string => (win ? s.replace(/\//g, '\\') : s);
+  const out = toNative(target.outputFilename);
+  const sepIdx = Math.max(out.lastIndexOf('/'), out.lastIndexOf('\\'));
+  const outDir = sepIdx >= 0 ? out.slice(0, sepIdx + 1) : '';
+  const baseName = sepIdx >= 0 ? out.slice(sepIdx + 1) : out;
   const stem = baseName.replace(/\.[^.]+$/, '');
 
   const vars: Record<string, string> = {
@@ -511,10 +543,10 @@ export function expandBuildVars(cmd: string, basePath: string, target: BuildTarg
     TARGET_OUTPUT_BASENAME: stem,
     TARGET_OUTPUT_DIR: outDir,
     TARGET_NAME: target.title,
-    TARGET_OBJECT_DIR: u(target.objectOutput || 'obj/'),
-    // 项目根目录宏：对齐 Code::Blocks GetBasePath()（wxPATH_GET_SEPARATOR，带结尾分隔符）+ UnixFilename（正斜杠）
-    PROJECT_DIR: u(basePath).replace(/\/?$/, '/'),
-    PROJECT_DIRECTORY: u(basePath).replace(/\/?$/, '/'),
+    TARGET_OBJECT_DIR: toNative(target.objectOutput || 'obj/'),
+    // 项目根目录宏：对齐 Code::Blocks GetBasePath()（wxPATH_GET_SEPARATOR，带结尾分隔符）+ 原生分隔符
+    PROJECT_DIR: (win ? upperDrive(basePath) : basePath).replace(/[\\/]$/, '') + (win ? '\\' : '/'),
+    PROJECT_DIRECTORY: (win ? upperDrive(basePath) : basePath).replace(/[\\/]$/, '') + (win ? '\\' : '/'),
     PROJECT_NAME: projectTitle,
     PROJECTNAME: projectTitle,
     PROJECT_FILENAME: projectFilename,

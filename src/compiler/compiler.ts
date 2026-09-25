@@ -91,6 +91,14 @@ export interface Compiler {
   cOnlyFlags: string[];
   /** 仅 C++ 编译器的 flag（编译 C 时移除） */
   cppOnlyFlags: string[];
+  /** 编译器全局 include 目录（default.conf /compiler_sets/<id>/include_dirs，追加在项目/目标目录之后） */
+  includeDirs: string[];
+  /** 编译器全局库目录（/library_dirs） */
+  libDirs: string[];
+  /** 编译器全局资源 include 目录（/res_include_dirs） */
+  resIncludeDirs: string[];
+  /** 编译器全局链接库（/link_libs，供外部依赖检查） */
+  linkLibs: string[];
 }
 
 /** 每个 CommandType 下的命令模板数组（按扩展名匹配） */
@@ -183,5 +191,9 @@ export function createGccCompiler(platform: NodeJS.Platform, masterPath = ''): C
     regexes: [],
     cOnlyFlags: [],
     cppOnlyFlags: [],
+    includeDirs: [],
+    libDirs: [],
+    resIncludeDirs: [],
+    linkLibs: [],
   };
 }

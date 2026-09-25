@@ -64,6 +64,10 @@ export class CompilerOptionsLoader {
       regexes: [],
       cOnlyFlags: [],
       cppOnlyFlags: [],
+      includeDirs: [],
+      libDirs: [],
+      resIncludeDirs: [],
+      linkLibs: [],
     };
 
     // 交叉编译器（如 riscv）无独立 XML，复用 GCC 的命令模板/选项/正则
