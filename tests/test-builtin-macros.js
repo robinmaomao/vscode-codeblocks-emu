@@ -33,5 +33,12 @@ check('REMOVE_QUOTES 内宏展开', replaceCbMacros('$REMOVE_QUOTES{"$(AMP)x"}',
 check('TO_ABSOLUTE_PATH 嵌套 REMOVE_QUOTES', replaceCbMacros('$TO_ABSOLUTE_PATH{$REMOVE_QUOTES{"src/a b.c"}}', opts) === 'C:\\proj\\src\\a b.c', replaceCbMacros('$TO_ABSOLUTE_PATH{$REMOVE_QUOTES{"src/a b.c"}}', opts), 'C:\\proj\\src\\a b.c');
 check('TO_ABSOLUTE_PATH 内容宏展开', replaceCbMacros('$TO_ABSOLUTE_PATH{src/$(PROJECT_NAME)}', { ...opts, vars: { PROJECT_NAME: 'my' } }) === 'C:\\proj\\src\\my', replaceCbMacros('$TO_ABSOLUTE_PATH{src/$(PROJECT_NAME)}', { ...opts, vars: { PROJECT_NAME: 'my' } }), 'C:\\proj\\src\\my');
 
+// M1 变量名内嵌宏 + $if 条件块
+const gcvOpts = { ...opts, gcv: { Sdk: { base: 'C:/sdk' } } };
+check('变量名内嵌宏', replaceCbMacros('$(#$(PROJECT_NAME).base)', { ...gcvOpts, vars: { PROJECT_NAME: 'Sdk' } }) === 'C:/sdk', replaceCbMacros('$(#$(PROJECT_NAME).base)', { ...gcvOpts, vars: { PROJECT_NAME: 'Sdk' } }), 'C:/sdk');
+check('$if 真分支', replaceCbMacros('$if{1}{yes}$else{no}$endif', opts) === 'yes', replaceCbMacros('$if{1}{yes}$else{no}$endif', opts), 'yes');
+check('$if 假分支', replaceCbMacros('$if{$(EMPTY_X)}{yes}$else{no}$endif', opts) === 'no', replaceCbMacros('$if{$(EMPTY_X)}{yes}$else{no}$endif', opts), 'no');
+check('$if 无 else', replaceCbMacros('$if{1}{yes}$endif', opts) === 'yes', replaceCbMacros('$if{1}{yes}$endif', opts), 'yes');
+
 console.log(`内置宏 + 函数式宏: ${pass} pass, ${fail} fail`);
 process.exit(fail ? 1 : 0);

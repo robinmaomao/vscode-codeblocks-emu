@@ -276,15 +276,113 @@ function replaceCbMacrosInner(
     if (c.length > 2 && c.startsWith('"') && c.endsWith('"')) return c.slice(1, -1);
     return c;
   });
+  // $if 条件块（macrosmanager 条件式）：$if{cond}{then}$else{else}$endif（$else 可选）
+  if (cur.includes('$if{')) {
+    cur = applyConditional(cur, opts, depth);
+  }
+  // 变量名内嵌宏：名内的 $(...) 先递归展开（对齐 macrosmanager 变量名内嵌宏）
+  const expandName = (rawName: string): string => {
+    if (!rawName.includes('$(')) return rawName;
+    let nm = rawName;
+    let guard = 0;
+    while (guard++ < 4 && nm.includes('$(')) {
+      const next = nm.replace(/\$\(([#]?[A-Za-z_][A-Za-z0-9_.]*)\)/g, (_m: string, n: string) => resolve(n));
+      if (next === nm) break;
+      nm = next;
+    }
+    return nm;
+  };
+  /** $( 变量扫描（括号配对，名内可含嵌套 $() 宏） */
+  const applyVars = (s: string): string => {
+    let out = '';
+    let i = 0;
+    let guard = 0;
+    while (guard++ < 256) {
+      const idx = s.indexOf('$(', i);
+      if (idx === -1) {
+        out += s.slice(i);
+        break;
+      }
+      out += s.slice(i, idx);
+      let depth = 0;
+      let close = -1;
+      for (let k = idx + 1; k < s.length; k++) {
+        const ch = s[k];
+        if (ch === '(') depth++;
+        else if (ch === ')') {
+          depth--;
+          if (depth === 0) {
+            close = k;
+            break;
+          }
+        }
+      }
+      if (close === -1) {
+        out += s.slice(idx);
+        break;
+      }
+      const rawName = s.slice(idx + 2, close);
+      out += resolve(expandName(rawName));
+      i = close + 1;
+    }
+    return out;
+  };
   for (let i = 0; i < 5; i++) {
-    const next = cur
-      .replace(/\$\(([#]?[A-Za-z_][A-Za-z0-9_.]*)\)/g, (_m: string, n: string) => resolve(n))
+    const next = applyVars(cur)
       .replace(/\$([#]?[A-Za-z_][A-Za-z0-9_.]*)(?![A-Za-z0-9_])/g, (_m: string, n: string) => resolve(n));
     if (next === cur) break;
     cur = next;
   }
   // 反转义（CB 非子请求时：$$→$、%%→%）
   return cur.replace(/\u0001CBDOLLAR\u0001/g, '$').replace(/%%/g, '%');
+}
+
+/**
+ * $if{cond}{then}$else{else}$endif 条件块处理（$else 可选；条件先完整宏展开，非空且非 '0' 为真）。
+ * 嵌套 $if 在 then/else 内递归处理（深度护栏）。
+ */
+function applyConditional(
+  s: string,
+  opts: { vars?: Record<string, string>; customVars?: Record<string, string>; gcv?: Record<string, Record<string, string>>; basePath?: string },
+  depth: number,
+): string {
+  let out = '';
+  let i = 0;
+  let guard = 0;
+  while (guard++ < 64) {
+    const idx = s.indexOf('$if{', i);
+    if (idx === -1) {
+      out += s.slice(i);
+      break;
+    }
+    const b = takeBrace(s, idx + 3); // '$if{' → '{' 在 idx+3
+    if (!b) {
+      out += s.slice(i);
+      break;
+    }
+    out += s.slice(i, idx);
+    const condExpanded = depth < 8 ? replaceCbMacrosInner(b.inner, opts, depth + 1) : b.inner;
+    const condTruthy = condExpanded.trim() !== '' && condExpanded.trim() !== '0';
+    const elsePos = s.indexOf('$else{', b.end + 1);
+    const endifPos = s.indexOf('$endif', b.end + 1);
+    if (endifPos === -1) {
+      out += s.slice(idx);
+      break;
+    }
+    let thenPart: string;
+    let elsePart = '';
+    const after = endifPos + '$endif'.length;
+    const tb = takeBrace(s, b.end + 1); // then 块大括号
+    thenPart = tb && tb.end < endifPos ? tb.inner : s.slice(b.end + 1, endifPos);
+    if (elsePos !== -1 && elsePos < endifPos) {
+      const eb = takeBrace(s, elsePos + 5); // '$else{' → '{' 在 elsePos+5
+      if (eb && eb.end < endifPos) elsePart = eb.inner;
+    }
+    const chosen = condTruthy ? thenPart : elsePart;
+    out += depth < 8 ? applyConditional(chosen, opts, depth + 1) : chosen;
+    i = after;
+  }
+  return out;
 }
 
 /**
