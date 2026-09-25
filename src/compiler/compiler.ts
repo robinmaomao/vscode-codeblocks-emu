@@ -99,6 +99,8 @@ export interface Compiler {
   resIncludeDirs: string[];
   /** 编译器全局链接库（/libraries，供外部依赖检查与 $libs 追加） */
   linkLibs: string[];
+  /** 编译器附加搜索路径（default.conf /compiler_sets/<id>/extra_paths，SetupEnvironment PATH 注入 + IsValid 程序搜索） */
+  extraPaths: string[];
   /** 编译器全局编译选项（/compiler_options，SetupCompilerOptions:1017 追加在项目/目标之后） */
   compilerOptions: string[];
   /** 编译器全局链接选项（/linker_options，SetupLinkerOptions:1046） */
@@ -201,6 +203,7 @@ export function createGccCompiler(platform: NodeJS.Platform, masterPath = ''): C
     libDirs: [],
     resIncludeDirs: [],
     linkLibs: [],
+    extraPaths: [],
     compilerOptions: [],
     linkerOptions: [],
     resourceCompilerOptions: [],
