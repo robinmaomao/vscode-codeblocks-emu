@@ -1935,6 +1935,8 @@ function getCompiler(compilerId?: string): Compiler {
       compiler.resIncludeDirs = sd.resIncludeDirs;
       compiler.linkLibs = sd.linkLibs;
     }
+    // 用户自定义错误正则按索引覆盖/追加（对齐 Compiler::LoadSettings:699-737）
+    codeBlocksConfig?.applyUserRegexes(id, compiler.regexes);
     return compiler;
   };
   if (compilerLoader) {
