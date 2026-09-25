@@ -53,21 +53,35 @@ const g1b = new CommandGenerator(makeProject([t1]), compiler);
 const c1b = g1b.generateFromTemplate('$def_output', { target: t1, pf: null, file: '', object: '', flatObject: '', deps: '' });
 check('静态 def 恒替换 .def（extension_auto=false）', c1b === 'bin\\Debug\\libfoo.def' || c1b === 'bin/Debug/libfoo.def', c1b, 'libfoo.def');
 
-// K1-b：动态 def 追加且大小写不敏感（output 已是 .DLL 不追加、.dll 也不追加）
+// K1-b/L1：动态默认 def 基础名 = 输出去扩展名 → libfoo.def（不再 libfoo.dll.def）
 const t2 = makeTarget({ targetType: TargetType.DynamicLib, outputFilename: 'bin/Debug/libfoo.dll', prefixAuto: true, extensionAuto: true });
 const tpl2 = { command: '$linker -shared $def_output', extensions: [], generatedFiles: [] };
 compiler.commands[5] = [tpl2];
 const g2 = new CommandGenerator(makeProject([t2]), compiler);
 const c2 = g2.generateFromTemplate('$def_output', { target: t2, pf: null, file: '', object: '', flatObject: '', deps: '' });
-check('动态 def 追加 .def', c2 === 'bin\\Debug\\libfoo.dll.def' || c2 === 'bin/Debug/libfoo.dll.def', c2, 'libfoo.dll.def');
+check('动态默认 def = 输出去扩展名 + .def', c2 === 'bin\\Debug\\libfoo.def' || c2 === 'bin/Debug/libfoo.def', c2, 'libfoo.def');
 
-// K2：import 库扩展名恒大小写不敏感（output libfoo.A → 不追加 .a）
-const t3 = makeTarget({ targetType: TargetType.DynamicLib, outputFilename: 'bin/Debug/libfoo.A' });
+// K1-c：显式 def_file 含扩展名 → 追加 .def（保持 K1 动态分支语义）
+const t5 = makeTarget({ targetType: TargetType.DynamicLib, outputFilename: 'bin/Debug/libfoo.dll', defFile: 'bin/Debug/libfoo.dll' });
+const g5 = new CommandGenerator(makeProject([t5]), compiler);
+const c5 = g5.generateFromTemplate('$def_output', { target: t5, pf: null, file: '', object: '', flatObject: '', deps: '' });
+check('显式 def_file 追加 .def', c5 === 'bin\\Debug\\libfoo.dll.def' || c5 === 'bin/Debug/libfoo.dll.def', c5, 'libfoo.dll.def');
+
+// L1：动态默认 import 库基础名 = 输出去扩展名 → libfoo.a（不再 libfoo.dll.a）
+const t4 = makeTarget({ targetType: TargetType.DynamicLib, outputFilename: 'bin/Debug/libfoo.dll' });
+const tpl4 = { command: '$linker -shared $static_output', extensions: [], generatedFiles: [] };
+compiler.commands[5] = [tpl4];
+const g4 = new CommandGenerator(makeProject([t4]), compiler);
+const c4 = g4.generateFromTemplate('$static_output', { target: t4, pf: null, file: '', object: '', flatObject: '', deps: '' });
+check('动态默认 import = libfoo.a', c4 === 'bin\\Debug\\libfoo.a' || c4 === 'bin/Debug/libfoo.a', c4, 'libfoo.a');
+
+// K2：显式 imp_lib 含大写扩展 .A → 大小写不敏感不追加 .a
+const t3 = makeTarget({ targetType: TargetType.DynamicLib, outputFilename: 'bin/Debug/libfoo.dll', impLib: 'bin/Debug/libfoo.A' });
 const tpl3 = { command: '$linker -shared $static_output', extensions: [], generatedFiles: [] };
 compiler.commands[5] = [tpl3];
 const g3 = new CommandGenerator(makeProject([t3]), compiler);
 const c3 = g3.generateFromTemplate('$static_output', { target: t3, pf: null, file: '', object: '', flatObject: '', deps: '' });
-check('import 库 .A 大小写不敏感不追加', c3 === 'bin\\Debug\\libfoo.A' || c3 === 'bin/Debug/libfoo.A', c3, 'libfoo.A');
+check('显式 imp_lib .A 大小写不敏感不追加', c3 === 'bin\\Debug\\libfoo.A' || c3 === 'bin/Debug/libfoo.A', c3, 'libfoo.A');
 
 console.log(`def 命名 + import 库扩展名: ${pass} pass, ${fail} fail`);
 process.exit(fail ? 1 : 0);

@@ -1439,11 +1439,15 @@ export class BuildEngine {
         }
       }
       // 动态库：同时删除 import 库（对齐 GetTargetCleanCommands ttDynamicLib → GetStaticLibFilename；
-      // ttDynamicLib 的 import 库强制平台默认前缀/扩展，对齐 SetupOutputFilenames）
+      // import 库默认基础名 = 输出去扩展名（GetDynamicLibImportFilename 的 $(TARGET_OUTPUT_DIR)$(TARGET_OUTPUT_BASENAME)），
+      // 强制平台默认前缀/扩展且大小写不敏感，对齐 SetupOutputFilenames）
       if (target.targetType === TargetType.DynamicLib) {
+        const out = this.expandedOutputFilename(target);
+        const outP = path.parse(out);
+        const impBase = target.impLib || path.join(outP.dir, outP.name);
         const imp = path.join(
           this.project.basePath,
-          computeStaticOutput(target.impLib || this.expandedOutputFilename(target), this.compiler.switches, true, true, true),
+          computeStaticOutput(impBase, this.compiler.switches, true, true, true),
         );
         if (this.removeFileIfExists(imp)) {
           removed++;

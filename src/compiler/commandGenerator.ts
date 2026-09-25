@@ -261,10 +261,13 @@ export class CommandGenerator {
   }
 
   private setupStaticOutput(target: BuildTarget): string {
-    // DynamicLib import 库：优先自定义 imp_lib，否则由 output 推导（对齐 GetDynamicLibImportFilename，673 先 ReplaceMacros）；
+    // DynamicLib import 库：优先自定义 imp_lib，否则由 output 推导（对齐 GetDynamicLibImportFilename:390-404——
+    // 默认为 $(TARGET_OUTPUT_DIR)$(TARGET_OUTPUT_BASENAME) 即**输出去扩展名**，673 先 ReplaceMacros）；
     // 对齐 SetupOutputFilenames：ttDynamicLib 的 import 库**强制**平台默认前缀/扩展（策略无视）且扩展名恒大小写不敏感（687 IsSameAs false）；Quote 后 FixPathSeparators
     const force = target.targetType === TargetType.DynamicLib;
-    const base = this.expandCb(target.impLib || target.outputFilename, target);
+    const base = target.impLib
+      ? this.expandCb(target.impLib, target)
+      : (force ? this.expandOutputBasename(target) : this.expandCb(target.outputFilename, target));
     return quoteIfNeeded(this.fixSep(computeStaticOutput(
       base,
       this.compiler.switches,
@@ -275,11 +278,14 @@ export class CommandGenerator {
   }
 
   private setupDefOutput(target: BuildTarget): string {
-    // def 文件名：优先自定义 def_file，否则由 output 推导（对齐 GetDynamicLibDefFilename，700 先 ReplaceMacros）；
+    // def 文件名：优先自定义 def_file，否则由 output 推导（对齐 GetDynamicLibDefFilename:406-420——
+    // 默认为 $(TARGET_OUTPUT_DIR)$(TARGET_OUTPUT_BASENAME) 即**输出去扩展名**，700 先 ReplaceMacros）；
     // 非动态：前缀随 prefix_auto 策略、扩展名恒替换为 def（对齐 SetupOutputFilenames:774 SetExt("def")，与 extension_auto 无关）；
     // 动态：前缀随策略、扩展名追加且大小写不敏感（704-716）；Quote 后 FixPathSeparators
     const isDyn = target.targetType === TargetType.DynamicLib;
-    const base = unquote(this.expandCb(target.defFile || target.outputFilename, target));
+    const base = unquote(target.defFile
+      ? this.expandCb(target.defFile, target)
+      : (isDyn ? this.expandOutputBasename(target) : this.expandCb(target.outputFilename, target)));
     const p = path.parse(base);
     let name = p.name;
     if (target.prefixAuto && this.compiler.switches.libPrefix && !name.startsWith(this.compiler.switches.libPrefix)) {
@@ -293,6 +299,13 @@ export class CommandGenerator {
       defOut = path.join(p.dir, name + '.def');
     }
     return quoteIfNeeded(this.fixSep(defOut));
+  }
+
+  /** 输出文件名去扩展名（含目录）—— 对齐 $(TARGET_OUTPUT_DIR)$(TARGET_OUTPUT_BASENAME)（compiletargetbase.cpp:396/412） */
+  private expandOutputBasename(target: BuildTarget): string {
+    const out = unquote(this.expandCb(target.outputFilename, target));
+    const p = path.parse(out);
+    return path.join(p.dir, p.name);
   }
 
   private setupIncludeDirs(target: BuildTarget): string {
