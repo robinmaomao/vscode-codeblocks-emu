@@ -371,6 +371,24 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     }),
   );
 
+  // 单文件编译（对齐 Code::Blocks 的 Build file：只编译右键文件，不链接）
+  context.subscriptions.push(
+    vscode.commands.registerCommand('codeblocks.compileFile', async (node?: any) => {
+      const { project, file } = resolveFileNode(node);
+      if (!project || !file) return;
+      await buildSingleFile(project, file);
+    }),
+  );
+
+  // 单文件清理（对齐 Code::Blocks 的 Clean file：删除对象文件与依赖文件）
+  context.subscriptions.push(
+    vscode.commands.registerCommand('codeblocks.cleanFile', async (node?: any) => {
+      const { project, file } = resolveFileNode(node);
+      if (!project || !file) return;
+      await cleanSingleFile(project, file);
+    }),
+  );
+
   // 编辑文件自定义构建命令（右键快捷入口，写回 .cbp <Option buildCommand>）
   context.subscriptions.push(
     vscode.commands.registerCommand('codeblocks.editFileBuildCommand', async (node?: any) => {
@@ -2420,6 +2438,101 @@ async function buildSingleProject(filename: string, rebuild: boolean): Promise<v
     vscode.window.showErrorMessage(`❌ 构建失败 · ${errorCount} 错误 · ${warningCount} 警告`);
   }
   finishBuildSummary(ok && !cancelled, buildStartMs);
+}
+
+/** 单文件编译（对齐 Code::Blocks Build file：CompileFile，只编译不链接） */
+async function buildSingleFile(project: Project, file: ProjectFile): Promise<void> {
+  // 构建互斥：进行中时忽略新的编译命令
+  if (buildInProgress) {
+    vscode.window.showWarningMessage('已有构建正在进行，请等待完成或先停止');
+    return;
+  }
+  if (project.filename !== activeProject?.filename) {
+    setActiveProject(project, { persist: true });
+  }
+  await saveAllBeforeBuild();
+
+  // 项目级平台过滤（对齐 compilergcc.cpp:2724）
+  if (!supportsCurrentPlatform(project.platforms)) {
+    outputChannel.warn(`[Code::Blocks] 项目 "${project.title}" 不支持当前平台，跳过`);
+    return;
+  }
+  const targetTitle = getSelectedTarget(project) ?? project.buildTargets.find((t) => supportsCurrentPlatform(t.platforms))?.title;
+  if (!targetTitle) {
+    vscode.window.showWarningMessage('项目没有构建目标');
+    return;
+  }
+  const target = project.buildTargets.find((t) => t.title === targetTitle);
+  if (!target) return;
+  const compiler = getCompiler(target.compilerId || project.compilerId);
+
+  outputChannel.show(true);
+  const engine = new BuildEngine(project, compiler, outputChannel);
+  const cancelSource = new BuildCancelSource();
+  currentBuildCancel = cancelSource;
+  buildInProgress = true;
+  let ok = false;
+  let cancelled = false;
+  try {
+    ok = await vscode.window.withProgress(
+      { location: vscode.ProgressLocation.Notification, title: `Code::Blocks 编译文件 ${file.relativeFilename}...`, cancellable: true },
+      async (_progress, token) => {
+        token.onCancellationRequested(() => cancelSource.cancel());
+        return engine.compileFile(targetTitle, file.relativeFilename, {
+          rebuild: false,
+          cancel: cancelSource,
+          onLine: (line, severity) => {
+            if (severity === 'error') outputChannel.error(line);
+            else if (severity === 'warning') outputChannel.warn(line);
+            else outputChannel.info(line);
+          },
+          onDiagnostic: (diag, fileUri) => {
+            // clangd 接管诊断时，Problems 面板由 clangd 产出（对齐整目标构建）
+            if (clangdDiagnosticsEnabled) return;
+            const uri = fileUri ?? vscode.Uri.file(project.basePath);
+            const diags = diagnosticCollection.get(uri) ?? [];
+            diagnosticCollection.set(uri, [...diags, diag]);
+          },
+        });
+      },
+    );
+  } catch (e) {
+    if (e instanceof vscode.CancellationError) {
+      cancelled = true;
+      ok = false;
+    } else {
+      throw e;
+    }
+  } finally {
+    buildInProgress = false;
+    currentBuildCancel = undefined;
+  }
+
+  if (cancelled) {
+    outputChannel.warn('[Code::Blocks] ⚠ 单文件编译已取消（用户中断）');
+  } else if (ok) {
+    outputChannel.info(`[Code::Blocks] ✅ 单文件编译成功: ${file.relativeFilename}`);
+  } else {
+    outputChannel.error(`[Code::Blocks] ❌ 单文件编译失败: ${file.relativeFilename}`);
+  }
+}
+
+/** 单文件清理（对齐 Code::Blocks Clean file：删除对象文件，needDependencies 时连带依赖文件） */
+async function cleanSingleFile(project: Project, file: ProjectFile): Promise<void> {
+  if (buildInProgress) {
+    vscode.window.showWarningMessage('已有构建正在进行，请等待完成或先停止');
+    return;
+  }
+  const targetTitle = getSelectedTarget(project) ?? project.buildTargets.find((t) => supportsCurrentPlatform(t.platforms))?.title;
+  if (!targetTitle) {
+    vscode.window.showWarningMessage('项目没有构建目标');
+    return;
+  }
+  const target = project.buildTargets.find((t) => t.title === targetTitle);
+  if (!target) return;
+  const compiler = getCompiler(target.compilerId || project.compilerId);
+  outputChannel.show(true);
+  new BuildEngine(project, compiler, outputChannel).cleanFile(targetTitle, file.relativeFilename);
 }
 
 /** 构建单个项目的一个目标（被 build / buildSingleProject 复用）；支持虚拟目标展开 */

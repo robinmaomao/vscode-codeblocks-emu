@@ -4,7 +4,7 @@
 
 直接在 VS Code 中打开 `.cbp` / `.workspace` 工程，即可获得与 Code::Blocks 对齐的构建、调试与工程浏览体验。
 
-> **作者**：Robinmaomao ｜ **版本**：0.8.26-dev
+> **作者**：Robinmaomao ｜ **版本**：0.8.27-dev
 
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE.md)
 
@@ -41,6 +41,7 @@
   - 构建 Banner 顺序/文案、up-to-date 判定与 post-build 门控对齐 Code::Blocks 状态机
 - ⏹️ **编译随时停止**：构建通知上的 ❌ 按钮或命令 `Code::Blocks: Stop Build` 一键停止；Windows 下 `taskkill /T /F` 强杀整棵进程树（cmd → gcc → cc1/as/ld 无残留），取消不计入失败
 - 🛡️ **Rebuild 确认**：Rebuild 前弹出模态确认框（对齐 Code::Blocks 的 Rebuild 确认），普通 Build 不弹窗
+- 📄 **单文件编译 / 单文件 Clean**：工程树右键文件 → `Build File`（对齐 Code::Blocks `CompileFile`：DepsSearchStart + IsObjectOutdated 增量判断，命令与整目标构建字节级一致）/ `Clean File`（删对象与 `.depend` 依赖文件）
 - 📊 **辅助工具**：代码统计、TODO 扫描、AStyle 格式化。
 
 ## ⚠️ 已知限制（不支持的功能）
@@ -53,7 +54,6 @@
 | **makefile 项目模式**（`makefile_is_custom="1"`） | 自定义 Makefile 项目未实现，构建仍走内部编译链路 |
 | **跨卷对象路径** | 对象文件位于不同盘符时的相对路径处理未实现 |
 | **console runner** | Code::Blocks 的 cb_console_runner 未移植 |
-| **单文件编译 / 单文件 Clean** | 右键 `CompileFile` 未实现（仅切换编译/链接开关） |
 | **DAP 深层成员赋值** | 调试中修改变量值支持顶层变量与一层成员，二层以上嵌套暂不支持 |
 | **其他工程模板** | sdl / glfw / qt / wxwidgets 等依赖外部库的模板未移植（当前 5 个基础模板） |
 
@@ -72,7 +72,7 @@ npx tsc -p ./
 npx vsce package --allow-missing-repository
 
 # 4. 安装
-code --install-extension codeblocks-vscode-0.8.26-dev.vsix --force
+code --install-extension codeblocks-vscode-0.8.27-dev.vsix --force
 ```
 
 > Windows 下建议使用 `npm.cmd` / `npx.cmd`（PSReadLine 执行策略）。
@@ -143,6 +143,7 @@ code --extensionDevelopmentPath="." --disable-extensions --new-window
 
 - `Code::Blocks: Open Project (.cbp)`
 - `Code::Blocks: Build` / `Rebuild` / `Build and Run` / `Clean` / `Run`
+- `Build File` / `Clean File`（工程树右键文件：单文件编译 / 单文件清理）
 - `Code::Blocks: Stop Build`（编译随时停止）
 - `Code::Blocks: Select Build Target`
 - `Code::Blocks: Detect Compilers`
