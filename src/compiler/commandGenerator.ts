@@ -156,6 +156,11 @@ export class CommandGenerator {
 
   private rel = OptionsRelationType;
 
+  /** 对齐 FixPathSeparators（compilercommandgenerator.cpp:629）：forceFwdSlashes 时 \→/（跳过 "\ " 转义空格） */
+  private fixSep(s: string): string {
+    return this.compiler.switches.forceFwdSlashes ? s.replace(/\\(?! )/g, '/') : s;
+  }
+
   private getRelation(target: BuildTarget, type: OptionsRelationType): OptionsRelation {
     return target.optionRelations[type] ?? OptionsRelation.AppendToParentOptions;
   }
@@ -227,7 +232,8 @@ export class CommandGenerator {
         out = shortPathWin(unquoted);
       }
     }
-    return out;
+    // FixPathSeparators（对齐 GetOrdered*Dirs 尾部循环）
+    return this.fixSep(out);
   }
 
   private setupCompilerOptions(target: BuildTarget): string {
@@ -257,30 +263,80 @@ export class CommandGenerator {
     return opts.join(' ');
   }
 
+  /**
+   * 链接库构造 —— 对齐 SetupLinkLibraries（compilercommandgenerator.cpp:1106）：
+   * 项目+目标（选项关系）→ 追加编译器全局库 → FixupLinkLibraries → PathSearch（需要时）→ 逐库引号。
+   */
   private setupLinkLibraries(target: BuildTarget): string {
-    // 项目级 + 目标级库合并，沿用 linkerOptions 的选项关系（对齐 CodeBlocks SetupLinkLibraries → GetOrderedOptions）
+    // 项目级 + 目标级库合并，沿用 linkerOptions 的选项关系（对齐 SetupLinkLibraries → GetOrderedOptions）
     const libs = combineOptions(
       this.project.linkLibs,
       target.linkLibs,
       this.getRelation(target, this.rel.LinkerOptions),
     );
+    // 追加编译器全局链接库（对齐 SetupLinkLibraries：compiler->GetLinkLibs()）
+    libs.push(...(this.compiler.linkLibs ?? []));
     const s = this.compiler.switches;
-    return libs
-      .map((lib) => {
-        let name = lib;
-        // 去掉路径与扩展，应用 libPrefix/libExtension 规则
-        const base = path.basename(unquote(name));
-        let stem = base;
-        if (s.linkerNeedsLibPrefix) {
-          if (!stem.startsWith(s.libPrefix)) stem = s.libPrefix + stem;
-        } else if (stem.startsWith(s.libPrefix)) {
-          stem = stem.slice(s.libPrefix.length);
-        }
-        const ext = path.extname(stem);
-        if (ext) stem = stem.slice(0, stem.length - ext.length);
-        return s.linkLibs + stem;
-      })
-      .join(' ');
+    let result = '';
+    for (const lib of libs) {
+      if (!lib) continue;
+      let tmp = this.fixupLinkLibrary(lib);
+      // 需要时用库目录解析库全路径（对齐 SetupLinkLibraries 的 PathSearch）
+      if (s.linkerNeedsPathResolved) {
+        tmp = this.pathSearchLibrary(tmp, target);
+      }
+      if (result) result += s.objectSeparator;
+      result += quoteIfNeeded(tmp);
+    }
+    return result;
+  }
+
+  /** 单个链接库名修复 —— 对齐 FixupLinkLibraries（compilercommandgenerator.cpp:1055） */
+  private fixupLinkLibrary(lib: string): string {
+    if (!lib) return '';
+    const s = this.compiler.switches;
+    let result = quoteIfNeeded(lib);
+    // 含路径的库原样保留（不做前缀/扩展处理，不加 -l）
+    if (result.includes('/') || result.includes('\\')) {
+      return result;
+    }
+    // 剥 lib 前缀（linkerNeedsLibPrefix=false 时）
+    let hadLibPrefix = false;
+    if (!s.linkerNeedsLibPrefix && s.libPrefix && result.startsWith(s.libPrefix)) {
+      result = result.slice(s.libPrefix.length);
+      hadLibPrefix = true;
+    }
+    // 扩展处理（对齐 CB：剥前缀后才剥扩展；needsLibExtension 时补扩展）
+    if (!s.linkerNeedsLibExtension && result.length > s.libExtension.length && result.endsWith('.' + s.libExtension)) {
+      if (hadLibPrefix) result = result.slice(0, result.length - (s.libExtension.length + 1));
+    } else if (s.linkerNeedsLibExtension && s.libExtension) {
+      if (result.length <= s.libExtension.length || !result.endsWith('.' + s.libExtension)) {
+        result += '.' + s.libExtension;
+      }
+    }
+    return s.linkLibs + result;
+  }
+
+  /** 库目录解析库全路径 —— 对齐 SetupLinkLibraries 的 PathSearch（linkerNeedsPathResolved 时） */
+  private pathSearchLibrary(lib: string, target: BuildTarget): string {
+    let name = unquote(lib);
+    if (!name) return lib;
+    const linkSwitch = this.compiler.switches.linkLibs;
+    if (linkSwitch && name.startsWith(linkSwitch)) name = name.slice(linkSwitch.length);
+    // 已带路径或绝对路径：无需解析
+    if (name.includes('/') || name.includes('\\') || path.isAbsolute(name)) return lib;
+    const dirs = combineOptions(
+      this.project.libDirs,
+      target.libDirs,
+      this.getRelation(target, this.rel.LibDirs),
+    );
+    dirs.push(...(this.compiler.libDirs ?? []));
+    for (const d of dirs) {
+      const base = path.isAbsolute(d) ? d : path.join(this.project.basePath, d);
+      const cand = path.join(base, name);
+      if (fs.existsSync(cand)) return quoteIfNeeded(cand);
+    }
+    return lib;
   }
 
   private getOrderedIncludeDirs(target: BuildTarget): string[] {
@@ -389,15 +445,22 @@ export class CommandGenerator {
     const file = params.file;
     // 默认将 $file/$file_dir 转为平台原生分隔符（Windows 反斜杠），对齐 Code::Blocks 命令行；
     // nativeSep=false 时保持正斜杠（clangd compile_commands.json 偏好正斜杠）
-    const fname = params.nativeSep === false ? unquote(file) : upperDrive(toNative(unquote(file)));
+    let fname = params.nativeSep === false ? unquote(file) : upperDrive(toNative(unquote(file)));
+    // Use83Paths 源文件短路径（对齐 GenerateCommandLine:417，仅 Windows 且文件存在）
+    if (process.platform === 'win32' && this.compiler.switches.use83Paths) {
+      const raw = unquote(fname);
+      if (fs.existsSync(raw)) fname = shortPathWin(raw);
+    }
+    // FixPathSeparators（对齐 GenerateCommandLine：forceFwdSlashes 时 \→/，跳过 "\ "）
+    fname = this.fixSep(fname);
     const ext = path.extname(fname);
     const baseName = path.basename(fname, ext);
     const dirName = path.dirname(fname);
     const fileExt = ext.replace('.', '');
 
-    const object = params.object;
-    const flatObject = params.flatObject;
-    const deps = params.deps;
+    const object = this.fixSep(params.object);
+    const flatObject = this.fixSep(params.flatObject);
+    const deps = this.fixSep(params.deps);
 
     // allObjectsQuoted 构造
     let allObjectsQuoted = object;
@@ -410,7 +473,7 @@ export class CommandGenerator {
     let macro = template;
 
     // 1. 编译器/链接器程序（含空格的路径需加引号，避免 shell 把 "C:\Program" 当命令）
-    macro = macro.replace(/\$compiler/g, quoteIfNeeded(picked.comp));
+    macro = macro.replace(/\$compiler/g, quoteIfNeeded(this.fixSep(picked.comp)));
     macro = macro.replace(/\$linker/g, quoteIfNeeded(linkerProgram));
     macro = macro.replace(/\$lib_linker/g, quoteIfNeeded(prog.LIB));
     macro = macro.replace(/\$rescomp/g, quoteIfNeeded(prog.WINDRES));
