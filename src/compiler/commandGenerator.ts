@@ -48,6 +48,7 @@ export function computeLibOutput(
   extension: string,
   prefixAuto = true,
   extensionAuto = true,
+  insensitiveExt?: boolean,
 ): string {
   const dir = path.dirname(outputFilename);
   let fullName = path.basename(outputFilename);
@@ -57,9 +58,9 @@ export function computeLibOutput(
   if (prefixAuto && libPrefix && !name.startsWith(libPrefix)) {
     fullName = libPrefix + fullName;
   }
-  // 扩展名策略（对齐 CB：Windows IsSameAs(ext, false) 大小写不敏感，其余大小写敏感）
+  // 扩展名策略（对齐 CB：静态库 756 按平台大小写，import 库 687 恒大小写不敏感 → insensitiveExt 参数）
   if (extensionAuto && extension) {
-    const same = process.platform === 'win32'
+    const same = (insensitiveExt ?? process.platform === 'win32')
       ? curExt.toLowerCase() === extension.toLowerCase()
       : curExt === extension;
     if (!same) {
@@ -69,14 +70,15 @@ export function computeLibOutput(
   return path.join(dir, fullName);
 }
 
-/** 静态库/import 库输出（.a），复用 computeLibOutput（策略默认平台默认，ttDynamicLib 调用方强制） */
+/** 静态库/import 库输出（.a），复用 computeLibOutput（策略默认平台默认，ttDynamicLib 调用方强制；import 库扩展名恒大小写不敏感 → insensitiveExt 透传） */
 export function computeStaticOutput(
   outputFilename: string,
   switches: { libPrefix: string; libExtension: string },
   prefixAuto = true,
   extensionAuto = true,
+  insensitiveExt?: boolean,
 ): string {
-  return computeLibOutput(outputFilename, switches.libPrefix, switches.libExtension, prefixAuto, extensionAuto);
+  return computeLibOutput(outputFilename, switches.libPrefix, switches.libExtension, prefixAuto, extensionAuto, insensitiveExt);
 }
 
 function unquote(s: string): string {
@@ -260,7 +262,7 @@ export class CommandGenerator {
 
   private setupStaticOutput(target: BuildTarget): string {
     // DynamicLib import 库：优先自定义 imp_lib，否则由 output 推导（对齐 GetDynamicLibImportFilename，673 先 ReplaceMacros）；
-    // 对齐 SetupOutputFilenames：ttDynamicLib 的 import 库**强制**平台默认前缀/扩展（策略无视）；Quote 后 FixPathSeparators
+    // 对齐 SetupOutputFilenames：ttDynamicLib 的 import 库**强制**平台默认前缀/扩展（策略无视）且扩展名恒大小写不敏感（687 IsSameAs false）；Quote 后 FixPathSeparators
     const force = target.targetType === TargetType.DynamicLib;
     const base = this.expandCb(target.impLib || target.outputFilename, target);
     return quoteIfNeeded(this.fixSep(computeStaticOutput(
@@ -268,19 +270,29 @@ export class CommandGenerator {
       this.compiler.switches,
       force ? true : target.prefixAuto,
       force ? true : target.extensionAuto,
+      force ? true : undefined,
     )));
   }
 
   private setupDefOutput(target: BuildTarget): string {
-    // def 文件名：优先自定义 def_file，否则由 output 推导（对齐 GetDynamicLibDefFilename，700 先 ReplaceMacros）；前缀/扩展按目标策略；Quote 后 FixPathSeparators
-    const base = this.expandCb(target.defFile || target.outputFilename, target);
-    return quoteIfNeeded(this.fixSep(computeLibOutput(
-      base,
-      this.compiler.switches.libPrefix,
-      'def',
-      target.prefixAuto,
-      target.extensionAuto,
-    )));
+    // def 文件名：优先自定义 def_file，否则由 output 推导（对齐 GetDynamicLibDefFilename，700 先 ReplaceMacros）；
+    // 非动态：前缀随 prefix_auto 策略、扩展名恒替换为 def（对齐 SetupOutputFilenames:774 SetExt("def")，与 extension_auto 无关）；
+    // 动态：前缀随策略、扩展名追加且大小写不敏感（704-716）；Quote 后 FixPathSeparators
+    const isDyn = target.targetType === TargetType.DynamicLib;
+    const base = unquote(this.expandCb(target.defFile || target.outputFilename, target));
+    const p = path.parse(base);
+    let name = p.name;
+    if (target.prefixAuto && this.compiler.switches.libPrefix && !name.startsWith(this.compiler.switches.libPrefix)) {
+      name = this.compiler.switches.libPrefix + name;
+    }
+    let defOut: string;
+    if (isDyn) {
+      const fullBase = name + p.ext;
+      defOut = path.join(p.dir, p.ext.toLowerCase() === '.def' ? fullBase : fullBase + '.def');
+    } else {
+      defOut = path.join(p.dir, name + '.def');
+    }
+    return quoteIfNeeded(this.fixSep(defOut));
   }
 
   private setupIncludeDirs(target: BuildTarget): string {
