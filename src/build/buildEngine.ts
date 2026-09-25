@@ -847,7 +847,8 @@ export class BuildEngine {
           });
           if (linkCommand) {
             this.output.info(linkCommand);
-            this.output.info(`[Linking] → ${path.relative(this.project.basePath, outputAbs)}`);
+            // 对齐 GetTargetLinkCommands:917 的 Linking <kind>: <output>（kind 映射 853-879）
+            this.output.info(`[Code::Blocks] Linking ${this.linkKind(target)}: ${this.expandedOutputFilename(target)}`);
             const linkStartMs = Date.now();
             linkExecuted = true;
             // 链接响应文件基础名对齐 CheckForToLongCommandLine：对象输出目录 + <title>_link.respFile
@@ -936,7 +937,8 @@ export class BuildEngine {
           });
           if (arCmd) {
             this.output.info(arCmd);
-            this.output.info(`[Archiving] → ${staticOut}`);
+            // 对齐 GetTargetLinkCommands:917（静态库同走 Linking 行，kind = static library）
+            this.output.info(`[Code::Blocks] Linking ${this.linkKind(target)}: ${this.expandedOutputFilename(target)}`);
             const arStartMs = Date.now();
             archiveExecuted = true;
             const respBase = path.join(this.project.basePath, target.objectOutput, `${target.title}_link`);
@@ -1032,6 +1034,17 @@ export class BuildEngine {
       case TargetType.Native: return CommandType.LinkNativeCmd;
       case TargetType.StaticLib: return CommandType.LinkStaticCmd;
       default: return CommandType.LinkExeCmd;
+    }
+  }
+
+  /** 链接阶段 kind_of_output 文案（对齐 GetTargetLinkCommands:853-879） */
+  private linkKind(target: BuildTarget): string {
+    switch (target.targetType) {
+      case TargetType.ConsoleOnly: return 'console executable';
+      case TargetType.DynamicLib: return 'dynamic library';
+      case TargetType.StaticLib: return 'static library';
+      case TargetType.Native: return 'native';
+      default: return 'executable';
     }
   }
 
