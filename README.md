@@ -8,7 +8,7 @@
 
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE.md)
 
-> 📖 详细的功能介绍、使用说明与 **RISC-V 交叉编译完整示例**见 [docs/使用说明.md](docs/使用说明.md)。
+> 📖 详细的功能介绍、使用说明与 **RISC-V 交叉编译完整示例**见 [docs/使用说明.md](docs/使用说明.md)；逐项对齐依据见 [docs/对齐对照.md](docs/对齐对照.md)。
 
 ## 特性
 
@@ -22,12 +22,12 @@
 - 📂 **工程树浏览**：按公共顶层目录（`relativeToCommonTopLevelPath`）展开的多层嵌套目录树、文件类型图标、缺失文件标记、目录优先排序（对齐 VS Code Explorer）。
 - 🧩 **右键菜单**：项目节点支持增量编译/全量编译/添加文件；文件节点支持从项目移除、打开所在目录、切换编译/链接开关（写回 `.cbp`）。
 - 📋 **结构化构建日志**：构建摘要树（编译器/编译统计/链接结果 + **错误 (N) / 警告 (N) 分组**，诊断挂在分组下一层级），点击诊断节点精确定位到行列；`F4`/`Shift+F4` 循环跳转错误。
-- 🖥️ **结构化输出通道**：输出面板采用日志通道（LogOutputChannel），每行带时间戳、按级别着色（错误红 / 警告黄）；构建过程分级输出 `[Compiling]` / `[Skipping]` / `[Linking]` / `[Archiving]` 进度，构建结束输出 Emoji 汇总块（编译/跳过/失败统计 + 错误/警告数 + 耗时）。
+- 🖥️ **结构化输出通道**：输出面板采用日志通道（LogOutputChannel），每行带时间戳、按级别着色（错误红 / 警告黄）；构建过程输出单行完成式进度（`✓ [Compiled] 123-248 xxx.c (2.0s)`）、`[Skipping]` / `[Linking]` / `[Archiving]` 状态，构建结束输出 Emoji 汇总块（编译/跳过/失败统计 + 错误/警告数 + 耗时 + 最慢 Top3）。
 - 🎨 **专用语法高亮**：为链接脚本（`.ld` / `.lcf`）、GNU 汇编（`.S` / `.s`，RISC-V）、xmaker 配置脚本（`.xm`）提供专用 TextMate 语法高亮；安装时自动写入仅作用于这些文件的 token 颜色规则，不覆盖用户其他配色。
 - 🚀 **对齐 Code::Blocks 细节**：
   - 增量编译（源文件 + `#include` 头文件依赖 mtime 比对）、`rebuild` 对齐 Code::Blocks（先 Clean 再 Build）
   - 文件类型判定对齐 Code::Blocks `FileTypeOf`：汇编源文件（`.S`/`.s`/`.asm`/`.ss`/`.s62`）正确编译并参与链接；链接脚本（`.ld`）等非源文件默认不编译不链接；`<Option buildCommand>` 自定义命令按 `use="1"` 语义识别
-  - pre/post build 脚本（`.bat` / 命令；Windows 下实时读取系统 PATH，支持运行期新加入 PATH 的工具）
+  - pre/post build 脚本（`.bat` / 命令；Windows 下实时读取系统 PATH，支持运行期新加入 PATH 的工具）；项目级 pre/post **每次构建各执行一次**，目标级按目标执行，post-build 按「实际产生命令」门控（对齐 Code::Blocks 状态机）
   - 带空格工具链路径自动加引号（如 `C:\Program Files (x86)\...` 下的 gcc / ar，避免 cmd 在空格处截断）
   - 超长命令行自动改用响应文件（`@file`，对齐 Code::Blocks CheckForToLongCommandLine，解决大量对象文件链接时 cmd「命令行太长」）
   - 静态库归档对齐 Code::Blocks `LinkStatic` 模板（先删旧库再 ar，避免追加旧符号）
@@ -37,6 +37,10 @@
   - 目标类型数字映射（`type="1"` = 控制台应用，正确区分 `-mwindows`）
   - `max_reported_errors` 错误数截断（防构建日志卡顿）
   - 路径分隔符对齐 Code::Blocks（`UnixFilename(wxPATH_NATIVE)`）：Windows 下 `directory`/`library`/`output` 属性用反斜杠，保证 `map.txt` 等构建产物与 Code::Blocks 一致
+  - 外部依赖强制重链（`external_deps` / `additional_output` / 链接库 mtime 比对，缺失 WARNING）+ 编译器全局搜索目录（`default.conf`）+ 项目自定义变量（`codeblocks_project_custom_variables`）宏展开
+  - 构建 Banner 顺序/文案、up-to-date 判定与 post-build 门控对齐 Code::Blocks 状态机
+- ⏹️ **编译随时停止**：构建通知上的 ❌ 按钮或命令 `Code::Blocks: Stop Build` 一键停止；Windows 下 `taskkill /T /F` 强杀整棵进程树（cmd → gcc → cc1/as/ld 无残留），取消不计入失败
+- 🛡️ **Rebuild 确认**：Rebuild 前弹出模态确认框（对齐 Code::Blocks 的 Rebuild 确认），普通 Build 不弹窗
 - 📊 **辅助工具**：代码统计、TODO 扫描、AStyle 格式化。
 
 ## ⚠️ 已知限制（不支持的功能）
@@ -47,6 +51,9 @@
 |------|------|
 | **Squirrel 构建脚本**（`<Script file="*.script"/>`） | Squirrel 脚本引擎未移植，构建时输出警告并跳过 |
 | **makefile 项目模式**（`makefile_is_custom="1"`） | 自定义 Makefile 项目未实现，构建仍走内部编译链路 |
+| **跨卷对象路径** | 对象文件位于不同盘符时的相对路径处理未实现 |
+| **console runner** | Code::Blocks 的 cb_console_runner 未移植 |
+| **单文件编译 / 单文件 Clean** | 右键 `CompileFile` 未实现（仅切换编译/链接开关） |
 | **DAP 深层成员赋值** | 调试中修改变量值支持顶层变量与一层成员，二层以上嵌套暂不支持 |
 | **其他工程模板** | sdl / glfw / qt / wxwidgets 等依赖外部库的模板未移植（当前 5 个基础模板） |
 
@@ -91,12 +98,13 @@ code --extensionDevelopmentPath="." --disable-extensions --new-window
 ### 构建
 
 - **构建**：状态栏 `Build` 按钮、`Ctrl+F9`，或菜单 `Build → Build`
-- **全量编译**：状态栏 `Rebuild` 按钮、`Ctrl+F11`，或菜单 `Build → Rebuild`
+- **全量编译**：状态栏 `Rebuild` 按钮、`Ctrl+F11`，或菜单 `Build → Rebuild`（**弹确认框**后执行）
 - **清理**：`Ctrl+Shift+F9`，或菜单 `Build → Clean`
 - **构建并运行**：`F9`
 - **运行**：`Ctrl+F10`
+- **停止构建**：构建通知上的 ❌ 按钮，或命令 `Code::Blocks: Stop Build`
 
-> 构建为**增量编译**（源文件与 `#include` 头文件 mtime 比对，头文件更新也触发重编译）；`Rebuild` 对齐 Code::Blocks，先清理对象目录再全量重编译。
+> 构建为**增量编译**（源文件与 `#include` 头文件 mtime 比对，头文件更新也触发重编译）；`Rebuild` 对齐 Code::Blocks，先清理对象目录再全量重编译。链接库/外部依赖（`external_deps`）更新会自动触发重链接；Rebuild 后的纯增量构建不会重复执行 post-build 脚本（对齐 Code::Blocks）。
 
 ### 多项目管理
 
@@ -135,6 +143,7 @@ code --extensionDevelopmentPath="." --disable-extensions --new-window
 
 - `Code::Blocks: Open Project (.cbp)`
 - `Code::Blocks: Build` / `Rebuild` / `Build and Run` / `Clean` / `Run`
+- `Code::Blocks: Stop Build`（编译随时停止）
 - `Code::Blocks: Select Build Target`
 - `Code::Blocks: Detect Compilers`
 - `Code::Blocks: Compiler Options`
@@ -154,6 +163,8 @@ code --extensionDevelopmentPath="." --disable-extensions --new-window
 | `codeblocks.compilerPrograms` | `{}` | 编译器程序完整路径（交叉编译器由探测自动写入） |
 | `codeblocks.astyleOptions` | `["--style=allman", "--indent=spaces=4"]` | AStyle 格式化选项 |
 | `codeblocks.maxReportedErrors` | `50` | 单次构建最多收集的错误数（0 = 不限制） |
+| `codeblocks.build.verboseOutput` | `false` | 构建详细输出：完整编译命令行、Clean 逐文件删除列表、增量跳过列表（对齐 Code::Blocks 详细模式） |
+| `codeblocks.build.skipIncludeDeps` | `false` | 增量编译跳过 `#include` 头文件依赖扫描（对齐 Code::Blocks /skip_include_deps 设置） |
 | `codeblocks.clangd.enabled` | `true` | 是否启用 clangd 集成（自动生成 `compile_commands.json` 并更新 clangd 用户配置） |
 | `codeblocks.clangd.buildLogDiagnostics` | `build` | 检测到 clangd 时 Build Log 的诊断来源：`build` = 构建引擎完整诊断（默认）；`clangd` = clangd 诊断（仅打开过的文件） |
 | `codeblocks.clangd.forcedIncludes` | `["global.h"]` | clangd 分析头文件时强制预包含的基础头文件名（默认 `global.h`：typedef/macro/sfr/clib 上下文；勿用 `include.h` 这类全量主头文件，否则递归包含产生误报） |
