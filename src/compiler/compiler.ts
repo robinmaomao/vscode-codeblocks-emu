@@ -101,6 +101,10 @@ export interface Compiler {
   linkLibs: string[];
   /** 编译器附加搜索路径（default.conf /compiler_sets/<id>/extra_paths，SetupEnvironment PATH 注入 + IsValid 程序搜索） */
   extraPaths: string[];
+  /** include_prj_cwd 开关（default.conf /compiler/include_prj_cwd，GenerateCommandLine:379：$includes 追加项目公共顶层目录） */
+  includePrjCwd: boolean;
+  /** include_file_cwd 开关（default.conf /compiler/include_file_cwd，GenerateCommandLine:347：$includes 追加当前编译文件目录） */
+  includeFileCwd: boolean;
   /** 编译器全局编译选项（/compiler_options，SetupCompilerOptions:1017 追加在项目/目标之后） */
   compilerOptions: string[];
   /** 编译器全局链接选项（/linker_options，SetupLinkerOptions:1046） */
@@ -204,6 +208,8 @@ export function createGccCompiler(platform: NodeJS.Platform, masterPath = ''): C
     resIncludeDirs: [],
     linkLibs: [],
     extraPaths: [],
+    includePrjCwd: false,
+    includeFileCwd: false,
     compilerOptions: [],
     linkerOptions: [],
     resourceCompilerOptions: [],

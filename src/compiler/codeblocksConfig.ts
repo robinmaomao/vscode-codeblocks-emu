@@ -56,6 +56,31 @@ export class CodeBlocksConfig {
   }>();
   /** 全局编译器变量（default.conf /gcv/sets/<set>/<var>/<member>，对齐 uservarmanager） */
   private globalVars = new Map<string, Record<string, string>>();
+  /** include_prj_cwd（default.conf /compiler/include_prj_cwd，GenerateCommandLine:379） */
+  private prjCwd = false;
+  /** include_file_cwd（default.conf /compiler/include_file_cwd，GenerateCommandLine:347） */
+  private fileCwd = false;
+  /** rebuild_seperately（default.conf /compiler/rebuild_seperately，RebuildWorkspace:3012） */
+  private rebuildSep = false;
+
+  /** default.conf 布尔键读取（value 为 '1'/'true' 或 <bool> 节点） */
+  private cfgBool(node: any, name: string): boolean {
+    const n = node?.[name] ?? node?.[name.toUpperCase()];
+    if (n === undefined || n === null) return false;
+    if (typeof n === 'object') {
+      const raw = String(n['@_bool'] ?? n['@_int'] ?? n['str'] ?? n['#text'] ?? '').toLowerCase();
+      return raw === '1' || raw === 'true';
+    }
+    const v = String(n).toLowerCase();
+    return v === '1' || v === 'true';
+  }
+
+  /** include_prj_cwd 开关 */
+  includePrjCwd(): boolean { return this.prjCwd; }
+  /** include_file_cwd 开关 */
+  includeFileCwd(): boolean { return this.fileCwd; }
+  /** rebuild_seperately 开关 */
+  rebuildSeperately(): boolean { return this.rebuildSep; }
 
   /** 加载 default.conf（若存在） */
   load(defaultConfPath?: string): void {
@@ -80,6 +105,12 @@ export class CodeBlocksConfig {
 
     // 全局编译器变量（/gcv/sets/<set>/<var>/<member>，默认集优先；旧版 /global_uservars）
     this.parseGlobalVariables(root);
+
+    // /compiler 全局开关（GenerateCommandLine:347/379 + RebuildWorkspace:3012）
+    const compCfg = root?.CodeBlocksConfig?.compiler;
+    this.prjCwd = this.cfgBool(compCfg, 'include_prj_cwd');
+    this.fileCwd = this.cfgBool(compCfg, 'include_file_cwd');
+    this.rebuildSep = this.cfgBool(compCfg, 'rebuild_seperately');
 
     // 编译器设置集合（/compiler_sets/<id>：全局搜索目录 + 链接库，对齐 Compiler::LoadSettings:645-647）
     const sets = root?.CodeBlocksConfig?.compiler?.compiler_sets;

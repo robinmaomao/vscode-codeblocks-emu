@@ -70,6 +70,8 @@ export class CompilerOptionsLoader {
       resIncludeDirs: [],
       linkLibs: [],
       extraPaths: [],
+      includePrjCwd: false,
+      includeFileCwd: false,
       compilerOptions: [],
       linkerOptions: [],
       resourceCompilerOptions: [],

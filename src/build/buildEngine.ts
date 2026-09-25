@@ -1266,7 +1266,11 @@ export class BuildEngine {
   /** 收集目标的 include 搜索目录（关系合并后的有序目录 + 反引号派生目录；对齐 DepsSearchStart 的 GetCompilerSearchDirs） */
   private getIncludeDirs(target: BuildTarget, generator?: CommandGenerator): string[] {
     if (generator) return generator.getCompilerSearchDirs(target.title);
-    return [...this.project.includeDirs, ...target.includeDirs];
+    const dirs = [...this.project.includeDirs, ...target.includeDirs];
+    // 对齐 CB GetIncludeDirs:808-811：cwd 类目录参与依赖扫描
+    if (this.compiler.includePrjCwd) dirs.push(this.project.basePath);
+    if (this.compiler.includeFileCwd) dirs.push('.');
+    return dirs;
   }
 
   /** 递归扫描 #include "..." 依赖树，返回依赖头文件的最大 mtime（毫秒，不含文件自身） */
@@ -1535,6 +1539,14 @@ export class BuildEngine {
     }
     const objDir = target.objectOutput || '.objs';
     const rel = file.relativeToCommonTopLevelPath || file.relativeFilename;
+    if (path.isAbsolute(rel)) {
+      // 绝对路径/跨卷文件（对齐 CB wxFileName::MakeRelativeTo 跨卷失败 → 保留绝对路径）：
+      // 对象放在该文件自身盘上的源文件旁，避免 path.join 把盘符误拼
+      const parsedAbs = path.parse(rel);
+      const extAbs = ft === FileType.Resource ? 'res' : this.compiler.switches.objectExtension;
+      const nameAbs = this.project.extendedObjNames ? parsedAbs.base + '.' + extAbs : parsedAbs.name + '.' + extAbs;
+      return path.join(parsedAbs.dir, nameAbs);
+    }
     const parsed = path.parse(rel);
     const ext = ft === FileType.Resource ? 'res' : this.compiler.switches.objectExtension;
     const flat = this.compiler.switches.useFlatObjects;
@@ -1588,6 +1600,12 @@ export class BuildEngine {
     }
     const objDir = target.objectOutput || '.objs';
     const ext = ft === FileType.Resource ? 'res' : this.compiler.switches.objectExtension;
+    if (path.isAbsolute(file.relativeFilename)) {
+      // 跨卷文件：对象放自身盘上的源文件旁（对齐 MakeRelativeTo 跨卷失败语义）
+      const parsedAbs = path.parse(file.relativeFilename);
+      const nameAbs = this.project.extendedObjNames ? parsedAbs.base + '.' + ext : parsedAbs.name + '.' + ext;
+      return path.join(parsedAbs.dir, nameAbs);
+    }
     const name = this.project.extendedObjNames
       ? path.basename(file.relativeFilename) + '.' + ext
       : path.parse(file.relativeFilename).name + '.' + ext;

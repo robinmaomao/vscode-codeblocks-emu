@@ -1982,6 +1982,8 @@ function getCompiler(compilerId?: string): Compiler {
       compiler.resIncludeDirs = sd.resIncludeDirs;
       compiler.linkLibs = sd.linkLibs;
       compiler.extraPaths = sd.extraPaths;
+      compiler.includePrjCwd = codeBlocksConfig?.includePrjCwd() ?? false;
+      compiler.includeFileCwd = codeBlocksConfig?.includeFileCwd() ?? false;
       compiler.compilerOptions = sd.compilerOptions;
       compiler.linkerOptions = sd.linkerOptions;
       compiler.resourceCompilerOptions = sd.resourceCompilerOptions;
@@ -2842,6 +2844,22 @@ function finishBuildSummary(allOk: boolean, buildStartMs: number): void {
   }
   // 引导用户查看结构化摘要（不强制弹出）
   vscode.commands.executeCommand('codeblocks.buildLog.focus');
+  // 对齐 CB SaveBuildLog（compilergcc.cpp:3898/4051）：构建结束写 buildlog.html（失败不影响构建）
+  try {
+    const projDir = activeProject?.basePath ?? openProjects[0]?.basePath;
+    if (projDir) {
+      const esc = (s: unknown): string => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+      const rows: string[] = [];
+      for (const p of currentBuildProjects) {
+        rows.push(`<tr><th colspan="4" style="text-align:left">${esc(p.projectName)} — ${esc(p.targetName)}</th></tr>`);
+        for (const d of p.diagnostics) {
+          rows.push(`<tr class="${esc(d.severity)}"><td>${esc(d.severity)}</td><td>${esc(d.file ?? '')}</td><td>${d.line ?? ''}</td><td>${esc(d.message)}</td></tr>`);
+        }
+      }
+      const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Build Log</title><style>table{border-collapse:collapse}td,th{border:1px solid #999;padding:2px 6px;font-family:monospace;font-size:12px}.error{color:#c00}.warning{color:#c60}</style></head><body><h2>Code::Blocks Build Log — ${esc(new Date().toLocaleString())}</h2><table>${rows.join('')}</table></body></html>`;
+      fs.writeFileSync(path.join(projDir, 'buildlog.html'), html, 'utf-8');
+    }
+  } catch { /* 非致命：日志导出失败不影响构建 */ }
 }
 
 async function clean(): Promise<void> {
@@ -2940,6 +2958,29 @@ async function rebuildWorkspace(): Promise<void> {
   clearBackticksCache();
   outputChannel.clear();
   outputChannel.show(true);
+  // rebuild_seperately（default.conf /compiler/rebuild_seperately，RebuildWorkspace:3012-3014）：
+  // true → 单遍交错（DoWorkspaceBuild true,true，每工程 clean+build）；false → 两遍（默认分支）
+  if (codeBlocksConfig?.rebuildSeperately() === true) {
+    buildInProgress = true;
+    try {
+      for (const project of topologicalBuildOrder(openProjects)) {
+        if (!supportsCurrentPlatform(project.platforms)) {
+          outputChannel.warn(`[Code::Blocks] 项目 "${project.title}" 不支持当前平台，跳过`);
+          continue;
+        }
+        const targetTitle = getSelectedTarget(project) ?? project.buildTargets.find((t) => supportsCurrentPlatform(t.platforms))?.title;
+        if (!targetTitle) {
+          outputChannel.warn(`[Code::Blocks] 项目 "${project.title}" 没有构建目标，跳过`);
+          continue;
+        }
+        await cleanTargets(project, targetTitle);
+        await buildOneProject(project, targetTitle, false);
+      }
+    } finally {
+      buildInProgress = false;
+    }
+    return;
+  }
   // clean 遍：对齐 DoWorkspaceBuild(target, true, false)——依赖拓扑顺序清理全部工程选中目标
   for (const project of topologicalBuildOrder(openProjects)) {
     if (!supportsCurrentPlatform(project.platforms)) {
