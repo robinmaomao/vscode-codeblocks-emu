@@ -12,6 +12,7 @@ import { spawnSync } from 'child_process';
 import { Compiler } from '../compiler/compiler';
 import { upperDrive, shortPathWin } from '../tools/pathCase';
 import { replaceCbMacros, cbBuiltinVars } from './cbMacros';
+import { strictQuoting } from '../build/logLang';
 import {
   Project,
   BuildTarget,
@@ -29,6 +30,13 @@ function toNative(p: string): string {
 /** 如果字符串含空白则加引号（QuoteStringIfNeeded） */
 export function quoteIfNeeded(s: string): string {
   if (!s) return s;
+  // 严格模式（codeblocks.build.strictQuoting）：仅空格加引号，对齐 CB NeedQuotes
+  if (strictQuoting()) {
+    if (/[ \t]/.test(s) && !s.startsWith('"')) {
+      return `"${s}"`;
+    }
+    return s;
+  }
   // 含空白或 cmd 元字符（& | < > ^ ( )）时加引号，避免 shell 二次解析拆断路径
   if (/[ \t&|<>^()]/.test(s) && !s.startsWith('"')) {
     return `"${s}"`;

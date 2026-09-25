@@ -26,6 +26,7 @@ import { BuildCancelSource, BuildCancelHandle } from './build/cancelToken';
 import { expandMacros } from './build/scriptRunner';
 import { applyGeneratedFiles } from './build/generatedFiles';
 import { cbBuiltinVars, replaceCbMacros } from './compiler/cbMacros';
+import { buildLogPrefs, msg } from './build/logLang';
 import { clearBackticksCache } from './compiler/commandGenerator';
 import { OutputParser } from './build/outputParser';
 import { collectClangdEntries, writeClangdDatabase, CompileCommandEntry } from './build/compileCommands';
@@ -2322,6 +2323,35 @@ async function stopDebuggerIfRunning(): Promise<boolean> {
   return true;
 }
 
+/**
+ * 构建结果汇报：
+ * - 默认（增强模式）：中文 + Emoji 通知
+ * - codeblocks.log.english：英文文案
+ * - codeblocks.build.plainCbLog：CB 风格 `=== Build finished: N error(s), N warning(s) (x minute(s), y second(s)) ===`，无 Emoji 通知
+ */
+function reportBuildResult(success: boolean, cancelled: boolean, buildStartMs: number, errorCount: number, warningCount: number): void {
+  if (cancelled) {
+    const en = 'Build cancelled (user interrupted)';
+    outputChannel.warn(buildLogPrefs().plain ? en : msg('[Code::Blocks] ⚠ 构建已取消（用户中断）', en));
+    vscode.window.showWarningMessage(buildLogPrefs().plain ? en : msg('⚠ 构建已取消', en));
+    return;
+  }
+  if (buildLogPrefs().plain) {
+    const secs = Math.round((Date.now() - buildStartMs) / 1000);
+    const line = `=== Build ${success ? 'finished' : 'failed'}: ${errorCount} error(s), ${warningCount} warning(s) (${Math.floor(secs / 60)} minute(s), ${secs % 60} second(s)) ===`;
+    if (success) outputChannel.info(line);
+    else outputChannel.error(line);
+    return;
+  }
+  if (success) {
+    outputChannel.info(msg('[Code::Blocks] 构建成功', '[Code::Blocks] Build finished'));
+    vscode.window.showInformationMessage(msg(`✅ 构建成功 · ${errorCount} 错误 · ${warningCount} 警告`, `Build finished: ${errorCount} error(s), ${warningCount} warning(s)`));
+  } else {
+    outputChannel.error(msg('[Code::Blocks] 构建失败', '[Code::Blocks] Build failed'));
+    vscode.window.showErrorMessage(msg(`❌ 构建失败 · ${errorCount} 错误 · ${warningCount} 警告`, `Build failed: ${errorCount} error(s), ${warningCount} warning(s)`));
+  }
+}
+
 /** 主 Build —— 对齐 CB OnBuild：仅活动项目；多工程且无活动项目时询问（AskForActiveProject:1080） */
 async function build(rebuild: boolean): Promise<boolean> {
   // 构建互斥：进行中时忽略新的构建命令（防止双开构建进程打架）
@@ -2379,7 +2409,7 @@ async function buildWorkspace(rebuild: boolean, clearLog = true): Promise<boolea
     outputChannel.clear();
   }
   outputChannel.show(true);
-  outputChannel.info(`[Code::Blocks] 开始构建 ${rebuild ? '(重新构建)' : ''}...（共 ${openProjects.length} 个项目）`);
+  outputChannel.info(`[Code::Blocks] ${msg(`开始构建 ${rebuild ? '(重新构建)' : ''}...（共 ${openProjects.length} 个项目）`, `Starting build${rebuild ? ' (rebuild)' : ''}... (${openProjects.length} project(s))`)}`);
 
   const buildStartMs = Date.now();
   currentBuildProjects.length = 0;
@@ -2451,16 +2481,7 @@ async function buildWorkspace(rebuild: boolean, clearLog = true): Promise<boolea
   }
 
   const { errorCount, warningCount } = buildResultStats();
-  if (cancelled) {
-    outputChannel.warn('[Code::Blocks] ⚠ 构建已取消（用户中断）');
-    vscode.window.showWarningMessage('⚠ 构建已取消');
-  } else if (allOk) {
-    outputChannel.info('[Code::Blocks] 构建成功');
-    vscode.window.showInformationMessage(`✅ 构建成功 · ${errorCount} 错误 · ${warningCount} 警告`);
-  } else {
-    outputChannel.error('[Code::Blocks] 构建失败');
-    vscode.window.showErrorMessage(`❌ 构建失败 · ${errorCount} 错误 · ${warningCount} 警告`);
-  }
+  reportBuildResult(allOk && !cancelled, cancelled, buildStartMs, errorCount, warningCount);
   finishBuildSummary(allOk && !cancelled, buildStartMs);
 
   return allOk && !cancelled;
@@ -2509,7 +2530,7 @@ async function buildSingleProject(filename: string, rebuild: boolean): Promise<b
   diagnosticCollection.clear();
   outputChannel.clear();
   outputChannel.show(true);
-  outputChannel.info(`[Code::Blocks] 开始构建 ${rebuild ? '(重新构建)' : ''}...（单项目）`);
+  outputChannel.info(`[Code::Blocks] ${msg(`开始构建 ${rebuild ? '(重新构建)' : ''}...（单项目）`, `Starting build${rebuild ? ' (rebuild)' : ''}... (single project)`)}`);
 
   const buildStartMs = Date.now();
   currentBuildProjects.length = 0;
@@ -2547,16 +2568,7 @@ async function buildSingleProject(filename: string, rebuild: boolean): Promise<b
   }
 
   const { errorCount, warningCount } = buildResultStats();
-  if (cancelled) {
-    outputChannel.warn('[Code::Blocks] ⚠ 构建已取消（用户中断）');
-    vscode.window.showWarningMessage('⚠ 构建已取消');
-  } else if (ok) {
-    outputChannel.info('[Code::Blocks] 构建成功');
-    vscode.window.showInformationMessage(`✅ 构建成功 · ${errorCount} 错误 · ${warningCount} 警告`);
-  } else {
-    outputChannel.error('[Code::Blocks] 构建失败');
-    vscode.window.showErrorMessage(`❌ 构建失败 · ${errorCount} 错误 · ${warningCount} 警告`);
-  }
+  reportBuildResult(ok && !cancelled, cancelled, buildStartMs, errorCount, warningCount);
   finishBuildSummary(ok && !cancelled, buildStartMs);
   return ok && !cancelled;
 }
@@ -2630,11 +2642,11 @@ async function buildSingleFile(project: Project, file: ProjectFile): Promise<voi
   }
 
   if (cancelled) {
-    outputChannel.warn('[Code::Blocks] ⚠ 单文件编译已取消（用户中断）');
+    outputChannel.warn(buildLogPrefs().plain ? 'Compile cancelled (user interrupted)' : '[Code::Blocks] ⚠ 单文件编译已取消（用户中断）');
   } else if (ok) {
-    outputChannel.info(`[Code::Blocks] ✅ 单文件编译成功: ${file.relativeFilename}`);
+    outputChannel.info(msg(`[Code::Blocks] ✅ 单文件编译成功: ${file.relativeFilename}`, `[Code::Blocks] Compile finished: ${file.relativeFilename}`));
   } else {
-    outputChannel.error(`[Code::Blocks] ❌ 单文件编译失败: ${file.relativeFilename}`);
+    outputChannel.error(msg(`[Code::Blocks] ❌ 单文件编译失败: ${file.relativeFilename}`, `[Code::Blocks] Compile failed: ${file.relativeFilename}`));
   }
 }
 
@@ -2717,24 +2729,26 @@ async function buildOneProject(project: Project, targetTitle: string, rebuild: b
   const cancelled = !!stats.cancelled || !!cancel?.isCancelled();
   const projectName = path.basename(path.dirname(project.filename));
 
-  // === 构建完成汇总块（OUTPUT 文本，Emoji 风格）===
-  const doneSym = cancelled ? '⚠' : ok ? '✅' : '❌';
-  const errCount = diagnostics.filter((d) => d.severity === 'error').length;
-  const warnCount = diagnostics.filter((d) => d.severity === 'warning').length;
-  outputChannel.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-  outputChannel.info(`${doneSym} ${cancelled ? '构建已取消' : '构建完成'}: ${project.title} (${targetTitle})`);
-  outputChannel.info(`🔨 编译 ${stats.compiledCount} · ⏭️ 跳过 ${stats.skippedCount} · ❌ 失败 ${stats.failedCount}`);
-  if (!stats.linkSkipped) {
-    outputChannel.info(`${stats.linkSuccess ? '🔗' : '❌'} 链接${stats.linkSuccess ? '成功' : '失败'}${stats.outputFilename ? ` → ${stats.outputFilename}` : ''}`);
+  // === 构建完成汇总块（OUTPUT 文本，Emoji 风格；plainCbLog 模式跳过，对齐 CB 纯日志）===
+  if (!buildLogPrefs().plain) {
+    const doneSym = cancelled ? '⚠' : ok ? '✅' : '❌';
+    const errCount = diagnostics.filter((d) => d.severity === 'error').length;
+    const warnCount = diagnostics.filter((d) => d.severity === 'warning').length;
+    outputChannel.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    outputChannel.info(`${doneSym} ${cancelled ? '构建已取消' : '构建完成'}: ${project.title} (${targetTitle})`);
+    outputChannel.info(`🔨 编译 ${stats.compiledCount} · ⏭️ 跳过 ${stats.skippedCount} · ❌ 失败 ${stats.failedCount}`);
+    if (!stats.linkSkipped) {
+      outputChannel.info(`${stats.linkSuccess ? '🔗' : '❌'} 链接${stats.linkSuccess ? '成功' : '失败'}${stats.outputFilename ? ` → ${stats.outputFilename}` : ''}`);
+    }
+    outputChannel.info(`🐞 错误 ${errCount} · ⚠️ 警告 ${warnCount}`);
+    outputChannel.info(`⏱️ 用时 ${(durationMs / 1000).toFixed(1)}s`);
+    // 最慢 Top 3（定位慢文件）
+    const top = [...engine.lastCompileTimings].sort((a, b) => b.ms - a.ms).slice(0, 3);
+    if (top.length) {
+      outputChannel.info(`🐢 最慢: ${top.map((t) => `${t.file} (${(t.ms / 1000).toFixed(1)}s)`).join(' · ')}`);
+    }
+    outputChannel.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
   }
-  outputChannel.info(`🐞 错误 ${errCount} · ⚠️ 警告 ${warnCount}`);
-  outputChannel.info(`⏱️ 用时 ${(durationMs / 1000).toFixed(1)}s`);
-  // 最慢 Top 3（定位慢文件）
-  const top = [...engine.lastCompileTimings].sort((a, b) => b.ms - a.ms).slice(0, 3);
-  if (top.length) {
-    outputChannel.info(`🐢 最慢: ${top.map((t) => `${t.file} (${(t.ms / 1000).toFixed(1)}s)`).join(' · ')}`);
-  }
-  outputChannel.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
 
   // 项目源文件绝对路径（供「Build Log 使用 clangd 诊断」模式收集诊断）
   const projectFiles = new Set<string>();
