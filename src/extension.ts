@@ -9,7 +9,7 @@ import * as fs from 'fs';
 import * as crypto from 'crypto';
 import { spawn } from 'child_process';
 import { ProjectParser, WorkspaceParser } from './model/parser';
-import { Project, BuildTarget, ProjectFile, TargetType, OptionsRelation, OptionsRelationType, LinkerExecutableOption, supportsCurrentPlatform } from './model/types';
+import { Project, BuildTarget, ProjectFile, TargetType, OptionsRelation, OptionsRelationType, LinkerExecutableOption, supportsCurrentPlatform, PLATFORM_ALL } from './model/types';
 import { serializeProject } from './model/projectWriter';
 import { createProjectFromTemplate, PROJECT_TEMPLATES } from './project/newProject';
 import { Compiler } from './compiler/compiler';
@@ -21,6 +21,7 @@ import { ProjectPropertiesPanel, TargetEditData, FileEditData, BuildOptionsEditD
 import { ProjectTreeProvider } from './ui/projectTreeProvider';
 import { registerStatusBarMenu, MenuDynamicData } from './ui/statusBarMenu';
 import { BuildLogTreeProvider, BuildLogProject, BuildLogDiagnostic } from './ui/buildLogTreeProvider';
+import { AnalysisTreeProvider, AnalysisData, AnalysisProjectInfo, LastBuildMeta } from './ui/analysisTreeProvider';
 import { SymbolTreeProvider } from './ui/symbolTreeProvider';
 import { BuildEngine } from './build/buildEngine';
 import { BuildCancelSource, BuildCancelHandle } from './build/cancelToken';
@@ -53,6 +54,9 @@ let projectTreeProvider: ProjectTreeProvider | undefined;
 let projectTreeView: vscode.TreeView<any> | undefined;
 let buildLogTreeProvider: BuildLogTreeProvider | undefined;
 let symbolTreeProvider: SymbolTreeProvider | undefined;
+let analysisTreeProvider: AnalysisTreeProvider | undefined;
+/** 最近一次构建摘要（供工程分析视图） */
+let lastBuildMeta: LastBuildMeta | undefined;
 let extContext: vscode.ExtensionContext | undefined;
 /** 当前一次构建累积的项目摘要（供 Build Log 视图） */
 const currentBuildProjects: BuildLogProject[] = [];
@@ -178,6 +182,41 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     showCollapseAll: true,
   });
   context.subscriptions.push(symbolsTreeView);
+
+  // 注册工程分析视图（概览 / 文件类型分布 / TODO 统计 / 构建目标 / 最近构建）
+  analysisTreeProvider = new AnalysisTreeProvider(context.extensionUri, () => computeAnalysisData());
+  const analysisTreeView = vscode.window.createTreeView('codeblocks.analysis', {
+    treeDataProvider: analysisTreeProvider,
+  });
+  context.subscriptions.push(analysisTreeView);
+  // 视图重新可见时刷新一次（懒计算，避免常驻开销）
+  context.subscriptions.push(
+    analysisTreeView.onDidChangeVisibility((e) => {
+      if (e.visible) analysisTreeProvider?.refresh();
+    }),
+  );
+  // 手动刷新（视图标题栏 $(refresh)）
+  context.subscriptions.push(
+    vscode.commands.registerCommand('codeblocks.analysis.refresh', () => {
+      analysisTreeProvider?.refresh();
+    }),
+  );
+  // 工程分析：点击属性 → 在 .cbp 中定位对应配置
+  context.subscriptions.push(
+    vscode.commands.registerCommand('codeblocks.analysis.locate', async (arg?: { filename?: string; locate?: string[] }) => {
+      if (!arg?.filename || !Array.isArray(arg.locate)) return;
+      await locateInCbp(arg.filename, arg.locate);
+    }),
+  );
+  // 工程分析：右键 → 复制对应 .cbp 片段
+  context.subscriptions.push(
+    vscode.commands.registerCommand('codeblocks.analysis.copyXml', async (node?: any) => {
+      const xml: string | undefined = node?.xml;
+      if (!xml) return;
+      await vscode.env.clipboard.writeText(xml);
+      vscode.window.showInformationMessage('已复制 .cbp 片段');
+    }),
+  );
 
   // 状态栏菜单（Code::Blocks 菜单栏移植到状态栏最左侧；两级 QuickPick）
   context.subscriptions.push(registerStatusBarMenu(context, getMenuDynamicData));
@@ -1176,6 +1215,7 @@ async function openProject(filename: string): Promise<void> {
     openProjects.push(project);
     // 最近工程记录（E1；状态栏菜单按需拉取动态区）
     recordRecentProject(filename);
+    analysisTreeProvider?.refresh();
     if (!activeProject) {
       // 优先恢复上次持久化的活动工程；否则默认第一个打开的工程
       const persisted = extContext?.workspaceState.get<string>('codeblocks.activeProject', '');
@@ -1911,6 +1951,7 @@ function removeProject(filename: string): void {
   refreshStatusBars();
   persistProjectOrder();
   rebuildFallbackIndex();
+  analysisTreeProvider?.refresh();
   outputChannel.info(`[Code::Blocks] 已移除项目: ${removed.title}`);
 }
 
@@ -3156,6 +3197,114 @@ function getMenuDynamicData(): MenuDynamicData {
   }
 }
 
+/** 构建目标类型显示名 */
+function targetTypeLabel(tt: TargetType): string {
+  switch (tt) {
+    case TargetType.Executable: return 'Executable';
+    case TargetType.ConsoleOnly: return 'Console';
+    case TargetType.StaticLib: return 'Static library';
+    case TargetType.DynamicLib: return 'Dynamic library';
+    case TargetType.CommandsOnly: return 'Commands only';
+    case TargetType.Native: return 'Native';
+    default: return 'Executable';
+  }
+}
+
+/** 平台位掩码显示名（0x01 Mac / 0x02 Unix / 0x04 Windows / 0xff All；0 视为全部） */
+function platformsLabelOf(platforms: number): string {
+  if (!platforms || platforms === PLATFORM_ALL) return '全部';
+  const parts: string[] = [];
+  if (platforms & 0x04) parts.push('Windows');
+  if (platforms & 0x02) parts.push('Unix');
+  if (platforms & 0x01) parts.push('Mac');
+  return parts.length ? parts.join(' / ') : '全部';
+}
+
+/** 在 .cbp 中定位属性对应的配置行（按候选文本顺序搜索首个匹配并高亮） */
+async function locateInCbp(filename: string, candidates: string[]): Promise<void> {
+  try {
+    const doc = await vscode.workspace.openTextDocument(filename);
+    const editor = await vscode.window.showTextDocument(doc, { preview: false });
+    const text = doc.getText();
+    for (const candidate of candidates) {
+      if (!candidate) continue;
+      const idx = text.indexOf(candidate);
+      if (idx >= 0) {
+        const start = doc.positionAt(idx);
+        const end = doc.positionAt(idx + candidate.length);
+        editor.selection = new vscode.Selection(start, end);
+        editor.revealRange(new vscode.Range(start, end), vscode.TextEditorRevealType.InCenter);
+        return;
+      }
+    }
+    vscode.window.showInformationMessage('未在 .cbp 中找到对应配置行（已打开文件）');
+  } catch { /* 打开失败忽略 */ }
+}
+
+/** 汇总工程分析数据（各工程 .cbp 重要属性；供 AnalysisTreeProvider 懒计算） */
+function computeAnalysisData(): AnalysisData {
+  const projects: AnalysisProjectInfo[] = [];
+  try {
+    for (const p of openProjects) {
+      projects.push({
+        filename: p.filename,
+        title: p.title,
+        dirName: path.basename(path.dirname(p.filename)),
+        compilerId: p.compilerId,
+        basePath: p.basePath,
+        pchMode: p.pchMode,
+        pchLabel: p.pchMode === 2 ? '生成 PCH' : p.pchMode === 1 ? '使用 PCH' : '关闭',
+        objectNamingLabel: p.extendedObjNames ? '扩展名（如 .cpp.o）' : '默认',
+        platformsLabel: platformsLabelOf(p.platforms),
+        fileCount: p.files.length,
+        compileCount: p.files.filter((f) => f.compile).length,
+        linkCount: p.files.filter((f) => f.link).length,
+        autoGeneratedCount: p.files.filter((f) => !!f.autoGeneratedBy).length,
+        virtualFolderCount: p.virtualFolders.length,
+        customCommandFileCount: p.files.filter((f) => Object.keys(f.customBuildCommands ?? {}).length > 0).length,
+        virtualTargets: p.virtualTargets.map((v) => ({ title: v.title, targets: v.targets })),
+        targets: p.buildTargets.map((t) => ({
+          title: t.title,
+          typeValue: t.targetType,
+          typeLabel: targetTypeLabel(t.targetType),
+          compilerId: t.compilerId,
+          outputFilename: t.outputFilename,
+          objectOutput: t.objectOutput,
+          platformsLabel: platformsLabelOf(t.platforms),
+          compilerOptionCount: t.compilerOptions.length,
+          linkerOptionCount: t.linkerOptions.length,
+          linkLibCount: t.linkLibs.length,
+          includeDirCount: t.includeDirs.length,
+          preBuildCount: t.commandsBeforeBuild.length,
+          postBuildCount: t.commandsAfterBuild.length,
+          externalDepsCount: t.externalDeps.length,
+          sampleCompilerOption: t.compilerOptions[0],
+          sampleLinkerOption: t.linkerOptions[0],
+          sampleLinkLib: t.linkLibs[0],
+          sampleIncludeDir: t.includeDirs[0],
+          samplePreBuild: t.commandsBeforeBuild[0],
+          sampleExternalDep: t.externalDeps[0],
+        })),
+        cmd: {
+          preBuild: p.commandsBeforeBuild.length,
+          postBuild: p.commandsAfterBuild.length,
+          scriptCount: p.buildScripts.length,
+          makefileCustom: p.makefileIsCustom,
+          makefile: p.makefile,
+          executionDir: p.executionDir,
+        },
+        dirs: { include: p.includeDirs, lib: p.libDirs, resource: p.resourceIncludeDirs },
+        customVariables: Object.entries(p.customVariables ?? {}).map(([name, value]) => ({ name, value })),
+        envVarCount: (p.envVars ?? []).length,
+        notes: p.notes ?? '',
+        sampleFileName: p.files[0]?.relativeFilename,
+        sampleScript: p.buildScripts[0],
+      });
+    }
+  } catch { /* 部分失败返回已收集数据 */ }
+  return { generatedAt: Date.now(), projects, lastBuild: lastBuildMeta };
+}
+
 /** 构建结束：汇总所有项目摘要，写入 Build Log 树视图 */
 function finishBuildSummary(allOk: boolean, buildStartMs: number): void {
   if (!buildLogTreeProvider) return;
@@ -3168,6 +3317,17 @@ function finishBuildSummary(allOk: boolean, buildStartMs: number): void {
   }
 
   const { errorCount, warningCount } = buildResultStats();
+  // 记录最近构建摘要（供工程分析视图）
+  lastBuildMeta = {
+    ok: allOk,
+    durationMs: Date.now() - buildStartMs,
+    compiled: currentBuildProjects.reduce((n, p) => n + p.compiledCount, 0),
+    skipped: currentBuildProjects.reduce((n, p) => n + p.skippedCount, 0),
+    failed: currentBuildProjects.reduce((n, p) => n + p.failedCount, 0),
+    errors: errorCount,
+    warnings: warningCount,
+  };
+  analysisTreeProvider?.refresh();
   buildLogTreeProvider.setSummary({
     success: allOk,
     durationMs: Date.now() - buildStartMs,
