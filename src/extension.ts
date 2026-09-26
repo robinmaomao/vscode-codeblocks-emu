@@ -15,7 +15,7 @@ import { createProjectFromTemplate, PROJECT_TEMPLATES } from './project/newProje
 import { Compiler } from './compiler/compiler';
 import { CompilerOptionsLoader } from './compiler/optionsLoader';
 import { CodeBlocksConfig } from './compiler/codeblocksConfig';
-import { detectAllCompilers, DetectedCompiler } from './compiler/detector';
+import { detectAllCompilers, detectAllCompilersAsync, DetectedCompiler } from './compiler/detector';
 import { CompilerOptionsPanel } from './ui/compilerOptionsPanel';
 import { ProjectPropertiesPanel, TargetEditData, FileEditData, BuildOptionsEditData, SearchDirsEditData, ProjectSettingsEditData, BuildScriptsEditData, NotesEditData, VirtualTargetEditData } from './ui/projectPropertiesPanel';
 import { ProjectTreeProvider } from './ui/projectTreeProvider';
@@ -356,6 +356,16 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   compilerStatusBar.tooltip = '点击选择编译器';
   context.subscriptions.push(compilerStatusBar);
   updateCompilerStatusBar();
+
+  // 后台预热编译器探测缓存（延迟启动，避免影响窗口加载；令「选择编译器」弹窗即时展示）
+  setTimeout(() => {
+    void (async () => {
+      try {
+        const masterPath = vscode.workspace.getConfiguration('codeblocks').get<string>('masterPath', '');
+        saveDetectCache(masterPath, await detectAllCompilersAsync(masterPath));
+      } catch { /* 非关键 */ }
+    })();
+  }, 4000);
 
   // 打开最近工程（E1）
   context.subscriptions.push(
@@ -2229,38 +2239,111 @@ function resolveTargetCompiler(compilerId: string): Compiler | undefined {
   return undefined;
 }
 
+/** 编译器探测结果跨会话缓存（globalState；TTL 24h 或 masterPath 变化失效） */
+const DETECT_CACHE_KEY = 'codeblocks.detectedCompilersCache';
+const DETECT_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+
+interface DetectCacheEntry {
+  masterPath: string;
+  at: number;
+  list: DetectedCompiler[];
+}
+
+function loadDetectCache(): DetectCacheEntry | undefined {
+  try {
+    const raw = extContext?.globalState.get<DetectCacheEntry>(DETECT_CACHE_KEY);
+    if (!raw || !Array.isArray(raw.list)) return undefined;
+    if (Date.now() - (raw.at ?? 0) > DETECT_CACHE_TTL_MS) return undefined;
+    return raw;
+  } catch {
+    return undefined;
+  }
+}
+
+function saveDetectCache(masterPath: string, list: DetectedCompiler[]): void {
+  try {
+    void extContext?.globalState.update(DETECT_CACHE_KEY, { masterPath, at: Date.now(), list });
+  } catch { /* 非关键 */ }
+}
+
 async function detectCompilers(): Promise<void> {
   const cfg = vscode.workspace.getConfiguration('codeblocks');
   const masterPath = cfg.get<string>('masterPath', '');
-  const detected = detectAllCompilers(masterPath);
 
-  if (detected.length === 0) {
-    vscode.window.showWarningMessage('未探测到可用的编译器（GCC/Clang/MSVC/RISC-V）');
-    return;
-  }
-
-  const picked = await vscode.window.showQuickPick(
-    detected.map((d) => ({
+  interface CompilerPick extends vscode.QuickPickItem { compiler?: DetectedCompiler; }
+  const toItems = (list: DetectedCompiler[]): CompilerPick[] =>
+    list.map((d) => ({
       label: d.name,
       description: d.version ?? d.masterPath,
       detail: d.cCompilerPath,
       compiler: d,
-    })),
-    { placeHolder: '选择要使用的编译器' },
-  );
+    }));
 
+  // 跨会话缓存预填（masterPath 一致且未过期）
+  const cached = loadDetectCache();
+  const initial = cached && cached.masterPath === masterPath ? cached.list : [];
+
+  // 立即弹窗（缓存预填 + busy 进度条），后台异步并行探测，完成后刷新列表
+  const qp = vscode.window.createQuickPick<CompilerPick>();
+  qp.placeholder = initial.length ? '选择要使用的编译器（正在后台重新探测…）' : '正在探测编译器…';
+  qp.busy = true;
+  qp.items = toItems(initial);
+
+  let chosen: CompilerPick | undefined;
+  const done = new Promise<void>((resolve) => {
+    qp.onDidAccept(() => {
+      chosen = qp.selectedItems[0];
+      qp.hide();
+    });
+    qp.onDidHide(() => resolve());
+  });
+  qp.show();
+
+  // 让出主线程，先渲染弹窗，再开始探测
+  await new Promise((r) => setImmediate(r));
+  let detected: DetectedCompiler[] | undefined;
+  try {
+    detected = await detectAllCompilersAsync(masterPath);
+  } catch {
+    detected = undefined;
+  }
+
+  if (detected) {
+    saveDetectCache(masterPath, detected);
+    if (!chosen) {
+      qp.busy = false;
+      qp.placeholder = '选择要使用的编译器';
+      qp.items = toItems(detected);
+      if (detected.length === 0) {
+        qp.hide();
+        vscode.window.showWarningMessage('未探测到可用的编译器（GCC/Clang/MSVC/RISC-V）');
+      }
+    }
+  } else if (!chosen) {
+    qp.busy = false;
+    qp.placeholder = initial.length ? '选择要使用的编译器（探测失败，显示缓存结果）' : '编译器探测失败';
+    if (initial.length === 0) {
+      qp.hide();
+      vscode.window.showWarningMessage('编译器探测失败（详情见 Code::Blocks 输出）');
+    }
+  }
+
+  await done;
+  qp.dispose();
+
+  const picked = chosen?.compiler;
   if (picked) {
-    await cfg.update('compilerId', picked.compiler.id, vscode.ConfigurationTarget.Global);
-    if (picked.compiler.masterPath) {
-      await cfg.update('masterPath', picked.compiler.masterPath, vscode.ConfigurationTarget.Global);
+    await cfg.update('compilerId', picked.id, vscode.ConfigurationTarget.Global);
+    if (picked.masterPath) {
+      await cfg.update('masterPath', picked.masterPath, vscode.ConfigurationTarget.Global);
     }
     // 交叉编译器：持久化完整程序路径；标准编译器：清空以回退到 PATH 查找
-    if (picked.compiler.programs) {
-      await cfg.update('compilerPrograms', picked.compiler.programs, vscode.ConfigurationTarget.Global);
+    if (picked.programs) {
+      await cfg.update('compilerPrograms', picked.programs, vscode.ConfigurationTarget.Global);
     } else {
       await cfg.update('compilerPrograms', {}, vscode.ConfigurationTarget.Global);
     }
-    vscode.window.showInformationMessage(`已选择编译器: ${picked.compiler.name}`);
+    vscode.window.showInformationMessage(`已选择编译器: ${picked.name}`);
     updateCompilerStatusBar();
   }
 }
