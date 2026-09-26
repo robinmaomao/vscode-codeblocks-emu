@@ -8,11 +8,11 @@ import * as vscode from 'vscode';
 import { GdbMiSession, MiResult, MiAsync } from './gdbMiSession';
 import {
   AsmInsn, base64ToHex, breakpointLocation, hexToBase64, isExitReason, isPendingBreakpoint,
-  logpointExpressions, mapStopReason, parseCatchpointNumbers, parseDisassemble, parseQuotedList,
-  parseReadMemory, parseRegisterValues, parseStackFrameTuples, pointerMemoryReference, selectWindow,
-  truthyMiValue,
+  logpointExpressions, mapStopReason, parseCatchpointNumbers, parseDisassemble, parseInstructionReference,
+  parseQuotedList, parseReadMemory, parseRegisterValues, parseStackFrameTuples, parseThreadTuples,
+  pointerMemoryReference, selectWindow, truthyMiValue,
 } from './miParse';
-import { debugStateChanged, debugTrace, setActiveAdapter } from './debugRegistry';
+import { debugStateChanged, debugTrace, registerAdapter, unregisterAdapter } from './debugRegistry';
 
 /** 截断超长跟踪文本 */
 function truncate(s: string, n = 300): string {
@@ -91,6 +91,14 @@ export class GdbDebugAdapter implements vscode.DebugAdapter {
   private bpConditions = new Map<string, string>();
   // 第五十轮修复 8：Step Out 的「调用者返回地址」临时断点编号（-exec-finish 在本机 GDB 8.1 上会崩溃）
   private stepOutBpNum: string | null = null;
+  // 第五十一轮 E1：指令断点（反汇编视图；`-break-insert *ADDR`）
+  private instructionBreakpoints: { gdbNum?: string; verified: boolean }[] = [];
+  // 第五十一轮 E3：VS Code 调试会话 id（多会话路由；直构/测试场景可省略）
+  private sessionId?: string;
+
+  constructor(sessionId?: string) {
+    this.sessionId = sessionId;
+  }
 
   onDidSendMessage = this.emitter.event;
 
@@ -120,6 +128,7 @@ export class GdbDebugAdapter implements vscode.DebugAdapter {
       case 'writeMemory': this.onWriteMemory(msg); break;
       case 'dataBreakpointInfo': this.onDataBreakpointInfo(msg); break;
       case 'setDataBreakpoints': this.onSetDataBreakpoints(msg); break;
+      case 'setInstructionBreakpoints': this.onSetInstructionBreakpoints(msg); break;
       case 'gotoTargets': this.onGotoTargets(msg); break;
       case 'goto': this.onGoto(msg); break;
       case 'setExceptionBreakpoints': this.onSetExceptionBreakpoints(msg); break;
@@ -133,7 +142,8 @@ export class GdbDebugAdapter implements vscode.DebugAdapter {
   dispose(): void {
     this.session?.dispose();
     this.session = null;
-    setActiveAdapter(null);
+    // 第五十一轮 E3：注销本会话（多会话时不影响其它会话的注册）
+    unregisterAdapter(this.sessionId, this);
   }
 
   // ---- 公共访问（寄存器视图 / 调试辅助命令用，第四十九轮） ----
@@ -214,6 +224,7 @@ export class GdbDebugAdapter implements vscode.DebugAdapter {
       supportsReadMemoryRequest: true,
       supportsWriteMemoryRequest: true,
       supportsDataBreakpoints: true,
+      supportsInstructionBreakpoints: true, // 第五十一轮 E1：反汇编视图指令断点
       supportsSteppingGranularity: true,
       supportsHitConditionalBreakpoints: true,
       supportsLogPoints: true,
@@ -313,7 +324,8 @@ export class GdbDebugAdapter implements vscode.DebugAdapter {
       }
       this.sendEvent('terminated', {});
     };
-    setActiveAdapter(this);
+    // 第五十一轮 E3：注册本会话（多会话时聚焦会话优先、最近会话兜底）
+    registerAdapter(this.sessionId, this);
   }
 
   /** 调试器设置注入（对齐 CB debuggersettingsdlg 子集） */
@@ -532,7 +544,8 @@ export class GdbDebugAdapter implements vscode.DebugAdapter {
     try {
       const r = await this.session.send('-thread-info');
       const threads = r.attrs['threads'] ?? '';
-      this.threads = this.parseThreads(threads);
+      // 第五十一轮 E2：逐 tuple 解析（旧惰性可选组正则的 name 永不捕获，与 D3 同款缺陷）
+      this.threads = parseThreadTuples(threads).map((t) => ({ id: t.id, name: t.name ?? `线程 ${t.id}` }));
     } catch { /* ignore */ }
     this.sendResponse(req, true, {
       threads: this.threads.map((t) => ({ id: t.id, name: t.name })),
@@ -838,6 +851,49 @@ export class GdbDebugAdapter implements vscode.DebugAdapter {
     this.sendResponse(req, true, { breakpoints: result });
   }
 
+  /**
+   * 指令断点（第五十一轮 E1）：反汇编视图 gutter 对任意指令下断。
+   * 地址形式 `-break-insert *ADDR` 已在 GDB 8.1 / 7.6.1 双实测可用（Step Out 临时断点同路径）；
+   * 条件/命中次数/日志断点复用文件断点机制（条件为客户端求值）。
+   */
+  private async onSetInstructionBreakpoints(req: DapRequest): Promise<void> {
+    const args = (req as any).arguments ?? {};
+    const requested: { instructionReference?: string; offset?: number; condition?: string; hitCondition?: string; logMessage?: string }[] = args.breakpoints ?? [];
+    if (!this.session) { this.sendResponse(req, true, { breakpoints: requested.map(() => ({ verified: false })) }); return; }
+
+    // 清旧（同步清理条件/日志表）
+    for (const bp of this.instructionBreakpoints) {
+      if (bp.gdbNum) {
+        try { await this.session.sendExact(`-break-delete ${bp.gdbNum}`); } catch { /* ignore */ }
+        this.bpConditions.delete(bp.gdbNum);
+        this.logpoints.delete(bp.gdbNum);
+      }
+    }
+    this.instructionBreakpoints = [];
+
+    const result: { verified: boolean; id?: number; message?: string }[] = [];
+    for (const br of requested) {
+      const addr = parseInstructionReference(String(br.instructionReference ?? ''), br.offset);
+      if (addr === null) { result.push({ verified: false, message: '无效的指令地址' }); continue; }
+      try {
+        const r = await this.session.sendExact(`-break-insert *${GdbDebugAdapter.hex(addr)}`);
+        const gdbNum = r.attrs['bkpt'] ? this.extractField(r.attrs['bkpt'], 'number') : undefined;
+        const verified = !!r.attrs['bkpt'] && !isPendingBreakpoint(r.attrs['bkpt']);
+        if (gdbNum && br.condition) this.bpConditions.set(gdbNum, br.condition);
+        if (gdbNum && br.logMessage) this.logpoints.set(gdbNum, String(br.logMessage));
+        const hit = br.hitCondition ? parseInt(String(br.hitCondition).replace(/[^\d]/g, ''), 10) : NaN;
+        if (gdbNum && Number.isFinite(hit) && hit > 1) {
+          try { await this.session.sendExact(`-break-after ${gdbNum} ${hit - 1}`); } catch { /* 不致命 */ }
+        }
+        this.instructionBreakpoints.push({ gdbNum, verified });
+        result.push({ verified, id: this.instructionBreakpoints.length, message: verified ? undefined : '指令地址未解析' });
+      } catch (err) {
+        result.push({ verified: false, message: (err as Error).message });
+      }
+    }
+    this.sendResponse(req, true, { breakpoints: result });
+  }
+
   /** Run to cursor（DAP gotoTargets） */
   private async onGotoTargets(req: DapRequest): Promise<void> {
     const args = (req as any).arguments ?? {};
@@ -1007,17 +1063,6 @@ export class GdbDebugAdapter implements vscode.DebugAdapter {
   private extractField(bkptStr: string, field: string): string | undefined {
     const m = bkptStr.match(new RegExp(`${field}="([^"]*)"`));
     return m ? m[1] : undefined;
-  }
-
-  private parseThreads(s: string): { id: number; name: string }[] {
-    // 格式: [{id="1",...},...]
-    const out: { id: number; name: string }[] = [];
-    const re = /id="(\d+)"[^}]*?(?:name="([^"]*)")?/g;
-    let m;
-    while ((m = re.exec(s)) !== null) {
-      out.push({ id: Number(m[1]), name: m[2] ?? `线程 ${m[1]}` });
-    }
-    return out;
   }
 
   private parseStackFrames(s: string): { id: number; name: string; file?: string; line?: number; addr?: string }[] {

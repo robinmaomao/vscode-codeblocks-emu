@@ -140,9 +140,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   // 注册 DAP 调试器（内联实现，直接驱动 GDB）
   context.subscriptions.push(
     vscode.debug.registerDebugAdapterDescriptorFactory('codeblocks', {
-      createDebugAdapterDescriptor: () => new vscode.DebugAdapterInlineImplementation(new GdbDebugAdapter()),
+      // 第五十一轮 E3：把 VS Code 会话 id 传给适配器（多会话时寄存器视图/调试命令跟随聚焦会话）
+      createDebugAdapterDescriptor: (session) => new vscode.DebugAdapterInlineImplementation(new GdbDebugAdapter(session.id)),
     }),
   );
+  // 第五十一轮 E3：聚焦会话切换 → 刷新注册表状态（寄存器视图即时跟随）
+  context.subscriptions.push(vscode.debug.onDidChangeActiveDebugSession(() => debugStateChanged.fire()));
 
   // 第四十九轮：寄存器视图（调试容器）+ 调试辅助命令
   const registersProvider = new RegistersTreeProvider();

@@ -317,3 +317,15 @@ export function isUnframedLine(line: string): boolean {
   if (/^\d+\^/.test(line)) return false;
   return true;
 }
+
+/**
+ * 指令断点地址解析（第五十一轮 E1）：`0x…` / 十进制引用 + 偏移 → 绝对地址；非法返回 null。
+ */
+export function parseInstructionReference(reference: string, offset?: number): number | null {
+  const t = (reference ?? '').trim();
+  if (!t) return null;
+  const base = /^0x[0-9a-f]+$/i.test(t) ? parseInt(t, 16) : /^\d+$/.test(t) ? parseInt(t, 10) : NaN;
+  if (!Number.isFinite(base)) return null;
+  const off = Number.isFinite(offset as number) ? Math.trunc(offset as number) : 0;
+  return base + off;
+}

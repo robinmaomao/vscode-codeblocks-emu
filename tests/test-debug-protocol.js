@@ -7,7 +7,7 @@ const {
   parseDisassemble, selectWindow, parseQuotedList, parseRegisterValues, parseReadMemory,
   hexToBase64, base64ToHex, parseCatchpointNumbers, parseTasklist, parsePsList, pointerMemoryReference,
   parseStackFrameTuples, parseThreadTuples, mapStopReason, isExitReason, logpointExpressions,
-  breakpointLocation, isPendingBreakpoint, isUnframedLine, truthyMiValue,
+  breakpointLocation, isPendingBreakpoint, isUnframedLine, truthyMiValue, parseInstructionReference,
 } = require('../dist/debug/miParse.js');
 
 let pass = 0, fail = 0;
@@ -141,6 +141,12 @@ check('条件求值：0/false → 假', truthyMiValue('0') === false && truthyMi
 check('条件求值：0x5 真 / 0x0 假', truthyMiValue('0x5') === true && truthyMiValue('0x0') === false, 'n/a', '0x5/0x0');
 check('条件求值：非零十进制', truthyMiValue('42') === true, 'n/a', true);
 check('条件求值：空值 → 假', truthyMiValue('') === false && truthyMiValue('  ') === false, 'n/a', false);
+
+// ---- 17. 指令断点地址解析（第五十一轮 E1）----
+check('指令地址：0x 引用', parseInstructionReference('0x40156c', 0) === 0x40156c, 'n/a', 0x40156c);
+check('指令地址：偏移叠加', parseInstructionReference('0x40156c', 4) === 0x401570, 'n/a', 0x401570);
+check('指令地址：十进制引用', parseInstructionReference('4199788', 0) === 4199788, 'n/a', 4199788);
+check('指令地址：非法/空 → null', parseInstructionReference('xx', 0) === null && parseInstructionReference('', 0) === null, 'n/a', null);
 
 console.log(`调试协议解析回归: ${pass} pass, ${fail} fail`);
 process.exit(fail ? 1 : 0);
