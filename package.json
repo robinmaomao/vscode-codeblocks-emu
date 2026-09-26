@@ -2,7 +2,7 @@
   "name": "codeblocks-vscode",
   "displayName": "Code::Blocks for VS Code",
   "description": "原生移植 Code::Blocks 核心功能到 VS Code：项目模型、构建引擎、编译器管理与调试引擎",
-  "version": "0.8.69-dev",
+  "version": "0.8.70-dev",
   "icon": "resources/icon.png",
   "publisher": "robinmaomao",
   "author": {
@@ -250,6 +250,47 @@
       {
         "command": "codeblocks.prevError",
         "title": "Code::Blocks: Previous Error"
+      },
+      {
+        "command": "codeblocks.compileCurrentFile",
+        "title": "Code::Blocks: Compile Current File",
+        "icon": "$(run-above)"
+      },
+      {
+        "command": "codeblocks.clearErrors",
+        "title": "Code::Blocks: Clear All Errors"
+      },
+      {
+        "command": "codeblocks.activatePriorProject",
+        "title": "Code::Blocks: Activate Prior Project"
+      },
+      {
+        "command": "codeblocks.activateNextProject",
+        "title": "Code::Blocks: Activate Next Project"
+      },
+      {
+        "command": "codeblocks.toggleCategorize",
+        "title": "Code::Blocks: Categorize Project Tree by File Types"
+      },
+      {
+        "command": "codeblocks.clearRecentProjects",
+        "title": "Code::Blocks: Clear Recent Projects"
+      },
+      {
+        "command": "codeblocks.projectNotes",
+        "title": "Code::Blocks: Project Notes"
+      },
+      {
+        "command": "codeblocks.setProgramArguments",
+        "title": "Code::Blocks: Set Programs' Arguments"
+      },
+      {
+        "command": "codeblocks.showGlobalVariables",
+        "title": "Code::Blocks: Show Global Variables"
+      },
+      {
+        "command": "codeblocks.clearBacktickCache",
+        "title": "Code::Blocks: Clear Backtick Cache"
       }
     ],
     "languages": [
@@ -770,7 +811,7 @@
         "when": "editorTextFocus"
       },
       {
-        "command": "codeblocks.clean",
+        "command": "codeblocks.compileCurrentFile",
         "key": "ctrl+shift+f9",
         "mac": "cmd+shift+f9",
         "when": "editorTextFocus"
@@ -789,6 +830,14 @@
         "command": "codeblocks.prevError",
         "key": "shift+f4",
         "when": "editorTextFocus"
+      },
+      {
+        "command": "codeblocks.activatePriorProject",
+        "key": "alt+f5"
+      },
+      {
+        "command": "codeblocks.activateNextProject",
+        "key": "alt+f6"
       }
     ]
   },
