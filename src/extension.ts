@@ -53,6 +53,7 @@ import { parseProjectDebuggerConfig, mergeRemoteOptions, applyProjectDebuggerCon
 import { setProjectDependencies, wouldCreateCycle } from './model/workspaceWriter';
 import { generateMakefile } from './build/makefileExporter';
 import { buildProjectFromImport, importDevProject, importDspProject, importVcxproj } from './project/projectImporter';
+import { buildTargetExportProject } from './project/exportTarget';
 import { collectConflicts, normalizeKey, parseJsonc, KeybindingDef, ConflictItem } from './tools/keybindingConflicts';
 import {
   MANAGED_COMMANDS, MANAGED_KEYBINDINGS, buildExportPayload, buildKeybindingRows, computeDesiredEntries,
@@ -1240,6 +1241,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     vscode.commands.registerCommand('codeblocks.importProject', async () => {
       await importExternalProject();
     }),
+    vscode.commands.registerCommand('codeblocks.exportTargetAsProject', async (targetTitleArg?: unknown) => {
+      await exportTargetAsProject(targetTitleArg);
+    }),
     vscode.commands.registerCommand('codeblocks.openDefaultConfig', async () => {
       await openDefaultConf();
     }),
@@ -1811,6 +1815,46 @@ async function persistProjectAndReload(project: Project): Promise<void> {
     projectTreeProvider?.setActiveProject(activeProject);
     updateTargetStatusBar();
     updateCompilerStatusBar();
+  }
+}
+
+/**
+ * R9：从目标导出独立工程（对齐 CB ProjectOptions → Create project from target）：
+ * 确认 → 选保存位置（默认 <工程名>_<目标名>.cbp）→ 生成单目标工程 → 写盘 → 可立即打开。
+ */
+async function exportTargetAsProject(targetTitleArg?: unknown): Promise<void> {
+  const project = requireProject();
+  if (!project) return;
+  let targetTitle = String(targetTitleArg ?? '').trim();
+  if (!targetTitle || !project.buildTargets.some((t) => t.title === targetTitle)) {
+    const pick = await vscode.window.showQuickPick(
+      project.buildTargets.map((t) => ({ label: t.title, description: `输出: ${t.outputFilename}` })),
+      { placeHolder: '选择要导出的构建目标' },
+    );
+    if (!pick) return;
+    targetTitle = pick.label;
+  }
+  const confirm = await vscode.window.showWarningMessage(
+    `把目标 "${targetTitle}" 导出为独立工程？（仅包含属于该目标的文件）`,
+    { modal: true },
+    'Export',
+  );
+  if (confirm !== 'Export') return;
+  await saveAllBeforeBuild();
+  const safe = targetTitle.replace(/[^\w.-]+/g, '_');
+  const base = path.basename(project.filename, path.extname(project.filename));
+  const suggested = path.join(path.dirname(project.filename), `${base}_${safe}.cbp`);
+  const save = await vscode.window.showSaveDialog({
+    defaultUri: vscode.Uri.file(suggested),
+    filters: { 'Code::Blocks project': ['cbp'] },
+  });
+  if (!save) return;
+  const exported = buildTargetExportProject(project, targetTitle);
+  fs.writeFileSync(save.fsPath, serializeProject(exported), 'utf-8');
+  outputChannel.info(`[Code::Blocks] 已从目标导出工程: ${save.fsPath}（目标 ${targetTitle}，${exported.files.length} 个文件）`);
+  const pick = await vscode.window.showInformationMessage(`已导出工程（${exported.files.length} 个文件）`, '打开', '稍后');
+  if (pick === '打开') {
+    await openProject(save.fsPath);
   }
 }
 
@@ -2622,6 +2666,13 @@ async function saveProjectProperties(
   project.title = projectSettings.title.trim() || project.title;
   project.compilerId = projectSettings.compilerId.trim() || project.compilerId;
   project.virtualFolders = projectSettings.virtualFolders;
+  // 工程高级设置（R7：platforms / pch_mode / extended_obj_names / makefile 模式）
+  project.platforms = Number.isFinite(projectSettings.platforms) ? projectSettings.platforms : project.platforms;
+  project.pchMode = projectSettings.pchMode;
+  project.extendedObjNames = projectSettings.extendedObjNames === true;
+  project.makefileIsCustom = projectSettings.makefileIsCustom === true;
+  project.makefile = projectSettings.makefile.trim();
+  project.executionDir = projectSettings.executionDir.trim();
   // 环境变量（R1：<Build><Environment>，项目级）——构建/运行宏 $(NAME) + Run/Debug 进程环境
   project.envVars = (projectSettings.envVars ?? [])
     .filter((v) => v.name)
@@ -2640,6 +2691,7 @@ async function saveProjectProperties(
   project.buildScripts = buildScripts.project.scripts;
   project.commandsBeforeBuild = buildScripts.project.before;
   project.commandsAfterBuild = buildScripts.project.after;
+  project.alwaysRunPostBuildSteps = buildScripts.project.always === true;
 
   const oldByOriginal = new Map(project.buildTargets.map((t) => [t.title, t]));
   const renameMap = new Map<string, string>(); // 旧标题 → 新标题
@@ -2672,6 +2724,19 @@ async function saveProjectProperties(
     t.additionalOutput = [...(e.additionalOutput ?? [])];
     // 目标环境变量（R1：<Environment>，同名时覆盖项目变量）
     t.envVars = (e.envVars ?? []).filter((v) => v.name).map((v) => ({ name: v.name, value: v.value }));
+    // 高级字段（R6：working_dir / deps_output / platforms / 宿主程序 / 库命名策略）
+    t.workingDir = e.workingDir ?? '';
+    t.depsOutput = e.depsOutput ?? '';
+    t.platforms = Number.isFinite(e.platforms) ? e.platforms : t.platforms;
+    t.hostApplication = e.hostApplication ?? '';
+    t.runHostApplicationInTerminal = e.runHostApplicationInTerminal !== false;
+    t.useConsoleRunner = e.useConsoleRunner !== false;
+    t.impLib = e.impLib ?? '';
+    t.defFile = e.defFile ?? '';
+    t.createDefFile = e.createDefFile === true;
+    t.createStaticLib = e.createStaticLib === true;
+    t.prefixAuto = e.prefixAuto !== false;
+    t.extensionAuto = e.extensionAuto !== false;
     newTargets.push(t);
     newTitles.add(title);
   }
@@ -2758,6 +2823,7 @@ async function saveProjectProperties(
     newTargets[i].buildScripts = buildScripts.targets[i].scripts;
     newTargets[i].commandsBeforeBuild = buildScripts.targets[i].before;
     newTargets[i].commandsAfterBuild = buildScripts.targets[i].after;
+    newTargets[i].alwaysRunPostBuildSteps = buildScripts.targets[i].always === true;
   }
 
   // 应用虚拟目标（直接重建：alias + 过滤为仍然存在的新目标标题）

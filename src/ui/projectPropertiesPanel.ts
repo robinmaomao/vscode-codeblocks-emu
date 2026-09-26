@@ -32,6 +32,30 @@ export interface TargetEditData {
    * 参与构建/运行宏 $(NAME)（目标覆盖项目），Run/Debug 时注入进程环境（对齐 CB Build options → Custom variables）
    */
   envVars: CustomVariableEditData[];
+  /** R6：运行工作目录（<Option working_dir>，空 = 输出目录；Run/Debug 用） */
+  workingDir: string;
+  /** R6：deps 输出目录（<Option deps_output>，默认 .deps） */
+  depsOutput: string;
+  /** R6：目标平台位掩码（<Option platforms>，0xff = 全部） */
+  platforms: number;
+  /** R6：宿主程序（<Option host_application>，库/CommandsOnly 目标 Run 用） */
+  hostApplication: string;
+  /** R6：宿主程序在终端运行（<Option run_host_application_in_terminal>，默认 true） */
+  runHostApplicationInTerminal: boolean;
+  /** R6：使用 console runner / 结束暂停（<Option use_console_runner>，默认 true） */
+  useConsoleRunner: boolean;
+  /** R6：动态库 import 库文件名（<Option output imp_lib>，空 = 按策略推导） */
+  impLib: string;
+  /** R6：def 文件名（<Option output def_file>，空 = 按策略推导） */
+  defFile: string;
+  /** R6：静态/动态库生成 DEF（<Option createDefFile>） */
+  createDefFile: boolean;
+  /** R6：动态库生成 import 静态库（<Option createStaticLib>） */
+  createStaticLib: boolean;
+  /** R6：库名自动前缀（<Option output prefix_auto>，默认 true） */
+  prefixAuto: boolean;
+  /** R6：库扩展名自动（<Option output extension_auto>，默认 true） */
+  extensionAuto: boolean;
 }
 
 /** WebView 前后端交换的文件编辑数据 */
@@ -88,6 +112,18 @@ export interface ProjectSettingsEditData {
   customVariables: CustomVariableEditData[];
   /** 项目环境变量（<Build><Environment><Variable>，R1；构建/运行宏 $(NAME) + Run/Debug 进程环境） */
   envVars: CustomVariableEditData[];
+  /** R7：工程平台位掩码（<Option platforms>，0xff = 全部） */
+  platforms: number;
+  /** R7：PCH 模式（<Option pch_mode>：0=源目录 1=对象目录 2=源文件，默认 1） */
+  pchMode: number;
+  /** R7：扩展对象命名（<Option extended_obj_names>：foo.c → foo.c.o） */
+  extendedObjNames: boolean;
+  /** R7：自定义 Makefile（<Option makefile_is_custom>） */
+  makefileIsCustom: boolean;
+  /** R7：Makefile 文件名（<Option makefile>，默认 Makefile） */
+  makefile: string;
+  /** R7：makefile 模式执行目录（<Option execution_dir>，空 = 项目根） */
+  executionDir: string;
 }
 
 /** 构建脚本 + pre/post build 命令（作用域：项目级 + 各目标，目标项按 targets 数组顺序对齐） */
@@ -98,6 +134,8 @@ export interface ScriptItemEditData {
   before: string[];
   /** 构建后命令（<ExtraCommands><Add after>） */
   after: string[];
+  /** 无构建命令时也执行 post-build（<ExtraCommands><Mode after="always">，R7；对齐 CB Pre/post 页选项） */
+  always: boolean;
 }
 
 export interface BuildScriptsEditData {
@@ -232,6 +270,18 @@ export class ProjectPropertiesPanel {
       externalDeps: [...t.externalDeps],
       additionalOutput: [...t.additionalOutput],
       envVars: t.envVars.map((v) => ({ name: v.name, value: v.value })),
+      workingDir: t.workingDir ?? '',
+      depsOutput: t.depsOutput ?? '',
+      platforms: t.platforms,
+      hostApplication: t.hostApplication ?? '',
+      runHostApplicationInTerminal: t.runHostApplicationInTerminal !== false,
+      useConsoleRunner: t.useConsoleRunner !== false,
+      impLib: t.impLib ?? '',
+      defFile: t.defFile ?? '',
+      createDefFile: t.createDefFile === true,
+      createStaticLib: t.createStaticLib === true,
+      prefixAuto: t.prefixAuto !== false,
+      extensionAuto: t.extensionAuto !== false,
     }));
 
     const cmp = this.project.compilerId;
@@ -281,17 +331,25 @@ export class ProjectPropertiesPanel {
       virtualFolders: [...this.project.virtualFolders],
       customVariables: Object.entries(this.project.customVariables ?? {}).map(([name, value]) => ({ name, value })),
       envVars: this.project.envVars.map((v) => ({ name: v.name, value: v.value })),
+      platforms: this.project.platforms,
+      pchMode: this.project.pchMode,
+      extendedObjNames: this.project.extendedObjNames === true,
+      makefileIsCustom: this.project.makefileIsCustom === true,
+      makefile: this.project.makefile ?? '',
+      executionDir: this.project.executionDir ?? '',
     };
 
     const projectScripts = {
       scripts: [...this.project.buildScripts],
       before: [...this.project.commandsBeforeBuild],
       after: [...this.project.commandsAfterBuild],
+      always: this.project.alwaysRunPostBuildSteps === true,
     };
     const targetScripts = this.project.buildTargets.map((t) => ({
       scripts: [...t.buildScripts],
       before: [...t.commandsBeforeBuild],
       after: [...t.commandsAfterBuild],
+      always: t.alwaysRunPostBuildSteps === true,
     }));
     const notes = {
       notes: this.project.notes,
@@ -493,6 +551,9 @@ export class ProjectPropertiesPanel {
               <button id="add" title="添加目标">添加</button>
               <button id="copy" title="复制选中目标">复制</button>
               <button id="remove" title="删除选中目标">删除</button>
+              <button id="up" title="上移选中目标">上移</button>
+              <button id="down" title="下移选中目标">下移</button>
+              <button id="exportTarget" title="把选中目标导出为独立工程（对齐 CB Create project from target）">导出为工程</button>
             </div>
           </div>
           <div class="form" id="form"></div>
@@ -651,9 +712,35 @@ export class ProjectPropertiesPanel {
         '<label><span class="field-name">目标环境变量（每行 name=value）</span>' +
         '<textarea id="f-envvars">' + esc((t.envVars || []).map(v => v.name + '=' + v.value).join('\\n')) + '</textarea>' +
         '<div class="hint">&lt;Environment&gt;&lt;Variable&gt;：构建/运行宏 $(NAME)（对齐 CB Build options → Custom variables；同名时目标覆盖项目）</div></label>' +
+        '</details>' +
+        '<details class="fg"><summary>高级</summary>' +
+        '<label><span class="field-name">运行工作目录</span>' +
+        '<input id="f-workdir" value="' + escAttr(t.workingDir || '') + '"><div class="hint">&lt;Option working_dir&gt;：留空 = 输出文件目录；支持 $(VAR) 宏（对齐 CB Run 工作目录）</div></label>' +
+        '<label><span class="field-name">deps 输出目录</span>' +
+        '<input id="f-deps" value="' + escAttr(t.depsOutput || '') + '"><div class="hint">留空 = 默认 .deps</div></label>' +
+        '<label><span class="field-name">平台</span>' +
+        '<span class="checks">' +
+        '<label class="check"><input type="checkbox" id="f-pwin"' + ((t.platforms & 4) ? ' checked' : '') + '> Windows</label>' +
+        '<label class="check"><input type="checkbox" id="f-punix"' + ((t.platforms & 2) ? ' checked' : '') + '> Unix</label>' +
+        '<label class="check"><input type="checkbox" id="f-pmac"' + ((t.platforms & 1) ? ' checked' : '') + '> Mac</label>' +
+        '</span><div class="hint">全选 = All（0xff）；不支持的平台在构建与目标列表中跳过（对齐 CB platforms）</div></label>' +
+        '<label><span class="field-name">宿主程序（库/CommandsOnly 目标运行/调试用）</span>' +
+        '<input id="f-host" value="' + escAttr(t.hostApplication || '') + '"></label>' +
+        '<label class="check"><input type="checkbox" id="f-hostterm"' + (t.runHostApplicationInTerminal !== false ? ' checked' : '') + '> 宿主程序在终端运行</label>' +
+        '<label class="check"><input type="checkbox" id="f-console"' + (t.useConsoleRunner !== false ? ' checked' : '') + '> 使用 console runner（结束时暂停；集成终端下为兼容项）</label>' +
+        '<label><span class="field-name">import 库文件名（动态库，空 = 推导）</span>' +
+        '<input id="f-implib" value="' + escAttr(t.impLib || '') + '"></label>' +
+        '<label><span class="field-name">def 文件名（空 = 推导）</span>' +
+        '<input id="f-deffile" value="' + escAttr(t.defFile || '') + '"></label>' +
+        '<label class="check"><input type="checkbox" id="f-defchk"' + (t.createDefFile ? ' checked' : '') + '> 静态/动态库生成 DEF 文件</label>' +
+        '<label class="check"><input type="checkbox" id="f-staticchk"' + (t.createStaticLib ? ' checked' : '') + '> 动态库生成 import 静态库</label>' +
+        '<label class="check"><input type="checkbox" id="f-prefix"' + (t.prefixAuto !== false ? ' checked' : '') + '> 库名自动加前缀（prefix_auto）</label>' +
+        '<label class="check"><input type="checkbox" id="f-ext"' + (t.extensionAuto !== false ? ' checked' : '') + '> 库名自动加扩展名（extension_auto）</label>' +
         '</details>';
       document.getElementById('f-type').value = String(t.targetType);
-      ['f-title', 'f-type', 'f-output', 'f-object', 'f-compiler', 'f-params', 'f-extdeps', 'f-addout', 'f-envvars'].forEach(id => {
+      ['f-title', 'f-type', 'f-output', 'f-object', 'f-compiler', 'f-params', 'f-extdeps', 'f-addout', 'f-envvars',
+        'f-workdir', 'f-deps', 'f-pwin', 'f-punix', 'f-pmac', 'f-host', 'f-hostterm', 'f-console',
+        'f-implib', 'f-deffile', 'f-defchk', 'f-staticchk', 'f-prefix', 'f-ext'].forEach(id => {
         document.getElementById(id).addEventListener('change', () => collectTargetForm());
       });
     }
@@ -672,6 +759,22 @@ export class ProjectPropertiesPanel {
       t.externalDeps = optionsLines(document.getElementById('f-extdeps').value);
       t.additionalOutput = optionsLines(document.getElementById('f-addout').value);
       t.envVars = parseVarLines(document.getElementById('f-envvars').value);
+      // R6：高级字段
+      t.workingDir = document.getElementById('f-workdir').value.trim();
+      t.depsOutput = document.getElementById('f-deps').value.trim();
+      const pw = document.getElementById('f-pwin').checked;
+      const pu = document.getElementById('f-punix').checked;
+      const pm = document.getElementById('f-pmac').checked;
+      t.platforms = (pw && pu && pm) ? 255 : ((pw ? 4 : 0) | (pu ? 2 : 0) | (pm ? 1 : 0));
+      t.hostApplication = document.getElementById('f-host').value.trim();
+      t.runHostApplicationInTerminal = document.getElementById('f-hostterm').checked;
+      t.useConsoleRunner = document.getElementById('f-console').checked;
+      t.impLib = document.getElementById('f-implib').value.trim();
+      t.defFile = document.getElementById('f-deffile').value.trim();
+      t.createDefFile = document.getElementById('f-defchk').checked;
+      t.createStaticLib = document.getElementById('f-staticchk').checked;
+      t.prefixAuto = document.getElementById('f-prefix').checked;
+      t.extensionAuto = document.getElementById('f-ext').checked;
       // 目标重命名：同步文件归属引用
       if (oldTitle !== newTitle) {
         files.forEach(f => {
@@ -689,7 +792,7 @@ export class ProjectPropertiesPanel {
     document.getElementById('add').addEventListener('click', () => {
       collectTargetForm();
       const n = targets.length + 1;
-      targets.push({ originalTitle: '', title: 'Target' + n, targetType: 1, outputFilename: 'bin/Target' + n + '/app', objectOutput: 'obj/Target' + n + '/', compilerId: data.compilerId || 'gcc', executionParameters: '', externalDeps: [], additionalOutput: [], envVars: [] });
+      targets.push({ originalTitle: '', title: 'Target' + n, targetType: 1, outputFilename: 'bin/Target' + n + '/app', objectOutput: 'obj/Target' + n + '/', compilerId: data.compilerId || 'gcc', executionParameters: '', externalDeps: [], additionalOutput: [], envVars: [], workingDir: '', depsOutput: '', platforms: 255, hostApplication: '', runHostApplicationInTerminal: true, useConsoleRunner: true, impLib: '', defFile: '', createDefFile: false, createStaticLib: false, prefixAuto: true, extensionAuto: true });
       targetOpts.push({ compilerOptions: [], linkerOptions: [], linkLibs: [], relations: { compiler: 3, linker: 3, include: 3, lib: 3, res: 3 } });
       targetDirs.push({ includeDirs: [], libDirs: [], resourceDirs: [] });
       targetScripts.push({ scripts: [], before: [], after: [] });
@@ -732,6 +835,26 @@ export class ProjectPropertiesPanel {
         v.targets = v.targets.filter(t => t !== removedTitle);
       });
       renderList(); renderForm();
+    });
+
+    // R8：目标上/下移（同步四个并行数组）
+    function moveTarget(delta) {
+      if (!targets.length) return;
+      collectTargetForm();
+      const dst = selected + delta;
+      if (dst < 0 || dst >= targets.length) return;
+      const swap = (arr) => { const tmp = arr[selected]; arr[selected] = arr[dst]; arr[dst] = tmp; };
+      swap(targets); swap(targetOpts); swap(targetDirs); swap(targetScripts);
+      selected = dst;
+      renderList(); renderForm();
+    }
+    document.getElementById('up').addEventListener('click', () => moveTarget(-1));
+    document.getElementById('down').addEventListener('click', () => moveTarget(1));
+    // R9：导出选中目标为独立工程（宿主端命令）
+    document.getElementById('exportTarget').addEventListener('click', () => {
+      if (!targets.length) return;
+      collectTargetForm();
+      vscode.postMessage({ type: 'exportTarget', target: targets[selected].title });
     });
 
     // ---- 虚拟目标 tab ----
@@ -1016,8 +1139,32 @@ export class ProjectPropertiesPanel {
         '<div class="hint">构建/运行宏 $(name) 使用（扩展增强：写入 Extensions 节点；变量名不能含空格）</div></label>' +
         '<label><span class="field-name">环境变量（每行 name=value）</span>' +
         '<textarea id="set-envvars">' + esc((projSettings.envVars || []).map(v => v.name + '=' + v.value).join('\\n')) + '</textarea>' +
-        '<div class="hint">写入 &lt;Environment&gt;：构建/运行宏 $(NAME)（对齐 Code::Blocks Build options → Custom variables）</div></label>';
-      ['set-title', 'set-compiler', 'set-vfolders', 'set-vars', 'set-envvars'].forEach(id => {
+        '<div class="hint">写入 &lt;Environment&gt;：构建/运行宏 $(NAME)（对齐 Code::Blocks Build options → Custom variables）</div></label>' +
+        '<details class="fg"><summary>工程编译与输出</summary>' +
+        '<label><span class="field-name">工程平台</span>' +
+        '<span class="checks">' +
+        '<label class="check"><input type="checkbox" id="set-pwin"' + ((projSettings.platforms & 4) ? ' checked' : '') + '> Windows</label>' +
+        '<label class="check"><input type="checkbox" id="set-punix"' + ((projSettings.platforms & 2) ? ' checked' : '') + '> Unix</label>' +
+        '<label class="check"><input type="checkbox" id="set-pmac"' + ((projSettings.platforms & 1) ? ' checked' : '') + '> Mac</label>' +
+        '</span><div class="hint">全选 = All（0xff）；工程不支持当前平台时整个工程跳过构建</div></label>' +
+        '<label><span class="field-name">PCH 生成策略</span>' +
+        '<select id="set-pch">' +
+        '<option value="0">与源文件同目录（pchSourceDir）</option>' +
+        '<option value="1">与对象文件同目录（pchObjectDir，默认）</option>' +
+        '<option value="2">与源文件同名 .gch（pchSourceFile）</option>' +
+        '</select></label>' +
+        '<label class="check"><input type="checkbox" id="set-extobj"' + (projSettings.extendedObjNames ? ' checked' : '') + '> 扩展对象命名（foo.c → foo.c.o）</label>' +
+        '</details>' +
+        '<details class="fg"><summary>Makefile 模式</summary>' +
+        '<label class="check"><input type="checkbox" id="set-mkcustom"' + (projSettings.makefileIsCustom ? ' checked' : '') + '> 使用自定义 Makefile（构建/重建/清理走 make 命令）</label>' +
+        '<label><span class="field-name">Makefile 文件名</span>' +
+        '<input id="set-mkfile" value="' + escAttr(projSettings.makefile || '') + '"><div class="hint">默认 Makefile</div></label>' +
+        '<label><span class="field-name">执行目录</span>' +
+        '<input id="set-mkdir" value="' + escAttr(projSettings.executionDir || '') + '"><div class="hint">留空 = 项目根（对齐 GetMakefileExecutionDir）</div></label>' +
+        '</details>';
+      document.getElementById('set-pch').value = String(projSettings.pchMode);
+      ['set-title', 'set-compiler', 'set-vfolders', 'set-vars', 'set-envvars',
+        'set-pwin', 'set-punix', 'set-pmac', 'set-pch', 'set-extobj', 'set-mkcustom', 'set-mkfile', 'set-mkdir'].forEach(id => {
         document.getElementById(id).addEventListener('change', () => collectSettingsForm());
       });
     }
@@ -1030,6 +1177,15 @@ export class ProjectPropertiesPanel {
       projSettings.virtualFolders = optionsLines(document.getElementById('set-vfolders').value);
       projSettings.customVariables = parseVarLines(document.getElementById('set-vars').value);
       projSettings.envVars = parseVarLines(document.getElementById('set-envvars').value);
+      const sw = document.getElementById('set-pwin').checked;
+      const su = document.getElementById('set-punix').checked;
+      const sm = document.getElementById('set-pmac').checked;
+      projSettings.platforms = (sw && su && sm) ? 255 : ((sw ? 4 : 0) | (su ? 2 : 0) | (sm ? 1 : 0));
+      projSettings.pchMode = Number(document.getElementById('set-pch').value) || 1;
+      projSettings.extendedObjNames = document.getElementById('set-extobj').checked;
+      projSettings.makefileIsCustom = document.getElementById('set-mkcustom').checked;
+      projSettings.makefile = document.getElementById('set-mkfile').value.trim();
+      projSettings.executionDir = document.getElementById('set-mkdir').value.trim();
     }
 
     // ---- 构建脚本 tab ----
@@ -1052,7 +1208,8 @@ export class ProjectPropertiesPanel {
         '<div class="hint">每行一条命令，构建前执行</div></label>' +
         '<label><span class="field-name">构建后命令</span>' +
         '<textarea id="scr-after">' + esc(cur.after.join('\\n')) + '</textarea>' +
-        '<div class="hint">每行一条命令，构建后执行</div></label>';
+        '<div class="hint">每行一条命令，构建后执行</div></label>' +
+        '<label class="check"><input type="checkbox" id="scr-always"' + (cur.always ? ' checked' : '') + '> 无构建命令时也执行 post-build（Mode after=always，对齐 CB Pre/post 页）</label>';
       document.getElementById('scr-scope').value = String(selectedScriptScope);
       document.getElementById('scr-scope').addEventListener('change', () => {
         collectScriptsForm();
@@ -1060,7 +1217,7 @@ export class ProjectPropertiesPanel {
         selectedScriptScope = selectedScriptScope === 'project' ? 'project' : Number(selectedScriptScope);
         renderScriptsForm();
       });
-      ['scr-list', 'scr-before', 'scr-after'].forEach(id => {
+      ['scr-list', 'scr-before', 'scr-after', 'scr-always'].forEach(id => {
         document.getElementById(id).addEventListener('change', () => collectScriptsForm());
       });
     }
@@ -1072,6 +1229,7 @@ export class ProjectPropertiesPanel {
       cur.scripts = optionsLines(document.getElementById('scr-list').value);
       cur.before = optionsLines(document.getElementById('scr-before').value);
       cur.after = optionsLines(document.getElementById('scr-after').value);
+      cur.always = document.getElementById('scr-always').checked;
     }
 
     // ---- 备注 tab ----
@@ -1212,6 +1370,11 @@ export class ProjectPropertiesPanel {
   }
 
   private async onMessage(msg: any): Promise<void> {
+    // R9：导出选中目标为独立工程（宿主命令）
+    if (msg.type === 'exportTarget') {
+      await vscode.commands.executeCommand('codeblocks.exportTargetAsProject', String(msg.target ?? ''));
+      return;
+    }
     if (msg.type === 'save') {
       const targets: TargetEditData[] = (msg.targets ?? []).map((t: any) => ({
         originalTitle: String(t.originalTitle ?? ''),
@@ -1228,6 +1391,18 @@ export class ProjectPropertiesPanel {
               .map((v: any) => ({ name: String(v?.name ?? '').trim(), value: String(v?.value ?? '') }))
               .filter((v: any) => v.name)
           : [],
+        workingDir: String(t.workingDir ?? ''),
+        depsOutput: String(t.depsOutput ?? ''),
+        platforms: Number.isFinite(Number(t.platforms)) ? Number(t.platforms) : 255,
+        hostApplication: String(t.hostApplication ?? ''),
+        runHostApplicationInTerminal: t.runHostApplicationInTerminal !== false,
+        useConsoleRunner: t.useConsoleRunner !== false,
+        impLib: String(t.impLib ?? ''),
+        defFile: String(t.defFile ?? ''),
+        createDefFile: t.createDefFile === true,
+        createStaticLib: t.createStaticLib === true,
+        prefixAuto: t.prefixAuto !== false,
+        extensionAuto: t.extensionAuto !== false,
       }));
       const files: FileEditData[] = (msg.files ?? []).map((f: any) => ({
         relativeFilename: String(f.relativeFilename ?? ''),
@@ -1281,11 +1456,18 @@ export class ProjectPropertiesPanel {
               .map((v: any) => ({ name: String(v?.name ?? '').trim(), value: String(v?.value ?? '') }))
               .filter((v: any) => v.name)
           : [],
+        platforms: Number.isFinite(Number(msg.projectSettings?.platforms)) ? Number(msg.projectSettings?.platforms) : 255,
+        pchMode: [0, 1, 2].includes(Number(msg.projectSettings?.pchMode)) ? Number(msg.projectSettings?.pchMode) : 1,
+        extendedObjNames: msg.projectSettings?.extendedObjNames === true,
+        makefileIsCustom: msg.projectSettings?.makefileIsCustom === true,
+        makefile: String(msg.projectSettings?.makefile ?? ''),
+        executionDir: String(msg.projectSettings?.executionDir ?? ''),
       };
       const scriptItem = (o: any) => ({
         scripts: strArr(o?.scripts),
         before: strArr(o?.before),
         after: strArr(o?.after),
+        always: o?.always === true,
       });
       const buildScripts: BuildScriptsEditData = {
         project: scriptItem(msg.buildScripts?.project),

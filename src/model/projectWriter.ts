@@ -2,10 +2,10 @@
  * .cbp 序列化器 —— 对应 projectloader.cpp 的 ExportTargetAsProject（写入 .cbp）。
  *
  * 将 Project 模型写回 .cbp XML，严格对齐 Code::Blocks 的元素顺序、属性、缩进与
- * 空节点省略规则。未映射到模型的原生元素（如 <Option platforms/makefile> 等）从
+ * 空节点省略规则。未映射到模型的原生元素（如 <Option check_files> 等）从
  * 原始 XML 节点（rawProject）透传，保证「往返」不丢失。
  */
-import { Project, BuildTarget, TargetType, ProjectFile, OptionsRelationType, LinkerExecutableOption, EnvVariable } from './types';
+import { Project, BuildTarget, TargetType, ProjectFile, OptionsRelationType, LinkerExecutableOption, EnvVariable, PLATFORM_ALL } from './types';
 import { XMLBuilder } from 'fast-xml-parser';
 import { defaultCompile, defaultLink, shouldWriteCompilerVar } from './fileTypes';
 
@@ -15,6 +15,20 @@ function esc(s: string): string {
 
 function unix(p: string): string {
   return p.replace(/\\/g, '/');
+}
+
+/**
+ * 平台位掩码 → CB 字符串（globals.cpp GetStringFromPlatforms）：
+ * 低三位全置 → "All"；否则按 Windows;Unix;Mac; 顺序拼接（带尾分号，CB 同）。
+ */
+export function formatPlatforms(platforms: number): string {
+  const all = 0x04 | 0x02 | 0x01;
+  if ((platforms & all) === all) return 'All';
+  let s = '';
+  if (platforms & 0x04) s += 'Windows;';
+  if (platforms & 0x02) s += 'Unix;';
+  if (platforms & 0x01) s += 'Mac;';
+  return s;
 }
 
 /** 从 fast-xml-parser 节点提取属性列表（去掉 @_ 前缀） */
@@ -33,10 +47,13 @@ function asArray<T>(v: T | T[] | undefined): T[] {
   return Array.isArray(v) ? v : [v];
 }
 
-/** 透传项目级 <Option> 中模型未映射的属性（platforms/makefile/pch_mode/...） */
+/** 透传项目级 <Option> 中模型未映射的属性（check_files 等；platforms/makefile/pch_mode/execution_dir/extended_obj_names 已显式写出） */
 function passthroughProjectOptions(rawProject: unknown): { key: string; value: string }[] {
   const raw = rawProject as any;
-  const handled = new Set(['title', 'compiler', 'virtualFolders', 'notes', 'show_notes']);
+  const handled = new Set([
+    'title', 'compiler', 'virtualFolders', 'notes', 'show_notes',
+    'platforms', 'pch_mode', 'makefile', 'makefile_is_custom', 'execution_dir', 'extended_obj_names',
+  ]);
   const out: { key: string; value: string }[] = [];
   for (const o of asArray<any>(raw?.Option)) {
     for (const [key, value] of Object.entries(attrs(o))) {
@@ -46,13 +63,14 @@ function passthroughProjectOptions(rawProject: unknown): { key: string; value: s
   return out;
 }
 
-/** 透传目标级 <Option> 中模型未映射的属性（platforms/working_dir/deps_output/...） */
+/** 透传目标级 <Option> 中模型未映射的属性（includeInTargetAll 等遗留属性；高字段已显式写出） */
 function passthroughTargetOptions(rawProject: unknown, title: string): { key: string; value: string }[] {
   const raw = rawProject as any;
   const handled = new Set([
     'title', 'type', 'compiler', 'parameters', 'output', 'object_output', 'use_console_runner',
     'createDefFile', 'createStaticLib', 'prefix_auto', 'extension_auto', 'imp_lib', 'def_file',
     'external_deps', 'additional_output',
+    'platforms', 'working_dir', 'deps_output', 'host_application', 'run_host_application_in_terminal',
     'projectCompilerOptionsRelation', 'projectLinkerOptionsRelation',
     'projectIncludeDirsRelation', 'projectResourceIncludeDirsRelation', 'projectLibDirsRelation',
   ]);
@@ -174,6 +192,17 @@ function writeTarget(L: string[], t: BuildTarget, rawProject: unknown): void {
   const impLibAttr = t.impLib ? ` imp_lib="${esc(unix(t.impLib))}"` : '';
   const defFileAttr = t.defFile ? ` def_file="${esc(unix(t.defFile))}"` : '';
   L.push(`\t\t\t\t<Option output="${esc(unix(t.outputFilename))}" prefix_auto="${t.prefixAuto ? 1 : 0}" extension_auto="${t.extensionAuto ? 1 : 0}"${impLibAttr}${defFileAttr} />`);
+  // R6：工作目录 / deps 目录（对齐 CB ExportTargetAsProject：working_dir != '.'、deps_output != '.deps' 才写）
+  if (t.workingDir && t.workingDir !== '.') {
+    L.push(`\t\t\t\t<Option working_dir="${esc(unix(t.workingDir))}" />`);
+  }
+  if (t.depsOutput && t.depsOutput !== '.deps') {
+    L.push(`\t\t\t\t<Option deps_output="${esc(unix(t.depsOutput))}" />`);
+  }
+  // R6：目标平台过滤（!= spAll 才写，对齐 CB）
+  if (t.platforms !== PLATFORM_ALL) {
+    L.push(`\t\t\t\t<Option platforms="${esc(formatPlatforms(t.platforms))}" />`);
+  }
   if (t.objectOutput && t.objectOutput !== '.objs') {
     L.push(`\t\t\t\t<Option object_output="${esc(unix(t.objectOutput))}" />`);
   }
@@ -182,6 +211,11 @@ function writeTarget(L: string[], t: BuildTarget, rawProject: unknown): void {
   // 执行参数（<Option parameters>，对齐 SaveTargetOptions；非空才写）
   if (t.executionParameters) {
     L.push(`\t\t\t\t<Option parameters="${esc(t.executionParameters)}" />`);
+  }
+  // R6：宿主程序（库/CommandsOnly 目标 Run 用；对齐 CB：host_application 非空才写，且随写终端开关）
+  if (t.hostApplication) {
+    L.push(`\t\t\t\t<Option host_application="${esc(unix(t.hostApplication))}" />`);
+    L.push(`\t\t\t\t<Option run_host_application_in_terminal="${t.runHostApplicationInTerminal ? 1 : 0}" />`);
   }
   if (t.targetType === TargetType.ConsoleOnly && !t.useConsoleRunner) {
     L.push('\t\t\t\t<Option use_console_runner="0" />');
@@ -279,12 +313,31 @@ export function serializeProject(project: Project): string {
   L.push('\t<FileVersion major="1" minor="6" />');
   L.push('\t<Project>');
   L.push(`\t\t<Option title="${esc(project.title)}" />`);
+  // R7：工程级高级选项（对齐 CB ExportTargetAsProject 的写出条件）
+  if (project.platforms !== PLATFORM_ALL) {
+    L.push(`\t\t<Option platforms="${esc(formatPlatforms(project.platforms))}" />`);
+  }
+  if (project.makefile && project.makefile !== 'Makefile') {
+    L.push(`\t\t<Option makefile="${esc(unix(project.makefile))}" />`);
+  }
+  if (project.makefileIsCustom) {
+    L.push('\t\t<Option makefile_is_custom="1" />');
+  }
+  if (project.executionDir) {
+    L.push(`\t\t<Option execution_dir="${esc(unix(project.executionDir))}" />`);
+  }
+  if (project.pchMode !== 1) {
+    L.push(`\t\t<Option pch_mode="${project.pchMode}" />`);
+  }
   for (const { key, value } of passthroughProjectOptions(project.rawProject)) {
     L.push(`\t\t<Option ${key}="${esc(value)}" />`);
   }
   L.push(`\t\t<Option compiler="${esc(project.compilerId)}" />`);
   if (project.virtualFolders.length) {
     L.push(`\t\t<Option virtualFolders="${esc(project.virtualFolders.join(';'))}" />`);
+  }
+  if (project.extendedObjNames) {
+    L.push('\t\t<Option extended_obj_names="1" />');
   }
   if (project.showNotesOnLoad || project.notes) {
     const show = project.showNotesOnLoad ? 1 : 0;
