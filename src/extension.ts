@@ -4022,11 +4022,26 @@ function buildResultStats(): { errorCount: number; warningCount: number } {
   return { errorCount, warningCount };
 }
 
-/** 记录最近打开工程（globalState，最多 8 个，E1） */
+/** 头文件保护风格（设置 editor.headerGuardStyle；缺省 ifndef） */
+function headerGuardStyle(): 'ifndef' | 'pragma-once' {
+  return vscode.workspace.getConfiguration('codeblocks').get<string>('editor.headerGuardStyle', 'ifndef') === 'pragma-once'
+    ? 'pragma-once'
+    : 'ifndef';
+}
+
+/** 「最近工程」列表上限（设置 ui.recentProjectsLimit，0 = 不记录；越界钳制 0–50） */
+function recentProjectsLimit(): number {
+  const raw = vscode.workspace.getConfiguration('codeblocks').get<number>('ui.recentProjectsLimit', 8);
+  return Number.isFinite(raw) ? Math.max(0, Math.min(50, raw)) : 8;
+}
+
+/** 记录最近打开工程（globalState，上限可配（ui.recentProjectsLimit），E1） */
 function recordRecentProject(filename: string): void {
   try {
+    const limit = recentProjectsLimit();
+    if (limit === 0) return;
     const list = extContext?.globalState.get<string[]>('codeblocks.recentProjects', []) ?? [];
-    const next = [filename, ...list.filter((f) => f !== filename)].slice(0, 8);
+    const next = [filename, ...list.filter((f) => f !== filename)].slice(0, limit);
     void extContext?.globalState.update('codeblocks.recentProjects', next);
   } catch { /* 非关键 */ }
 }
@@ -4035,7 +4050,8 @@ function recordRecentProject(filename: string): void {
 function getMenuDynamicData(): MenuDynamicData {
   try {
     const recents = (extContext?.globalState.get<string[]>('codeblocks.recentProjects', []) ?? [])
-      .filter((f) => fs.existsSync(f));
+      .filter((f) => fs.existsSync(f))
+      .slice(0, recentProjectsLimit());
     return {
       recents: recents.map((f) => ({ label: path.basename(f), file: f })),
       order: topologicalBuildOrder(openProjects).map((p, i) => ({
@@ -4069,7 +4085,7 @@ async function insertHeaderGuardInActiveEditor(): Promise<void> {
   }
   const doc = editor.document;
   const text = doc.getText();
-  const updated = applyHeaderGuard(doc.uri.fsPath, text);
+  const updated = applyHeaderGuard(doc.uri.fsPath, text, headerGuardStyle());
   if (updated === null) {
     vscode.window.showInformationMessage('已存在头文件保护（#pragma once / #ifndef）');
     return;
@@ -4092,7 +4108,7 @@ async function autoInsertHeaderGuards(files: readonly vscode.Uri[]): Promise<voi
       const doc = await vscode.workspace.openTextDocument(uri);
       const text = doc.getText();
       if (text.trim()) continue; // 仅空文件
-      const updated = applyHeaderGuard(uri.fsPath, text);
+      const updated = applyHeaderGuard(uri.fsPath, text, headerGuardStyle());
       if (updated === null) continue;
       const edit = new vscode.WorkspaceEdit();
       edit.replace(uri, new vscode.Range(doc.positionAt(0), doc.positionAt(text.length)), updated);
@@ -4114,7 +4130,9 @@ async function tidyCommentsInActiveEditor(): Promise<void> {
     return;
   }
   const selected = editor.document.getText(sel);
-  const updated = tidyCommentBlock(selected);
+  const rawWidth = vscode.workspace.getConfiguration('codeblocks').get<number>('editor.tidyCommentWidth', 80);
+  const width = Number.isFinite(rawWidth) ? Math.max(20, Math.min(200, rawWidth)) : 80;
+  const updated = tidyCommentBlock(selected, width);
   if (updated === selected) {
     vscode.window.setStatusBarMessage('注释已是整洁格式，无更改', 2500);
     return;

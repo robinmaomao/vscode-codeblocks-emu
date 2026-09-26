@@ -46,5 +46,10 @@ check('doc 风格 /** 对齐', tidyCommentBlock('/**\n* doc\n*/') === '/**\n * d
 // 9. 尾随换行保留
 check('尾随换行保留', tidyCommentBlock('/*\n * a\n */\n').endsWith('\n'), true);
 
+// 10. 自定义宽度（设置 editor.tidyCommentWidth，如 60）
+const w60 = tidyCommentBlock(`/*\n * ${longContent}\n */`, 60);
+const body60 = w60.split('\n').filter((l) => /^\s*\* /.test(l));
+check('自定义宽度 60（每行 ≤ 60 且多次换行）', w60.split('\n').every((l) => l.length <= 60) && body60.length > 2, w60.split('\n').map((l) => l.length));
+
 console.log(`Tidy 注释: ${pass} pass, ${fail} fail`);
 process.exit(fail ? 1 : 0);

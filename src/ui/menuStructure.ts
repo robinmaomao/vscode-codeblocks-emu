@@ -98,6 +98,8 @@ export const CHILD_ICONS: Record<string, string> = {
   'Workspace Dependencies…': 'references',
   'Import Project…': 'cloud-download',
   'Default Config…': 'file-code',
+  'Build & Log…': 'output',
+  'clangd / IntelliSense…': 'lightbulb',
 };
 
 /** 分隔线占位 */
@@ -322,7 +324,9 @@ export const MENU_STRUCTURE: MenuDef[] = [
       { label: 'Environment…', command: 'workbench.action.openSettings', args: ['@ext:robinmaomao.codeblocks-vscode'] },
       { label: 'Editor…', command: 'workbench.action.openSettings', args: ['editor.'] },
       { label: 'Compiler…', command: 'workbench.action.openSettings', args: ['codeblocks.masterPath'] },
+      { label: 'Build & Log…', command: 'workbench.action.openSettings', args: ['codeblocks.build'] },
       { label: 'Debugger…', command: 'workbench.action.openSettings', args: ['codeblocks.gdb'] },
+      { label: 'clangd / IntelliSense…', command: 'workbench.action.openSettings', args: ['codeblocks.clangd'] },
       SEP,
       { label: 'Keybindings…', command: 'codeblocks.keybindings.panel' },
       { label: 'Global Variables…', command: 'codeblocks.showGlobalVariables' },

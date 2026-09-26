@@ -21,5 +21,11 @@ check('幂等：已有保护返回 null', applyHeaderGuard('x.h', wrapped) === n
 check('空文件', applyHeaderGuard('a.h', '') === '#ifndef __A_H__\n#define __A_H__\n\n#endif // __A_H__\n', applyHeaderGuard('a.h', ''));
 check('CRLF 跟随', applyHeaderGuard('b.h', 'int x;\r\n').includes('#ifndef __B_H__\r\n#define __B_H__\r\n\r\n'), true);
 
+// pragma-once 风格（设置 editor.headerGuardStyle）
+const po = applyHeaderGuard('C:\\p\\util.h', 'int x;\n', 'pragma-once');
+check('pragma-once 风格', po === '#pragma once\n\nint x;\n', po);
+check('pragma-once 空文件', applyHeaderGuard('a.h', '', 'pragma-once') === '#pragma once\n', null);
+check('pragma-once 幂等（已有保护返回 null）', applyHeaderGuard('a.h', po, 'pragma-once') === null, null);
+
 console.log(`头文件保护: ${pass} pass, ${fail} fail`);
 process.exit(fail ? 1 : 0);

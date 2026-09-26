@@ -2,7 +2,7 @@
   "name": "codeblocks-vscode",
   "displayName": "Code::Blocks for VS Code",
   "description": "原生移植 Code::Blocks 核心功能到 VS Code：项目模型、构建引擎、编译器管理与调试引擎",
-  "version": "0.8.78-dev",
+  "version": "0.8.79-dev",
   "icon": "resources/icon.png",
   "publisher": "robinmaomao",
   "author": {
@@ -394,244 +394,312 @@
       { "language": "asm", "scopeName": "source.asm", "path": "./syntaxes/asm.tmLanguage.json" },
       { "language": "xm", "scopeName": "source.xm", "path": "./syntaxes/xm.tmLanguage.json" }
     ],
-    "configuration": {
-      "title": "Code::Blocks",
-      "properties": {
-        "codeblocks.projectTree.categorize": {
-          "type": "boolean",
-          "default": true,
-          "description": "工程树按文件类型分组显示（Sources / Headers / ASM Sources / Resources / Others，对齐 Code::Blocks）。关闭后按物理目录显示。"
-        },
-        "codeblocks.compilerId": {
-          "type": "string",
-          "default": "gcc",
-          "description": "默认编译器 ID（对应 options_<id>.xml）"
-        },
-        "codeblocks.masterPath": {
-          "type": "string",
-          "default": "",
-          "description": "编译器安装根目录（留空则从 PATH 探测）"
-        },
-        "codeblocks.parallelJobs": {
-          "type": "number",
-          "default": 0,
-          "description": "并行编译任务数（0 = 自动，取 CPU 核数）"
-        },
-        "codeblocks.build.skipIncludeDeps": {
-          "type": "boolean",
-          "default": false,
-          "description": "增量编译时跳过 #include 依赖扫描（对齐 Code::Blocks 的 skip_include_deps 设置，供非 C/C++ 编译器使用）"
-        },
-        "codeblocks.build.verboseOutput": {
-          "type": "boolean",
-          "default": false,
-          "description": "详细构建输出：完整编译命令行（对齐 Code::Blocks 详细模式）、clean/rebuild 逐文件列表、增量跳过文件列表"
-        },
-        "codeblocks.build.compileCommandsOnlyTargets": {
-          "type": "boolean",
-          "default": false,
-          "description": "CommandsOnly 目标（type=4）是否编译其文件（对齐 Code::Blocks：CB 以空选项/空 include 编译 CommandsOnly 目标的文件；默认关闭保持扩展原行为：仅执行 pre/post 脚本）"
-        },
-        "codeblocks.saveBeforeBuild": {
-          "type": "boolean",
-          "default": true,
-          "description": "构建/运行/清理前自动保存工作区中未保存的文件（对齐 Code::Blocks 的 Save all files before build）"
-        },
-        "codeblocks.build.plainCbLog": {
-          "type": "boolean",
-          "default": false,
-          "description": "纯 Code::Blocks 日志模式：关闭脚本编号/单行完成式/Emoji 汇总块/最慢 Top3，构建结束输出 CB 风格 === Build finished === 行"
-        },
-        "codeblocks.log.english": {
-          "type": "boolean",
-          "default": false,
-          "description": "构建日志输出英文文案（汇总/状态类消息对齐 Code::Blocks 原文）"
-        },
-        "codeblocks.build.strictQuoting": {
-          "type": "boolean",
-          "default": false,
-          "description": "严格引号规则（对齐 Code::Blocks NeedQuotes：仅空格加引号）；默认关闭为宽规则（空格 + cmd 元字符，防 shell 二次解析）"
-        },
-        "codeblocks.ui.quietSuccess": {
-          "type": "boolean",
-          "default": false,
-          "description": "构建成功静默模式：不弹成功 toast，仅输出日志与状态栏诊断徽标"
-        },
-        "codeblocks.ui.projectToolbar": {
-          "type": "array",
-          "items": {
+    "configuration": [
+      {
+        "title": "编译器与工具链",
+        "order": 10,
+        "properties": {
+          "codeblocks.compilerId": {
             "type": "string",
-            "enum": [
-              "newProject",
-              "openProject",
-              "build",
-              "rebuild",
-              "clean",
-              "run",
-              "debug",
+            "default": "gcc",
+            "description": "默认编译器 ID（对应 options_<id>.xml）"
+          },
+          "codeblocks.masterPath": {
+            "type": "string",
+            "scope": "machine-overridable",
+            "default": "",
+            "description": "编译器安装根目录（留空则从 PATH 探测）"
+          },
+          "codeblocks.compilerPrograms": {
+            "type": "object",
+            "scope": "machine-overridable",
+            "default": {},
+            "description": "编译器程序完整路径（交叉编译器如 RISC-V 由「探测编译器」自动写入，普通编译器留空）",
+            "properties": {
+              "C": { "type": "string" },
+              "CPP": { "type": "string" },
+              "LD": { "type": "string" },
+              "LIB": { "type": "string" },
+              "WINDRES": { "type": "string" },
+              "MAKE": { "type": "string" },
+              "DBGconfig": { "type": "string" }
+            }
+          }
+        }
+      },
+      {
+        "title": "构建与日志",
+        "order": 20,
+        "properties": {
+          "codeblocks.saveBeforeBuild": {
+            "type": "boolean",
+            "default": true,
+            "description": "构建/运行/清理前自动保存工作区中未保存的文件（对齐 Code::Blocks 的 Save all files before build）"
+          },
+          "codeblocks.parallelJobs": {
+            "type": "number",
+            "default": 0,
+            "minimum": 0,
+            "maximum": 64,
+            "description": "并行编译任务数（0 = 自动，取 CPU 核数）"
+          },
+          "codeblocks.maxReportedErrors": {
+            "type": "number",
+            "default": 50,
+            "minimum": 0,
+            "description": "单次构建最多收集的错误数（0 = 不限制）。对齐 Code::Blocks 的 max_reported_errors，防止错误过多导致 Build Log 卡顿"
+          },
+          "codeblocks.build.skipIncludeDeps": {
+            "type": "boolean",
+            "default": false,
+            "description": "增量编译时跳过 #include 依赖扫描（对齐 Code::Blocks 的 skip_include_deps 设置，供非 C/C++ 编译器使用）"
+          },
+          "codeblocks.build.verboseOutput": {
+            "type": "boolean",
+            "default": false,
+            "description": "详细构建输出：完整编译命令行（对齐 Code::Blocks 详细模式）、clean/rebuild 逐文件列表、增量跳过文件列表"
+          },
+          "codeblocks.build.compileCommandsOnlyTargets": {
+            "type": "boolean",
+            "default": false,
+            "description": "CommandsOnly 目标（type=4）是否编译其文件（对齐 Code::Blocks：CB 以空选项/空 include 编译 CommandsOnly 目标的文件；默认关闭保持扩展原行为：仅执行 pre/post 脚本）"
+          },
+          "codeblocks.build.plainCbLog": {
+            "type": "boolean",
+            "default": false,
+            "description": "纯 Code::Blocks 日志模式：关闭脚本编号/单行完成式/Emoji 汇总块/最慢 Top3，构建结束输出 CB 风格 === Build finished === 行"
+          },
+          "codeblocks.build.strictQuoting": {
+            "type": "boolean",
+            "default": false,
+            "description": "严格引号规则（对齐 Code::Blocks NeedQuotes：仅空格加引号）；默认关闭为宽规则（空格 + cmd 元字符，防 shell 二次解析）"
+          },
+          "codeblocks.log.english": {
+            "type": "boolean",
+            "default": false,
+            "description": "构建日志输出英文文案（汇总/状态类消息对齐 Code::Blocks 原文）"
+          }
+        }
+      },
+      {
+        "title": "调试 (GDB)",
+        "order": 30,
+        "properties": {
+          "codeblocks.gdbTimeoutMs": {
+            "type": "number",
+            "default": 30000,
+            "minimum": 1000,
+            "description": "GDB MI 命令超时（毫秒）。个别慢操作（加载符号、大数组子节点展开等）可适当调大"
+          },
+          "codeblocks.debug.initCommands": {
+            "type": "array",
+            "items": { "type": "string" },
+            "default": [],
+            "description": "调试会话启动后注入的 GDB 命令（按 CLI 逐条执行，如 set pagination off）；对齐 Code::Blocks Debugger settings 的初始化命令"
+          },
+          "codeblocks.debug.printPretty": {
+            "type": "boolean",
+            "default": false,
+            "description": "调试变量显示美化（GDB set print pretty on，结构体多行缩进）"
+          },
+          "codeblocks.debug.printElements": {
+            "type": "number",
+            "default": 0,
+            "minimum": 0,
+            "description": "数组/字符串最多显示的元素数（GDB set print elements；0 = 不设置，使用 GDB 默认）"
+          },
+          "codeblocks.debug.disassemblyFlavor": {
+            "type": "string",
+            "enum": ["default", "intel", "att"],
+            "default": "default",
+            "description": "反汇编语法风格（GDB set disassembly-flavor）；default = 不设置（跟随 GDB 默认）"
+          },
+          "codeblocks.debug.charset": {
+            "type": "string",
+            "default": "",
+            "description": "调试字符集（GDB set charset，如 UTF-8 / GBK；留空 = 不设置）"
+          },
+          "codeblocks.debug.gdbPath": {
+            "type": "string",
+            "scope": "machine-overridable",
+            "default": "",
+            "description": "GDB 可执行文件路径（留空自动探测：masterPath/bin → PATH）。跨工具链（如 RV32）建议显式指定对应 gdb，避免架构不匹配"
+          },
+          "codeblocks.debug.trace": {
+            "type": "boolean",
+            "default": false,
+            "description": "调试协议跟踪：把 DAP 请求/响应/事件写入 Code::Blocks 输出通道（排查「会话异常结束/断点不生效」等问题时开启）"
+          },
+          "codeblocks.debug.registers": {
+            "type": "boolean",
+            "default": false,
+            "description": "Registers 视图读取寄存器值（默认关闭：部分 MinGW GDB 8.1 构建在读取寄存器时会让 GDB 进程崩溃、调试会话中断；确认你的 GDB 无此问题后再开启）"
+          }
+        }
+      },
+      {
+        "title": "IntelliSense (clangd)",
+        "order": 40,
+        "properties": {
+          "codeblocks.clangd.enabled": {
+            "type": "boolean",
+            "default": true,
+            "description": "是否启用 clangd 集成（自动生成 compile_commands.json 并更新 clangd 用户配置）。需安装 clangd 扩展后补全/跳转才生效"
+          },
+          "codeblocks.clangd.buildLogDiagnostics": {
+            "type": "string",
+            "enum": ["build", "clangd"],
+            "default": "build",
+            "description": "检测到 clangd 时 Build Log 视图的诊断来源：build = 构建引擎完整诊断（默认，覆盖所有编译文件）；clangd = 使用 clangd 诊断（仅打开过的文件，可能不完整）。无论哪种，Problems 面板都由 clangd 产出"
+          },
+          "codeblocks.clangd.restartOnActiveProjectSwitch": {
+            "type": "boolean",
+            "default": true,
+            "description": "切换活动工程且编译数据库实际变化（存在共享文件）时，是否重启 clangd 以让已打开文件立即按新活动工程的编译命令重新分析（更新红波浪线/补全/跳转）。重启会触发 clangd 重新索引，若觉得频繁可关闭"
+          },
+          "codeblocks.clangd.forcedIncludes": {
+            "type": "array",
+            "items": { "type": "string" },
+            "default": ["global.h"],
+            "description": "clangd 分析头文件时强制预包含的基础头文件名（按 include 搜索目录查找，存在则加 -include）。默认 global.h（typedef/macro/sfr/clib 基础上下文），不要用 include.h 这类「包含所有头文件」的主头文件，否则会对被它包含的头文件造成递归包含、产生大量误报"
+          },
+          "codeblocks.clangd.suppressedWarnings": {
+            "type": "array",
+            "items": { "type": "string" },
+            "default": ["-Wunused-function"],
+            "description": "在 clangd 诊断中压制的警告类别（写入 Diagnostics.Suppress）。嵌入式 SDK 常用静态函数做编译期断言，-Wunused-function 是预期噪声"
+          },
+          "codeblocks.clangd.suppressHeaderDiagnostics": {
+            "type": "boolean",
+            "default": true,
+            "description": "是否在头文件中压制全部诊断（单独打开 .h 文件时不再显示 unknown type name 等误报）。SDK 头文件普遍不自包含，单独分析必然报错；.c 文件的真实诊断不受影响"
+          }
+        }
+      },
+      {
+        "title": "界面",
+        "order": 50,
+        "properties": {
+          "codeblocks.projectTree.categorize": {
+            "type": "boolean",
+            "default": true,
+            "description": "工程树按文件类型分组显示（Sources / Headers / ASM Sources / Resources / Others，对齐 Code::Blocks）。关闭后按物理目录显示。"
+          },
+          "codeblocks.ui.quietSuccess": {
+            "type": "boolean",
+            "default": false,
+            "description": "构建成功静默模式：不弹成功 toast，仅输出日志与状态栏诊断徽标"
+          },
+          "codeblocks.ui.projectToolbar": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "newProject",
+                "openProject",
+                "build",
+                "rebuild",
+                "clean",
+                "run",
+                "debug",
+                "buildWorkspace",
+                "rebuildWorkspace",
+                "cleanWorkspace",
+                "compilerOptions",
+                "projectProperties",
+                "codeStats"
+              ]
+            },
+            "default": [
               "buildWorkspace",
               "rebuildWorkspace",
-              "cleanWorkspace",
-              "compilerOptions",
-              "projectProperties",
-              "codeStats"
-            ]
+              "cleanWorkspace"
+            ],
+            "markdownDescription": "Project 视图标题栏常驻按钮（当选中的按钮在标题栏显示时，不再出现在 ⋯ 溢出菜单）。可选值：`newProject` / `openProject` / `build` / `rebuild` / `clean` / `run` / `debug` / `buildWorkspace` / `rebuildWorkspace` / `cleanWorkspace` / `compilerOptions` / `projectProperties` / `codeStats`"
           },
-          "default": [
-            "buildWorkspace",
-            "rebuildWorkspace",
-            "cleanWorkspace"
-          ],
-          "markdownDescription": "Project 视图标题栏常驻按钮（当选中的按钮在标题栏显示时，不再出现在 ⋯ 溢出菜单）。可选值：`newProject` / `openProject` / `build` / `rebuild` / `clean` / `run` / `debug` / `buildWorkspace` / `rebuildWorkspace` / `cleanWorkspace` / `compilerOptions` / `projectProperties` / `codeStats`"
-        },
-        "codeblocks.ui.symbolsView": {
-          "type": "boolean",
-          "default": true,
-          "description": "显示 Symbols 视图（初始默认隐藏，可从视图容器的 ⋯ → Views 菜单调出；关闭此设置后强制隐藏）"
-        },
-        "codeblocks.debug.initCommands": {
-          "type": "array",
-          "items": { "type": "string" },
-          "default": [],
-          "description": "调试会话启动后注入的 GDB 命令（按 CLI 逐条执行，如 set pagination off）；对齐 Code::Blocks Debugger settings 的初始化命令"
-        },
-        "codeblocks.debug.printPretty": {
-          "type": "boolean",
-          "default": false,
-          "description": "调试变量显示美化（GDB set print pretty on，结构体多行缩进）"
-        },
-        "codeblocks.debug.printElements": {
-          "type": "number",
-          "default": 0,
-          "description": "数组/字符串最多显示的元素数（GDB set print elements；0 = 不设置，使用 GDB 默认）"
-        },
-        "codeblocks.debug.disassemblyFlavor": {
-          "type": "string",
-          "enum": ["default", "intel", "att"],
-          "default": "default",
-          "description": "反汇编语法风格（GDB set disassembly-flavor）；default = 不设置（跟随 GDB 默认）"
-        },
-        "codeblocks.debug.charset": {
-          "type": "string",
-          "default": "",
-          "description": "调试字符集（GDB set charset，如 UTF-8 / GBK；留空 = 不设置）"
-        },
-        "codeblocks.debug.gdbPath": {
-          "type": "string",
-          "default": "",
-          "description": "GDB 可执行文件路径（第五十轮；留空自动探测：masterPath/bin → PATH）。跨工具链（如 RV32）建议显式指定对应 gdb，避免架构不匹配"
-        },
-        "codeblocks.debug.trace": {
-          "type": "boolean",
-          "default": false,
-          "description": "调试协议跟踪：把 DAP 请求/响应/事件写入 Code::Blocks 输出通道（排查「会话异常结束/断点不生效」等问题时开启）"
-        },
-        "codeblocks.debug.registers": {
-          "type": "boolean",
-          "default": false,
-          "description": "Registers 视图读取寄存器值（默认关闭：部分 MinGW GDB 8.1 构建在读取寄存器时会让 GDB 进程崩溃、调试会话中断；确认你的 GDB 无此问题后再开启）"
-        },
-        "codeblocks.keybindings.cbStyle": {
-          "type": "boolean",
-          "default": false,
-          "markdownDescription": "启用 Code::Blocks 保真键位（默认关闭，全部避开 VS Code 默认）：`F5` 切换断点 / `Shift+F8` 停止调试 / `F2` 打开 Build Log / `Ctrl+R` 替换 / `Ctrl+Shift+B` 跳转匹配括号 / `Ctrl+Shift+C` 注释 / `Ctrl+Shift+S` 全部保存 / `Ctrl+Q` 退出 / `F12` 折叠 / `F7`·`Shift+F7`·`Ctrl+F7` 单步。开启后这些键将覆盖 VS Code 默认；关闭即恢复。可打开 [可视化快捷键设置面板](command:codeblocks.keybindings.panel) 逐项微调或单独解绑，用 [检查键位冲突](command:codeblocks.keybindings.check) 查看冲突清单。"
-        },
-        "codeblocks.keybindings.overrides": {
-          "type": "object",
-          "default": {},
-          "markdownDescription": "逐命令自定义快捷键（键名 = 命令短 id，值 = 键位串，空字符串 = 解绑）。修改后自动写入用户 `keybindings.json`（仅增删托管条目 + 移除默认键的 `-command` 规则；首次写入前备份为 `keybindings.json.codeblocks-backup`）。推荐直接点开 [可视化快捷键设置面板](command:codeblocks.keybindings.panel)：按键录入 / 手动输入 / 解绑 / 恢复默认 / 导出·导入方案 / 全部重置。常用键名：`build` / `rebuild` / `clean` / `run` / `buildAndRun` / `compileCurrentFile` / `debug` / `nextError` / `prevError` / `activatePriorProject` / `activateNextProject` / `moveProjectUp` / `moveProjectDown` / `projectTreeFocus` / `buildLogFocus`；CB 保真组 `cb*`（`cbToggleBreakpoint` / `cbBuildLog` / `cbReplace` / `cbStepOver` 等 12 项）；外部别名 `aliasGotoFile` / `aliasReplaceInFiles` / `aliasSelectNextMatch`。示例：`{ \"build\": \"ctrl+alt+b\", \"cbQuit\": \"\" }`"
-        },
-        "codeblocks.compilerPrograms": {
-          "type": "object",
-          "default": {},
-          "description": "编译器程序完整路径（交叉编译器如 RISC-V 由「探测编译器」自动写入，普通编译器留空）",
-          "properties": {
-            "C": { "type": "string" },
-            "CPP": { "type": "string" },
-            "LD": { "type": "string" },
-            "LIB": { "type": "string" },
-            "WINDRES": { "type": "string" },
-            "MAKE": { "type": "string" }
+          "codeblocks.ui.symbolsView": {
+            "type": "boolean",
+            "default": true,
+            "description": "显示 Symbols 视图（初始默认隐藏，可从视图容器的 ⋯ → Views 菜单调出；关闭此设置后强制隐藏）"
+          },
+          "codeblocks.ui.recentProjectsLimit": {
+            "type": "number",
+            "default": 8,
+            "minimum": 0,
+            "maximum": 50,
+            "description": "「最近工程」列表上限（状态栏菜单 Recent Projects；0 = 不记录）"
           }
-        },
-        "codeblocks.astyleOptions": {
-          "type": "array",
-          "items": {
-            "type": "string"
+        }
+      },
+      {
+        "title": "编辑器辅助与工具",
+        "order": 60,
+        "properties": {
+          "codeblocks.editor.autoHeaderGuard": {
+            "type": "boolean",
+            "default": false,
+            "description": "新建空头文件（.h/.hpp/.hxx）时自动插入头文件保护宏（对齐 headerguard 插件；已有 #pragma once / #ifndef 保护的文件不处理）"
           },
-          "default": [
-            "--style=allman",
-            "--indent=spaces=4"
-          ],
-          "description": "AStyle 格式化选项"
-        },
-        "codeblocks.editor.autoHeaderGuard": {
-          "type": "boolean",
-          "default": false,
-          "description": "新建空头文件（.h/.hpp/.hxx）时自动插入头文件保护宏（对齐 headerguard 插件；已有 #pragma once / #ifndef 保护的文件不处理）"
-        },
-        "codeblocks.tools": {
-          "type": "array",
-          "items": {
+          "codeblocks.editor.headerGuardStyle": {
+            "type": "string",
+            "enum": ["ifndef", "pragma-once"],
+            "default": "ifndef",
+            "markdownDescription": "插入头文件保护的方式：`ifndef` = `#ifndef` / `#define` / `#endif` 包裹（默认）；`pragma-once` = 仅顶部 `#pragma once`"
+          },
+          "codeblocks.editor.tidyCommentWidth": {
+            "type": "number",
+            "default": 80,
+            "minimum": 20,
+            "maximum": 200,
+            "description": "Tidy 注释（块注释整理）的换行宽度（列）"
+          },
+          "codeblocks.astyleOptions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": [
+              "--style=allman",
+              "--indent=spaces=4"
+            ],
+            "description": "AStyle 格式化选项"
+          },
+          "codeblocks.tools": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["name", "command"],
+              "properties": {
+                "name": { "type": "string", "description": "工具名称（Tools 菜单与状态栏菜单中的显示名）" },
+                "command": { "type": "string", "description": "可执行文件路径或命令（支持别名宏与 Code::Blocks 宏）" },
+                "arguments": { "type": "string", "description": "参数字符串（引号感知分词；支持别名宏与 CB 宏）" },
+                "workingDirectory": { "type": "string", "description": "工作目录（缺省 = 活动工程目录；支持宏）" },
+                "env": { "type": "object", "additionalProperties": { "type": "string" }, "description": "附加环境变量" },
+                "output": { "type": "string", "enum": ["output", "terminal", "silent"], "default": "output", "description": "输出模式：output = 专用输出通道；terminal = 集成终端；silent = 无输出" }
+              }
+            },
+            "default": [],
+            "markdownDescription": "用户自定义工具（对齐 Code::Blocks Tools → Configure tools…）：在「Tools」菜单与状态栏菜单末尾列出，选中即运行。支持别名宏 `${file}` / `${fileDir}` / `${projectDir}` / `${projectName}` / `${workspaceFolder}` 与 Code::Blocks 宏 `$(VAR)`（如 `$(TARGET_OUTPUT_FILE)`、项目自定义变量 `$(var)`）。示例：`{ \"name\": \"反汇编\", \"command\": \"objdump\", \"arguments\": \"-d \\\"${file}\\\"\", \"output\": \"output\" }`"
+          }
+        }
+      },
+      {
+        "title": "快捷键",
+        "order": 70,
+        "properties": {
+          "codeblocks.keybindings.cbStyle": {
+            "type": "boolean",
+            "default": false,
+            "markdownDescription": "启用 Code::Blocks 保真键位（默认关闭，全部避开 VS Code 默认）：`F5` 切换断点 / `Shift+F8` 停止调试 / `F2` 打开 Build Log / `Ctrl+R` 替换 / `Ctrl+Shift+B` 跳转匹配括号 / `Ctrl+Shift+C` 注释 / `Ctrl+Shift+S` 全部保存 / `Ctrl+Q` 退出 / `F12` 折叠 / `F7`·`Shift+F7`·`Ctrl+F7` 单步。开启后这些键将覆盖 VS Code 默认；关闭即恢复。可打开 [可视化快捷键设置面板](command:codeblocks.keybindings.panel) 逐项微调或单独解绑，用 [检查键位冲突](command:codeblocks.keybindings.check) 查看冲突清单。"
+          },
+          "codeblocks.keybindings.overrides": {
             "type": "object",
-            "required": ["name", "command"],
-            "properties": {
-              "name": { "type": "string", "description": "工具名称（Tools 菜单与状态栏菜单中的显示名）" },
-              "command": { "type": "string", "description": "可执行文件路径或命令（支持别名宏与 Code::Blocks 宏）" },
-              "arguments": { "type": "string", "description": "参数字符串（引号感知分词；支持别名宏与 CB 宏）" },
-              "workingDirectory": { "type": "string", "description": "工作目录（缺省 = 活动工程目录；支持宏）" },
-              "env": { "type": "object", "additionalProperties": { "type": "string" }, "description": "附加环境变量" },
-              "output": { "type": "string", "enum": ["output", "terminal", "silent"], "default": "output", "description": "输出模式：output = 专用输出通道；terminal = 集成终端；silent = 无输出" }
-            }
-          },
-          "default": [],
-          "markdownDescription": "用户自定义工具（对齐 Code::Blocks Tools → Configure tools…）：在「Tools」菜单与状态栏菜单末尾列出，选中即运行。支持别名宏 `${file}` / `${fileDir}` / `${projectDir}` / `${projectName}` / `${workspaceFolder}` 与 Code::Blocks 宏 `$(VAR)`（如 `$(TARGET_OUTPUT_FILE)`、项目自定义变量 `$(var)`）。示例：`{ \"name\": \"反汇编\", \"command\": \"objdump\", \"arguments\": \"-d \\\"${file}\\\"\", \"output\": \"output\" }`"
-        },
-        "codeblocks.maxReportedErrors": {
-          "type": "number",
-          "default": 50,
-          "description": "单次构建最多收集的错误数（0 = 不限制）。对齐 Code::Blocks 的 max_reported_errors，防止错误过多导致 Build Log 卡顿"
-        },
-        "codeblocks.gdbTimeoutMs": {
-          "type": "number",
-          "default": 30000,
-          "description": "GDB MI 命令超时（毫秒）。个别慢操作（加载符号、大数组子节点展开等）可适当调大"
-        },
-        "codeblocks.clangd.enabled": {
-          "type": "boolean",
-          "default": true,
-          "description": "是否启用 clangd 集成（自动生成 compile_commands.json 并更新 clangd 用户配置）。需安装 clangd 扩展后补全/跳转才生效"
-        },
-        "codeblocks.clangd.buildLogDiagnostics": {
-          "type": "string",
-          "enum": ["build", "clangd"],
-          "default": "build",
-          "description": "检测到 clangd 时 Build Log 视图的诊断来源：build = 构建引擎完整诊断（默认，覆盖所有编译文件）；clangd = 使用 clangd 诊断（仅打开过的文件，可能不完整）。无论哪种，Problems 面板都由 clangd 产出"
-        },
-        "codeblocks.clangd.restartOnActiveProjectSwitch": {
-          "type": "boolean",
-          "default": true,
-          "description": "切换活动工程且编译数据库实际变化（存在共享文件）时，是否重启 clangd 以让已打开文件立即按新活动工程的编译命令重新分析（更新红波浪线/补全/跳转）。重启会触发 clangd 重新索引，若觉得频繁可关闭"
-        },
-        "codeblocks.clangd.forcedIncludes": {
-          "type": "array",
-          "items": { "type": "string" },
-          "default": ["global.h"],
-          "description": "clangd 分析头文件时强制预包含的基础头文件名（按 include 搜索目录查找，存在则加 -include）。默认 global.h（typedef/macro/sfr/clib 基础上下文），不要用 include.h 这类「包含所有头文件」的主头文件，否则会对被它包含的头文件造成递归包含、产生大量误报"
-        },
-        "codeblocks.clangd.suppressedWarnings": {
-          "type": "array",
-          "items": { "type": "string" },
-          "default": ["-Wunused-function"],
-          "description": "在 clangd 诊断中压制的警告类别（写入 Diagnostics.Suppress）。嵌入式 SDK 常用静态函数做编译期断言，-Wunused-function 是预期噪声"
-        },
-        "codeblocks.clangd.suppressHeaderDiagnostics": {
-          "type": "boolean",
-          "default": true,
-          "description": "是否在头文件中压制全部诊断（单独打开 .h 文件时不再显示 unknown type name 等误报）。SDK 头文件普遍不自包含，单独分析必然报错；.c 文件的真实诊断不受影响"
+            "default": {},
+            "markdownDescription": "逐命令自定义快捷键（键名 = 命令短 id，值 = 键位串，空字符串 = 解绑）。修改后自动写入用户 `keybindings.json`（仅增删托管条目 + 移除默认键的 `-command` 规则；首次写入前备份为 `keybindings.json.codeblocks-backup`）。推荐直接点开 [可视化快捷键设置面板](command:codeblocks.keybindings.panel)：按键录入 / 手动输入 / 解绑 / 恢复默认 / 导出·导入方案 / 全部重置。常用键名：`build` / `rebuild` / `clean` / `run` / `buildAndRun` / `compileCurrentFile` / `debug` / `nextError` / `prevError` / `activatePriorProject` / `activateNextProject` / `moveProjectUp` / `moveProjectDown` / `projectTreeFocus` / `buildLogFocus`；CB 保真组 `cb*`（`cbToggleBreakpoint` / `cbBuildLog` / `cbReplace` / `cbStepOver` 等 12 项）；外部别名 `aliasGotoFile` / `aliasReplaceInFiles` / `aliasSelectNextMatch`。示例：`{ \"build\": \"ctrl+alt+b\", \"cbQuit\": \"\" }`"
+          }
         }
       }
-    },
+    ],
     "viewsContainers": {
       "activitybar": [
         {
