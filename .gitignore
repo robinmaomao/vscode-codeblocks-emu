@@ -9,4 +9,5 @@ codeblocks-src/
 # 测试工程构建产物
 test-project/**/bin/
 test-project/**/obj/
+test-project/buildlog.html
 .git-msg.txt

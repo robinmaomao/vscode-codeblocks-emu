@@ -11,6 +11,7 @@
  */
 import { spawn, ChildProcess } from 'child_process';
 import { decodeText } from '../tools/encoding';
+import { isUnframedLine } from './miParse';
 
 export interface MiResult {
   token: number;
@@ -28,7 +29,8 @@ export interface MiAsync {
 
 export interface GdbOptions {
   gdbPath: string;
-  program: string;
+  /** 仅作为信息保留；实际由适配器经 -file-exec-and-symbols 注入（见 start 注释） */
+  program?: string;
   args?: string[];
   cwd?: string;
   env?: Record<string, string>;
@@ -55,9 +57,10 @@ export class GdbMiSession {
   /** 启动 GDB MI */
   start(opts: GdbOptions): Promise<void> {
     return new Promise((resolve, reject) => {
+      // 第五十轮修复：程序/参数**不**作为命令行位置参数传入 —— MinGW GDB（已实证）会把含空格的
+      // 路径按空格二次切分（E:\Work_Share\VSCode 与 Workstation\...\hello.exe 两段），
+      // 改由适配器会话建立后用 MI 注入：-file-exec-and-symbols / -exec-arguments。
       const args = ['-i=mi', '--quiet'];
-      if (opts.args && opts.args.length) args.push('--args', opts.program, ...opts.args);
-      else args.push(opts.program);
 
       this.proc = spawn(opts.gdbPath, args, {
         cwd: opts.cwd,
@@ -156,6 +159,31 @@ export class GdbMiSession {
     });
   }
 
+  /**
+   * 原样发送 MI 命令行（调用方自行控制引号/参数，如 `-data-disassemble -s 0x1000 -e 0x1100 -- 1`）。
+   * 第四十九轮：反汇编/内存/寄存器/用户命令用。
+   */
+  sendExact(line: string): Promise<MiResult> {
+    if (!this.proc) return Promise.reject(new Error('GDB 未启动'));
+    const token = ++this.token;
+    this.proc.stdin?.write(`${token}${line}\n`);
+
+    return new Promise<MiResult>((resolve, reject) => {
+      this.pending.set(token, { resolve, reject });
+      setTimeout(() => {
+        if (this.pending.has(token)) {
+          this.pending.delete(token);
+          reject(new Error(`GDB 命令超时: ${line}`));
+        }
+      }, this.timeoutMs);
+    });
+  }
+
+  /** MI 字符串引号（表达式/路径用；裸标识符不加引号） */
+  quote(s: string): string {
+    return this.miQuote(s);
+  }
+
   private feed(chunk: string): void {
     this.buffer += chunk;
     let idx;
@@ -217,6 +245,13 @@ export class GdbMiSession {
 
     // GDB 就绪提示 (gdb)
     if (line.startsWith('(gdb)')) return;
+
+    // 无 MI 前缀的裸文本：MinGW GDB 实测会把被测程序 stdout/stderr 原样写入管道
+    // （既不包 @"…" 也不包 ~"…"）；此前被静默丢弃 → Debug Console 看不到 printf 输出（修复 7）
+    if (isUnframedLine(line)) {
+      this.onTargetOutput?.(line);
+      return;
+    }
   }
 
   /** 解析 MI 的属性列表：key="value" / key=value / key=[...] / key={...} */

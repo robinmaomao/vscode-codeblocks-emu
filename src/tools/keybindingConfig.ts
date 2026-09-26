@@ -41,7 +41,7 @@ export const MANAGED_KEYBINDINGS: ManagedKeybinding[] = [
   { id: 'run', label: 'Run（运行）', command: 'codeblocks.run', when: 'editorTextFocus', defaults: ['ctrl+f10'], group: 'builtin' },
   { id: 'buildAndRun', label: 'Build and Run（构建并运行）', command: 'codeblocks.buildAndRun', when: 'editorTextFocus && !inDebugMode', defaults: ['f9'], group: 'builtin' },
   { id: 'compileCurrentFile', label: 'Compile Current File（编译当前文件）', command: 'codeblocks.compileCurrentFile', when: 'editorTextFocus', defaults: ['ctrl+shift+f9'], group: 'builtin' },
-  { id: 'debug', label: 'Debug / Continue（调试）', command: 'codeblocks.debug', when: 'editorTextFocus && !inDebugMode', defaults: ['f8'], group: 'builtin' },
+  { id: 'debug', label: 'Debug / Continue（调试）', command: 'codeblocks.debug', when: 'editorTextFocus', defaults: ['f8'], group: 'builtin' },
   { id: 'nextError', label: 'Next Error（下一错误）', command: 'codeblocks.nextError', when: 'editorTextFocus', defaults: ['f4', 'alt+f2'], group: 'builtin' },
   { id: 'prevError', label: 'Previous Error（上一错误）', command: 'codeblocks.prevError', when: 'editorTextFocus', defaults: ['shift+f4', 'alt+f1'], group: 'builtin' },
   { id: 'activatePriorProject', label: 'Activate Prior Project（上一个工程）', command: 'codeblocks.activatePriorProject', defaults: ['alt+f5'], group: 'builtin' },

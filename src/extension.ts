@@ -8,6 +8,8 @@ import * as path from 'path';
 import * as fs from 'fs';
 import * as crypto from 'crypto';
 import { spawn } from 'child_process';
+import { execFile } from 'child_process';
+import { isExecutableTargetType, resolveExecutablePath } from './build/outputPath';
 import { ProjectParser, WorkspaceParser } from './model/parser';
 import { Project, BuildTarget, ProjectFile, TargetType, OptionsRelation, OptionsRelationType, LinkerExecutableOption, supportsCurrentPlatform, PLATFORM_ALL } from './model/types';
 import { serializeProject } from './model/projectWriter';
@@ -35,7 +37,12 @@ import { OutputParser } from './build/outputParser';
 import { collectClangdEntries, writeClangdDatabase, CompileCommandEntry } from './build/compileCommands';
 import { detectClangd, queryCompilerSystemIncludes, queryCompilerTarget, updateClangdUserConfig, clangdUserConfigPath } from './tools/clangd';
 import { SymbolIndex, registerFallbackIntelliSense } from './tools/codeCompletion';
-import { GdbDebugAdapter } from './debug/gdbDebugAdapter';import { scanTodos } from './tools/todoScanner';
+import { GdbDebugAdapter } from './debug/gdbDebugAdapter';
+import { debugStateChanged, getActiveAdapter, setDebugTraceEnabled, setDebugTraceSink } from './debug/debugRegistry';
+import { parsePsList, parseTasklist, ProcessInfo } from './debug/miParse';
+import { resolveGdbPath } from './debug/gdbLocate';
+import { RegistersTreeProvider } from './ui/registersTreeProvider';
+import { scanTodos } from './tools/todoScanner';
 import { countFiles, isSourceFile } from './tools/codeStats';
 import { formatActiveDocument } from './tools/astyle';
 import { collectConflicts, normalizeKey, parseJsonc, KeybindingDef, ConflictItem } from './tools/keybindingConflicts';
@@ -107,6 +114,15 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   extContext = context;
   loadSelectedTargets();
   outputChannel = vscode.window.createOutputChannel('Code::Blocks', { log: true });
+  // DAP 跟踪（codeblocks.debug.trace）：写入本输出通道
+  setDebugTraceSink((line) => outputChannel.appendLine(line));
+  const applyDebugTrace = () => setDebugTraceEnabled(
+    vscode.workspace.getConfiguration('codeblocks').get<boolean>('debug.trace', false),
+  );
+  applyDebugTrace();
+  context.subscriptions.push(vscode.workspace.onDidChangeConfiguration((e) => {
+    if (e.affectsConfiguration('codeblocks.debug.trace')) applyDebugTrace();
+  }));
   diagnosticCollection = vscode.languages.createDiagnosticCollection('codeblocks');
 
   // 安装/激活时自动写入 .ld/.xm 的 token 颜色规则（幂等，仅命中 source.ld/source.xm）
@@ -127,6 +143,70 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       createDebugAdapterDescriptor: () => new vscode.DebugAdapterInlineImplementation(new GdbDebugAdapter()),
     }),
   );
+
+  // 第四十九轮：寄存器视图（调试容器）+ 调试辅助命令
+  const registersProvider = new RegistersTreeProvider();
+  context.subscriptions.push(vscode.window.registerTreeDataProvider('codeblocks.debug.registers', registersProvider));
+  context.subscriptions.push(debugStateChanged.event(() => registersProvider.refresh()));
+  context.subscriptions.push(vscode.commands.registerCommand('codeblocks.debug.refreshRegisters', () => registersProvider.refresh()));
+  context.subscriptions.push(vscode.commands.registerCommand('codeblocks.debug.sendGdbCommand', async () => {
+    const adapter = getActiveAdapter();
+    if (!adapter || !adapter.isActive()) { vscode.window.showWarningMessage('没有活动的 Code::Blocks 调试会话'); return; }
+    const text = await vscode.window.showInputBox({
+      prompt: 'GDB 命令：MI 以 - 开头（如 -exec-until main）；其它按 CLI 执行（如 add-symbol-file app.elf）',
+      placeHolder: 'add-symbol-file build/app.elf',
+    });
+    if (!text || !text.trim()) return;
+    try {
+      const out = await adapter.sendUserCommand(text);
+      vscode.window.setStatusBarMessage(`GDB: ${out || 'OK'}`, 4000);
+    } catch (err) {
+      vscode.window.showErrorMessage(`GDB 命令失败: ${(err as Error).message}`);
+    }
+  }));
+  context.subscriptions.push(vscode.commands.registerCommand('codeblocks.debug.setNextStatement', async () => {
+    const adapter = getActiveAdapter();
+    if (!adapter || !adapter.isActive()) { vscode.window.showWarningMessage('没有活动的 Code::Blocks 调试会话'); return; }
+    const ed = vscode.window.activeTextEditor;
+    if (!ed) { vscode.window.showWarningMessage('请在目标源码中放置光标'); return; }
+    const line = ed.selection.active.line + 1;
+    try {
+      await adapter.setNextStatement(ed.document.uri.fsPath, line);
+      vscode.window.setStatusBarMessage(`已跳转到第 ${line} 行`, 4000);
+    } catch (err) {
+      vscode.window.showErrorMessage(`设置下一条语句失败: ${(err as Error).message}`);
+    }
+  }));
+  context.subscriptions.push(vscode.commands.registerCommand('codeblocks.debug.attachToProcess', async () => {
+    const procs = await listProcesses();
+    if (!procs.length) { vscode.window.showWarningMessage('未获取到进程列表'); return; }
+    const pick = await vscode.window.showQuickPick(
+      procs.map((p): vscode.QuickPickItem & { pid: number } => ({ label: p.name, description: `PID ${p.pid}`, pid: p.pid })),
+      { placeHolder: '选择要附加的进程', matchOnDescription: true },
+    );
+    if (!pick) return;
+    await vscode.debug.startDebugging(undefined, {
+      type: 'codeblocks',
+      request: 'attach',
+      name: `附加: ${pick.label} (${pick.pid})`,
+      pid: pick.pid,
+    });
+  }));
+
+  /** 列举本机进程（附加调试用；Windows tasklist / POSIX ps） */
+  function listProcesses(): Promise<ProcessInfo[]> {
+    return new Promise((resolve) => {
+      if (process.platform === 'win32') {
+        execFile('tasklist', ['/FO', 'CSV', '/NH'], { maxBuffer: 4 * 1024 * 1024, windowsHide: true }, (err, stdout) => {
+          resolve(err ? [] : parseTasklist(stdout).sort((a, b) => a.name.localeCompare(b.name)));
+        });
+      } else {
+        execFile('ps', ['-eo', 'pid,comm'], { maxBuffer: 4 * 1024 * 1024 }, (err, stdout) => {
+          resolve(err ? [] : parsePsList(stdout).sort((a, b) => a.name.localeCompare(b.name)));
+        });
+      }
+    });
+  }
 
   // 注册项目树视图（支持多项目 + 拖拽排序）
   projectTreeProvider = new ProjectTreeProvider();
@@ -727,9 +807,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     }),
   );
 
-  // 调试
+  // 调试（F8 = Start / Continue，对齐 CB debugger_menu 的单项语义：调试中按 F8 = 继续运行）
   context.subscriptions.push(
     vscode.commands.registerCommand('codeblocks.debug', async () => {
+      if (vscode.debug.activeDebugSession) {
+        await vscode.commands.executeCommand('workbench.action.debug.continue');
+        return;
+      }
       await debug();
     }),
   );
@@ -4374,9 +4458,10 @@ async function run(): Promise<void> {
     return;
   }
 
-  const exePath = path.join(project.basePath, target.outputFilename);
+  const expandedOut = replaceCbMacros(target.outputFilename, { vars, customVars: project.customVariables ?? {}, basePath: project.basePath });
+  const exePath = resolveExecutablePath(project.basePath, expandedOut, process.platform, isExecutableTargetType(target.targetType));
   if (!fs.existsSync(exePath)) {
-    vscode.window.showErrorMessage('可执行文件不存在，请先构建');
+    vscode.window.showErrorMessage(`可执行文件不存在，请先构建（${path.relative(project.basePath, exePath)}）`);
     return;
   }
 
@@ -4403,21 +4488,42 @@ async function debug(): Promise<void> {
   const target = project.buildTargets.find((t) => t.title === selectedTitle);
   if (!target) return;
 
-  const exePath = path.join(project.basePath, target.outputFilename);
-  if (!fs.existsSync(exePath)) {
-    vscode.window.showErrorMessage('可执行文件不存在，请先构建');
-    return;
-  }
-
-  // 定位 GDB
-  const gdbPath = await locateGdb();
-  if (!gdbPath) {
-    vscode.window.showErrorMessage('未找到 GDB 调试器，请确认已安装 MinGW/gdb');
-    return;
-  }
-
   // 执行参数与环境变量（对齐 GetExecutionParameters + <Environment>）
   const vars = cbBuiltinVars(project.basePath, target.outputFilename, target.title, target.objectOutput, project.title, project.filename, getCompiler(target.compilerId)?.masterPath ?? '');
+
+  // 调试目标：库/CommandsOnly 走宿主程序（对齐 run()/CB compilergcc.cpp:2091-2126），其余走可执行输出
+  let program = '';
+  const tt = target.targetType;
+  if (tt === TargetType.DynamicLib || tt === TargetType.StaticLib || tt === TargetType.CommandsOnly) {
+    const host = target.hostApplication
+      ? replaceCbMacros(target.hostApplication, { vars, customVars: project.customVariables ?? {} })
+      : '';
+    if (!host) {
+      vscode.window.showErrorMessage('You must select a host application to "run" a library...');
+      return;
+    }
+    if (!fs.existsSync(host)) {
+      vscode.window.showErrorMessage(`宿主程序不存在，请先构建（${host}）`);
+      return;
+    }
+    program = host;
+  } else {
+    // 输出文件名宏展开 + 真实可执行路径（Windows 无扩展名输出 → 链接器追加 .exe，需回退）
+    const expandedOut = replaceCbMacros(target.outputFilename, { vars, customVars: project.customVariables ?? {}, basePath: project.basePath });
+    const exePath = resolveExecutablePath(project.basePath, expandedOut, process.platform, isExecutableTargetType(target.targetType));
+    if (!fs.existsSync(exePath)) {
+      vscode.window.showErrorMessage(`可执行文件不存在，请先构建（${path.relative(project.basePath, exePath)}）`);
+      return;
+    }
+    program = exePath;
+  }
+
+  // 定位 GDB（codeblocks.debug.gdbPath → masterPath/bin → PATH，第五十轮 D9）
+  const gdb = await locateGdb();
+  if (!gdb.path) {
+    vscode.window.showErrorMessage(`未找到 GDB 调试器（已尝试：${summarizeTried(gdb.tried)}）。可在设置 codeblocks.debug.gdbPath 指定完整路径`);
+    return;
+  }
   const argsStr = target.executionParameters ? expandMacros(target.executionParameters, vars) : '';
   const env: Record<string, string> = {};
   for (const ev of [...project.envVars, ...target.envVars]) env[ev.name] = ev.value;
@@ -4426,9 +4532,9 @@ async function debug(): Promise<void> {
     type: 'codeblocks',
     name: `Debug: ${target.title}`,
     request: 'launch',
-    program: exePath,
-    cwd: project.basePath,
-    gdbPath,
+    program,
+    cwd: runWorkingDir(project, target, vars),
+    gdbPath: gdb.path,
     args: splitCommandLine(argsStr),
     environment: env,
   });
@@ -4450,25 +4556,27 @@ function splitCommandLine(s: string): string[] {
   return out;
 }
 
-/** 定位 GDB 可执行文件 */
-async function locateGdb(): Promise<string | undefined> {
-  const win = process.platform === 'win32';
-  const gdbName = win ? 'gdb.exe' : 'gdb';
+/**
+ * 定位 GDB 可执行文件（第五十轮 D9）：
+ * 优先级 codeblocks.debug.gdbPath → masterPath/bin → PATH；返回尝试过的路径便于错误提示。
+ */
+async function locateGdb(): Promise<{ path?: string; tried: string[] }> {
   const cfg = vscode.workspace.getConfiguration('codeblocks');
-  const masterPath = cfg.get<string>('masterPath', '');
-  if (masterPath) {
-    const gdb = path.join(masterPath, 'bin', gdbName);
-    if (fs.existsSync(gdb)) return gdb;
-  }
-  // PATH 中查找
-  const pathVar = process.env.PATH ?? '';
-  const sep = win ? ';' : ':';
-  for (const dir of pathVar.split(sep)) {
-    if (!dir) continue;
-    const full = path.join(dir, gdbName);
-    if (fs.existsSync(full)) return full;
-  }
-  return undefined;
+  const tried: string[] = [];
+  const found = resolveGdbPath({
+    settingPath: cfg.get<string>('debug.gdbPath', ''),
+    masterPath: cfg.get<string>('masterPath', ''),
+    pathEnv: process.env.PATH ?? '',
+    platform: process.platform,
+    exists: (p) => { tried.push(p); return fs.existsSync(p); },
+  });
+  return { path: found, tried };
+}
+
+/** 错误提示用：截断尝试路径列表 */
+function summarizeTried(tried: string[]): string {
+  const head = tried.slice(0, 5).join('、');
+  return tried.length > 5 ? `${head} 等 ${tried.length} 处` : head;
 }
 
 /** .ld / .xm 语法高亮的 token 颜色规则（对齐 hightlight-demo 的 Dark+ 配色；scope 后缀唯一，仅命中这两类文件） */
