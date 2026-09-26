@@ -11,7 +11,7 @@ import * as fs from 'fs';
 import { spawnSync } from 'child_process';
 import { Compiler } from '../compiler/compiler';
 import { upperDrive, shortPathWin } from '../tools/pathCase';
-import { replaceCbMacros, cbBuiltinVars } from './cbMacros';
+import { replaceCbMacros, cbBuiltinVars, envVarMap } from './cbMacros';
 import { strictQuoting } from '../build/logLang';
 import {
   Project,
@@ -248,17 +248,23 @@ export class CommandGenerator {
     return target.optionRelations[type] ?? OptionsRelation.AppendToParentOptions;
   }
 
-  /** 内置构建宏（目标上下文） */
+  /**
+   * 构建宏表（目标上下文）——`<Environment>` 变量（目标覆盖项目）+ 内置宏。
+   * 合并次序对齐 macrosmanager RecalcVars：环境变量在前、内置宏在后 → 内置宏优先。
+   */
   private cbVars(target: BuildTarget): Record<string, string> {
-    return cbBuiltinVars(
-      this.project.basePath,
-      target.outputFilename,
-      target.title,
-      target.objectOutput,
-      this.project.title,
-      this.project.filename,
-      this.compiler.masterPath,
-    );
+    return {
+      ...envVarMap(this.project.envVars, target.envVars),
+      ...cbBuiltinVars(
+        this.project.basePath,
+        target.outputFilename,
+        target.title,
+        target.objectOutput,
+        this.project.title,
+        this.project.filename,
+        this.compiler.masterPath,
+      ),
+    };
   }
 
   /** 对齐 CB ReplaceMacros（含 $(#var)、日期/时间、env 回退、反转义；compilercommandgenerator.cpp:579/806-1163） */

@@ -2,6 +2,9 @@
  * Code::Blocks 宏展开 —— 对齐 macrosmanager.cpp ReplaceMacros（macrosmanager.cpp:659-750）：
  * - `$(#var)` / `$(#var.member)`：全局编译器变量（uservarmanager，值经 UnixFilename 规范化）
  * - 内置日期/时间（NOW/NOW_L/TODAY/TDAY/WEEKDAY 及 _UTC 变体）、COIN/RANDOM
+ * - `<Environment>` 项目/目标环境变量：经 envVarMap 合并进 vars（键大写；目标覆盖项目；
+ *   合并次序 = 环境变量在前、内置宏在后 → 内置宏优先（保护 TARGET_* 等核心宏；CB 中早期宏可被覆盖，属保护性差异）
+ * - 变量名查找先精确、后大写回退（对齐 macrosmanager.cpp:675/708 查表前 Upper()）
  * - 未命中宏回退环境变量（wxGetEnv 语义；仍无 → 空替换，CB 同）
  * - `$$` → `$`、`%%` → `%` 反转义（CB 非子请求时）
  */
@@ -37,6 +40,24 @@ export function globalVariables(): Record<string, Record<string, string>> {
 /** 清空全局变量缓存（测试用） */
 export function resetGlobalVariables(): void {
   cachedGcv = undefined;
+}
+
+/**
+ * 合并 `<Environment>` 项目/目标环境变量为宏表（对齐 macrosmanager.cpp:217-243 ReadMacros）：
+ * - 键统一大写（CB 查表前 Upper()）；
+ * - 按参数顺序合并，后者覆盖前者（项目级在前、目标级在后 → 目标覆盖项目）。
+ */
+export function envVarMap(
+  ...lists: Array<Array<{ name: string; value: string }> | undefined>
+): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const list of lists) {
+    for (const v of list ?? []) {
+      const name = String(v?.name ?? '').trim();
+      if (name) out[name.toUpperCase()] = String(v?.value ?? '');
+    }
+  }
+  return out;
 }
 
 function dateVars(d: Date): Record<string, string> {
@@ -232,11 +253,18 @@ function replaceCbMacrosInner(
     if (name.startsWith('#')) return lookup(name);
     if (name === 'COIN') return Math.random() < 0.5 ? '1' : '0';
     if (name === 'RANDOM') return String(Math.floor(Math.random() * 0x10000));
+    // 大小写不敏感查找（对齐 macrosmanager.cpp:675/708：查表前 Upper()；先精确匹配保持既有行为）
+    const upper = name.toUpperCase();
     if (dyn[name] !== undefined) return dyn[name];
     if (vars[name] !== undefined) return vars[name];
+    if (upper !== name) {
+      if (dyn[upper] !== undefined) return dyn[upper];
+      if (vars[upper] !== undefined) return vars[upper];
+    }
     if (customVars[name] !== undefined) return customVars[name];
-    // 未命中 → 环境变量回退（CB wxGetEnv）；仍无 → 空替换（CB 同，宏被移除）
-    return process.env[name] ?? '';
+    if (upper !== name && customVars[upper] !== undefined) return customVars[upper];
+    // 未命中 → 环境变量回退（CB wxGetEnv，同样按大写名查找）；仍无 → 空替换（CB 同，宏被移除）
+    return process.env[name] ?? (upper !== name ? process.env[upper] ?? '' : '');
   };
 
   let cur = cmd.replace(/\$\$/g, '\u0001CBDOLLAR\u0001');

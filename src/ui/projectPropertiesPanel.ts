@@ -26,6 +26,11 @@ export interface TargetEditData {
   externalDeps: string[];
   /** 附加输出（<Option additional_output>，每行一个；外部依赖比它新时强制重链接） */
   additionalOutput: string[];
+  /**
+   * 目标环境变量（<Environment><Variable name value>，R1）——
+   * 参与构建/运行宏 $(NAME)（目标覆盖项目），Run/Debug 时注入进程环境（对齐 CB Build options → Custom variables）
+   */
+  envVars: CustomVariableEditData[];
 }
 
 /** WebView 前后端交换的文件编辑数据 */
@@ -74,12 +79,14 @@ export interface CustomVariableEditData {
   value: string;
 }
 
-/** 项目设置（标题 / 默认编译器 / 虚拟文件夹 / 自定义变量） */
+/** 项目设置（标题 / 默认编译器 / 虚拟文件夹 / 自定义变量 / 环境变量） */
 export interface ProjectSettingsEditData {
   title: string;
   compilerId: string;
   virtualFolders: string[];
   customVariables: CustomVariableEditData[];
+  /** 项目环境变量（<Build><Environment><Variable>，R1；构建/运行宏 $(NAME) + Run/Debug 进程环境） */
+  envVars: CustomVariableEditData[];
 }
 
 /** 构建脚本 + pre/post build 命令（作用域：项目级 + 各目标，目标项按 targets 数组顺序对齐） */
@@ -195,6 +202,7 @@ export class ProjectPropertiesPanel {
       executionParameters: t.executionParameters ?? '',
       externalDeps: [...t.externalDeps],
       additionalOutput: [...t.additionalOutput],
+      envVars: t.envVars.map((v) => ({ name: v.name, value: v.value })),
     }));
 
     const cmp = this.project.compilerId;
@@ -243,6 +251,7 @@ export class ProjectPropertiesPanel {
       compilerId: this.project.compilerId,
       virtualFolders: [...this.project.virtualFolders],
       customVariables: Object.entries(this.project.customVariables ?? {}).map(([name, value]) => ({ name, value })),
+      envVars: this.project.envVars.map((v) => ({ name: v.name, value: v.value })),
     };
 
     const projectScripts = {
@@ -493,7 +502,7 @@ export class ProjectPropertiesPanel {
     let targetOpts = data.targetOpts.map(o => ({ compilerOptions: [...o.compilerOptions], linkerOptions: [...o.linkerOptions], linkLibs: [...o.linkLibs], relations: { ...o.relations } }));
     let projDirs = { includeDirs: [...data.projectDirs.includeDirs], libDirs: [...data.projectDirs.libDirs], resourceDirs: [...data.projectDirs.resourceDirs] };
     let targetDirs = data.targetDirs.map(o => ({ includeDirs: [...o.includeDirs], libDirs: [...o.libDirs], resourceDirs: [...o.resourceDirs] }));
-    let projSettings = { title: data.projectSettings.title, compilerId: data.projectSettings.compilerId, virtualFolders: [...data.projectSettings.virtualFolders], customVariables: (data.projectSettings.customVariables || []).map(v => ({ ...v })) };
+    let projSettings = { title: data.projectSettings.title, compilerId: data.projectSettings.compilerId, virtualFolders: [...data.projectSettings.virtualFolders], customVariables: (data.projectSettings.customVariables || []).map(v => ({ ...v })), envVars: (data.projectSettings.envVars || []).map(v => ({ ...v })) };
     let projScripts = { scripts: [...data.projectScripts.scripts], before: [...data.projectScripts.before], after: [...data.projectScripts.after] };
     let targetScripts = data.targetScripts.map(s => ({ scripts: [...s.scripts], before: [...s.before], after: [...s.after] }));
     let notes = { notes: data.notes.notes, showNotesOnLoad: data.notes.showNotesOnLoad };
@@ -588,9 +597,14 @@ export class ProjectPropertiesPanel {
         '<label><span class="field-name">附加输出（每行一个）</span>' +
         '<textarea id="f-addout">' + esc((t.additionalOutput || []).join('\\n')) + '</textarea>' +
         '<div class="hint">&lt;Option additional_output&gt;：外部依赖比它新时强制重链接</div></label>' +
+        '</details>' +
+        '<details class="fg"><summary>环境变量</summary>' +
+        '<label><span class="field-name">目标环境变量（每行 name=value）</span>' +
+        '<textarea id="f-envvars">' + esc((t.envVars || []).map(v => v.name + '=' + v.value).join('\\n')) + '</textarea>' +
+        '<div class="hint">&lt;Environment&gt;&lt;Variable&gt;：构建/运行宏 $(NAME)（对齐 CB Build options → Custom variables；同名时目标覆盖项目）</div></label>' +
         '</details>';
       document.getElementById('f-type').value = String(t.targetType);
-      ['f-title', 'f-type', 'f-output', 'f-object', 'f-compiler', 'f-params', 'f-extdeps', 'f-addout'].forEach(id => {
+      ['f-title', 'f-type', 'f-output', 'f-object', 'f-compiler', 'f-params', 'f-extdeps', 'f-addout', 'f-envvars'].forEach(id => {
         document.getElementById(id).addEventListener('change', () => collectTargetForm());
       });
     }
@@ -608,6 +622,7 @@ export class ProjectPropertiesPanel {
       t.executionParameters = document.getElementById('f-params').value;
       t.externalDeps = optionsLines(document.getElementById('f-extdeps').value);
       t.additionalOutput = optionsLines(document.getElementById('f-addout').value);
+      t.envVars = parseVarLines(document.getElementById('f-envvars').value);
       // 目标重命名：同步文件归属引用
       if (oldTitle !== newTitle) {
         files.forEach(f => {
@@ -625,7 +640,7 @@ export class ProjectPropertiesPanel {
     document.getElementById('add').addEventListener('click', () => {
       collectTargetForm();
       const n = targets.length + 1;
-      targets.push({ originalTitle: '', title: 'Target' + n, targetType: 1, outputFilename: 'bin/Target' + n + '/app', objectOutput: 'obj/Target' + n + '/', compilerId: data.compilerId || 'gcc', executionParameters: '', externalDeps: [], additionalOutput: [] });
+      targets.push({ originalTitle: '', title: 'Target' + n, targetType: 1, outputFilename: 'bin/Target' + n + '/app', objectOutput: 'obj/Target' + n + '/', compilerId: data.compilerId || 'gcc', executionParameters: '', externalDeps: [], additionalOutput: [], envVars: [] });
       targetOpts.push({ compilerOptions: [], linkerOptions: [], linkLibs: [], relations: { compiler: 3, linker: 3, include: 3, lib: 3, res: 3 } });
       targetDirs.push({ includeDirs: [], libDirs: [], resourceDirs: [] });
       targetScripts.push({ scripts: [], before: [], after: [] });
@@ -644,7 +659,7 @@ export class ProjectPropertiesPanel {
       if (!targets.length) return;
       collectTargetForm();
       const src = targets[selected];
-      targets.splice(selected + 1, 0, { ...src, originalTitle: '', title: src.title + ' copy', externalDeps: [...(src.externalDeps || [])], additionalOutput: [...(src.additionalOutput || [])] });
+      targets.splice(selected + 1, 0, { ...src, originalTitle: '', title: src.title + ' copy', externalDeps: [...(src.externalDeps || [])], additionalOutput: [...(src.additionalOutput || [])], envVars: (src.envVars || []).map(v => ({ ...v })) });
       targetOpts.splice(selected + 1, 0, { compilerOptions: [...targetOpts[selected].compilerOptions], linkerOptions: [...targetOpts[selected].linkerOptions], linkLibs: [...targetOpts[selected].linkLibs], relations: { ...targetOpts[selected].relations } });
       targetDirs.splice(selected + 1, 0, { includeDirs: [...targetDirs[selected].includeDirs], libDirs: [...targetDirs[selected].libDirs], resourceDirs: [...targetDirs[selected].resourceDirs] });
       targetScripts.splice(selected + 1, 0, { scripts: [...targetScripts[selected].scripts], before: [...targetScripts[selected].before], after: [...targetScripts[selected].after] });
@@ -949,8 +964,11 @@ export class ProjectPropertiesPanel {
         '<div class="hint">每行一个虚拟文件夹名，如 Headers、Sources</div></label>' +
         '<label><span class="field-name">项目自定义变量（每行 name=value）</span>' +
         '<textarea id="set-vars">' + esc(projSettings.customVariables.map(v => v.name + '=' + v.value).join('\\n')) + '</textarea>' +
-        '<div class="hint">构建/运行宏 $(name) 使用（对齐 Code::Blocks Custom variables）；变量名不能含空格</div></label>';
-      ['set-title', 'set-compiler', 'set-vfolders', 'set-vars'].forEach(id => {
+        '<div class="hint">构建/运行宏 $(name) 使用（扩展增强：写入 Extensions 节点；变量名不能含空格）</div></label>' +
+        '<label><span class="field-name">环境变量（每行 name=value）</span>' +
+        '<textarea id="set-envvars">' + esc((projSettings.envVars || []).map(v => v.name + '=' + v.value).join('\\n')) + '</textarea>' +
+        '<div class="hint">写入 &lt;Environment&gt;：构建/运行宏 $(NAME)（对齐 Code::Blocks Build options → Custom variables）</div></label>';
+      ['set-title', 'set-compiler', 'set-vfolders', 'set-vars', 'set-envvars'].forEach(id => {
         document.getElementById(id).addEventListener('change', () => collectSettingsForm());
       });
     }
@@ -962,6 +980,7 @@ export class ProjectPropertiesPanel {
       projSettings.compilerId = document.getElementById('set-compiler').value.trim();
       projSettings.virtualFolders = optionsLines(document.getElementById('set-vfolders').value);
       projSettings.customVariables = parseVarLines(document.getElementById('set-vars').value);
+      projSettings.envVars = parseVarLines(document.getElementById('set-envvars').value);
     }
 
     // ---- 构建脚本 tab ----
@@ -1084,6 +1103,11 @@ export class ProjectPropertiesPanel {
         executionParameters: String(t.executionParameters ?? ''),
         externalDeps: Array.isArray(t.externalDeps) ? t.externalDeps.map((x: any) => String(x)) : [],
         additionalOutput: Array.isArray(t.additionalOutput) ? t.additionalOutput.map((x: any) => String(x)) : [],
+        envVars: Array.isArray(t.envVars)
+          ? t.envVars
+              .map((v: any) => ({ name: String(v?.name ?? '').trim(), value: String(v?.value ?? '') }))
+              .filter((v: any) => v.name)
+          : [],
       }));
       const files: FileEditData[] = (msg.files ?? []).map((f: any) => ({
         relativeFilename: String(f.relativeFilename ?? ''),
@@ -1129,6 +1153,11 @@ export class ProjectPropertiesPanel {
         virtualFolders: strArr(msg.projectSettings?.virtualFolders),
         customVariables: Array.isArray(msg.projectSettings?.customVariables)
           ? msg.projectSettings.customVariables
+              .map((v: any) => ({ name: String(v?.name ?? '').trim(), value: String(v?.value ?? '') }))
+              .filter((v: any) => v.name)
+          : [],
+        envVars: Array.isArray(msg.projectSettings?.envVars)
+          ? msg.projectSettings.envVars
               .map((v: any) => ({ name: String(v?.name ?? '').trim(), value: String(v?.value ?? '') }))
               .filter((v: any) => v.name)
           : [],

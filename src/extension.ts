@@ -29,7 +29,7 @@ import { BuildEngine } from './build/buildEngine';
 import { BuildCancelSource, BuildCancelHandle } from './build/cancelToken';
 import { expandMacros } from './build/scriptRunner';
 import { applyGeneratedFiles } from './build/generatedFiles';
-import { cbBuiltinVars, replaceCbMacros, globalVariables } from './compiler/cbMacros';
+import { cbBuiltinVars, replaceCbMacros, globalVariables, envVarMap } from './compiler/cbMacros';
 import { buildLogPrefs, msg, quietSuccess } from './build/logLang';
 import { decodeText } from './tools/encoding';
 import { clearBackticksCache } from './compiler/commandGenerator';
@@ -2616,6 +2616,10 @@ async function saveProjectProperties(
   project.title = projectSettings.title.trim() || project.title;
   project.compilerId = projectSettings.compilerId.trim() || project.compilerId;
   project.virtualFolders = projectSettings.virtualFolders;
+  // 环境变量（R1：<Build><Environment>，项目级）——构建/运行宏 $(NAME) + Run/Debug 进程环境
+  project.envVars = (projectSettings.envVars ?? [])
+    .filter((v) => v.name)
+    .map((v) => ({ name: v.name, value: v.value }));
   // 项目自定义变量（C3）：写回模型 + Extensions 原始节点（序列化时按节点重建；空 = 移除节点）
   const cvResult = applyCustomVariables(project.extensions, projectSettings.customVariables ?? []);
   project.extensions = cvResult.extensions;
@@ -2658,6 +2662,8 @@ async function saveProjectProperties(
     // 外部依赖 / 附加输出（C2：<Option external_deps> / <Option additional_output>）
     t.externalDeps = [...(e.externalDeps ?? [])];
     t.additionalOutput = [...(e.additionalOutput ?? [])];
+    // 目标环境变量（R1：<Environment>，同名时覆盖项目变量）
+    t.envVars = (e.envVars ?? []).filter((v) => v.name).map((v) => ({ name: v.name, value: v.value }));
     newTargets.push(t);
     newTitles.add(title);
   }
@@ -4238,7 +4244,7 @@ async function runConfiguredTool(index: number): Promise<void> {
     projectName: project?.title,
     workspaceFolder: vscode.workspace.workspaceFolders?.[0]?.uri.fsPath,
     vars: project && target
-      ? cbBuiltinVars(project.basePath, target.outputFilename, target.title, target.objectOutput, project.title, project.filename, getCompiler(target.compilerId)?.masterPath ?? '')
+      ? { ...envVarMap(project.envVars, target.envVars), ...cbBuiltinVars(project.basePath, target.outputFilename, target.title, target.objectOutput, project.title, project.filename, getCompiler(target.compilerId)?.masterPath ?? '') }
       : undefined,
     customVars: project?.customVariables,
   };
@@ -4752,7 +4758,7 @@ function getMakeCommand(project: Project, target: BuildTarget | undefined, key: 
     .replace(/\$makefile/g, project.makefile || 'Makefile')
     .replace(/\$make/g, compiler.programs.MAKE || 'make')
     .replace(/\$target/g, target?.title ?? '');
-  const vars = cbBuiltinVars(project.basePath, target?.outputFilename ?? '', target?.title ?? '', target?.objectOutput ?? '', project.title, project.filename, compiler.masterPath);
+  const vars = { ...envVarMap(project.envVars, target?.envVars), ...cbBuiltinVars(project.basePath, target?.outputFilename ?? '', target?.title ?? '', target?.objectOutput ?? '', project.title, project.filename, compiler.masterPath) };
   return replaceCbMacros(cmd, { vars, customVars: project.customVariables ?? {}, basePath: project.basePath });
 }
 
@@ -4986,7 +4992,7 @@ async function run(): Promise<void> {
   if (!target) return;
 
   // 执行参数宏展开（对齐 GetExecutionParameters → GetFullCompilerVarsSet 全集：$(TARGET_OUTPUT_FILE) 等）
-  const vars = cbBuiltinVars(project.basePath, target.outputFilename, target.title, target.objectOutput, project.title, project.filename, getCompiler(target.compilerId)?.masterPath ?? '');
+  const vars = { ...envVarMap(project.envVars, target.envVars), ...cbBuiltinVars(project.basePath, target.outputFilename, target.title, target.objectOutput, project.title, project.filename, getCompiler(target.compilerId)?.masterPath ?? '') };
   const args = target.executionParameters ? expandMacros(target.executionParameters, vars) : '';
   // 环境变量（项目级 + 目标级 <Environment><Variable name value>）
   const env: Record<string, string> = {};
@@ -5043,7 +5049,7 @@ async function debug(): Promise<void> {
   if (!target) return;
 
   // 执行参数与环境变量（对齐 GetExecutionParameters + <Environment>）
-  const vars = cbBuiltinVars(project.basePath, target.outputFilename, target.title, target.objectOutput, project.title, project.filename, getCompiler(target.compilerId)?.masterPath ?? '');
+  const vars = { ...envVarMap(project.envVars, target.envVars), ...cbBuiltinVars(project.basePath, target.outputFilename, target.title, target.objectOutput, project.title, project.filename, getCompiler(target.compilerId)?.masterPath ?? '') };
 
   // 调试目标：库/CommandsOnly 走宿主程序（对齐 run()/CB compilergcc.cpp:2091-2126），其余走可执行输出
   let program = '';

@@ -15,7 +15,7 @@ import { Compiler } from '../compiler/compiler';
 import { CommandGenerator, computeStaticOutput, quoteIfNeeded, clearBackticksCache } from '../compiler/commandGenerator';
 import { OutputParser } from './outputParser';
 import { runScriptCommands } from './scriptRunner';
-import { replaceCbMacros, cbBuiltinVars } from '../compiler/cbMacros';
+import { replaceCbMacros, cbBuiltinVars, envVarMap } from '../compiler/cbMacros';
 import { buildLogPrefs, msg } from './logLang';
 import { BuildCancelHandle } from './cancelToken';
 import { decodeText } from '../tools/encoding';
@@ -156,8 +156,11 @@ export class BuildEngine {
 
     // 编译/链接子进程 PATH 注入：bin + masterPath + extra_paths + 系统 PATH（对齐 SetupEnvironment:795-830：ReplaceMacros 展开 + 去尾分隔符 + 去重）
     const expandEnvPath = (p: string): string =>
-      replaceCbMacros(p, { customVars: this.project.customVariables ?? {}, basePath: this.project.basePath })
-        .replace(/[\\/]+$/, '');
+      replaceCbMacros(p, {
+        vars: envVarMap(this.project.envVars),
+        customVars: this.project.customVariables ?? {},
+        basePath: this.project.basePath,
+      }).replace(/[\\/]+$/, '');
     const masterPath = this.compiler.masterPath ? expandEnvPath(this.compiler.masterPath) : '';
     const extraPaths = (this.compiler.extraPaths ?? []).map(expandEnvPath);
     const parts = process.platform === 'win32'
@@ -298,10 +301,15 @@ export class BuildEngine {
     return ok;
   }
 
-  /** 目标宏变量（内置全集 + 项目自定义变量，对齐 macrosmanager RecalcVars + cbProject SetVariable） */
+  /**
+   * 目标宏变量（内置全集 + `<Environment>` 项目/目标环境变量 + 项目自定义变量）——
+   * 对齐 macrosmanager RecalcVars：目标变量后读覆盖项目（envVarMap 参数顺序）；
+   * 环境变量在前、内置宏在后 → 内置宏优先（保护 TARGET_* 等核心宏）；
+   * 项目自定义变量（扩展增强）最后合并保持既有优先级。
+   */
   private targetMacroVars(target: BuildTarget): Record<string, string> {
     const vars = cbBuiltinVars(this.project.basePath, target.outputFilename, target.title, target.objectOutput, this.project.title, this.project.filename, this.compiler.masterPath);
-    return { ...vars, ...this.project.customVariables };
+    return { ...envVarMap(this.project.envVars, target.envVars), ...vars, ...this.project.customVariables };
   }
 
   /** 展开 pre/post 命令中的编译宏（$compiler/$options/$includes 等），对齐 GenerateCommandLine */
