@@ -19,6 +19,7 @@ import { replaceCbMacros, cbBuiltinVars } from '../compiler/cbMacros';
 import { buildLogPrefs, msg } from './logLang';
 import { BuildCancelHandle } from './cancelToken';
 import { decodeText } from '../tools/encoding';
+import { isExecutableTargetType, resolveExecutablePath } from './outputPath';
 import { applyResponseFile, compareFilesByWeight } from './commandLine';
 import { upperDrive, shortPathWin } from '../tools/pathCase';
 import { getWindowsSystemPath } from '../tools/windowsPath';
@@ -1146,16 +1147,9 @@ export class BuildEngine {
         computeStaticOutput(output, this.compiler.switches, target.prefixAuto, target.extensionAuto),
       );
     }
-    const out = path.join(this.project.basePath, output);
-    if (fs.existsSync(out)) return out;
-    if (process.platform === 'win32') {
-      const isExeType =
-        target.targetType === TargetType.ConsoleOnly ||
-        target.targetType === TargetType.Executable ||
-        target.targetType === TargetType.Native;
-      if (isExeType && fs.existsSync(out + '.exe')) return out + '.exe';
-    }
-    return out;
+    return resolveExecutablePath(
+      this.project.basePath, output, process.platform, isExecutableTargetType(target.targetType),
+    );
   }
 
   /**

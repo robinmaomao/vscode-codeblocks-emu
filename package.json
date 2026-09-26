@@ -2,7 +2,7 @@
   "name": "codeblocks-vscode",
   "displayName": "Code::Blocks for VS Code",
   "description": "原生移植 Code::Blocks 核心功能到 VS Code：项目模型、构建引擎、编译器管理与调试引擎",
-  "version": "0.8.74-dev",
+  "version": "0.8.76-dev",
   "icon": "resources/icon.png",
   "publisher": "robinmaomao",
   "author": {
@@ -322,6 +322,26 @@
       {
         "command": "codeblocks.keybindings.import",
         "title": "Code::Blocks: Import Keybinding Scheme"
+      },
+      {
+        "command": "codeblocks.debug.refreshRegisters",
+        "title": "Code::Blocks: Refresh Registers",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "codeblocks.debug.sendGdbCommand",
+        "title": "Code::Blocks: Send GDB Command…",
+        "icon": "$(terminal)"
+      },
+      {
+        "command": "codeblocks.debug.setNextStatement",
+        "title": "Code::Blocks: Set Next Statement",
+        "icon": "$(debug-step-over)"
+      },
+      {
+        "command": "codeblocks.debug.attachToProcess",
+        "title": "Code::Blocks: Attach to Process…",
+        "icon": "$(debug-alt)"
       }
     ],
     "languages": [
@@ -428,6 +448,48 @@
           "type": "boolean",
           "default": true,
           "description": "显示 Symbols 视图（初始默认隐藏，可从视图容器的 ⋯ → Views 菜单调出；关闭此设置后强制隐藏）"
+        },
+        "codeblocks.debug.initCommands": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": [],
+          "description": "调试会话启动后注入的 GDB 命令（按 CLI 逐条执行，如 set pagination off）；对齐 Code::Blocks Debugger settings 的初始化命令"
+        },
+        "codeblocks.debug.printPretty": {
+          "type": "boolean",
+          "default": false,
+          "description": "调试变量显示美化（GDB set print pretty on，结构体多行缩进）"
+        },
+        "codeblocks.debug.printElements": {
+          "type": "number",
+          "default": 0,
+          "description": "数组/字符串最多显示的元素数（GDB set print elements；0 = 不设置，使用 GDB 默认）"
+        },
+        "codeblocks.debug.disassemblyFlavor": {
+          "type": "string",
+          "enum": ["default", "intel", "att"],
+          "default": "default",
+          "description": "反汇编语法风格（GDB set disassembly-flavor）；default = 不设置（跟随 GDB 默认）"
+        },
+        "codeblocks.debug.charset": {
+          "type": "string",
+          "default": "",
+          "description": "调试字符集（GDB set charset，如 UTF-8 / GBK；留空 = 不设置）"
+        },
+        "codeblocks.debug.gdbPath": {
+          "type": "string",
+          "default": "",
+          "description": "GDB 可执行文件路径（第五十轮；留空自动探测：masterPath/bin → PATH）。跨工具链（如 RV32）建议显式指定对应 gdb，避免架构不匹配"
+        },
+        "codeblocks.debug.trace": {
+          "type": "boolean",
+          "default": false,
+          "description": "调试协议跟踪：把 DAP 请求/响应/事件写入 Code::Blocks 输出通道（排查「会话异常结束/断点不生效」等问题时开启）"
+        },
+        "codeblocks.debug.registers": {
+          "type": "boolean",
+          "default": false,
+          "description": "Registers 视图读取寄存器值（默认关闭：部分 MinGW GDB 8.1 构建在读取寄存器时会让 GDB 进程崩溃、调试会话中断；确认你的 GDB 无此问题后再开启）"
         },
         "codeblocks.keybindings.cbStyle": {
           "type": "boolean",
@@ -552,6 +614,14 @@
           "id": "codeblocks.buildLog",
           "name": "Build Log",
           "icon": "resources/buildlog.svg"
+        }
+      ],
+      "debug": [
+        {
+          "id": "codeblocks.debug.registers",
+          "name": "Registers",
+          "contextualTitle": "Code::Blocks 寄存器",
+          "when": "inDebugMode"
         }
       ]
     },
@@ -860,7 +930,7 @@
       {
         "command": "codeblocks.debug",
         "key": "f8",
-        "when": "editorTextFocus && !inDebugMode"
+        "when": "editorTextFocus"
       },
       {
         "command": "codeblocks.nextError",

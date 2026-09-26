@@ -4,9 +4,11 @@
 
 直接在 VS Code 中打开 `.cbp` / `.workspace` 工程，即可获得与 Code::Blocks 对齐的构建、调试与工程浏览体验。
 
-> **作者**：Robinmaomao ｜ **版本**：0.8.74-dev
+> **作者**：Robinmaomao ｜ **版本**：0.8.76-dev
 
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE.md)
+
+> **许可证说明**：本扩展的 TypeScript 代码为独立重写（非复制 GPL 源码）；其中错误正则表（`resources/compilers/options_common_re.xml`）与命令模板（`resources/compilers/options_gcc.xml`）源自 GPL v3 的 Code::Blocks `compilergcc` 资源，因此整体按 GPL v3 发布，详见 [LICENSE.md](LICENSE.md)。
 
 > 📖 详细的功能介绍、使用说明与 **RISC-V 交叉编译完整示例**见 [docs/使用说明.md](docs/使用说明.md)；逐项对齐依据见 [docs/对齐对照.md](docs/对齐对照.md)。
 
@@ -15,7 +17,7 @@
 - 📁 **原生工程解析**：直接加载 `.cbp` / `.workspace`（`fast-xml-parser`），完整还原 `Project` / `BuildTarget` / `ProjectFile` 内存模型，支持虚拟目标与虚拟文件夹。
 - 🔨 **真实构建引擎**：不依赖 `tasks.json`。内置 Code::Blocks 的命令模板 + 宏展开（`$compiler $options $includes ...`），直接 `spawn` 编译/链接进程。
 - ⚙️ **编译器管理**：完整解析 `options_<id>.xml`（含 `extends` 继承、`<if platform>` 平台分支、`<Common>` 引用），自动探测 GCC / MinGW / Clang / MSVC；支持从 Code::Blocks 的 `default.conf` 读取**用户自定义交叉编译器**（如 RISC-V）。
-- 🐞 **GDB 调试**：自研内联 DAP 调试适配器，直接驱动 `gdb -i=mi`，支持断点、单步、变量、调用栈与表达式求值。
+- 🐞 **GDB 调试**：自研内联 DAP 调试适配器，直接驱动 `gdb -i=mi`；断点（条件/命中次数/日志）、单步（含指令级）、变量、调用栈、线程、表达式求值；**第四十九轮新增**：反汇编视图、Memory 内存查看、Registers 寄存器视图、数据断点、异常断点、运行到光标、Set Next Statement、附加进程、Send GDB Command（Debug Console `-` 前缀透传 MI）；**第五十轮实机加固**：程序输出转发、Step Out / 条件断点 / 寄存器读取等多项 GDB 兼容修复（GDB 7.6.1–8.1 实测，详见 docs/开发进度.md）。
 - ✨ **IntelliSense 补全**：自动生成 `compile_commands.json`（复用与 Code::Blocks 对齐的编译命令，写到工作区外缓存并更新 clangd 用户配置），配合 clangd 获得补全 / 跳转 / 悬停 / 重命名等能力；未安装 clangd 时自动回退到项目内轻量符号补全 / 悬停 / 跳转。
 - 🔍 **符号浏览器（Symbols）**：对齐 Code::Blocks Symbols 面板，按 函数 / 宏 / 类型 / 变量 分组展示项目符号，点击精确定位。
 - 🗂️ **多项目管理**：同时打开多个 `.cbp`，工程树支持拖拽排序（即编译顺序）、上移/下移、移除项目、活动项目高亮；打开工作区自动检测 `.cbp`，多选弹窗（目录名/文件名、默认全选）或状态栏入口随时重新打开。
@@ -78,7 +80,7 @@ npx tsc -p ./
 npx vsce package --allow-missing-repository
 
 # 4. 安装
-code --install-extension codeblocks-vscode-0.8.74-dev.vsix --force
+code --install-extension codeblocks-vscode-0.8.76-dev.vsix --force
 ```
 
 > Windows 下建议使用 `npm.cmd` / `npx.cmd`（PSReadLine 执行策略）。
