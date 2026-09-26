@@ -20,6 +20,8 @@ export interface TargetEditData {
   outputFilename: string;
   objectOutput: string;
   compilerId: string;
+  /** 执行参数（<Option parameters>，Run/Debug 用；对齐 Code::Blocks Set programs' arguments） */
+  executionParameters: string;
 }
 
 /** WebView 前后端交换的文件编辑数据 */
@@ -135,6 +137,8 @@ export class ProjectPropertiesPanel {
       notes: NotesEditData,
       virtualTargets: VirtualTargetEditData[],
     ) => Promise<void>,
+    /** 打开时直达的 tab（默认 targets；如 'notes'） */
+    private initialTab: string | undefined = undefined,
   ) {
     this.panel = vscode.window.createWebviewPanel(
       'codeblocks.projectProperties',
@@ -163,9 +167,10 @@ export class ProjectPropertiesPanel {
       notes: NotesEditData,
       virtualTargets: VirtualTargetEditData[],
     ) => Promise<void>,
+    initialTab?: string,
   ): void {
     ProjectPropertiesPanel.current?.dispose();
-    ProjectPropertiesPanel.current = new ProjectPropertiesPanel(project, extensionUri, onSave);
+    ProjectPropertiesPanel.current = new ProjectPropertiesPanel(project, extensionUri, onSave, initialTab);
   }
 
   private buildHtml(): string {
@@ -176,6 +181,7 @@ export class ProjectPropertiesPanel {
       outputFilename: t.outputFilename,
       objectOutput: t.objectOutput,
       compilerId: t.compilerId,
+      executionParameters: t.executionParameters ?? '',
     }));
 
     const cmp = this.project.compilerId;
@@ -249,6 +255,8 @@ export class ProjectPropertiesPanel {
     const typeOptions = Object.entries(TARGET_TYPE_NAMES)
       .map(([v, name]) => `<option value="${v}">${this.escapeHtml(name)}</option>`)
       .join('');
+    // 初始 tab（供脚本注入；JSON.stringify 保证引号安全）
+    const initialTabJs = JSON.stringify(this.initialTab ?? 'targets');
 
     const data = JSON.stringify({
       title: this.project.title,
@@ -482,7 +490,7 @@ export class ProjectPropertiesPanel {
     let selectedScope = 'project';
     let selectedDirScope = 'project';
     let selectedScriptScope = 'project';
-    let activeTab = 'targets';
+    let activeTab = ${initialTabJs};
 
     function esc(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
     function escAttr(s) { return esc(s).replace(/"/g, '&quot;'); }
@@ -553,9 +561,14 @@ export class ProjectPropertiesPanel {
         '<div class="hint">留空则使用默认 .objs</div></label>' +
         '<label><span class="field-name">编译器 ID</span>' +
         '<input id="f-compiler" value="' + escAttr(t.compilerId) + '"></label>' +
+        '</details>' +
+        '<details open class="fg"><summary>运行</summary>' +
+        '<label><span class="field-name">执行参数</span>' +
+        '<input id="f-params" value="' + escAttr(t.executionParameters || '') + '">' +
+        '<div class="hint">运行/调试时传递给程序的命令行参数（对齐 Code::Blocks 的 Set programs’ arguments）</div></label>' +
         '</details>';
       document.getElementById('f-type').value = String(t.targetType);
-      ['f-title', 'f-type', 'f-output', 'f-object', 'f-compiler'].forEach(id => {
+      ['f-title', 'f-type', 'f-output', 'f-object', 'f-compiler', 'f-params'].forEach(id => {
         document.getElementById(id).addEventListener('change', () => collectTargetForm());
       });
     }
@@ -570,6 +583,7 @@ export class ProjectPropertiesPanel {
       t.outputFilename = document.getElementById('f-output').value;
       t.objectOutput = document.getElementById('f-object').value;
       t.compilerId = document.getElementById('f-compiler').value.trim();
+      t.executionParameters = document.getElementById('f-params').value;
       // 目标重命名：同步文件归属引用
       if (oldTitle !== newTitle) {
         files.forEach(f => {
@@ -587,7 +601,7 @@ export class ProjectPropertiesPanel {
     document.getElementById('add').addEventListener('click', () => {
       collectTargetForm();
       const n = targets.length + 1;
-      targets.push({ originalTitle: '', title: 'Target' + n, targetType: 1, outputFilename: 'bin/Target' + n + '/app', objectOutput: 'obj/Target' + n + '/', compilerId: data.compilerId || 'gcc' });
+      targets.push({ originalTitle: '', title: 'Target' + n, targetType: 1, outputFilename: 'bin/Target' + n + '/app', objectOutput: 'obj/Target' + n + '/', compilerId: data.compilerId || 'gcc', executionParameters: '' });
       targetOpts.push({ compilerOptions: [], linkerOptions: [], linkLibs: [], relations: { compiler: 3, linker: 3, include: 3, lib: 3, res: 3 } });
       targetDirs.push({ includeDirs: [], libDirs: [], resourceDirs: [] });
       targetScripts.push({ scripts: [], before: [], after: [] });
@@ -1013,6 +1027,7 @@ export class ProjectPropertiesPanel {
     renderList(); renderForm();
     renderVTList();
     renderFileList();
+    switchTab(activeTab);
   </script>
 </body>
 </html>`;
@@ -1031,6 +1046,7 @@ export class ProjectPropertiesPanel {
         outputFilename: String(t.outputFilename ?? ''),
         objectOutput: String(t.objectOutput ?? ''),
         compilerId: String(t.compilerId ?? this.project.compilerId),
+        executionParameters: String(t.executionParameters ?? ''),
       }));
       const files: FileEditData[] = (msg.files ?? []).map((f: any) => ({
         relativeFilename: String(f.relativeFilename ?? ''),

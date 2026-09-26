@@ -4,7 +4,7 @@
 
 直接在 VS Code 中打开 `.cbp` / `.workspace` 工程，即可获得与 Code::Blocks 对齐的构建、调试与工程浏览体验。
 
-> **作者**：Robinmaomao ｜ **版本**：0.8.69-dev
+> **作者**：Robinmaomao ｜ **版本**：0.8.70-dev
 
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE.md)
 
@@ -22,6 +22,7 @@
 - 📂 **工程树浏览**：按公共顶层目录（`relativeToCommonTopLevelPath`）展开的多层嵌套目录树、文件类型图标、缺失文件标记、目录优先排序（对齐 VS Code Explorer）。
 - 🧩 **右键菜单**：项目节点支持增量编译/全量编译/添加文件；文件节点支持从项目移除、打开所在目录、切换编译/链接开关（写回 `.cbp`）。
 - 📋 **结构化构建日志**：构建摘要树（编译器/编译统计/链接结果 + **错误 (N) / 警告 (N) 分组**，诊断挂在分组下一层级），点击诊断节点精确定位到行列；`F4`/`Shift+F4` 循环跳转错误。
+- 🗂️ **Code::Blocks 菜单（状态栏 `Menu`）**：File / Edit / View / Search / Project / Build / Debug / Tools / Settings 九大菜单——支持**子菜单下钻**、分隔线、**快捷键标注**；Build 菜单含 Compile Current File（Ctrl+Shift+F9）/ Build·Rebuild·Clean Workspace / Abort / Errors（上一/下一/清除全部）/ Select Target；未打开工程时相关项标注提示；悬停就地展开常用命令链接。
 - 🖥️ **结构化输出通道**：输出面板采用日志通道（LogOutputChannel），每行带时间戳、按级别着色（错误红 / 警告黄）；构建过程输出单行完成式进度（`✓ [Compiled] 123-248 xxx.c (2.0s)`）、`[Skipping]` / `[Linking]` / `[Archiving]` 状态，构建结束输出 Emoji 汇总块（编译/跳过/失败统计 + 错误/警告数 + 耗时 + 最慢 Top3）。
 - 🎨 **专用语法高亮**：为链接脚本（`.ld` / `.lcf`）、GNU 汇编（`.S` / `.s`，RISC-V）、xmaker 配置脚本（`.xm`）提供专用 TextMate 语法高亮；安装时自动写入仅作用于这些文件的 token 颜色规则，不覆盖用户其他配色。
 - 🚀 **对齐 Code::Blocks 细节**：
@@ -75,7 +76,7 @@ npx tsc -p ./
 npx vsce package --allow-missing-repository
 
 # 4. 安装
-code --install-extension codeblocks-vscode-0.8.69-dev.vsix --force
+code --install-extension codeblocks-vscode-0.8.70-dev.vsix --force
 ```
 
 > Windows 下建议使用 `npm.cmd` / `npx.cmd`（PSReadLine 执行策略）。

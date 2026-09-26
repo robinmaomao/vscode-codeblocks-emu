@@ -27,7 +27,7 @@ import { BuildEngine } from './build/buildEngine';
 import { BuildCancelSource, BuildCancelHandle } from './build/cancelToken';
 import { expandMacros } from './build/scriptRunner';
 import { applyGeneratedFiles } from './build/generatedFiles';
-import { cbBuiltinVars, replaceCbMacros } from './compiler/cbMacros';
+import { cbBuiltinVars, replaceCbMacros, globalVariables } from './compiler/cbMacros';
 import { buildLogPrefs, msg, quietSuccess } from './build/logLang';
 import { decodeText } from './tools/encoding';
 import { clearBackticksCache } from './compiler/commandGenerator';
@@ -292,9 +292,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     }),
   );
 
-  // 聚焦 Project 视图（菜单 View → Project）
+  // 聚焦 Project 视图（菜单 View → Project）——先打开侧栏容器再聚焦，避免容器未打开时聚焦无效
   context.subscriptions.push(
-    vscode.commands.registerCommand('codeblocks.projectTree.focus', () => {
+    vscode.commands.registerCommand('codeblocks.projectTree.focus', async () => {
+      await vscode.commands.executeCommand('workbench.view.extension.codeblocks');
       projectTreeView?.reveal(undefined, { focus: true });
     }),
   );
@@ -448,19 +449,19 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   );
   syncActiveProjectToEditor();
 
-  // 向上移动项目
+  // 向上移动项目（Menu/命令面板调用时回退到活动工程）
   context.subscriptions.push(
     vscode.commands.registerCommand('codeblocks.moveProjectUp', (node?: any) => {
-      const filename = resolveProjectFilename(node);
+      const filename = resolveProjectFilename(node) ?? activeProject?.filename;
       if (!filename) return;
       moveProject(filename, -1);
     }),
   );
 
-  // 向下移动项目
+  // 向下移动项目（Menu/命令面板调用时回退到活动工程）
   context.subscriptions.push(
     vscode.commands.registerCommand('codeblocks.moveProjectDown', (node?: any) => {
-      const filename = resolveProjectFilename(node);
+      const filename = resolveProjectFilename(node) ?? activeProject?.filename;
       if (!filename) return;
       moveProject(filename, 1);
     }),
@@ -469,7 +470,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   // 移除项目
   context.subscriptions.push(
     vscode.commands.registerCommand('codeblocks.removeProject', async (node?: any) => {
-      const filename = resolveProjectFilename(node);
+      const filename = resolveProjectFilename(node) ?? activeProject?.filename;
       if (!filename) return;
       const project = openProjects.find((p) => p.filename === filename);
       if (!project) return;
@@ -524,11 +525,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     }),
   );
 
-  // 添加文件到项目（右键）
+  // 添加文件到项目（右键；Menu/命令面板调用时回退到活动工程）
   context.subscriptions.push(
     vscode.commands.registerCommand('codeblocks.addFile', async (node?: any) => {
-      const filename = resolveProjectFilename(node);
-      if (!filename) return;
+      const filename = resolveProjectFilename(node) ?? activeProject?.filename;
+      if (!filename) {
+        requireProject();
+        return;
+      }
       await addFilesToProject(filename);
     }),
   );
@@ -749,7 +753,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     }),
   );
 
-  // 工程属性面板（构建目标管理）
+  // 工程属性面板（构建目标管理；备注 tab 由 codeblocks.projectNotes 直达）
   context.subscriptions.push(
     vscode.commands.registerCommand('codeblocks.projectProperties', async (node?: any) => {
       const filename = resolveProjectFilename(node);
@@ -757,9 +761,145 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         ? openProjects.find((p) => p.filename === filename)
         : requireProject();
       if (!project) return;
-      ProjectPropertiesPanel.show(project, context.extensionUri, async (targets, files, options, searchDirs, projectSettings, buildScripts, notes, virtualTargets) => {
-        await saveProjectProperties(project, targets, files, options, searchDirs, projectSettings, buildScripts, notes, virtualTargets);
+      showProjectPropertiesPanel(project, context.extensionUri);
+    }),
+  );
+
+  // —— 第四十四轮 Menu 对齐新增命令 ——
+
+  // 编译当前编辑器文件（对齐 Build → Compile current file，Ctrl+Shift+F9）
+  context.subscriptions.push(
+    vscode.commands.registerCommand('codeblocks.compileCurrentFile', async () => {
+      const editor = vscode.window.activeTextEditor;
+      if (!editor || editor.document.uri.scheme !== 'file') {
+        vscode.window.showWarningMessage('没有打开的源文件');
+        return;
+      }
+      // 无工程：走单文件编译（对齐 CompileFileWithoutProject）
+      if (openProjects.length === 0) {
+        await vscode.commands.executeCommand('codeblocks.compileFileWithoutProject');
+        return;
+      }
+      const targetPath = normPath(editor.document.uri.fsPath);
+      const ordered = activeProject
+        ? [activeProject, ...openProjects.filter((p) => p.filename !== activeProject?.filename)]
+        : [...openProjects];
+      for (const project of ordered) {
+        const file = project.files.find((f) => normPath(f.absolutePath) === targetPath);
+        if (file) {
+          if (activeProject?.filename !== project.filename) setActiveProject(project, { persist: true });
+          await buildSingleFile(project, file);
+          return;
+        }
+      }
+      // 对齐 GetBuildTargetForFile：文件未归属任何目标 → 提示中止
+      vscode.window.showWarningMessage('当前文件不属于任何已打开的工程（可先添加到工程后再编译）');
+    }),
+  );
+
+  // 清除全部编译错误（对齐 Build → Errors → Clear all errors）
+  context.subscriptions.push(
+    vscode.commands.registerCommand('codeblocks.clearErrors', () => {
+      buildLogTreeProvider?.setSummary(undefined);
+      vscode.window.setStatusBarMessage('已清除 Build Log 中的编译错误', 3000);
+    }),
+  );
+
+  // 激活上一个/下一个工程（对齐 Project tree → Activate prior/next project，Alt-F5/Alt-F6）
+  context.subscriptions.push(
+    vscode.commands.registerCommand('codeblocks.activatePriorProject', () => activateRelativeProject(-1)),
+    vscode.commands.registerCommand('codeblocks.activateNextProject', () => activateRelativeProject(1)),
+  );
+
+  // 工程树按文件类型分组开关（对齐 Project tree → Categorize by file types）
+  context.subscriptions.push(
+    vscode.commands.registerCommand('codeblocks.toggleCategorize', async () => {
+      const cfg = vscode.workspace.getConfiguration('codeblocks');
+      const next = !cfg.get<boolean>('projectTree.categorize', true);
+      await cfg.update('projectTree.categorize', next, vscode.ConfigurationTarget.Workspace);
+      vscode.window.setStatusBarMessage(`工程树分组显示: ${next ? '开启' : '关闭'}`, 3000);
+    }),
+  );
+
+  // 清空最近工程列表（Recent Projects 二级入口）
+  context.subscriptions.push(
+    vscode.commands.registerCommand('codeblocks.clearRecentProjects', async () => {
+      await extContext?.globalState.update('codeblocks.recentProjects', []);
+      vscode.window.setStatusBarMessage('已清空最近工程列表', 3000);
+    }),
+  );
+
+  // 工程备注（对齐 Project → Notes…：打开属性面板备注 tab）
+  context.subscriptions.push(
+    vscode.commands.registerCommand('codeblocks.projectNotes', async () => {
+      const project = requireProject();
+      if (!project) return;
+      showProjectPropertiesPanel(project, context.extensionUri, 'notes');
+    }),
+  );
+
+  // 设置目标执行参数（对齐 Project → Set programs' arguments…）
+  context.subscriptions.push(
+    vscode.commands.registerCommand('codeblocks.setProgramArguments', async () => {
+      const project = requireProject();
+      if (!project) return;
+      if (!project.buildTargets.length) {
+        vscode.window.showWarningMessage('项目没有构建目标');
+        return;
+      }
+      const remembered = getSelectedTarget(project);
+      let target = project.buildTargets.find((t) => t.title === remembered) ?? project.buildTargets[0];
+      if (project.buildTargets.length > 1) {
+        const picked = await vscode.window.showQuickPick(
+          project.buildTargets.map((t) => ({ label: t.title, description: t.title === remembered ? '当前' : undefined, t })),
+          { placeHolder: `选择目标（${project.title}）` },
+        );
+        if (!picked) return;
+        target = picked.t;
+      }
+      const value = await vscode.window.showInputBox({
+        prompt: `执行参数（${target.title}）— 运行/调试时传递给程序`,
+        value: target.executionParameters ?? '',
+        placeHolder: '例如 --verbose input.txt',
       });
+      if (value === undefined) return;
+      target.executionParameters = value;
+      await persistProjectAndReload(project);
+      vscode.window.setStatusBarMessage(`已保存执行参数: ${target.title}`, 3000);
+    }),
+  );
+
+  // 全局编译器变量（只读查看，选中复制；对齐 Settings → Global variables…）
+  context.subscriptions.push(
+    vscode.commands.registerCommand('codeblocks.showGlobalVariables', async () => {
+      const sets = globalVariables();
+      const items: vscode.QuickPickItem[] = [];
+      for (const [setName, vars] of Object.entries(sets)) {
+        for (const [varName, members] of Object.entries(vars)) {
+          items.push({
+            label: varName,
+            description: setName,
+            detail: Object.entries(members).map(([m, v]) => `${m}=${v}`).join(', '),
+          });
+        }
+      }
+      if (!items.length) {
+        vscode.window.showInformationMessage('未解析到全局编译器变量（default.conf /gcv 为空）');
+        return;
+      }
+      const picked = await vscode.window.showQuickPick(items, { placeHolder: '全局编译器变量（只读）— 选择复制到剪贴板' });
+      if (picked) {
+        await vscode.env.clipboard.writeText(`${picked.label} = ${picked.detail ?? ''}`);
+        vscode.window.setStatusBarMessage('已复制全局变量', 3000);
+      }
+    }),
+  );
+
+  // 清空反引号缓存（对齐 Settings → Backtick Cache…）
+  context.subscriptions.push(
+    vscode.commands.registerCommand('codeblocks.clearBacktickCache', () => {
+      clearBackticksCache();
+      vscode.window.setStatusBarMessage('已清空反引号缓存（下次构建重新执行反引号命令）', 3000);
     }),
   );
 
@@ -1316,6 +1456,42 @@ function setActiveProject(project: Project | undefined, opts: { persist?: boolea
   }
 }
 
+/** 在打开工程列表中循环切换活动工程（delta: -1 上一个 / 1 下一个，对齐 Activate prior/next project） */
+function activateRelativeProject(delta: number): void {
+  if (!openProjects.length) {
+    requireProject();
+    return;
+  }
+  const idx = activeProject ? openProjects.findIndex((p) => p.filename === activeProject!.filename) : -1;
+  const nextIdx = idx === -1 ? 0 : (idx + delta + openProjects.length) % openProjects.length;
+  const next = openProjects[nextIdx];
+  setActiveProject(next, { persist: true });
+  vscode.window.setStatusBarMessage(`活动工程: ${next.title}`, 2000);
+}
+
+/** 打开工程属性面板（initialTab 可直达指定 tab，如 notes） */
+function showProjectPropertiesPanel(project: Project, extensionUri: vscode.Uri, initialTab?: string): void {
+  ProjectPropertiesPanel.show(project, extensionUri, async (targets, files, options, searchDirs, projectSettings, buildScripts, notes, virtualTargets) => {
+    await saveProjectProperties(project, targets, files, options, searchDirs, projectSettings, buildScripts, notes, virtualTargets);
+  }, initialTab);
+}
+
+/** 序列化写回 .cbp 并重新解析刷新（供工程属性保存 / 执行参数修改共用） */
+async function persistProjectAndReload(project: Project): Promise<void> {
+  const xml = serializeProject(project);
+  fs.writeFileSync(project.filename, xml, 'utf-8');
+  const idx = openProjects.findIndex((p) => p.filename === project.filename);
+  if (idx !== -1) openProjects.splice(idx, 1);
+  const wasActive = activeProject?.filename === project.filename;
+  await openProject(project.filename);
+  if (wasActive) {
+    activeProject = openProjects.find((p) => p.filename === project.filename);
+    projectTreeProvider?.setActiveProject(activeProject);
+    updateTargetStatusBar();
+    updateCompilerStatusBar();
+  }
+}
+
 /** 是否有打开的 C/C++ 源文件（用于判断是否值得重启 clangd 刷新诊断） */
 function hasOpenSourceFile(): boolean {
   return vscode.window.visibleTextEditors.some((e) =>
@@ -1794,6 +1970,7 @@ async function saveProjectProperties(
     t.outputFilename = e.outputFilename;
     t.objectOutput = e.objectOutput || '';
     t.compilerId = e.compilerId.trim() || project.compilerId;
+    t.executionParameters = e.executionParameters ?? '';
     newTargets.push(t);
     newTitles.add(title);
   }
@@ -1900,22 +2077,9 @@ async function saveProjectProperties(
     }
   }
 
-  // 序列化写回 .cbp
-  const xml = serializeProject(project);
-  fs.writeFileSync(project.filename, xml, 'utf-8');
+  // 序列化写回 .cbp + 重新解析刷新（与执行参数修改共用）
   outputChannel.info(`[Code::Blocks] 已保存工程属性: ${project.title}（${newTargets.length} 个目标）`);
-
-  // 重新解析项目刷新树
-  const idx = openProjects.findIndex((p) => p.filename === project.filename);
-  if (idx !== -1) openProjects.splice(idx, 1);
-  const wasActive = activeProject?.filename === project.filename;
-  await openProject(project.filename);
-  if (wasActive) {
-    activeProject = openProjects.find((p) => p.filename === project.filename);
-    projectTreeProvider?.setActiveProject(activeProject);
-    updateTargetStatusBar();
-    updateCompilerStatusBar();
-  }
+  await persistProjectAndReload(project);
 }
 
 
@@ -3191,9 +3355,10 @@ function getMenuDynamicData(): MenuDynamicData {
         label: `${i + 1}. ${path.basename(path.dirname(p.filename)) || p.title}`,
         file: p.filename,
       })),
+      hasProjects: openProjects.length > 0,
     };
   } catch {
-    return { recents: [], order: [] };
+    return { recents: [], order: [], hasProjects: openProjects.length > 0 };
   }
 }
 

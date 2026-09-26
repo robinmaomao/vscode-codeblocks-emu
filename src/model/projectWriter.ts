@@ -50,7 +50,7 @@ function passthroughProjectOptions(rawProject: unknown): { key: string; value: s
 function passthroughTargetOptions(rawProject: unknown, title: string): { key: string; value: string }[] {
   const raw = rawProject as any;
   const handled = new Set([
-    'title', 'type', 'compiler', 'output', 'object_output', 'use_console_runner',
+    'title', 'type', 'compiler', 'parameters', 'output', 'object_output', 'use_console_runner',
     'createDefFile', 'createStaticLib', 'prefix_auto', 'extension_auto', 'imp_lib', 'def_file',
     'projectCompilerOptionsRelation', 'projectLinkerOptionsRelation',
     'projectIncludeDirsRelation', 'projectResourceIncludeDirsRelation', 'projectLibDirsRelation',
@@ -178,6 +178,10 @@ function writeTarget(L: string[], t: BuildTarget, rawProject: unknown): void {
   }
   L.push(`\t\t\t\t<Option type="${t.targetType}" />`);
   L.push(`\t\t\t\t<Option compiler="${esc(t.compilerId)}" />`);
+  // 执行参数（<Option parameters>，对齐 SaveTargetOptions；非空才写）
+  if (t.executionParameters) {
+    L.push(`\t\t\t\t<Option parameters="${esc(t.executionParameters)}" />`);
+  }
   if (t.targetType === TargetType.ConsoleOnly && !t.useConsoleRunner) {
     L.push('\t\t\t\t<Option use_console_runner="0" />');
   }

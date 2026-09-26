@@ -30,7 +30,7 @@ const typeOptions = Object.entries({ 0:'可执行文件 (Executable)',1:'控制�
 const data = JSON.stringify({ title: project.title, compilerId: cmp, targets, files, projectOpts, targetOpts, projectDirs, targetDirs, projectSettings }).replace(/</g, '\\u003c');
 
 // 3. 插值
-let html = htmlTemplate.replace('${data}', data).replace('${typeOptions}', typeOptions);
+let html = htmlTemplate.replace('${data}', data).replace('${typeOptions}', typeOptions).replace('${initialTabJs}', JSON.stringify('targets'));
 
 // 4. 提取 script 内容
 const sm = html.match(/<script>([\s\S]*?)<\/script>/);
