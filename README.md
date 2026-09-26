@@ -4,7 +4,7 @@
 
 直接在 VS Code 中打开 `.cbp` / `.workspace` 工程，即可获得与 Code::Blocks 对齐的构建、调试与工程浏览体验。
 
-> **作者**：Robinmaomao ｜ **版本**：0.8.72-dev
+> **作者**：Robinmaomao ｜ **版本**：0.8.74-dev
 
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE.md)
 
@@ -24,7 +24,7 @@
 - 📋 **结构化构建日志**：构建摘要树（编译器/编译统计/链接结果 + **错误 (N) / 警告 (N) 分组**，诊断挂在分组下一层级），点击诊断节点精确定位到行列；`F4`/`Shift+F4` 循环跳转错误。
 - 🗂️ **Code::Blocks 菜单（状态栏 `Menu`）**：File / Edit / View / Search / Project / Build / Debug / Tools / Settings 九大菜单——支持**子菜单下钻**、分隔线、**快捷键标注**；Build 菜单含 Compile Current File（Ctrl+Shift+F9）/ Build·Rebuild·Clean Workspace / Abort / Errors（上一/下一/清除全部）/ Select Target；未打开工程时相关项标注提示；悬停就地展开常用命令链接。
 - ⌨️ **快捷键与冲突处理**：默认键位全部避开 VS Code 默认（新增 `Alt+G` Goto File / `Shift+F2` Project 视图 / `Alt+F1-F2` 错误导航 / `Ctrl+Shift+R` Replace in Files 等 CB 键位）；设置 `codeblocks.keybindings.cbStyle` 启用 **CB 保真键位**（F5 断点、Ctrl+R 替换 等 12 项，会覆盖 VS Code 默认，可随时关闭）；命令 `Check Keybinding Conflicts` 扫描内置默认 / 用户 keybindings.json / 其它扩展并生成冲突报告。
-- 🎛️ **逐项自定义快捷键**（方案 A）：设置 `codeblocks.keybindings.overrides`（30 项：构建/调试/错误导航/工程管理 + 外部别名 + CB 保真组）为唯一数据源，修改后**自动写入用户 keybindings.json**（自定义键 + 对默认键的移除规则；仅托管条目、注释保留、首次备份、回读校验回滚）；向导命令 `Configure Keybindings…`、`Apply Keybindings`、`Reset Keybindings` 一键还原。
+- 🎛️ **逐项自定义快捷键**（方案 A）：设置 `codeblocks.keybindings.overrides`（30 项：构建/调试/错误导航/工程管理 + 外部别名 + CB 保真组）为唯一数据源，修改后**自动写入用户 keybindings.json**（自定义键 + 对默认键的移除规则；仅托管条目、注释保留、首次备份、回读校验回滚）；另提供**可视化设置面板**（`Code::Blocks: Keybinding Settings`：按键捕获录入、行内冲突/生效状态、检查冲突、方案导入导出）——可从命令面板、Menu → Settings → Keybindings… 或**扩展设置界面**（两项快捷键设置的描述内嵌一键链接）打开；另含向导/应用/重置命令。
 - 🖥️ **结构化输出通道**：输出面板采用日志通道（LogOutputChannel），每行带时间戳、按级别着色（错误红 / 警告黄）；构建过程输出单行完成式进度（`✓ [Compiled] 123-248 xxx.c (2.0s)`）、`[Skipping]` / `[Linking]` / `[Archiving]` 状态，构建结束输出 Emoji 汇总块（编译/跳过/失败统计 + 错误/警告数 + 耗时 + 最慢 Top3）。
 - 🎨 **专用语法高亮**：为链接脚本（`.ld` / `.lcf`）、GNU 汇编（`.S` / `.s`，RISC-V）、xmaker 配置脚本（`.xm`）提供专用 TextMate 语法高亮；安装时自动写入仅作用于这些文件的 token 颜色规则，不覆盖用户其他配色。
 - 🚀 **对齐 Code::Blocks 细节**：
@@ -78,7 +78,7 @@ npx tsc -p ./
 npx vsce package --allow-missing-repository
 
 # 4. 安装
-code --install-extension codeblocks-vscode-0.8.72-dev.vsix --force
+code --install-extension codeblocks-vscode-0.8.74-dev.vsix --force
 ```
 
 > Windows 下建议使用 `npm.cmd` / `npx.cmd`（PSReadLine 执行策略）。

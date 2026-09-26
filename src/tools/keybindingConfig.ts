@@ -7,7 +7,7 @@
  *      对默认键的移除规则 `-command`；解绑 = 仅移除规则）；
  *   3) 其它条目与注释原样保留（条目级文本手术，不整体重排文件）。
  */
-import { CB_STYLE_WHEN, normalizeKey, parseJsonc } from './keybindingConflicts';
+import { CB_STYLE_WHEN, normalizeKey, parseJsonc, VSCODE_DEFAULT_CONFLICTS } from './keybindingConflicts';
 
 /** 可配置的键位条目（id 稳定，供设置引用） */
 export interface ManagedKeybinding {
@@ -213,6 +213,9 @@ export function readManagedEntries(text: string, managedCommands: Set<string> = 
 }
 
 /** D7：期望条目与文件中实际条目的差异 */
+const norm = (a: DesiredEntry, b: DesiredEntry): boolean => normalizeKey(a.key) === normalizeKey(b.key) && (a.when ?? '') === (b.when ?? '');
+
+/** D7：期望条目与文件中实际条目的差异 */
 export function diffManaged(desired: DesiredEntry[], fileEntries: DesiredEntry[]): { missing: DesiredEntry[]; extra: DesiredEntry[] } {
   const key = (e: DesiredEntry): string => `${normalizeKey(e.key)}|${e.command}|${e.when ?? ''}`;
   const want = new Set(desired.filter((d) => !d.command.startsWith('-')).map(key));
@@ -221,6 +224,112 @@ export function diffManaged(desired: DesiredEntry[], fileEntries: DesiredEntry[]
     missing: desired.filter((d) => !d.command.startsWith('-') && !got.has(key(d))),
     extra: fileEntries.filter((e) => !want.has(key(e))),
   };
+}
+
+/** 面板行模型（可视化设置面板数据） */
+export interface KeybindingRow {
+  id: string;
+  label: string;
+  command: string;
+  when?: string;
+  group: 'builtin' | 'cbStyle' | 'alias';
+  status: 'default' | 'custom' | 'unbound';
+  /** 展示用当前键（默认集合 / 自定义键 / （已解绑）） */
+  effective: string;
+  /** 默认键集合展示 */
+  defaultsLabel: string;
+  /** 文件与设置一致（默认态恒 true；自定义/解绑态需已写入 keybindings.json） */
+  ok: boolean;
+  /** 冲突/重复提示 */
+  note?: string;
+}
+
+/** 由 overrides + 文件实际条目构建面板行模型（含 VS Code 默认冲突注解与跨项重复检测） */
+export function buildKeybindingRows(
+  overrides: Map<string, string>,
+  fileEntries: DesiredEntry[],
+  managed: ManagedKeybinding[] = MANAGED_KEYBINDINGS,
+): KeybindingRow[] {
+  const rows: KeybindingRow[] = [];
+  for (const m of managed) {
+    const raw = overrides.get(m.id);
+    const status: KeybindingRow['status'] = raw === undefined ? 'default' : raw.trim() === '' ? 'unbound' : 'custom';
+    const effective = status === 'default'
+      ? (m.defaults.join(' / ') || '（未绑定）')
+      : status === 'unbound' ? '（已解绑）' : raw!.trim();
+    const notes: string[] = [];
+    let ok = true;
+    if (status !== 'default') {
+      const desired = computeDesiredEntries(new Map([[m.id, raw!]]), [m]);
+      const wanted = desired.filter((d) => !d.command.startsWith('-'));
+      const fileHere = fileEntries.filter((e) => e.command === m.command);
+      ok = wanted.every((w) => fileHere.some((f) => norm(f, w))) && fileHere.every((f) => wanted.some((w) => norm(f, w)));
+      if (!ok) notes.push('未写入 keybindings.json（点击「应用」同步）');
+    }
+    const keys = status === 'custom' ? [raw!.trim()] : m.defaults;
+    for (const k of keys) {
+      const def = VSCODE_DEFAULT_CONFLICTS[normalizeKey(k)] ?? [];
+      const warn = def.filter((d) => d.severity !== 'info');
+      if (warn.length) notes.push(`与 VS Code 默认冲突：${warn.map((d) => d.note).join('；')}`);
+    }
+    rows.push({
+      id: m.id,
+      label: m.label,
+      command: m.command,
+      when: m.when,
+      group: m.group,
+      status,
+      effective,
+      defaultsLabel: m.defaults.join(' / ') || '（未绑定）',
+      ok,
+      note: notes.length ? notes.join(' ｜ ') : undefined,
+    });
+  }
+  // 跨托管项重复检测（仅自定义键）
+  const byKey = new Map<string, string[]>();
+  for (const r of rows) {
+    if (r.status !== 'custom') continue;
+    const k = normalizeKey(r.effective);
+    byKey.set(k, [...(byKey.get(k) ?? []), r.id]);
+  }
+  for (const r of rows) {
+    if (r.status !== 'custom') continue;
+    const dup = (byKey.get(normalizeKey(r.effective)) ?? []).filter((x) => x !== r.id);
+    if (dup.length) r.note = `${r.note ? `${r.note} ｜ ` : ''}与其它托管项重复（${dup.join(', ')}）`;
+  }
+  return rows;
+}
+
+// ———— 键位方案导入 / 导出（D5） ————
+
+/** 导出负载（稳定排序，便于版本管理与 diff） */
+export function buildExportPayload(overrides: Map<string, string>): string {
+  const obj: Record<string, string> = {};
+  for (const [id, v] of [...overrides.entries()].sort(([a], [b]) => a.localeCompare(b))) obj[id] = v;
+  return JSON.stringify({ version: 1, generatedBy: 'codeblocks-vscode', overrides: obj }, null, 2);
+}
+
+/** 导入负载解析（兼容 {"overrides":{…}} 与直接映射；非法/未知项单独返回） */
+export function parseImportPayload(text: string): {
+  overrides: Map<string, string>;
+  invalid: { id: string; value: string; error: string }[];
+  unknown: string[];
+  error?: string;
+} {
+  let raw: unknown;
+  try {
+    raw = parseJsonc(text);
+  } catch (e) {
+    return { overrides: new Map(), invalid: [], unknown: [], error: `JSON 解析失败：${(e as Error).message}` };
+  }
+  const obj = raw as any;
+  const payload = obj && typeof obj === 'object' && !Array.isArray(obj) && obj.overrides && typeof obj.overrides === 'object' && !Array.isArray(obj.overrides)
+    ? obj.overrides
+    : (obj && typeof obj === 'object' && !Array.isArray(obj) ? obj : undefined);
+  if (!payload) {
+    return { overrides: new Map(), invalid: [], unknown: [], error: '未找到 overrides 对象（期望 {"overrides":{…}} 或直接的键名→键位映射）' };
+  }
+  return parseOverrides(payload);
 }
 
 /** 生成单条条目的 JSON 文本（key/command/when 顺序稳定） */
