@@ -39,6 +39,10 @@ import { GdbDebugAdapter } from './debug/gdbDebugAdapter';import { scanTodos } f
 import { countFiles, isSourceFile } from './tools/codeStats';
 import { formatActiveDocument } from './tools/astyle';
 import { collectConflicts, normalizeKey, parseJsonc, KeybindingDef, ConflictItem } from './tools/keybindingConflicts';
+import {
+  MANAGED_COMMANDS, MANAGED_KEYBINDINGS, computeDesiredEntries, diffManaged, parseOverrides,
+  readManagedEntries, updateKeybindingsText, validateChord,
+} from './tools/keybindingConfig';
 
 /** 已打开的项目列表（顺序即编译顺序） */
 let openProjects: Project[] = [];
@@ -904,32 +908,43 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     }),
   );
 
-  // 快捷键冲突检测（VS Code 默认表 / 用户 keybindings.json / 其他已安装扩展）
+  // 快捷键冲突检测（VS Code 默认表 / 用户 keybindings.json / 其他已安装扩展）+ 托管覆盖状态（D7）
   context.subscriptions.push(
     vscode.commands.registerCommand('codeblocks.keybindings.check', async () => {
       const findings = collectKeybindingConflicts();
+      const managed = describeManagedOverrides();
       outputChannel.show(true);
-      if (!findings.length) {
-        outputChannel.info('[Code::Blocks] 快捷键冲突检测：未发现冲突');
+      if (!findings.length && !managed.length) {
+        outputChannel.info('[Code::Blocks] 快捷键冲突检测：未发现冲突（无托管覆盖）');
         vscode.window.showInformationMessage('未检测到快捷键冲突 ✓');
         return;
       }
-      const report = formatConflictReport(findings);
+      const report = [formatConflictReport(findings), ...managed.map((m) => m.line)].join('\n');
       outputChannel.info(report);
       interface ConflictPick extends vscode.QuickPickItem { action?: 'openEditor' | 'openJson' | 'copy' }
       const picks: ConflictPick[] = [
         { label: '$(keyboard) 打开键盘快捷方式编辑器…', action: 'openEditor' },
         { label: '$(json) 打开用户 keybindings.json', action: 'openJson' },
         { label: '$(clippy) 复制冲突报告', action: 'copy' },
-        { label: '', kind: vscode.QuickPickItemKind.Separator },
-        ...findings.map((f) => ({
+      ];
+      if (findings.length) {
+        picks.push({ label: '', kind: vscode.QuickPickItemKind.Separator });
+        for (const f of findings) picks.push({
           label: `${f.level === 'high' ? '$(warning)' : f.level === 'medium' ? '$(info)' : '$(circle-small-filled)'} ${f.key} → ${f.command}`,
           description: f.gated ? 'CB 保真模式' : undefined,
           detail: `冲突：${f.findings.map((x) => `${x.source} → ${x.command}`).join('；')}${f.note ? `（${f.note}）` : ''}`,
-        })),
-      ];
+        });
+      }
+      if (managed.length) {
+        picks.push({ label: '', kind: vscode.QuickPickItemKind.Separator });
+        for (const m of managed) picks.push({
+          label: `${m.ok ? '$(check)' : '$(warning)'} [托管] ${m.label}`,
+          description: m.ok ? '已生效' : '未写入/不一致',
+          detail: `${m.line.trim()}${m.detail ? `（${m.detail}）` : ''}`,
+        });
+      }
       const picked = await vscode.window.showQuickPick(picks, {
-        placeHolder: `快捷键冲突 ${findings.length} 项 — 查看详情或选择操作`,
+        placeHolder: `快捷键：冲突 ${findings.length} 项 · 托管覆盖 ${managed.length} 项 — 查看详情或选择操作`,
         title: 'Code::Blocks: Keybinding Conflicts',
       });
       if (!picked?.action) return;
@@ -945,6 +960,99 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       }
     }),
   );
+
+  // 快捷键托管：应用 / 向导 / 重置（方案 A：设置 overrides → 用户 keybindings.json）
+  context.subscriptions.push(
+    vscode.commands.registerCommand('codeblocks.keybindings.apply', () => applyKeybindings()),
+  );
+  context.subscriptions.push(
+    vscode.commands.registerCommand('codeblocks.keybindings.configure', async () => {
+      interface Pick extends vscode.QuickPickItem { id?: string; action?: 'reset' }
+      const overrides = keybindingsOverrideMap();
+      const items: Pick[] = MANAGED_KEYBINDINGS.map((m) => {
+        const custom = overrides.get(m.id);
+        const current = custom === undefined
+          ? (m.defaults.length ? `${m.defaults.join(' / ')}（默认）` : '（未绑定）')
+          : (custom === '' ? '（已解绑）' : custom);
+        return {
+          label: `$(keyboard) ${m.label}`,
+          description: `当前: ${current}`,
+          detail: `${m.id} · ${m.command}${m.when ? ` · when: ${m.when}` : ''}`,
+          id: m.id,
+        };
+      });
+      items.push({ label: '', kind: vscode.QuickPickItemKind.Separator });
+      items.push({ label: '$(trash) 重置全部为默认（清除所有覆盖）', action: 'reset' });
+      const picked = await vscode.window.showQuickPick(items, {
+        placeHolder: '选择要修改的快捷键（Esc 取消）',
+        title: 'Code::Blocks: Configure Keybindings',
+      });
+      if (!picked) return;
+      if (picked.action === 'reset') {
+        await vscode.commands.executeCommand('codeblocks.keybindings.reset');
+        return;
+      }
+      const managed = MANAGED_KEYBINDINGS.find((m) => m.id === picked.id);
+      if (!managed) return;
+      const current = overrides.get(managed.id) ?? (managed.defaults[0] ?? '');
+      const input = await vscode.window.showInputBox({
+        prompt: `${managed.label} — 输入新键位（空 = 解绑；输入 default = 恢复默认；如 ctrl+alt+b、f7、ctrl+k ctrl+c）`,
+        value: current,
+        validateInput: (v: string) => {
+          const t = v.trim();
+          if (t === '' || t.toLowerCase() === 'default') return undefined;
+          const res = validateChord(t);
+          return res.ok ? undefined : (res.error ?? '非法键位');
+        },
+      });
+      if (input === undefined) return;
+      const t = input.trim().toLowerCase();
+      const cfg = vscode.workspace.getConfiguration('codeblocks');
+      const map = { ...(cfg.get<Record<string, string>>('keybindings.overrides', {}) ?? {}) };
+      if (t === 'default') {
+        delete map[managed.id];
+      } else {
+        map[managed.id] = t; // '' = 解绑
+      }
+      await cfg.update('keybindings.overrides', map, vscode.ConfigurationTarget.Global);
+      applyKeybindings(); // 立即应用（自动监听可能随后再触发一次，二次为 no-change）
+      vscode.window.setStatusBarMessage(`已更新 ${managed.id} → ${t === 'default' ? '默认' : (t === '' ? '解绑' : t)}`, 3000);
+    }),
+  );
+  context.subscriptions.push(
+    vscode.commands.registerCommand('codeblocks.keybindings.reset', async () => {
+      // 1) 清除用户 keybindings.json 中的托管条目
+      try {
+        const target = userKeybindingsPath();
+        if (target && fs.existsSync(target)) {
+          const text = fs.readFileSync(target, 'utf-8');
+          const result = updateKeybindingsText(text, [], MANAGED_COMMANDS);
+          if (result.changed) fs.writeFileSync(target, result.text, 'utf-8');
+          outputChannel.info(`[Code::Blocks] 已清除用户 keybindings.json 中的托管条目（-${result.removed}）`);
+        }
+      } catch (err) {
+        outputChannel.warn(`[Code::Blocks] 清理 keybindings.json 失败：${(err as Error).message}`);
+      }
+      // 2) 清空设置中的覆盖
+      const cfg = vscode.workspace.getConfiguration('codeblocks');
+      try { await cfg.update('keybindings.overrides', {}, vscode.ConfigurationTarget.Global); } catch { /* 忽略 */ }
+      try { await cfg.update('keybindings.overrides', undefined, vscode.ConfigurationTarget.Workspace); } catch { /* 忽略 */ }
+      vscode.window.showInformationMessage('快捷键已恢复默认（托管条目与覆盖设置已清除）');
+    }),
+  );
+
+  // 设置变更 → 自动应用（去抖 800ms）
+  {
+    let applyTimer: ReturnType<typeof setTimeout> | undefined;
+    context.subscriptions.push({ dispose: () => { if (applyTimer) clearTimeout(applyTimer); } });
+    context.subscriptions.push(
+      vscode.workspace.onDidChangeConfiguration((e) => {
+        if (!e.affectsConfiguration('codeblocks.keybindings.overrides')) return;
+        if (applyTimer) clearTimeout(applyTimer);
+        applyTimer = setTimeout(() => applyKeybindings({ silent: true }), 800);
+      }),
+    );
+  }
 
   // CB 保真模式开启提醒（一次性，可直达冲突清单）
   context.subscriptions.push(
@@ -1668,6 +1776,95 @@ function checkUserKeybindingConflictsQuietly(context: vscode.ExtensionContext): 
     setTimeout(() => item.dispose(), 30000);
     void context.globalState.update('codeblocks.keybindingWarnings', [...seen, ...fresh.map((f) => `${normalizeKey(f.key)}|${f.command}`)]);
   } catch { /* 非关键：检测失败不影响激活 */ }
+}
+
+// ———— 快捷键托管配置（第四十六轮，方案 A） ————
+
+/** 设置中的 overrides（已解析，忽略非法/未知项） */
+function keybindingsOverrideMap(): Map<string, string> {
+  return parseOverrides(vscode.workspace.getConfiguration('codeblocks').get('keybindings.overrides')).overrides;
+}
+
+/** 将 overrides 物化写入用户 keybindings.json（仅托管条目；首次备份 + 回读校验，失败回滚） */
+function applyKeybindings(opts: { silent?: boolean } = {}): void {
+  try {
+    const parsed = parseOverrides(vscode.workspace.getConfiguration('codeblocks').get('keybindings.overrides'));
+    const desired = computeDesiredEntries(parsed.overrides, MANAGED_KEYBINDINGS);
+    const target = userKeybindingsPath();
+    if (!target) {
+      outputChannel.warn('[Code::Blocks] 无法定位用户 keybindings.json 路径');
+      return;
+    }
+    const exists = fs.existsSync(target);
+    const text = exists ? fs.readFileSync(target, 'utf-8') : '';
+    const backup = `${target}.codeblocks-backup`;
+    const result = updateKeybindingsText(text, desired, MANAGED_COMMANDS);
+    for (const inv of parsed.invalid) {
+      outputChannel.warn(`[Code::Blocks] 键位设置无效：${inv.id} = ${inv.value}（${inv.error}）`);
+    }
+    for (const u of parsed.unknown) {
+      outputChannel.warn(`[Code::Blocks] 键位设置含未知键名：${u}（键名列表见设置说明）`);
+    }
+    if (!result.changed) {
+      if (!opts.silent) vscode.window.setStatusBarMessage('快捷键已与设置一致，无需写入', 3000);
+      return;
+    }
+    if (exists && text.trim() && !fs.existsSync(backup)) fs.copyFileSync(target, backup);
+    fs.writeFileSync(target, result.text, 'utf-8');
+    // 回读校验：损坏则回滚
+    try {
+      parseJsonc(fs.readFileSync(target, 'utf-8'));
+    } catch (err) {
+      if (fs.existsSync(backup)) fs.copyFileSync(backup, target);
+      throw new Error(`写入后校验失败，已回滚：${(err as Error).message}`);
+    }
+    outputChannel.info(`[Code::Blocks] 快捷键已写入用户 keybindings.json：+${result.added} / -${result.removed} 条目（${target}）`);
+    if (!opts.silent) vscode.window.setStatusBarMessage(`快捷键已应用（+${result.added} / -${result.removed}）`, 3000);
+  } catch (err) {
+    outputChannel.error(`[Code::Blocks] 应用快捷键失败：${(err as Error).message}`);
+    if (!opts.silent) vscode.window.showErrorMessage(`应用快捷键失败：${(err as Error).message}`);
+  }
+}
+
+/** 托管覆盖状态（D7：设置 vs 用户 keybindings.json 实际条目） */
+interface ManagedStatus {
+  label: string;
+  ok: boolean;
+  line: string;
+  detail: string;
+}
+
+function describeManagedOverrides(): ManagedStatus[] {
+  try {
+    const parsed = parseOverrides(vscode.workspace.getConfiguration('codeblocks').get('keybindings.overrides'));
+    const out: ManagedStatus[] = [];
+    for (const inv of parsed.invalid) {
+      out.push({ label: inv.id, ok: false, line: `  [无效] ${inv.id} = ${inv.value}（${inv.error}）`, detail: '修改为合法键位或清空该键名' });
+    }
+    for (const u of parsed.unknown) {
+      out.push({ label: u, ok: false, line: `  [未知键名] ${u}`, detail: '不在托管表内（见设置说明的键名列表）' });
+    }
+    if (!parsed.overrides.size) return out;
+    const target = userKeybindingsPath();
+    const text = target && fs.existsSync(target) ? fs.readFileSync(target, 'utf-8') : '';
+    const fileEntries = readManagedEntries(text, MANAGED_COMMANDS);
+    const desired = computeDesiredEntries(parsed.overrides, MANAGED_KEYBINDINGS);
+    const { missing, extra } = diffManaged(desired, fileEntries);
+    for (const m of MANAGED_KEYBINDINGS) {
+      if (!parsed.overrides.has(m.id)) continue;
+      const value = parsed.overrides.get(m.id) ?? '';
+      const ok = !missing.some((x) => x.command === m.command) && !extra.some((x) => x.command === m.command);
+      out.push({
+        label: m.label,
+        ok,
+        line: `  [托管] ${m.id} → ${value === '' ? '解绑' : value}：${ok ? '已生效' : '未写入/不一致（运行 Apply Keybindings）'}`,
+        detail: `${m.command}${m.when ? ` · when: ${m.when}` : ''}`,
+      });
+    }
+    return out;
+  } catch {
+    return [];
+  }
 }
 
 /** 是否有打开的 C/C++ 源文件（用于判断是否值得重启 clangd 刷新诊断） */
