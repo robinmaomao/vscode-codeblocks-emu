@@ -2,7 +2,7 @@
   "name": "codeblocks-vscode",
   "displayName": "Code::Blocks for VS Code",
   "description": "原生移植 Code::Blocks 核心功能到 VS Code：项目模型、构建引擎、编译器管理与调试引擎",
-  "version": "0.8.79-dev",
+  "version": "0.8.80-dev",
   "icon": "resources/icon.png",
   "publisher": "robinmaomao",
   "author": {
@@ -396,7 +396,7 @@
     ],
     "configuration": [
       {
-        "title": "编译器与工具链",
+        "title": "%configuration.compiler.title%",
         "order": 10,
         "properties": {
           "codeblocks.compilerId": {
@@ -428,7 +428,7 @@
         }
       },
       {
-        "title": "构建与日志",
+        "title": "%configuration.build.title%",
         "order": 20,
         "properties": {
           "codeblocks.saveBeforeBuild": {
@@ -482,7 +482,7 @@
         }
       },
       {
-        "title": "调试 (GDB)",
+        "title": "%configuration.debug.title%",
         "order": 30,
         "properties": {
           "codeblocks.gdbTimeoutMs": {
@@ -538,7 +538,7 @@
         }
       },
       {
-        "title": "IntelliSense (clangd)",
+        "title": "%configuration.intellisense.title%",
         "order": 40,
         "properties": {
           "codeblocks.clangd.enabled": {
@@ -577,7 +577,7 @@
         }
       },
       {
-        "title": "界面",
+        "title": "%configuration.ui.title%",
         "order": 50,
         "properties": {
           "codeblocks.projectTree.categorize": {
@@ -632,7 +632,7 @@
         }
       },
       {
-        "title": "编辑器辅助与工具",
+        "title": "%configuration.editor.title%",
         "order": 60,
         "properties": {
           "codeblocks.editor.autoHeaderGuard": {
@@ -684,7 +684,7 @@
         }
       },
       {
-        "title": "快捷键",
+        "title": "%configuration.keybindings.title%",
         "order": 70,
         "properties": {
           "codeblocks.keybindings.cbStyle": {

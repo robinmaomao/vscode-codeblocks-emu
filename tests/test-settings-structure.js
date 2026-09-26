@@ -20,6 +20,16 @@ check('分区块数量 = 7', cfg.length === 7, cfg.length);
 check('每块含 title + order', cfg.every((b) => typeof b.title === 'string' && b.title && Number.isFinite(b.order)), cfg.map((b) => [b.title, b.order]));
 check('order 严格递增', cfg.every((b, i) => i === 0 || cfg[i - 1].order < b.order), cfg.map((b) => b.order));
 
+// ---- 分区标题 nls（跟随 VS Code 显示语言；默认英文） ----
+check('分区标题使用 nls 占位符', cfg.every((b) => /^%[A-Za-z0-9_.]+%$/.test(b.title)), cfg.map((b) => b.title));
+const nlsEn = JSON.parse(fs.readFileSync(path.resolve(__dirname, '../package.nls.json'), 'utf-8'));
+const nlsZh = JSON.parse(fs.readFileSync(path.resolve(__dirname, '../package.nls.zh-cn.json'), 'utf-8'));
+const titleKeys = cfg.map((b) => b.title.slice(1, -1));
+check('package.nls.json（英文默认）含全部标题键', titleKeys.every((k) => typeof nlsEn[k] === 'string' && nlsEn[k]), titleKeys.filter((k) => !nlsEn[k]));
+check('package.nls.zh-cn.json 含全部标题键', titleKeys.every((k) => typeof nlsZh[k] === 'string' && nlsZh[k]), titleKeys.filter((k) => !nlsZh[k]));
+check('英文标题不含中文', titleKeys.every((k) => !/[\u4e00-\u9fff]/.test(nlsEn[k] || '')), titleKeys.filter((k) => /[\u4e00-\u9fff]/.test(nlsEn[k] || '')));
+check('中文标题多数含中文（IntelliSense/clangd 专名除外）', titleKeys.filter((k) => /[\u4e00-\u9fff]/.test(nlsZh[k] || '')).length >= 6, titleKeys.map((k) => nlsZh[k]));
+
 const keys = [];
 const byKey = {};
 for (const b of cfg) {
