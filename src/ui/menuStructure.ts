@@ -292,6 +292,7 @@ export const MENU_STRUCTURE: MenuDef[] = [
       { label: 'Compiler…', command: 'workbench.action.openSettings', args: ['codeblocks.masterPath'] },
       { label: 'Debugger…', command: 'workbench.action.openSettings', args: ['codeblocks.gdb'] },
       SEP,
+      { label: 'Keybindings…', command: 'codeblocks.keybindings.configure' },
       { label: 'Global Variables…', command: 'codeblocks.showGlobalVariables' },
       { label: 'Backtick Cache (Clear)', command: 'codeblocks.clearBacktickCache' },
     ],
