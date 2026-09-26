@@ -25,6 +25,14 @@ export interface ProjectTemplate {
   targetType: TargetType;
   /** 骨架源文件（相对项目目录的文件名 + 内容） */
   skeleton: { name: string; content: string }[];
+  /** 模板附加编译选项（Debug/Release 共用，追加在内置选项之后） */
+  compilerOptions?: string[];
+  /** 模板 include 目录（相对项目根，按安装路径调整） */
+  includeDirs?: string[];
+  /** 模板库目录 */
+  libDirs?: string[];
+  /** 模板链接库（不带 -l / .lib 前缀） */
+  linkLibs?: string[];
 }
 
 const CONSOLE_MAIN_C = `#include <stdio.h>
@@ -43,6 +51,133 @@ int main()
     std::cout << "Hello, world!" << std::endl;
     return 0;
 }
+`;
+
+const GLFW_MAIN_C = `#include <GLFW/glfw3.h>
+
+int main(void)
+{
+    if (!glfwInit())
+        return 1;
+
+    GLFWwindow* window = glfwCreateWindow(800, 600, "GLFW window", NULL, NULL);
+    if (!window)
+    {
+        glfwTerminate();
+        return 1;
+    }
+
+    while (!glfwWindowShouldClose(window))
+    {
+        glfwSwapBuffers(window);
+        glfwPollEvents();
+    }
+
+    glfwDestroyWindow(window);
+    glfwTerminate();
+    return 0;
+}
+`;
+
+const GLFW_README = `GLFW 模板说明
+================
+1. 把 GLFW 安装目录的 include 目录加入 Build Options → Search directories
+   （默认已填相对路径 include；GLFW 头文件需位于 <项目>/include/GLFW/glfw3.h）。
+2. 库文件（libglfw3.a）所在目录加入 Linker directories（默认用系统库搜索路径）。
+3. 链接库已预置：glfw3 / opengl32 / gdi32（MinGW 静态库）。
+4. 若使用其它版本 GLFW，可直接在工程属性中修改上述路径。
+`;
+
+const SDL2_MAIN_C = `#include <SDL.h>
+
+int main(int argc, char* argv[])
+{
+    (void)argc;
+    (void)argv;
+
+    if (SDL_Init(SDL_INIT_VIDEO) != 0)
+        return 1;
+
+    SDL_Window* window = SDL_CreateWindow("SDL2 window",
+        SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, 800, 600, 0);
+    if (!window)
+    {
+        SDL_Quit();
+        return 1;
+    }
+
+    SDL_Event event;
+    int running = 1;
+    while (running)
+    {
+        while (SDL_PollEvent(&event))
+        {
+            if (event.type == SDL_QUIT)
+                running = 0;
+        }
+        SDL_Delay(16);
+    }
+
+    SDL_DestroyWindow(window);
+    SDL_Quit();
+    return 0;
+}
+`;
+
+const SDL2_README = `SDL2 模板说明
+================
+1. 解压 SDL2-devel（MinGW 版），将其 include 目录加入搜索目录
+   （SDL.h 位于 include/SDL2 时：搜索目录填 include/SDL2）。
+2. 将 x86_64-w64-mingw32/lib（或 i686-w64-mingw32/lib）加入库目录。
+3. 链接库已预置 mingw32 / SDL2main / SDL2；如需无控制台窗口再加 -mwindows。
+`;
+
+const WX_MAIN_CPP = `#include <wx/wx.h>
+
+class CbApp : public wxApp
+{
+public:
+    bool OnInit() override
+    {
+        wxFrame* frame = new wxFrame(nullptr, wxID_ANY, "wxWidgets");
+        frame->Show();
+        return true;
+    }
+};
+
+wxIMPLEMENT_APP(CbApp);
+`;
+
+const WX_README = `wxWidgets 模板说明
+====================
+1. 用 wx-config --cxxflags 的输出核对 include 目录；MinGW 安装通常在
+   <wx>/include 与 <wx>/lib/gcc_lib/mswu（版本相关）。
+2. 链接库名随 wx 版本变化（本模板预置 wx 3.2 Unicode 静态库：
+   wxmsw32u_core / wxbase32u）；使用动态库时改为对应 dll 导入库。
+3. 单个 main.cpp 直接编译不需要 moc；后续添加自定义控件类（使用
+   wxDECLARE_EVENT_TABLE 等）时需要预处理，建议改用 CMake + wxWidgets 官方工具链。
+`;
+
+const QT_MAIN_CPP = `#include <QApplication>
+#include <QLabel>
+
+int main(int argc, char* argv[])
+{
+    QApplication app(argc, argv);
+    QLabel label("Qt Widgets");
+    label.show();
+    return app.exec();
+}
+`;
+
+const QT_README = `Qt 模板说明
+=============
+1. 把 Qt 安装目录的 include（如 C:/Qt/6.6.0/mingw_64/include）各子目录加入搜索目录；
+   常用：include、include/QtCore、include/QtGui、include/QtWidgets。
+2. 库目录加入 C:/Qt/6.6.0/mingw_64/lib。
+3. 链接库已预置 Qt6Widgets / Qt6Gui / Qt6Core；链接需要 C++17 及以上。
+4. 自定义 QObject 类（含 Q_OBJECT）需要 moc 预处理；本模板仅 main.cpp 不需要。
+   工程变大后建议改用 CMake（Qt 官方推荐）。
 `;
 
 /** 工程模板列表（对齐 Code::Blocks 常用 New Project 模板） */
@@ -82,6 +217,54 @@ export const PROJECT_TEMPLATES: ProjectTemplate[] = [
     targetType: TargetType.ConsoleOnly,
     skeleton: [],
   },
+  {
+    id: 'glfw',
+    label: 'GLFW application (C)',
+    description: '图形窗口程序（GLFW；include/libs 按安装路径调整，见模板说明）',
+    targetType: TargetType.ConsoleOnly,
+    includeDirs: ['include'],
+    linkLibs: ['glfw3', 'opengl32', 'gdi32'],
+    skeleton: [
+      { name: 'main.c', content: GLFW_MAIN_C },
+      { name: 'README-模板说明.txt', content: GLFW_README },
+    ],
+  },
+  {
+    id: 'sdl2',
+    label: 'SDL2 application (C)',
+    description: 'SDL2 窗口程序（MinGW：-lmingw32 -lSDL2main -lSDL2）',
+    targetType: TargetType.ConsoleOnly,
+    includeDirs: ['include'],
+    linkLibs: ['mingw32', 'SDL2main', 'SDL2'],
+    skeleton: [
+      { name: 'main.c', content: SDL2_MAIN_C },
+      { name: 'README-模板说明.txt', content: SDL2_README },
+    ],
+  },
+  {
+    id: 'wxwidgets',
+    label: 'wxWidgets application (C++)',
+    description: 'wxWidgets 最小框架（链接库名按 wx 版本调整，见模板说明）',
+    targetType: TargetType.ConsoleOnly,
+    compilerOptions: ['-std=c++17'],
+    linkLibs: ['wxmsw32u_core', 'wxbase32u'],
+    skeleton: [
+      { name: 'main.cpp', content: WX_MAIN_CPP },
+      { name: 'README-模板说明.txt', content: WX_README },
+    ],
+  },
+  {
+    id: 'qt',
+    label: 'Qt Widgets application (C++)',
+    description: 'Qt6 Widgets 最小程序（需 Qt 头文件/库目录；moc 说明见模板）',
+    targetType: TargetType.ConsoleOnly,
+    compilerOptions: ['-std=c++17'],
+    linkLibs: ['Qt6Widgets', 'Qt6Gui', 'Qt6Core'],
+    skeleton: [
+      { name: 'main.cpp', content: QT_MAIN_CPP },
+      { name: 'README-模板说明.txt', content: QT_README },
+    ],
+  },
 ];
 
 function defaultRelations(): Record<OptionsRelationType, OptionsRelation> {
@@ -94,7 +277,7 @@ function defaultRelations(): Record<OptionsRelationType, OptionsRelation> {
   };
 }
 
-function makeTarget(name: string, title: string, type: TargetType, compilerOptions: string[], compilerId: string): BuildTarget {
+export function makeTarget(name: string, title: string, type: TargetType, compilerOptions: string[], compilerId: string): BuildTarget {
   return {
     title,
     targetType: type,
@@ -140,7 +323,7 @@ function makeTarget(name: string, title: string, type: TargetType, compilerOptio
   };
 }
 
-function makeFile(projectDir: string, rel: string, targetTitles: string[]): ProjectFile {
+export function makeFile(projectDir: string, rel: string, targetTitles: string[]): ProjectFile {
   return {
     relativeFilename: rel,
     relativeToCommonTopLevelPath: rel,
@@ -167,6 +350,15 @@ export function createProjectFromTemplate(
 ): { project: Project; projectDir: string } {
   const projectDir = path.join(basePath, name);
   const targetTitles = ['Debug', 'Release'];
+  // 模板附加选项（编译选项追加在内置之后；目录/库原样进入两个目标，可按需在工程属性中调整）
+  const tplOpts = tpl.compilerOptions ?? [];
+  const debugTarget = makeTarget(name, 'Debug', tpl.targetType, ['-g', '-Wall', ...tplOpts], compilerId);
+  const releaseTarget = makeTarget(name, 'Release', tpl.targetType, ['-O2', ...tplOpts], compilerId);
+  for (const t of [debugTarget, releaseTarget]) {
+    t.includeDirs = [...(tpl.includeDirs ?? [])];
+    t.libDirs = [...(tpl.libDirs ?? [])];
+    t.linkLibs = [...(tpl.linkLibs ?? [])];
+  }
   const project: Project = {
     title: name,
     basePath: projectDir,
@@ -183,10 +375,7 @@ export function createProjectFromTemplate(
     libDirs: [],
     resourceIncludeDirs: [],
     linkLibs: [],
-    buildTargets: [
-      makeTarget(name, 'Debug', tpl.targetType, ['-g', '-Wall'], compilerId),
-      makeTarget(name, 'Release', tpl.targetType, ['-O2'], compilerId),
-    ],
+    buildTargets: [debugTarget, releaseTarget],
     virtualTargets: [],
     virtualFolders: [],
     commandsBeforeBuild: [],

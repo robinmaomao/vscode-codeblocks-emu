@@ -52,6 +52,7 @@ function passthroughTargetOptions(rawProject: unknown, title: string): { key: st
   const handled = new Set([
     'title', 'type', 'compiler', 'parameters', 'output', 'object_output', 'use_console_runner',
     'createDefFile', 'createStaticLib', 'prefix_auto', 'extension_auto', 'imp_lib', 'def_file',
+    'external_deps', 'additional_output',
     'projectCompilerOptionsRelation', 'projectLinkerOptionsRelation',
     'projectIncludeDirsRelation', 'projectResourceIncludeDirsRelation', 'projectLibDirsRelation',
   ]);
@@ -191,6 +192,13 @@ function writeTarget(L: string[], t: BuildTarget, rawProject: unknown): void {
   if (t.targetType === TargetType.DynamicLib && t.createStaticLib) {
     L.push('\t\t\t\t<Option createStaticLib="1" />');
   }
+  // 外部依赖 / 附加输出（C2：分号列表、Unix 路径；非空才写；未编辑时模型值来自解析，与原始一致）
+  if (t.externalDeps?.length) {
+    L.push(`\t\t\t\t<Option external_deps="${esc(t.externalDeps.map((d) => unix(d)).join(';'))}" />`);
+  }
+  if (t.additionalOutput?.length) {
+    L.push(`\t\t\t\t<Option additional_output="${esc(t.additionalOutput.map((d) => unix(d)).join(';'))}" />`);
+  }
   writeRelations(L, '\t\t\t\t', t);
   // 目标级构建脚本（对齐 SaveUnit：Script 在 Compiler 之前）
   for (const s of t.buildScripts ?? []) {
@@ -242,7 +250,7 @@ function writeUnit(L: string[], f: ProjectFile, totalTargets: number): void {
 }
 
 function writeExtensions(L: string[], extensions: unknown): void {
-  if (extensions === undefined || extensions === null) {
+  if (extensions === undefined || extensions === null || extensions === '') {
     L.push('\t\t<Extensions />');
     return;
   }

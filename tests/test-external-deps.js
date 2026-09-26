@@ -28,13 +28,13 @@ fs.writeFileSync(cbp, `<?xml version="1.0" encoding="UTF-8" standalone="yes" ?>
 			</Target>
 		</Build>
 		<Unit filename="main.c" />
+		<Extensions>
+			<codeblocks_project_custom_variables>
+				<SDKROOT value="D:\\sdk" />
+				<TOOLCHAIN value="$(SDKROOT)\\riscv" />
+			</codeblocks_project_custom_variables>
+		</Extensions>
 	</Project>
-	<Extensions>
-		<codeblocks_project_custom_variables>
-			<SDKROOT value="D:\\sdk" />
-			<TOOLCHAIN value="$(SDKROOT)\\riscv" />
-		</codeblocks_project_custom_variables>
-	</Extensions>
 </CodeBlocks_project_file>`, 'utf-8');
 
 const p = new ProjectParser().parse(cbp);

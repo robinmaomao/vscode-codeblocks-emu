@@ -22,6 +22,10 @@ export interface TargetEditData {
   compilerId: string;
   /** 执行参数（<Option parameters>，Run/Debug 用；对齐 Code::Blocks Set programs' arguments） */
   executionParameters: string;
+  /** 外部依赖（<Option external_deps>，每行一个；比输出文件新时强制重链接） */
+  externalDeps: string[];
+  /** 附加输出（<Option additional_output>，每行一个；外部依赖比它新时强制重链接） */
+  additionalOutput: string[];
 }
 
 /** WebView 前后端交换的文件编辑数据 */
@@ -64,11 +68,18 @@ export interface SearchDirsEditData {
   targets: { includeDirs: string[]; libDirs: string[]; resourceDirs: string[] }[];
 }
 
-/** 项目设置（标题 / 默认编译器 / 虚拟文件夹） */
+/** 项目自定义变量（<Extensions><codeblocks_project_custom_variables>；构建宏 $(name)） */
+export interface CustomVariableEditData {
+  name: string;
+  value: string;
+}
+
+/** 项目设置（标题 / 默认编译器 / 虚拟文件夹 / 自定义变量） */
 export interface ProjectSettingsEditData {
   title: string;
   compilerId: string;
   virtualFolders: string[];
+  customVariables: CustomVariableEditData[];
 }
 
 /** 构建脚本 + pre/post build 命令（作用域：项目级 + 各目标，目标项按 targets 数组顺序对齐） */
@@ -182,6 +193,8 @@ export class ProjectPropertiesPanel {
       objectOutput: t.objectOutput,
       compilerId: t.compilerId,
       executionParameters: t.executionParameters ?? '',
+      externalDeps: [...t.externalDeps],
+      additionalOutput: [...t.additionalOutput],
     }));
 
     const cmp = this.project.compilerId;
@@ -229,6 +242,7 @@ export class ProjectPropertiesPanel {
       title: this.project.title,
       compilerId: this.project.compilerId,
       virtualFolders: [...this.project.virtualFolders],
+      customVariables: Object.entries(this.project.customVariables ?? {}).map(([name, value]) => ({ name, value })),
     };
 
     const projectScripts = {
@@ -479,7 +493,7 @@ export class ProjectPropertiesPanel {
     let targetOpts = data.targetOpts.map(o => ({ compilerOptions: [...o.compilerOptions], linkerOptions: [...o.linkerOptions], linkLibs: [...o.linkLibs], relations: { ...o.relations } }));
     let projDirs = { includeDirs: [...data.projectDirs.includeDirs], libDirs: [...data.projectDirs.libDirs], resourceDirs: [...data.projectDirs.resourceDirs] };
     let targetDirs = data.targetDirs.map(o => ({ includeDirs: [...o.includeDirs], libDirs: [...o.libDirs], resourceDirs: [...o.resourceDirs] }));
-    let projSettings = { title: data.projectSettings.title, compilerId: data.projectSettings.compilerId, virtualFolders: [...data.projectSettings.virtualFolders] };
+    let projSettings = { title: data.projectSettings.title, compilerId: data.projectSettings.compilerId, virtualFolders: [...data.projectSettings.virtualFolders], customVariables: (data.projectSettings.customVariables || []).map(v => ({ ...v })) };
     let projScripts = { scripts: [...data.projectScripts.scripts], before: [...data.projectScripts.before], after: [...data.projectScripts.after] };
     let targetScripts = data.targetScripts.map(s => ({ scripts: [...s.scripts], before: [...s.before], after: [...s.after] }));
     let notes = { notes: data.notes.notes, showNotesOnLoad: data.notes.showNotesOnLoad };
@@ -566,9 +580,17 @@ export class ProjectPropertiesPanel {
         '<label><span class="field-name">执行参数</span>' +
         '<input id="f-params" value="' + escAttr(t.executionParameters || '') + '">' +
         '<div class="hint">运行/调试时传递给程序的命令行参数（对齐 Code::Blocks 的 Set programs’ arguments）</div></label>' +
+        '</details>' +
+        '<details class="fg"><summary>依赖与附加输出</summary>' +
+        '<label><span class="field-name">外部依赖（每行一个）</span>' +
+        '<textarea id="f-extdeps">' + esc((t.externalDeps || []).join('\\n')) + '</textarea>' +
+        '<div class="hint">&lt;Option external_deps&gt;：比输出文件新时强制重链接（相对项目根，支持 $(VAR) 宏）</div></label>' +
+        '<label><span class="field-name">附加输出（每行一个）</span>' +
+        '<textarea id="f-addout">' + esc((t.additionalOutput || []).join('\\n')) + '</textarea>' +
+        '<div class="hint">&lt;Option additional_output&gt;：外部依赖比它新时强制重链接</div></label>' +
         '</details>';
       document.getElementById('f-type').value = String(t.targetType);
-      ['f-title', 'f-type', 'f-output', 'f-object', 'f-compiler', 'f-params'].forEach(id => {
+      ['f-title', 'f-type', 'f-output', 'f-object', 'f-compiler', 'f-params', 'f-extdeps', 'f-addout'].forEach(id => {
         document.getElementById(id).addEventListener('change', () => collectTargetForm());
       });
     }
@@ -584,6 +606,8 @@ export class ProjectPropertiesPanel {
       t.objectOutput = document.getElementById('f-object').value;
       t.compilerId = document.getElementById('f-compiler').value.trim();
       t.executionParameters = document.getElementById('f-params').value;
+      t.externalDeps = optionsLines(document.getElementById('f-extdeps').value);
+      t.additionalOutput = optionsLines(document.getElementById('f-addout').value);
       // 目标重命名：同步文件归属引用
       if (oldTitle !== newTitle) {
         files.forEach(f => {
@@ -601,7 +625,7 @@ export class ProjectPropertiesPanel {
     document.getElementById('add').addEventListener('click', () => {
       collectTargetForm();
       const n = targets.length + 1;
-      targets.push({ originalTitle: '', title: 'Target' + n, targetType: 1, outputFilename: 'bin/Target' + n + '/app', objectOutput: 'obj/Target' + n + '/', compilerId: data.compilerId || 'gcc', executionParameters: '' });
+      targets.push({ originalTitle: '', title: 'Target' + n, targetType: 1, outputFilename: 'bin/Target' + n + '/app', objectOutput: 'obj/Target' + n + '/', compilerId: data.compilerId || 'gcc', executionParameters: '', externalDeps: [], additionalOutput: [] });
       targetOpts.push({ compilerOptions: [], linkerOptions: [], linkLibs: [], relations: { compiler: 3, linker: 3, include: 3, lib: 3, res: 3 } });
       targetDirs.push({ includeDirs: [], libDirs: [], resourceDirs: [] });
       targetScripts.push({ scripts: [], before: [], after: [] });
@@ -620,7 +644,7 @@ export class ProjectPropertiesPanel {
       if (!targets.length) return;
       collectTargetForm();
       const src = targets[selected];
-      targets.splice(selected + 1, 0, { ...src, originalTitle: '', title: src.title + ' copy' });
+      targets.splice(selected + 1, 0, { ...src, originalTitle: '', title: src.title + ' copy', externalDeps: [...(src.externalDeps || [])], additionalOutput: [...(src.additionalOutput || [])] });
       targetOpts.splice(selected + 1, 0, { compilerOptions: [...targetOpts[selected].compilerOptions], linkerOptions: [...targetOpts[selected].linkerOptions], linkLibs: [...targetOpts[selected].linkLibs], relations: { ...targetOpts[selected].relations } });
       targetDirs.splice(selected + 1, 0, { includeDirs: [...targetDirs[selected].includeDirs], libDirs: [...targetDirs[selected].libDirs], resourceDirs: [...targetDirs[selected].resourceDirs] });
       targetScripts.splice(selected + 1, 0, { scripts: [...targetScripts[selected].scripts], before: [...targetScripts[selected].before], after: [...targetScripts[selected].after] });
@@ -792,6 +816,13 @@ export class ProjectPropertiesPanel {
     function optionsLines(text) {
       return text.split('\\n').map(s => s.trim()).filter(Boolean);
     }
+    // 项目自定义变量行解析：name=value（无 '=' 时值为空）
+    function parseVarLines(text) {
+      return text.split('\\n').map(s => s.trim()).filter(Boolean).map(line => {
+        const i = line.indexOf('=');
+        return i >= 0 ? { name: line.slice(0, i).trim(), value: line.slice(i + 1).trim() } : { name: line, value: '' };
+      }).filter(v => v.name);
+    }
     function relSel(id, val, label) {
       return '<label><span class="field-name">' + label + '</span>' +
         '<select id="' + id + '">' +
@@ -915,8 +946,11 @@ export class ProjectPropertiesPanel {
         '<div class="hint">如 gcc、riscv32-v2；目标未指定编译器时使用该值</div></label>' +
         '<label><span class="field-name">虚拟文件夹</span>' +
         '<textarea id="set-vfolders">' + esc(projSettings.virtualFolders.join('\\n')) + '</textarea>' +
-        '<div class="hint">每行一个虚拟文件夹名，如 Headers、Sources</div></label>';
-      ['set-title', 'set-compiler', 'set-vfolders'].forEach(id => {
+        '<div class="hint">每行一个虚拟文件夹名，如 Headers、Sources</div></label>' +
+        '<label><span class="field-name">项目自定义变量（每行 name=value）</span>' +
+        '<textarea id="set-vars">' + esc(projSettings.customVariables.map(v => v.name + '=' + v.value).join('\\n')) + '</textarea>' +
+        '<div class="hint">构建/运行宏 $(name) 使用（对齐 Code::Blocks Custom variables）；变量名不能含空格</div></label>';
+      ['set-title', 'set-compiler', 'set-vfolders', 'set-vars'].forEach(id => {
         document.getElementById(id).addEventListener('change', () => collectSettingsForm());
       });
     }
@@ -927,6 +961,7 @@ export class ProjectPropertiesPanel {
       projSettings.title = document.getElementById('set-title').value.trim() || projSettings.title;
       projSettings.compilerId = document.getElementById('set-compiler').value.trim();
       projSettings.virtualFolders = optionsLines(document.getElementById('set-vfolders').value);
+      projSettings.customVariables = parseVarLines(document.getElementById('set-vars').value);
     }
 
     // ---- 构建脚本 tab ----
@@ -1047,6 +1082,8 @@ export class ProjectPropertiesPanel {
         objectOutput: String(t.objectOutput ?? ''),
         compilerId: String(t.compilerId ?? this.project.compilerId),
         executionParameters: String(t.executionParameters ?? ''),
+        externalDeps: Array.isArray(t.externalDeps) ? t.externalDeps.map((x: any) => String(x)) : [],
+        additionalOutput: Array.isArray(t.additionalOutput) ? t.additionalOutput.map((x: any) => String(x)) : [],
       }));
       const files: FileEditData[] = (msg.files ?? []).map((f: any) => ({
         relativeFilename: String(f.relativeFilename ?? ''),
@@ -1090,6 +1127,11 @@ export class ProjectPropertiesPanel {
         title: String(msg.projectSettings?.title ?? this.project.title),
         compilerId: String(msg.projectSettings?.compilerId ?? this.project.compilerId),
         virtualFolders: strArr(msg.projectSettings?.virtualFolders),
+        customVariables: Array.isArray(msg.projectSettings?.customVariables)
+          ? msg.projectSettings.customVariables
+              .map((v: any) => ({ name: String(v?.name ?? '').trim(), value: String(v?.value ?? '') }))
+              .filter((v: any) => v.name)
+          : [],
       };
       const scriptItem = (o: any) => ({
         scripts: strArr(o?.scripts),

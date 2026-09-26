@@ -372,6 +372,11 @@ export class CodeBlocksConfig {
     }
   }
 
+  /** 公开位置获取（供「打开 default.conf」命令；B1/B2/C4 评估结论 A：只打开不写回） */
+  location(): string | undefined {
+    return this.defaultConfLocation();
+  }
+
   /** default.conf 常见位置 */
   private defaultConfLocation(): string | undefined {
     const win = process.platform === 'win32';
