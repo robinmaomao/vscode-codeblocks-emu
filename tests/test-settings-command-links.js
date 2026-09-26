@@ -14,7 +14,11 @@ function check(name, cond, got, want) {
 
 const pkg = JSON.parse(fs.readFileSync(path.resolve(__dirname, '../package.json'), 'utf-8'));
 const contributed = new Set((pkg.contributes.commands || []).map((c) => c.command));
-const props = (pkg.contributes.configuration && pkg.contributes.configuration.properties) || {};
+// 第53轮起 configuration 为分区块数组（兼容旧的对象形式）
+const cfg = pkg.contributes.configuration;
+const props = Array.isArray(cfg)
+  ? Object.assign({}, ...cfg.map((b) => b.properties || {}))
+  : ((cfg && cfg.properties) || {});
 
 // ---- 1. 收集全部 markdown 文本（properties 可嵌套 object/array） ----
 const markdowns = [];

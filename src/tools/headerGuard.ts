@@ -20,14 +20,17 @@ export function hasHeaderGuard(text: string): boolean {
 }
 
 /**
- * 生成插入保护后的全文（顶部 `#ifndef/#define`，底部 `#endif`；已有保护返回 null）。
+ * 生成插入保护后的全文（默认顶部 `#ifndef/#define` + 底部 `#endif`；style='pragma-once' 仅顶部 `#pragma once`；已有保护返回 null）。
  * 换行符跟随原文（LF/CRLF）；尾部空行归一。
  */
-export function applyHeaderGuard(fsPath: string, text: string): string | null {
+export function applyHeaderGuard(fsPath: string, text: string, style: 'ifndef' | 'pragma-once' = 'ifndef'): string | null {
   if (hasHeaderGuard(text)) return null;
-  const macro = headerGuardMacro(fsPath);
   const eol = text.includes('\r\n') ? '\r\n' : '\n';
   const trimmed = text.replace(/\s+$/, '');
+  if (style === 'pragma-once') {
+    return trimmed ? `#pragma once${eol}${eol}${trimmed}${eol}` : `#pragma once${eol}`;
+  }
+  const macro = headerGuardMacro(fsPath);
   const top = `#ifndef ${macro}${eol}#define ${macro}${eol}${eol}`;
   const bottom = trimmed ? `${eol}${eol}#endif // ${macro}${eol}` : `#endif // ${macro}${eol}`;
   return top + trimmed + bottom;
