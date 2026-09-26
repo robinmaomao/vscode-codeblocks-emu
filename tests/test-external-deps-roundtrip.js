@@ -59,7 +59,7 @@ check('写出新 external_deps（分号列表 + Unix 路径）', xml.includes('e
 check('旧值不残留', !xml.includes('libbar.a') && !xml.includes('generated.c'), null);
 check('external_deps 只写一次', xml.split('external_deps=').length === 2, xml.split('external_deps=').length - 1);
 check('additional_output 只写一次', xml.split('additional_output=').length === 2, xml.split('additional_output=').length - 1);
-check('未映射 Option（platforms）仍透传', xml.includes('<Option platforms="Windows" />'), null);
+check('platforms 按模型显式写出（CB 格式含尾分号）', xml.includes('<Option platforms="Windows;" />'), null);
 
 const tmp2 = path.join(os.tmpdir(), 'cb-extdeps-test-2.cbp');
 fs.writeFileSync(tmp2, xml, 'utf-8');

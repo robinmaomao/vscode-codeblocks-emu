@@ -2,7 +2,7 @@
   "name": "codeblocks-vscode",
   "displayName": "Code::Blocks for VS Code",
   "description": "原生移植 Code::Blocks 核心功能到 VS Code：项目模型、构建引擎、编译器管理与调试引擎",
-  "version": "0.8.82-dev",
+  "version": "0.8.83-dev",
   "icon": "resources/icon.png",
   "publisher": "robinmaomao",
   "author": {
@@ -213,6 +213,10 @@
       {
         "command": "codeblocks.importProject",
         "title": "Code::Blocks: Import Project (Dev-C++ / VC6 / VS2010+)"
+      },
+      {
+        "command": "codeblocks.exportTargetAsProject",
+        "title": "Code::Blocks: Create Project from Target…"
       },
       {
         "command": "codeblocks.openDefaultConfig",
