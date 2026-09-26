@@ -135,9 +135,12 @@ let scMsg = '';
 let scCount = 0;
 for (const it of all) {
   if (!it.shortcut) continue;
-  scCount++;
-  const hit = bindings.some((b) => b.command === it.command && norm(b.key) === norm(it.shortcut));
-  if (!hit) { scOk = false; scMsg = `${it.label} (${it.command}) 声明 ${it.shortcut} 但无对应 keybinding`; }
+  // 支持一键多标注（'Ctrl+Shift+Up' 或 'F4 / Alt+F2'）
+  for (const one of String(it.shortcut).split('/').map((s) => s.trim()).filter(Boolean)) {
+    scCount++;
+    const hit = bindings.some((b) => b.command === it.command && norm(b.key) === norm(one));
+    if (!hit) { scOk = false; scMsg = `${it.label} (${it.command}) 声明 ${one} 但无对应 keybinding`; }
+  }
 }
 check(`shortcut 均与 keybindings 一致（${scCount} 项）`, scOk, scMsg, '一致');
 
