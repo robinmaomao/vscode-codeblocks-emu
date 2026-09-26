@@ -38,6 +38,7 @@ import { SymbolIndex, registerFallbackIntelliSense } from './tools/codeCompletio
 import { GdbDebugAdapter } from './debug/gdbDebugAdapter';import { scanTodos } from './tools/todoScanner';
 import { countFiles, isSourceFile } from './tools/codeStats';
 import { formatActiveDocument } from './tools/astyle';
+import { collectConflicts, normalizeKey, parseJsonc, KeybindingDef, ConflictItem } from './tools/keybindingConflicts';
 
 /** 已打开的项目列表（顺序即编译顺序） */
 let openProjects: Project[] = [];
@@ -903,6 +904,66 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     }),
   );
 
+  // 快捷键冲突检测（VS Code 默认表 / 用户 keybindings.json / 其他已安装扩展）
+  context.subscriptions.push(
+    vscode.commands.registerCommand('codeblocks.keybindings.check', async () => {
+      const findings = collectKeybindingConflicts();
+      outputChannel.show(true);
+      if (!findings.length) {
+        outputChannel.info('[Code::Blocks] 快捷键冲突检测：未发现冲突');
+        vscode.window.showInformationMessage('未检测到快捷键冲突 ✓');
+        return;
+      }
+      const report = formatConflictReport(findings);
+      outputChannel.info(report);
+      interface ConflictPick extends vscode.QuickPickItem { action?: 'openEditor' | 'openJson' | 'copy' }
+      const picks: ConflictPick[] = [
+        { label: '$(keyboard) 打开键盘快捷方式编辑器…', action: 'openEditor' },
+        { label: '$(json) 打开用户 keybindings.json', action: 'openJson' },
+        { label: '$(clippy) 复制冲突报告', action: 'copy' },
+        { label: '', kind: vscode.QuickPickItemKind.Separator },
+        ...findings.map((f) => ({
+          label: `${f.level === 'high' ? '$(warning)' : f.level === 'medium' ? '$(info)' : '$(circle-small-filled)'} ${f.key} → ${f.command}`,
+          description: f.gated ? 'CB 保真模式' : undefined,
+          detail: `冲突：${f.findings.map((x) => `${x.source} → ${x.command}`).join('；')}${f.note ? `（${f.note}）` : ''}`,
+        })),
+      ];
+      const picked = await vscode.window.showQuickPick(picks, {
+        placeHolder: `快捷键冲突 ${findings.length} 项 — 查看详情或选择操作`,
+        title: 'Code::Blocks: Keybinding Conflicts',
+      });
+      if (!picked?.action) return;
+      if (picked.action === 'openEditor') {
+        await vscode.commands.executeCommand('workbench.action.openGlobalKeybindings');
+      } else if (picked.action === 'openJson') {
+        const p = userKeybindingsPath();
+        if (p && fs.existsSync(p)) await vscode.commands.executeCommand('vscode.open', vscode.Uri.file(p));
+        else vscode.window.showInformationMessage('用户 keybindings.json 尚不存在（可从键盘快捷方式编辑器右上角创建）');
+      } else if (picked.action === 'copy') {
+        await vscode.env.clipboard.writeText(report);
+        vscode.window.setStatusBarMessage('冲突报告已复制到剪贴板', 3000);
+      }
+    }),
+  );
+
+  // CB 保真模式开启提醒（一次性，可直达冲突清单）
+  context.subscriptions.push(
+    vscode.workspace.onDidChangeConfiguration((e) => {
+      if (!e.affectsConfiguration('codeblocks.keybindings.cbStyle')) return;
+      const on = vscode.workspace.getConfiguration('codeblocks').get<boolean>('keybindings.cbStyle', false);
+      if (!on) return;
+      void vscode.window.showInformationMessage(
+        '已启用 Code::Blocks 保真键位：F5 切换断点 / F2 打开 Build Log / Ctrl+R 替换 等将覆盖 VS Code 默认键位。可随时关闭设置 codeblocks.keybindings.cbStyle 恢复。',
+        '查看冲突清单',
+      ).then((pick) => {
+        if (pick) void vscode.commands.executeCommand('codeblocks.keybindings.check');
+      });
+    }),
+  );
+
+  // 启动时静默检测用户级键位冲突（不弹窗：输出通道 + 一次性状态栏提示）
+  checkUserKeybindingConflictsQuietly(context);
+
   // 代码统计
   context.subscriptions.push(
     vscode.commands.registerCommand('codeblocks.codeStats', async () => {
@@ -1490,6 +1551,123 @@ async function persistProjectAndReload(project: Project): Promise<void> {
     updateTargetStatusBar();
     updateCompilerStatusBar();
   }
+}
+
+// ———— 快捷键冲突检测（第四十五轮） ————
+
+/** 扩展自身贡献的键位（从随包 package.json 读取，保证与实际生效一致） */
+function ownKeybindings(): KeybindingDef[] {
+  try {
+    const pkgPath = path.join(extContext?.extensionPath ?? '', 'package.json');
+    const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf-8'));
+    const list: any[] = pkg?.contributes?.keybindings ?? [];
+    return list.map((b) => ({
+      key: String(b.key ?? ''),
+      command: String(b.command ?? ''),
+      when: b.when ? String(b.when) : undefined,
+      source: '扩展',
+    }));
+  } catch {
+    return [];
+  }
+}
+
+/** 用户 keybindings.json 路径（<userData>/User/keybindings.json） */
+function userKeybindingsPath(): string | undefined {
+  const gs = extContext?.globalStorageUri?.fsPath;
+  if (!gs) return undefined;
+  // <userData>/User/globalStorage/<publisher>.<name> → 上两级即 <userData>/User
+  return path.join(path.dirname(path.dirname(gs)), 'keybindings.json');
+}
+
+/** 读取用户 keybindings.json（JSONC 容错；不存在/损坏返回空） */
+function readUserKeybindings(): KeybindingDef[] {
+  try {
+    const p = userKeybindingsPath();
+    if (!p || !fs.existsSync(p)) return [];
+    const arr = parseJsonc(fs.readFileSync(p, 'utf-8'));
+    if (!Array.isArray(arr)) return [];
+    return arr
+      .filter((b: any) => b && typeof b.key === 'string')
+      .map((b: any) => ({
+        key: String(b.key),
+        command: String(b.command ?? ''),
+        when: b.when ? String(b.when) : undefined,
+        source: '用户 keybindings.json',
+      }));
+  } catch {
+    return [];
+  }
+}
+
+/** 其他已安装扩展贡献的键位（~/.vscode/extensions/<扩展目录>/package.json） */
+function readOtherExtensionKeybindings(): KeybindingDef[] {
+  const out: KeybindingDef[] = [];
+  try {
+    const home = process.env.USERPROFILE || process.env.HOME || '';
+    if (!home) return out;
+    for (const root of [path.join(home, '.vscode', 'extensions'), path.join(home, '.vscode-insiders', 'extensions')]) {
+      if (!fs.existsSync(root)) continue;
+      for (const dir of fs.readdirSync(root)) {
+        const manifest = path.join(root, dir, 'package.json');
+        if (!fs.existsSync(manifest)) continue;
+        try {
+          const pkg = JSON.parse(fs.readFileSync(manifest, 'utf-8'));
+          if (pkg?.name === 'codeblocks-vscode') continue; // 跳过自身
+          const list: any[] = pkg?.contributes?.keybindings ?? [];
+          for (const b of list) {
+            if (!b || typeof b.key !== 'string') continue;
+            out.push({
+              key: String(b.key),
+              command: String(b.command ?? ''),
+              when: b.when ? String(b.when) : undefined,
+              source: `扩展:${pkg?.name ?? dir}`,
+            });
+          }
+        } catch { /* 单个扩展清单损坏则跳过 */ }
+      }
+    }
+  } catch { /* 目录不可读则忽略 */ }
+  return out;
+}
+
+/** 完整冲突检测（含 VS Code 内置默认表） */
+function collectKeybindingConflicts(): ConflictItem[] {
+  return collectConflicts(ownKeybindings(), readUserKeybindings(), readOtherExtensionKeybindings());
+}
+
+/** 文本报告（输出通道 / 剪贴板共用） */
+function formatConflictReport(findings: ConflictItem[]): string {
+  const lines = [`[Code::Blocks] 快捷键冲突检测：${findings.length} 项`];
+  for (const f of findings) {
+    const level = f.level === 'high' ? '高' : f.level === 'medium' ? '中' : '低';
+    lines.push(`  [${level}] ${f.key} → ${f.command}${f.gated ? '（CB 保真模式）' : ''}`);
+    for (const x of f.findings) lines.push(`      冲突：${x.source} → ${x.command}${x.when ? ` (when: ${x.when})` : ''}`);
+    if (f.note) lines.push(`      说明：${f.note}`);
+  }
+  return lines.join('\n');
+}
+
+/** 启动静默检测：仅用户级真实撞车；输出通道 + 一次性状态栏提示（不弹窗） */
+function checkUserKeybindingConflictsQuietly(context: vscode.ExtensionContext): void {
+  try {
+    const findings = collectConflicts(ownKeybindings(), readUserKeybindings(), [], { includeDefaults: false })
+      .filter((f) => f.level !== 'info');
+    if (!findings.length) return;
+    const seen = new Set(context.globalState.get<string[]>('codeblocks.keybindingWarnings', []) ?? []);
+    const fresh = findings.filter((f) => !seen.has(`${normalizeKey(f.key)}|${f.command}`));
+    if (!fresh.length) return;
+    for (const f of fresh) {
+      outputChannel.warn(`[Code::Blocks] 快捷键冲突：${f.key} 同时绑定到 ${f.command} 与 ${f.findings.map((x) => x.command).join(' / ')}（运行 Code::Blocks: Check Keybinding Conflicts 查看详情）`);
+    }
+    const item = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 40);
+    item.text = `$(warning) Code::Blocks: ${fresh.length} 个快捷键冲突`;
+    item.tooltip = '检测到与用户键位（或其它来源）的冲突，点击查看清单';
+    item.command = 'codeblocks.keybindings.check';
+    item.show();
+    setTimeout(() => item.dispose(), 30000);
+    void context.globalState.update('codeblocks.keybindingWarnings', [...seen, ...fresh.map((f) => `${normalizeKey(f.key)}|${f.command}`)]);
+  } catch { /* 非关键：检测失败不影响激活 */ }
 }
 
 /** 是否有打开的 C/C++ 源文件（用于判断是否值得重启 clangd 刷新诊断） */

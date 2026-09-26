@@ -2,7 +2,7 @@
   "name": "codeblocks-vscode",
   "displayName": "Code::Blocks for VS Code",
   "description": "原生移植 Code::Blocks 核心功能到 VS Code：项目模型、构建引擎、编译器管理与调试引擎",
-  "version": "0.8.70-dev",
+  "version": "0.8.71-dev",
   "icon": "resources/icon.png",
   "publisher": "robinmaomao",
   "author": {
@@ -291,6 +291,11 @@
       {
         "command": "codeblocks.clearBacktickCache",
         "title": "Code::Blocks: Clear Backtick Cache"
+      },
+      {
+        "command": "codeblocks.keybindings.check",
+        "title": "Code::Blocks: Check Keybinding Conflicts",
+        "icon": "$(keyboard)"
       }
     ],
     "languages": [
@@ -397,6 +402,11 @@
           "type": "boolean",
           "default": true,
           "description": "显示 Symbols 视图（初始默认隐藏，可从视图容器的 ⋯ → Views 菜单调出；关闭此设置后强制隐藏）"
+        },
+        "codeblocks.keybindings.cbStyle": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "启用 Code::Blocks 保真键位（默认关闭，全部避开 VS Code 默认）：`F5` 切换断点 / `Shift+F8` 停止调试 / `F2` 打开 Build Log / `Ctrl+R` 替换 / `Ctrl+Shift+B` 跳转匹配括号 / `Ctrl+Shift+C` 注释 / `Ctrl+Shift+S` 全部保存 / `Ctrl+Q` 退出 / `F12` 折叠 / `F7`·`Shift+F7`·`Ctrl+F7` 单步。开启后这些键将覆盖 VS Code 默认；关闭即恢复。用命令 `Code::Blocks: Check Keybinding Conflicts` 查看冲突清单。"
         },
         "codeblocks.compilerPrograms": {
           "type": "object",
@@ -838,6 +848,104 @@
       {
         "command": "codeblocks.activateNextProject",
         "key": "alt+f6"
+      },
+      {
+        "command": "codeblocks.prevError",
+        "key": "alt+f1",
+        "when": "editorTextFocus"
+      },
+      {
+        "command": "codeblocks.nextError",
+        "key": "alt+f2",
+        "when": "editorTextFocus"
+      },
+      {
+        "command": "workbench.action.quickOpen",
+        "key": "alt+g"
+      },
+      {
+        "command": "codeblocks.projectTree.focus",
+        "key": "shift+f2"
+      },
+      {
+        "command": "workbench.action.replaceInFiles",
+        "key": "ctrl+shift+r",
+        "when": "!inSearchEditor"
+      },
+      {
+        "command": "codeblocks.moveProjectUp",
+        "key": "ctrl+shift+up",
+        "when": "focusedView == codeblocks.projectTree"
+      },
+      {
+        "command": "codeblocks.moveProjectDown",
+        "key": "ctrl+shift+down",
+        "when": "focusedView == codeblocks.projectTree"
+      },
+      {
+        "command": "editor.action.addSelectionToNextFindMatch",
+        "key": "ctrl+e",
+        "when": "editorTextFocus"
+      },
+      {
+        "command": "editor.debug.action.toggleBreakpoint",
+        "key": "f5",
+        "when": "config.codeblocks.keybindings.cbStyle && editorTextFocus"
+      },
+      {
+        "command": "workbench.action.debug.stop",
+        "key": "shift+f8",
+        "when": "config.codeblocks.keybindings.cbStyle && inDebugMode"
+      },
+      {
+        "command": "codeblocks.buildLog.focus",
+        "key": "f2",
+        "when": "config.codeblocks.keybindings.cbStyle"
+      },
+      {
+        "command": "editor.action.startFindReplaceAction",
+        "key": "ctrl+r",
+        "when": "config.codeblocks.keybindings.cbStyle && editorTextFocus"
+      },
+      {
+        "command": "editor.action.jumpToBracket",
+        "key": "ctrl+shift+b",
+        "when": "config.codeblocks.keybindings.cbStyle && editorTextFocus"
+      },
+      {
+        "command": "editor.action.commentLine",
+        "key": "ctrl+shift+c",
+        "when": "config.codeblocks.keybindings.cbStyle && editorTextFocus"
+      },
+      {
+        "command": "workbench.action.files.saveAll",
+        "key": "ctrl+shift+s",
+        "when": "config.codeblocks.keybindings.cbStyle"
+      },
+      {
+        "command": "workbench.action.quit",
+        "key": "ctrl+q",
+        "when": "config.codeblocks.keybindings.cbStyle"
+      },
+      {
+        "command": "editor.toggleFold",
+        "key": "f12",
+        "when": "config.codeblocks.keybindings.cbStyle && editorTextFocus"
+      },
+      {
+        "command": "workbench.action.debug.stepOver",
+        "key": "f7",
+        "when": "config.codeblocks.keybindings.cbStyle && inDebugMode"
+      },
+      {
+        "command": "workbench.action.debug.stepInto",
+        "key": "shift+f7",
+        "when": "config.codeblocks.keybindings.cbStyle && inDebugMode"
+      },
+      {
+        "command": "workbench.action.debug.stepOut",
+        "key": "ctrl+f7",
+        "when": "config.codeblocks.keybindings.cbStyle && inDebugMode"
       }
     ]
   },

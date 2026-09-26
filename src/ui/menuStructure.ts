@@ -20,7 +20,7 @@ export interface MenuItemDef {
   args?: unknown[];
   /** 子菜单（有 children、无 command） */
   children?: MenuItemDef[];
-  /** 快捷键展示（必须与 package.json keybindings 一致，回归测试校验） */
+  /** 快捷键展示（与 package.json keybindings 一致；多个用 ' / ' 分隔，回归测试校验） */
   shortcut?: string;
   /** 需要打开工程（无工程时在列表中标注提示） */
   needsProject?: boolean;
@@ -168,7 +168,7 @@ export const MENU_STRUCTURE: MenuDef[] = [
     label: 'View',
     icon: 'eye',
     children: [
-      { label: 'Project', command: 'codeblocks.projectTree.focus' },
+      { label: 'Project', command: 'codeblocks.projectTree.focus', shortcut: 'Shift+F2' },
       { label: 'Symbols', command: 'codeblocks.symbols.focus' },
       { label: 'Analysis', command: 'codeblocks.analysis.focus' },
       { label: 'Build Log', command: 'codeblocks.buildLog.focus' },
@@ -191,10 +191,10 @@ export const MENU_STRUCTURE: MenuDef[] = [
       { label: 'Find Previous', command: 'editor.action.previousMatchFindAction' },
       SEP,
       { label: 'Replace…', command: 'editor.action.startFindReplaceAction' },
-      { label: 'Replace in Files…', command: 'workbench.action.replaceInFiles' },
+      { label: 'Replace in Files…', command: 'workbench.action.replaceInFiles', shortcut: 'Ctrl+Shift+R' },
       SEP,
       { label: 'Goto Line…', command: 'workbench.action.gotoLine' },
-      { label: 'Goto File…', command: 'workbench.action.quickOpen' },
+      { label: 'Goto File…', command: 'workbench.action.quickOpen', shortcut: 'Alt+G' },
       SEP,
       { label: 'TODO List', command: 'codeblocks.todoList' },
     ],
@@ -208,8 +208,8 @@ export const MENU_STRUCTURE: MenuDef[] = [
       {
         label: 'Project tree',
         children: [
-          { label: 'Move Project Up', command: 'codeblocks.moveProjectUp', needsProject: true },
-          { label: 'Move Project Down', command: 'codeblocks.moveProjectDown', needsProject: true },
+          { label: 'Move Project Up', command: 'codeblocks.moveProjectUp', shortcut: 'Ctrl+Shift+Up', needsProject: true },
+          { label: 'Move Project Down', command: 'codeblocks.moveProjectDown', shortcut: 'Ctrl+Shift+Down', needsProject: true },
           SEP,
           { label: 'Activate Prior Project', command: 'codeblocks.activatePriorProject', shortcut: 'Alt+F5', needsProject: true },
           { label: 'Activate Next Project', command: 'codeblocks.activateNextProject', shortcut: 'Alt+F6', needsProject: true },
@@ -245,8 +245,8 @@ export const MENU_STRUCTURE: MenuDef[] = [
       {
         label: 'Errors',
         children: [
-          { label: 'Previous Error', command: 'codeblocks.prevError', shortcut: 'Shift+F4' },
-          { label: 'Next Error', command: 'codeblocks.nextError', shortcut: 'F4' },
+          { label: 'Previous Error', command: 'codeblocks.prevError', shortcut: 'Shift+F4 / Alt+F1' },
+          { label: 'Next Error', command: 'codeblocks.nextError', shortcut: 'F4 / Alt+F2' },
           SEP,
           { label: 'Clear All Errors', command: 'codeblocks.clearErrors' },
         ],
