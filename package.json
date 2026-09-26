@@ -2,7 +2,7 @@
   "name": "codeblocks-vscode",
   "displayName": "Code::Blocks for VS Code",
   "description": "原生移植 Code::Blocks 核心功能到 VS Code：项目模型、构建引擎、编译器管理与调试引擎",
-  "version": "0.8.77-dev",
+  "version": "0.8.78-dev",
   "icon": "resources/icon.png",
   "publisher": "robinmaomao",
   "author": {
@@ -177,6 +177,46 @@
       {
         "command": "codeblocks.format",
         "title": "Code::Blocks: Format with AStyle"
+      },
+      {
+        "command": "codeblocks.insertHeaderGuard",
+        "title": "Code::Blocks: Insert Header Guard"
+      },
+      {
+        "command": "codeblocks.tidyComments",
+        "title": "Code::Blocks: Tidy Comments"
+      },
+      {
+        "command": "codeblocks.swapHeaderSource",
+        "title": "Code::Blocks: Swap Header / Source"
+      },
+      {
+        "command": "codeblocks.runTool",
+        "title": "Code::Blocks: Run Tool"
+      },
+      {
+        "command": "codeblocks.configureTools",
+        "title": "Code::Blocks: Configure Tools…"
+      },
+      {
+        "command": "codeblocks.showCompilerCommands",
+        "title": "Code::Blocks: Show Compiler Commands"
+      },
+      {
+        "command": "codeblocks.exportMakefile",
+        "title": "Code::Blocks: Export Makefile"
+      },
+      {
+        "command": "codeblocks.workspace.editDependencies",
+        "title": "Code::Blocks: Edit Workspace Dependencies"
+      },
+      {
+        "command": "codeblocks.importProject",
+        "title": "Code::Blocks: Import Project (Dev-C++ / VC6 / VS2010+)"
+      },
+      {
+        "command": "codeblocks.openDefaultConfig",
+        "title": "Code::Blocks: Open default.conf"
       },
       {
         "command": "codeblocks.moveProjectUp",
@@ -524,6 +564,28 @@
             "--indent=spaces=4"
           ],
           "description": "AStyle 格式化选项"
+        },
+        "codeblocks.editor.autoHeaderGuard": {
+          "type": "boolean",
+          "default": false,
+          "description": "新建空头文件（.h/.hpp/.hxx）时自动插入头文件保护宏（对齐 headerguard 插件；已有 #pragma once / #ifndef 保护的文件不处理）"
+        },
+        "codeblocks.tools": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["name", "command"],
+            "properties": {
+              "name": { "type": "string", "description": "工具名称（Tools 菜单与状态栏菜单中的显示名）" },
+              "command": { "type": "string", "description": "可执行文件路径或命令（支持别名宏与 Code::Blocks 宏）" },
+              "arguments": { "type": "string", "description": "参数字符串（引号感知分词；支持别名宏与 CB 宏）" },
+              "workingDirectory": { "type": "string", "description": "工作目录（缺省 = 活动工程目录；支持宏）" },
+              "env": { "type": "object", "additionalProperties": { "type": "string" }, "description": "附加环境变量" },
+              "output": { "type": "string", "enum": ["output", "terminal", "silent"], "default": "output", "description": "输出模式：output = 专用输出通道；terminal = 集成终端；silent = 无输出" }
+            }
+          },
+          "default": [],
+          "markdownDescription": "用户自定义工具（对齐 Code::Blocks Tools → Configure tools…）：在「Tools」菜单与状态栏菜单末尾列出，选中即运行。支持别名宏 `${file}` / `${fileDir}` / `${projectDir}` / `${projectName}` / `${workspaceFolder}` 与 Code::Blocks 宏 `$(VAR)`（如 `$(TARGET_OUTPUT_FILE)`、项目自定义变量 `$(var)`）。示例：`{ \"name\": \"反汇编\", \"command\": \"objdump\", \"arguments\": \"-d \\\"${file}\\\"\", \"output\": \"output\" }`"
         },
         "codeblocks.maxReportedErrors": {
           "type": "number",

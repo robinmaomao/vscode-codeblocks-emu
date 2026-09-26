@@ -218,7 +218,8 @@ export class ProjectParser {
       makeCommands: {},
       customVariables: {},
       files: [],
-      extensions: root.Extensions ?? null,
+      // <Project><Extensions>…（空元素 '' 归一为 null；此前误从根节点读取导致恒为 null，保存会丢扩展数据）
+      extensions: root.Project?.Extensions || null,
       rawProject: root.Project,
     };
 
@@ -241,7 +242,7 @@ export class ProjectParser {
       // 文件
       this.parseUnits(root.Project, project);
       // 项目自定义变量（<Extensions><codeblocks_project_custom_variables>）
-      this.parseProjectCustomVariables(root, project);
+      this.parseProjectCustomVariables(root.Project, project);
     }
 
     // 计算公共顶层路径并设置 relativeToCommonTopLevelPath（对应 CalculateCommonTopLevelPath）

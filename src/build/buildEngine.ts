@@ -19,7 +19,7 @@ import { replaceCbMacros, cbBuiltinVars } from '../compiler/cbMacros';
 import { buildLogPrefs, msg } from './logLang';
 import { BuildCancelHandle } from './cancelToken';
 import { decodeText } from '../tools/encoding';
-import { isExecutableTargetType, resolveExecutablePath } from './outputPath';
+import { isExecutableTargetType, resolveExecutablePath, executableCandidates } from './outputPath';
 import { applyResponseFile, compareFilesByWeight } from './commandLine';
 import { upperDrive, shortPathWin } from '../tools/pathCase';
 import { getWindowsSystemPath } from '../tools/windowsPath';
@@ -315,12 +315,12 @@ export class BuildEngine {
    * 供 clangd / cpptools 的 compile_commands.json 使用。
    * 返回标准 LSP compile_commands 条目：{ directory, command, file }。
    */
-  collectCompileCommands(targetTitle?: string): { directory: string; command: string; file: string }[] {
+  collectCompileCommands(targetTitle?: string): { directory: string; command: string; file: string; objectRel: string; targetTitle: string }[] {
     const targets = targetTitle
       ? this.project.buildTargets.filter((t) => t.title === targetTitle)
       : this.project.buildTargets;
 
-    const entries: { directory: string; command: string; file: string }[] = [];
+    const entries: { directory: string; command: string; file: string; objectRel: string; targetTitle: string }[] = [];
 
     for (const target of targets) {
       // 平台过滤（对齐 GenerateCommandLine:238：目标不支持当前平台 → 不生成编译命令）
@@ -358,11 +358,113 @@ export class BuildEngine {
           nativeSep: false,
         });
         if (command) {
-          entries.push({ directory: this.project.basePath, command, file: file.absolutePath });
+          entries.push({ directory: this.project.basePath, command, file: file.absolutePath, objectRel, targetTitle: target.title });
         }
       }
     }
     return entries;
+  }
+
+  /**
+   * 收集 Makefile 导出数据（B4：字面编译/链接命令 + 对象依赖；不执行、不做增量判断）。
+   * 编译单元与 buildTarget 循环使用同一 makeCompileUnit，链接/打包与同一套
+   * linkObjectRelative / linkObjectsPrependHack / computeStaticOutput 参数，保证与真实构建一致。
+   * CommandsOnly 目标（默认不编译）与平台不支持的目标跳过。
+   */
+  collectMakefileData(targetTitle?: string): {
+    targetTitle: string;
+    output: string;
+    compile: { object: string; source: string; command: string }[];
+    link?: { kind: 'link' | 'archive'; command: string; objects: string[] };
+  }[] {
+    const targets = targetTitle
+      ? this.project.buildTargets.filter((t) => t.title === targetTitle)
+      : this.project.buildTargets;
+    const result: {
+      targetTitle: string;
+      output: string;
+      compile: { object: string; source: string; command: string }[];
+      link?: { kind: 'link' | 'archive'; command: string; objects: string[] };
+    }[] = [];
+
+    for (const target of targets) {
+      if (!supportsCurrentPlatform(target.platforms)) continue;
+      if (target.targetType === TargetType.CommandsOnly && !this.compileCommandsOnlyTargets()) continue;
+      this.switchCompiler(target);
+      const generator = new CommandGenerator(this.project, this.compiler);
+      const files = target.files.length ? target.files : this.project.files;
+      const sortedFiles = [...files].sort(compareFilesByWeight);
+      const hasCpp = sortedFiles.some((f) => isCppSource(f.relativeFilename));
+
+      // 编译单元（与 buildTarget 1b 相同的过滤：compile=false / compilerVar 空）
+      const compile: { object: string; source: string; command: string }[] = [];
+      for (const file of sortedFiles) {
+        if (file.compile === false) continue;
+        if (!file.compilerVar) continue;
+        const made = this.makeCompileUnit(target, file, generator, hasCpp);
+        if (!made.unit) continue;
+        compile.push({
+          object: this.objectPathFor(target, file),
+          source: file.absolutePath,
+          command: made.unit.command,
+        });
+      }
+
+      // 链接对象集合（与 buildTarget 1a 一致）
+      const linkFiles: ProjectFile[] = [];
+      const resFiles: ProjectFile[] = [];
+      for (const file of sortedFiles) {
+        if (file.link === false) continue;
+        const ftL = fileTypeOf(file.relativeFilename);
+        if (!isLinkableFileType(ftL)) continue;
+        const prog = ftL === FileType.Resource
+          ? this.compiler.programs.WINDRES
+          : file.compilerVar === 'CPP' ? this.compiler.programs.CPP : this.compiler.programs.C;
+        if (!prog) continue;
+        if (ftL === FileType.Resource) resFiles.push(file);
+        else linkFiles.push(file);
+      }
+
+      let link: { kind: 'link' | 'archive'; command: string; objects: string[] } | undefined;
+      if (target.targetType !== TargetType.CommandsOnly && (linkFiles.length || resFiles.length)) {
+        const isOw = (target.compilerId || '').toLowerCase() === 'ow';
+        const allObjectsAbs = [...linkFiles, ...resFiles].map((f) => this.linkObjectAbs(target, f));
+        if (target.targetType === TargetType.StaticLib) {
+          const hack = generator.linkObjectsPrependHack();
+          const objects = linkFiles.map((f) => hack + quoteIfNeeded(this.linkObjectRelative(target, f)));
+          const objectsFlat = linkFiles.map((f) => hack + quoteIfNeeded(this.linkObjectRelativeFlat(target, f)));
+          const objectSep = isOw ? ' ' : this.compiler.switches.objectSeparator;
+          const cmd = generator.generate(CommandType.LinkStaticCmd, {
+            target, pf: null, file: '', object: objects.join(objectSep), flatObject: objectsFlat.join(objectSep), deps: '', hasCppFilesToLink: false,
+          });
+          if (cmd) link = { kind: 'archive', command: cmd, objects: allObjectsAbs };
+        } else {
+          const linkObjects = linkFiles.map((f) => quoteIfNeeded(this.linkObjectRelative(target, f)));
+          const resObjects = resFiles.map((f) => quoteIfNeeded(this.objectPathRelative(target, f)));
+          const linkObjectsFlat = linkFiles.map((f) => quoteIfNeeded(this.linkObjectRelativeFlat(target, f)));
+          const linkObjectStr = isOw
+            ? (linkObjects.length ? 'file ' : '') + linkObjects.join(' ')
+            : linkObjects.join(this.compiler.switches.objectSeparator);
+          const resObjectStr = isOw
+            ? resObjects.map((o) => 'option resource=' + o).join(' ')
+            : resObjects.join(this.compiler.switches.objectSeparator);
+          const cmd = generator.generate(this.linkCommandType(target), {
+            target, pf: null, file: '', object: linkObjectStr,
+            flatObject: linkObjectsFlat.join(isOw ? ' ' : this.compiler.switches.objectSeparator),
+            deps: resObjectStr, hasCppFilesToLink: hasCpp,
+          });
+          if (cmd) link = { kind: 'link', command: cmd, objects: allObjectsAbs };
+        }
+      }
+
+      result.push({
+        targetTitle: target.title,
+        output: this.expectedOutputFile(target),
+        compile,
+        link,
+      });
+    }
+    return result;
   }
 
   /**
@@ -1129,6 +1231,24 @@ export class BuildEngine {
     // 扫描 #include 依赖，头文件更新也触发重编译（对应 depsScanForHeaders + depsGetNewest）
     const newestDep = this.depsNewestMtime(sourceFile, includeDirs, depsCache);
     return newestDep <= objStat.mtimeMs;
+  }
+
+  /**
+   * 预期输出文件路径（Makefile 导出用；B4）：
+   * 与 resolveOutputFile 不同，不做存在性回退，而是按平台规则预判真实产物——
+   * Windows 下 exe 类目标即使扩展名写了 app（MinGW 链接器实际产出 app.exe）也返回 app.exe，
+   * 否则 make 目标（无扩展名）永不满足、每次全量重链接。
+   */
+  private expectedOutputFile(target: BuildTarget): string {
+    if (target.targetType === TargetType.StaticLib) {
+      return this.resolveOutputFile(target);
+    }
+    const out = this.expandedOutputFilename(target);
+    const exeType = isExecutableTargetType(target.targetType);
+    if (process.platform === 'win32' && exeType && !out.toLowerCase().endsWith('.exe')) {
+      return executableCandidates(this.project.basePath, out, process.platform, exeType)[1];
+    }
+    return executableCandidates(this.project.basePath, out, process.platform, exeType)[0];
   }
 
   /**

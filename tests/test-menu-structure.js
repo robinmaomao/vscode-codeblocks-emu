@@ -52,6 +52,14 @@ const builtinWhitelist = new Set([
   'editor.action.selectAll',
   'editor.action.addSelectionToNextFindMatch',
   'editor.action.jumpToBracket',
+  'workbench.action.editor.changeEncoding',
+  'workbench.action.editor.changeEOL',
+  'workbench.action.editor.changeLanguageMode',
+  'editor.action.triggerParameterHints',
+  'editor.action.nextSelectionMatchFindAction',
+  'editor.action.previousSelectionMatchFindAction',
+  'workbench.action.editor.previousChange',
+  'workbench.action.editor.nextChange',
   // View
   'workbench.actions.view.problems',
   'workbench.action.terminal.toggleTerminal',
@@ -164,12 +172,16 @@ const expectCommands = [
   'codeblocks.projectNotes', 'codeblocks.setProgramArguments', 'codeblocks.showGlobalVariables',
   'codeblocks.clearBacktickCache', 'codeblocks.buildWorkspace', 'codeblocks.cleanWorkspace',
   'codeblocks.rebuildWorkspace', 'codeblocks.build.stop', 'codeblocks.generateCompileCommands',
+  'codeblocks.swapHeaderSource', 'codeblocks.insertHeaderGuard', 'codeblocks.tidyComments',
+  'codeblocks.configureTools', 'codeblocks.showCompilerCommands', 'codeblocks.exportMakefile',
+  'codeblocks.workspace.editDependencies', 'codeblocks.importProject',
+  'codeblocks.openDefaultConfig',
 ];
 const missing = expectCommands.filter((c) => !all.some((it) => it.command === c));
 check('第四十四轮关键命令均在菜单中', missing.length === 0, missing, '无缺失');
 
-// 动态区命令（Recent Projects 二级列表 / Workspace 二级列表）：不属于静态结构，但必须在 package.json 贡献
-const dynamicCommands = ['codeblocks.openRecentProject', 'codeblocks.clearRecentProjects'];
+// 动态区命令（Recent Projects 二级列表 / Workspace 二级列表 / Tools 自定义工具）：不属于静态结构，但必须在 package.json 贡献
+const dynamicCommands = ['codeblocks.openRecentProject', 'codeblocks.clearRecentProjects', 'codeblocks.runTool'];
 const dynMissing = dynamicCommands.filter((c) => !contributed.has(c));
 check('动态区命令（Recent/Clear）已贡献到 package.json', dynMissing.length === 0, dynMissing, '无缺失');
 

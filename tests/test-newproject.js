@@ -17,6 +17,15 @@ for (const tpl of PROJECT_TEMPLATES) {
   const ok = re.title === 'demo' && re.buildTargets.length === 2
     && re.buildTargets.every((t) => t.targetType === tpl.targetType)
     && re.files.length === tpl.skeleton.length;
+  // 模板附加选项（C6）：链接库/目录原样进入目标
+  if (ok && tpl.linkLibs && JSON.stringify(re.buildTargets[0].linkLibs) !== JSON.stringify(tpl.linkLibs)) {
+    console.log(`FAIL ${tpl.label}: linkLibs=${JSON.stringify(re.buildTargets[0].linkLibs)} want=${JSON.stringify(tpl.linkLibs)}`);
+    failed = true;
+  }
+  if (ok && tpl.includeDirs && re.buildTargets[0].includeDirs.length !== tpl.includeDirs.length) {
+    console.log(`FAIL ${tpl.label}: includeDirs=${JSON.stringify(re.buildTargets[0].includeDirs)}`);
+    failed = true;
+  }
   console.log(`${tpl.label}: ${ok ? 'OK' : 'FAIL'}（targets=${re.buildTargets.length}, files=${re.files.length}）`);
   if (!ok) { failed = true; console.log(xml); }
   fs.unlinkSync(tmp);

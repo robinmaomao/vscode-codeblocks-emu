@@ -11,11 +11,13 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import { CHILD_ICONS, HOVER_GROUPS, MENU_STRUCTURE, MenuDef, MenuItemDef, findMenuItem } from './menuStructure';
 
-/** 动态区数据（最近工程 / 工作区构建顺序 / 是否已打开工程） */
+/** 动态区数据（最近工程 / 工作区构建顺序 / 是否已打开工程 / 自定义工具） */
 export interface MenuDynamicData {
   recents: { label: string; file: string }[];
   order: { label: string; file: string }[];
   hasProjects: boolean;
+  /** 用户自定义工具（codeblocks.tools；Tools 菜单末尾动态注入，index = 设置数组下标） */
+  tools: { label: string; index: number }[];
 }
 
 
@@ -112,9 +114,14 @@ export function registerStatusBarMenu(
         return;
       }
 
-      // 第二级起：菜单命令（支持子菜单继续下钻）
+      // 第二级起：菜单命令（支持子菜单继续下钻；Tools 菜单末尾注入自定义工具）
       if (picked.menu) {
-        await showMenuLevel(picked.menu.children, `${picked.menu.label} — 选择命令`, dyn);
+        await showMenuLevel(
+          picked.menu.children,
+          `${picked.menu.label} — 选择命令`,
+          dyn,
+          picked.menu.label === 'Tools' ? dyn.tools : undefined,
+        );
       }
     }),
   );
@@ -152,7 +159,12 @@ async function showWorkspacePick(dyn: MenuDynamicData): Promise<void> {
  * 菜单层级渲染：叶子项执行命令，子菜单项继续下钻（与 CB 菜单层级一致）。
  * description 依次展示：子菜单箭头 / 快捷键 / （无工程）提示。
  */
-async function showMenuLevel(children: MenuItemDef[], placeHolder: string, dyn: MenuDynamicData): Promise<void> {
+async function showMenuLevel(
+  children: MenuItemDef[],
+  placeHolder: string,
+  dyn: MenuDynamicData,
+  dynamicTools?: { label: string; index: number }[],
+): Promise<void> {
   const items: (vscode.QuickPickItem & { def?: MenuItemDef })[] = [];
   for (const c of children) {
     if (c.separator) {
@@ -171,6 +183,17 @@ async function showMenuLevel(children: MenuItemDef[], placeHolder: string, dyn: 
       iconPath: icon ? new vscode.ThemeIcon(icon) : undefined,
       def: c,
     });
+  }
+  if (dynamicTools?.length) {
+    items.push({ label: '', kind: vscode.QuickPickItemKind.Separator });
+    for (const t of dynamicTools) {
+      items.push({
+        label: t.label,
+        description: '自定义工具',
+        iconPath: new vscode.ThemeIcon('play'),
+        def: { label: t.label, command: 'codeblocks.runTool', args: [t.index] },
+      });
+    }
   }
   const sel = await vscode.window.showQuickPick(items, { placeHolder });
   if (!sel?.def) return;
