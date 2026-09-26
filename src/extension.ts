@@ -19,7 +19,7 @@ import { detectAllCompilers, DetectedCompiler } from './compiler/detector';
 import { CompilerOptionsPanel } from './ui/compilerOptionsPanel';
 import { ProjectPropertiesPanel, TargetEditData, FileEditData, BuildOptionsEditData, SearchDirsEditData, ProjectSettingsEditData, BuildScriptsEditData, NotesEditData, VirtualTargetEditData } from './ui/projectPropertiesPanel';
 import { ProjectTreeProvider } from './ui/projectTreeProvider';
-import { MenuTreeProvider } from './ui/menuTreeProvider';
+import { registerStatusBarMenu, MenuDynamicData } from './ui/statusBarMenu';
 import { BuildLogTreeProvider, BuildLogProject, BuildLogDiagnostic } from './ui/buildLogTreeProvider';
 import { SymbolTreeProvider } from './ui/symbolTreeProvider';
 import { BuildEngine } from './build/buildEngine';
@@ -51,7 +51,6 @@ let compilerResourcesDir = '';
 let codeBlocksConfig: CodeBlocksConfig | undefined;
 let projectTreeProvider: ProjectTreeProvider | undefined;
 let projectTreeView: vscode.TreeView<any> | undefined;
-let menuTreeProvider: MenuTreeProvider | undefined;
 let buildLogTreeProvider: BuildLogTreeProvider | undefined;
 let symbolTreeProvider: SymbolTreeProvider | undefined;
 let extContext: vscode.ExtensionContext | undefined;
@@ -72,12 +71,8 @@ let targetStatusBar: vscode.StatusBarItem | undefined;
 let selectedTargets = new Map<string, string>();
 /** 各工程构建目标记忆的 workspaceState key */
 const SELECTED_TARGETS_KEY = 'codeblocks.selectedTargets';
-/** 底部状态栏：增量编译 */
+/** 底部状态栏：构建（Build/Rebuild/Build Workspace/Rebuild Workspace 整合为单项） */
 let buildStatusBar: vscode.StatusBarItem | undefined;
-/** 底部状态栏：全量编译 */
-let rebuildStatusBar: vscode.StatusBarItem | undefined;
-let buildWorkspaceStatusBar: vscode.StatusBarItem | undefined;
-let rebuildWorkspaceStatusBar: vscode.StatusBarItem | undefined;
 /** 底部状态栏：编译器选择 */
 let compilerStatusBar: vscode.StatusBarItem | undefined;
 /** 底部状态栏：检测到未打开的 Code::Blocks 项目入口 */
@@ -148,6 +143,16 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     }),
   );
 
+  // Project 标题栏按钮（设置 codeblocks.ui.projectToolbar；未选中的自动进入 ⋯ 溢出菜单）
+  applyProjectToolbarContext();
+  context.subscriptions.push(
+    vscode.workspace.onDidChangeConfiguration((e) => {
+      if (e.affectsConfiguration('codeblocks.ui.projectToolbar')) {
+        applyProjectToolbarContext();
+      }
+    }),
+  );
+
   // 点击工程树任意节点（项目/文件夹/文件）时，切换活动工程为该节点所属工程；
   // 共享文件点哪个工程子树就切哪个（每个节点自带所属 project）
   projectTreeView.onDidChangeSelection((e) => {
@@ -174,13 +179,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   });
   context.subscriptions.push(symbolsTreeView);
 
-  // 注册菜单树视图（File/Edit/View/Build 等，模拟 Code::Blocks 菜单栏）
-  menuTreeProvider = new MenuTreeProvider();
-  context.subscriptions.push(
-    vscode.window.registerTreeDataProvider('codeblocks.menu', menuTreeProvider),
-  );
-  // 初始渲染动态区（最近工程 + 工作区构建顺序）
-  updateMenuDynamicSections();
+  // 状态栏菜单（Code::Blocks 菜单栏移植到状态栏最左侧；两级 QuickPick）
+  context.subscriptions.push(registerStatusBarMenu(context, getMenuDynamicData));
 
   // 视图布局：升级/首次安装后一次性应用默认排布（Build Log → 底部 Panel；侧栏 Menu→Project→Symbols）。
   // 应用后由 VS Code 原生持久化用户调整（拖动/分割/大小），本扩展不再干预。
@@ -197,7 +197,6 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       const panelId = 'workbench.view.extension.codeblocks-buildPanel';
       // 顺序即最终排列：每次 move 追加到目标容器末尾
       await vscode.commands.executeCommand('vscode.moveViews', { viewIds: ['codeblocks.buildLog'], destinationId: panelId });
-      await vscode.commands.executeCommand('vscode.moveViews', { viewIds: ['codeblocks.menu'], destinationId: sidebarId });
       await vscode.commands.executeCommand('vscode.moveViews', { viewIds: ['codeblocks.projectTree'], destinationId: sidebarId });
       await vscode.commands.executeCommand('vscode.moveViews', { viewIds: ['codeblocks.symbols'], destinationId: sidebarId });
       if (restoreEditorFocus) {
@@ -206,7 +205,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
           void vscode.commands.executeCommand('workbench.action.focusActiveEditorGroup');
         }, 300);
       }
-      outputChannel.appendLine('[视图布局] 已应用默认布局（Build Log → 底部 Panel；侧栏 Menu→Project→Symbols）');
+      outputChannel.appendLine('[视图布局] 已应用默认布局（Build Log → 底部 Panel；侧栏 Project→Symbols）');
       return true;
     } catch (e) {
       outputChannel.appendLine(`[视图布局] 应用失败（本次会话将重试）: ${e instanceof Error ? e.message : String(e)}`);
@@ -324,66 +323,32 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   context.subscriptions.push(targetStatusBar);
   updateTargetStatusBar();
 
-  // 底部状态栏：增量编译
+  // 底部状态栏：构建（Build/Rebuild/Build Workspace/Rebuild Workspace 整合为单项）
+  // 空闲：点击弹构建菜单 + 悬停就地链接；构建中：spinner + 秒数，点击（或悬停链接）停止
   buildStatusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 90);
   buildStatusBar.text = '$(package) Build';
-  buildStatusBar.command = 'codeblocks.build';
-  buildStatusBar.tooltip = '增量编译（Ctrl+F9）';
+  buildStatusBar.command = 'codeblocks.build.menu';
+  buildStatusBar.tooltip = buildStatusHoverTooltip();
   context.subscriptions.push(buildStatusBar);
 
-  // 构建中旋转动画（buildInProgress 时 Build 项变 spinner + 点击变停止构建）
+  // 构建中旋转动画 + 实时秒数（buildInProgress 时 Build 项变 spinner + 点击变停止构建）
+  let buildingSince = 0;
   const spinTimer = setInterval(() => {
       if (!buildStatusBar) return;
       if (buildInProgress) {
-        buildStatusBar.text = '$(sync~spin) Building...';
-        buildStatusBar.tooltip = '构建进行中（点击停止）';
+        if (!buildingSince) buildingSince = Date.now();
+        const secs = Math.floor((Date.now() - buildingSince) / 1000);
+        buildStatusBar.text = `$(sync~spin) Building… (${secs}s)`;
+        buildStatusBar.tooltip = buildStopHoverTooltip(secs);
         buildStatusBar.command = 'codeblocks.build.stop';
       } else {
+        buildingSince = 0;
         buildStatusBar.text = '$(package) Build';
-        buildStatusBar.tooltip = '增量编译（Ctrl+F9）';
-        buildStatusBar.command = 'codeblocks.build';
+        buildStatusBar.tooltip = buildStatusHoverTooltip();
+        buildStatusBar.command = 'codeblocks.build.menu';
       }
     }, 250);
   context.subscriptions.push({ dispose: () => clearInterval(spinTimer) });
-
-  // 底部状态栏：全量编译
-  rebuildStatusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 80);
-  rebuildStatusBar.text = '$(sync) Rebuild';
-  rebuildStatusBar.command = 'codeblocks.rebuild';
-  rebuildStatusBar.tooltip = '全量编译（Ctrl+F11）';
-  context.subscriptions.push(rebuildStatusBar);
-
-  // 底部状态栏：构建工作区 / 重建工作区（设置 codeblocks.ui.workspaceStatusBar 控制显隐）
-  buildWorkspaceStatusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 78);
-  buildWorkspaceStatusBar.text = '$(multiple-windows) Build WS';
-  buildWorkspaceStatusBar.command = 'codeblocks.buildWorkspace';
-  buildWorkspaceStatusBar.tooltip = '构建工作区（全部工程增量编译）';
-  context.subscriptions.push(buildWorkspaceStatusBar);
-
-  rebuildWorkspaceStatusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 76);
-  rebuildWorkspaceStatusBar.text = '$(multiple-windows) Rebuild WS';
-  rebuildWorkspaceStatusBar.command = 'codeblocks.rebuildWorkspace';
-  rebuildWorkspaceStatusBar.tooltip = '重建工作区（全部工程 Clean + Build，会弹确认）';
-  context.subscriptions.push(rebuildWorkspaceStatusBar);
-
-  const updateWorkspaceStatusBars = (): void => {
-    const enabled = vscode.workspace.getConfiguration('codeblocks').get<boolean>('ui.workspaceStatusBar', true);
-    if (enabled) {
-      buildWorkspaceStatusBar?.show();
-      rebuildWorkspaceStatusBar?.show();
-    } else {
-      buildWorkspaceStatusBar?.hide();
-      rebuildWorkspaceStatusBar?.hide();
-    }
-  };
-  updateWorkspaceStatusBars();
-  context.subscriptions.push(
-    vscode.workspace.onDidChangeConfiguration((e) => {
-      if (e.affectsConfiguration('codeblocks.ui.workspaceStatusBar')) {
-        updateWorkspaceStatusBars();
-      }
-    }),
-  );
 
   // 底部状态栏：编译器选择
   compilerStatusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 70);
@@ -484,6 +449,29 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       const filename = resolveProjectFilename(node);
       if (!filename) return;
       await buildSingleProject(filename, true);
+    }),
+  );
+
+  // 清理单个项目（项目节点行内按钮 / 右键）：语义同 clean()，作用于点击的工程
+  context.subscriptions.push(
+    vscode.commands.registerCommand('codeblocks.cleanProject', async (node?: any) => {
+      const filename = resolveProjectFilename(node);
+      if (!filename) return;
+      const project = openProjects.find((p) => p.filename === filename);
+      if (!project) return;
+      // 对齐 OnClean：清理前确认
+      if (!(await confirmClean(`清理 "${project.title}" 的选中目标`))) return;
+      // 对齐 DoBuild：清理前须先停止调试会话
+      if (!(await stopDebuggerIfRunning())) return;
+      await saveAllBeforeBuild();
+      outputChannel.show(true);
+      const targetTitle = getSelectedTarget(project) ?? project.buildTargets.find((t) => supportsCurrentPlatform(t.platforms))?.title;
+      if (!targetTitle) {
+        vscode.window.showWarningMessage('项目没有构建目标');
+        return;
+      }
+      await cleanTargets(project, targetTitle);
+      outputChannel.info('[Code::Blocks] 清理完成');
     }),
   );
 
@@ -614,6 +602,26 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         return;
       }
       currentBuildCancel.cancel();
+    }),
+  );
+
+  // 构建菜单（状态栏 Build 项点击）：构建中 = 停止构建；空闲 = 四项 QuickPick
+  context.subscriptions.push(
+    vscode.commands.registerCommand('codeblocks.build.menu', async () => {
+      if (buildInProgress) {
+        await vscode.commands.executeCommand('codeblocks.build.stop');
+        return;
+      }
+      const picked = await vscode.window.showQuickPick(
+        [
+          { label: '$(package) Build', detail: '活动项目增量编译（Ctrl+F9）', target: 'codeblocks.build' },
+          { label: '$(sync) Rebuild', detail: '活动项目全量编译（Ctrl+F11）', target: 'codeblocks.rebuild' },
+          { label: '$(multiple-windows) Build Workspace', detail: '全部工程增量编译', target: 'codeblocks.buildWorkspace' },
+          { label: '$(multiple-windows) Rebuild Workspace', detail: '全部工程 Clean + Build（会弹确认）', target: 'codeblocks.rebuildWorkspace' },
+        ],
+        { placeHolder: '构建菜单 — 选择操作' },
+      );
+      if (picked) await vscode.commands.executeCommand(picked.target);
     }),
   );
 
@@ -1156,9 +1164,8 @@ async function openProject(filename: string): Promise<void> {
     // 建立 生成器 → 生成文件 关系（对齐 cbProject::AddFile 的 GenFilesHackMap，来自编译器 XML gen 属性）
     applyGeneratedFiles(project, getCompiler);
     openProjects.push(project);
-    // 最近工程记录 + 菜单动态区刷新（E1/E2）
+    // 最近工程记录（E1；状态栏菜单按需拉取动态区）
     recordRecentProject(filename);
-    updateMenuDynamicSections();
     if (!activeProject) {
       // 优先恢复上次持久化的活动工程；否则默认第一个打开的工程
       const persisted = extContext?.workspaceState.get<string>('codeblocks.activeProject', '');
@@ -1625,7 +1632,6 @@ function applyPersistedOrder(): void {
   // 剩余（未在持久化顺序中的新项目）追加到末尾
   for (const p of byFilename.values()) reordered.push(p);
   openProjects = reordered;
-  updateMenuDynamicSections();
   projectTreeProvider?.setProjects(openProjects);
 }
 
@@ -2374,6 +2380,46 @@ function updateCompilerStatusBar(): void {
   }
 }
 
+/** Build 项悬停就地菜单（空闲态：四项构建命令链接） */
+function buildStatusHoverTooltip(): vscode.MarkdownString {
+  const md = new vscode.MarkdownString(undefined, true);
+  md.isTrusted = true;
+  const l = (icon: string, label: string, command: string): string => `[${icon} ${label}](command:${command})`;
+  md.value = [
+    '**构建菜单**',
+    [l('$(package)', 'Build', 'codeblocks.build'), l('$(sync)', 'Rebuild', 'codeblocks.rebuild')].join('　'),
+    [l('$(multiple-windows)', 'Build Workspace', 'codeblocks.buildWorkspace'), l('$(multiple-windows)', 'Rebuild Workspace', 'codeblocks.rebuildWorkspace')].join('　'),
+    '点击打开构建菜单（构建中点击 = 停止构建）',
+  ].join('\n\n');
+  return md;
+}
+
+/** Build 项悬停菜单（构建中：停止构建链接 + 实时秒数） */
+function buildStopHoverTooltip(seconds: number): vscode.MarkdownString {
+  const md = new vscode.MarkdownString(undefined, true);
+  md.isTrusted = true;
+  md.value = `**构建进行中（${seconds}s）**\n\n[$(debug-stop) 停止构建](command:codeblocks.build.stop)`;
+  return md;
+}
+
+/** Project 标题栏可配置按钮清单（与 package.json view/title 的 codeblocks.tb.* 上下文键对应） */
+const PROJECT_TOOLBAR_ITEMS = [
+  'newProject', 'openProject', 'build', 'rebuild', 'clean', 'run', 'debug',
+  'buildWorkspace', 'rebuildWorkspace', 'cleanWorkspace',
+  'compilerOptions', 'projectProperties', 'codeStats',
+];
+/** 默认常驻按钮（与设置默认值一致） */
+const PROJECT_TOOLBAR_DEFAULT = ['buildWorkspace', 'rebuildWorkspace', 'cleanWorkspace'];
+
+/** 依据设置刷新 Project 标题栏按钮上下文键（选中=标题栏显示；未选中=⋯ 溢出菜单） */
+function applyProjectToolbarContext(): void {
+  const cfg = vscode.workspace.getConfiguration('codeblocks').get<string[]>('ui.projectToolbar', PROJECT_TOOLBAR_DEFAULT) ?? PROJECT_TOOLBAR_DEFAULT;
+  const enabled = new Set(cfg.map((s) => String(s).replace(/^codeblocks\./, '')));
+  for (const name of PROJECT_TOOLBAR_ITEMS) {
+    void vscode.commands.executeCommand('setContext', `codeblocks.tb.${name}`, enabled.has(name));
+  }
+}
+
 /** 统一刷新底部状态栏所有按钮的可见性与文本（无工程时仅显示 Code::Blocks 入口） */
 function refreshStatusBars(): void {
   updateTargetStatusBar();
@@ -2381,10 +2427,6 @@ function refreshStatusBars(): void {
   if (buildStatusBar) {
     if (openProjects.length > 0) buildStatusBar.show();
     else buildStatusBar.hide();
-  }
-  if (rebuildStatusBar) {
-    if (openProjects.length > 0) rebuildStatusBar.show();
-    else rebuildStatusBar.hide();
   }
   updateCbpStatusBar();
 }
@@ -3014,20 +3056,21 @@ function recordRecentProject(filename: string): void {
   } catch { /* 非关键 */ }
 }
 
-/** 刷新 Menu 视图动态区（最近工程 + 工作区拓扑构建顺序，E1/E2） */
-function updateMenuDynamicSections(): void {
-  if (!menuTreeProvider) return;
+/** 菜单动态区数据（最近工程 + 工作区拓扑构建顺序，E1/E2）——供状态栏菜单按需拉取 */
+function getMenuDynamicData(): MenuDynamicData {
   try {
     const recents = (extContext?.globalState.get<string[]>('codeblocks.recentProjects', []) ?? [])
       .filter((f) => fs.existsSync(f));
-    menuTreeProvider.setDynamic({
+    return {
       recents: recents.map((f) => ({ label: path.basename(f), file: f })),
       order: topologicalBuildOrder(openProjects).map((p, i) => ({
         label: `${i + 1}. ${path.basename(path.dirname(p.filename)) || p.title}`,
         file: p.filename,
       })),
-    });
-  } catch { /* 非关键 */ }
+    };
+  } catch {
+    return { recents: [], order: [] };
+  }
 }
 
 /** 构建结束：汇总所有项目摘要，写入 Build Log 树视图 */

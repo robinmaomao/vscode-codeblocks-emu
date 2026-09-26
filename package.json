@@ -2,7 +2,7 @@
   "name": "codeblocks-vscode",
   "displayName": "Code::Blocks for VS Code",
   "description": "原生移植 Code::Blocks 核心功能到 VS Code：项目模型、构建引擎、编译器管理与调试引擎",
-  "version": "0.8.63-dev",
+  "version": "0.8.67-dev",
   "icon": "resources/icon.png",
   "publisher": "robinmaomao",
   "author": {
@@ -191,6 +191,11 @@
         "icon": "$(sync)"
       },
       {
+        "command": "codeblocks.cleanProject",
+        "title": "Clean",
+        "icon": "$(trash)"
+      },
+      {
         "command": "codeblocks.addFile",
         "title": "Add Files...",
         "icon": "$(add)"
@@ -307,10 +312,32 @@
           "default": false,
           "description": "构建成功静默模式：不弹成功 toast，仅输出日志与状态栏诊断徽标"
         },
-        "codeblocks.ui.workspaceStatusBar": {
-          "type": "boolean",
-          "default": true,
-          "description": "状态栏显示 Build WS / Rebuild WS（构建工作区 / 重建工作区）按钮"
+        "codeblocks.ui.projectToolbar": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "newProject",
+              "openProject",
+              "build",
+              "rebuild",
+              "clean",
+              "run",
+              "debug",
+              "buildWorkspace",
+              "rebuildWorkspace",
+              "cleanWorkspace",
+              "compilerOptions",
+              "projectProperties",
+              "codeStats"
+            ]
+          },
+          "default": [
+            "buildWorkspace",
+            "rebuildWorkspace",
+            "cleanWorkspace"
+          ],
+          "markdownDescription": "Project 视图标题栏常驻按钮（当选中的按钮在标题栏显示时，不再出现在 ⋯ 溢出菜单）。可选值：`newProject` / `openProject` / `build` / `rebuild` / `clean` / `run` / `debug` / `buildWorkspace` / `rebuildWorkspace` / `cleanWorkspace` / `compilerOptions` / `projectProperties` / `codeStats`"
         },
         "codeblocks.compilerPrograms": {
           "type": "object",
@@ -400,12 +427,6 @@
     "views": {
       "codeblocks": [
         {
-          "id": "codeblocks.menu",
-          "name": "Menu",
-          "icon": "resources/menu.svg",
-          "initialSize": 7
-        },
-        {
           "id": "codeblocks.projectTree",
           "name": "Project",
           "icon": "resources/project.svg",
@@ -446,68 +467,118 @@
       "view/title": [
         {
           "command": "codeblocks.newProject",
-          "when": "view == codeblocks.projectTree",
+          "when": "view == codeblocks.projectTree && codeblocks.tb.newProject",
           "group": "navigation@1"
         },
         {
           "command": "codeblocks.openProject",
-          "when": "view == codeblocks.projectTree",
+          "when": "view == codeblocks.projectTree && codeblocks.tb.openProject",
           "group": "navigation@2"
         },
         {
-          "command": "codeblocks.compilerOptions",
-          "when": "view == codeblocks.projectTree",
+          "command": "codeblocks.build",
+          "when": "view == codeblocks.projectTree && codeblocks.tb.build",
           "group": "navigation@3"
         },
         {
-          "command": "codeblocks.projectProperties",
-          "when": "view == codeblocks.projectTree",
+          "command": "codeblocks.rebuild",
+          "when": "view == codeblocks.projectTree && codeblocks.tb.rebuild",
           "group": "navigation@4"
         },
         {
-          "command": "codeblocks.build",
-          "when": "view == codeblocks.projectTree",
+          "command": "codeblocks.clean",
+          "when": "view == codeblocks.projectTree && codeblocks.tb.clean",
           "group": "navigation@5"
         },
         {
-          "command": "codeblocks.rebuild",
-          "when": "view == codeblocks.projectTree",
+          "command": "codeblocks.run",
+          "when": "view == codeblocks.projectTree && codeblocks.tb.run",
           "group": "navigation@6"
         },
         {
-          "command": "codeblocks.run",
-          "when": "view == codeblocks.projectTree",
+          "command": "codeblocks.debug",
+          "when": "view == codeblocks.projectTree && codeblocks.tb.debug",
           "group": "navigation@7"
         },
         {
-          "command": "codeblocks.debug",
-          "when": "view == codeblocks.projectTree",
+          "command": "codeblocks.buildWorkspace",
+          "when": "view == codeblocks.projectTree && codeblocks.tb.buildWorkspace",
           "group": "navigation@8"
         },
         {
-          "command": "codeblocks.clean",
-          "when": "view == codeblocks.projectTree",
+          "command": "codeblocks.rebuildWorkspace",
+          "when": "view == codeblocks.projectTree && codeblocks.tb.rebuildWorkspace",
           "group": "navigation@9"
         },
         {
           "command": "codeblocks.cleanWorkspace",
-          "when": "view == codeblocks.projectTree",
+          "when": "view == codeblocks.projectTree && codeblocks.tb.cleanWorkspace",
           "group": "navigation@10"
         },
         {
-          "command": "codeblocks.rebuildWorkspace",
-          "when": "view == codeblocks.projectTree",
+          "command": "codeblocks.compilerOptions",
+          "when": "view == codeblocks.projectTree && codeblocks.tb.compilerOptions",
           "group": "navigation@11"
         },
         {
-          "command": "codeblocks.buildWorkspace",
-          "when": "view == codeblocks.projectTree",
+          "command": "codeblocks.projectProperties",
+          "when": "view == codeblocks.projectTree && codeblocks.tb.projectProperties",
           "group": "navigation@12"
         },
         {
           "command": "codeblocks.codeStats",
-          "when": "view == codeblocks.projectTree",
+          "when": "view == codeblocks.projectTree && codeblocks.tb.codeStats",
           "group": "navigation@13"
+        },
+        {
+          "command": "codeblocks.newProject",
+          "when": "view == codeblocks.projectTree && !codeblocks.tb.newProject",
+          "group": "0_open@1"
+        },
+        {
+          "command": "codeblocks.openProject",
+          "when": "view == codeblocks.projectTree && !codeblocks.tb.openProject",
+          "group": "0_open@2"
+        },
+        {
+          "command": "codeblocks.build",
+          "when": "view == codeblocks.projectTree && !codeblocks.tb.build",
+          "group": "1_build@1"
+        },
+        {
+          "command": "codeblocks.rebuild",
+          "when": "view == codeblocks.projectTree && !codeblocks.tb.rebuild",
+          "group": "1_build@2"
+        },
+        {
+          "command": "codeblocks.clean",
+          "when": "view == codeblocks.projectTree && !codeblocks.tb.clean",
+          "group": "1_build@3"
+        },
+        {
+          "command": "codeblocks.run",
+          "when": "view == codeblocks.projectTree && !codeblocks.tb.run",
+          "group": "2_run@1"
+        },
+        {
+          "command": "codeblocks.debug",
+          "when": "view == codeblocks.projectTree && !codeblocks.tb.debug",
+          "group": "2_run@2"
+        },
+        {
+          "command": "codeblocks.compilerOptions",
+          "when": "view == codeblocks.projectTree && !codeblocks.tb.compilerOptions",
+          "group": "3_project@1"
+        },
+        {
+          "command": "codeblocks.projectProperties",
+          "when": "view == codeblocks.projectTree && !codeblocks.tb.projectProperties",
+          "group": "3_project@2"
+        },
+        {
+          "command": "codeblocks.codeStats",
+          "when": "view == codeblocks.projectTree && !codeblocks.tb.codeStats",
+          "group": "4_tools@1"
         },
         {
           "command": "codeblocks.buildLog.toggleErrorsOnly",
@@ -535,6 +606,26 @@
           "command": "codeblocks.selectProjectTarget",
           "when": "view == codeblocks.projectTree && viewItem == project",
           "group": "1_project@1"
+        },
+        {
+          "command": "codeblocks.buildProject",
+          "when": "view == codeblocks.projectTree && viewItem == project",
+          "group": "inline@1"
+        },
+        {
+          "command": "codeblocks.rebuildProject",
+          "when": "view == codeblocks.projectTree && viewItem == project",
+          "group": "inline@2"
+        },
+        {
+          "command": "codeblocks.cleanProject",
+          "when": "view == codeblocks.projectTree && viewItem == project",
+          "group": "inline@3"
+        },
+        {
+          "command": "codeblocks.projectProperties",
+          "when": "view == codeblocks.projectTree && viewItem == project",
+          "group": "inline@4"
         },
         {
           "command": "codeblocks.projectProperties",
@@ -565,6 +656,11 @@
           "command": "codeblocks.rebuildProject",
           "when": "view == codeblocks.projectTree && viewItem == project",
           "group": "2_build@2"
+        },
+        {
+          "command": "codeblocks.cleanProject",
+          "when": "view == codeblocks.projectTree && viewItem == project",
+          "group": "2_build@3"
         },
         {
           "command": "codeblocks.addFile",
