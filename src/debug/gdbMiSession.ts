@@ -58,9 +58,9 @@ export class GdbMiSession {
   start(opts: GdbOptions): Promise<void> {
     return new Promise((resolve, reject) => {
       // 第五十轮修复：程序/参数**不**作为命令行位置参数传入 —— MinGW GDB（已实证）会把含空格的
-      // 路径按空格二次切分（E:\Work_Share\VSCode 与 Workstation\...\hello.exe 两段），
-      // 改由适配器会话建立后用 MI 注入：-file-exec-and-symbols / -exec-arguments。
-      const args = ['-i=mi', '--quiet'];
+      // 路径按空格二次切分；改由适配器会话建立后用 MI 注入：-file-exec-and-symbols / -exec-arguments。
+      // R5：opts.args = 用户附加参数（对齐 CB debugger settings user arguments）。
+      const args = ['-i=mi', '--quiet', ...(opts.args ?? [])];
 
       this.proc = spawn(opts.gdbPath, args, {
         cwd: opts.cwd,

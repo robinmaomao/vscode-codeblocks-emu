@@ -13,6 +13,8 @@ import {
   pointerMemoryReference, selectWindow, truthyMiValue,
 } from './miParse';
 import { debugStateChanged, debugTrace, registerAdapter, unregisterAdapter } from './debugRegistry';
+import { RemoteDebuggingOptions } from '../model/projectDebuggerExtensions';
+import { buildRemoteDebugCommands, buildSourceDirCommands, splitCommandLineArgs } from './remoteDebugging';
 
 /** 截断超长跟踪文本 */
 function truncate(s: string, n = 300): string {
@@ -73,6 +75,10 @@ export class GdbDebugAdapter implements vscode.DebugAdapter {
   private gdbPath = 'gdb';
   private program = '';
   private cwd = '';
+  // R3/R4：调试器源目录与远程目标（来自工程 Extensions/debugger，经扩展展开后随 launch 传入）
+  private searchDirs: string[] = [];
+  private remote: RemoteDebuggingOptions | undefined;
+  private isRemoteDebugging = false;
   // varobj 引用管理（子节点展开）
   private varSeq = 0;                                  // 生成 varobj 名
   private varRefCounter = 10000;                       // 生成 variablesReference
@@ -247,6 +253,9 @@ export class GdbDebugAdapter implements vscode.DebugAdapter {
     }
 
     this.attached = false;
+    this.searchDirs = Array.isArray(args.searchDirs) ? (args.searchDirs as unknown[]).filter((d): d is string => typeof d === 'string' && !!d) : [];
+    this.remote = (args.remoteDebugging as RemoteDebuggingOptions) ?? undefined;
+    this.isRemoteDebugging = false;
     this.openSession();
     try {
       await this.session!.start({
@@ -254,6 +263,8 @@ export class GdbDebugAdapter implements vscode.DebugAdapter {
         program: this.program,
         cwd: this.cwd,
         env: (args.environment as Record<string, string>) ?? {},
+        // R5：GDB 命令行附加参数（对齐 CB debugger settings user arguments）
+        args: splitCommandLineArgs(String(vscode.workspace.getConfiguration('codeblocks').get<string>('debug.userArguments', '') ?? '')),
       });
       // 程序与参数经 MI 注入（Windows 命令行空格安全，第五十轮修复）
       await this.session!.sendExact(`-file-exec-and-symbols ${this.session!.quote(this.program)}`);
@@ -262,6 +273,9 @@ export class GdbDebugAdapter implements vscode.DebugAdapter {
         await this.session!.sendExact(`-exec-arguments ${this.session!.quote(progArgs.join(' '))}`);
       }
       await this.applyDebugSettings();
+      // R3/R4：源目录搜索 + 远程目标准备（对齐 Prepare：init → 源目录 → set args → 远程连接）
+      await this.applySourceDirs();
+      await this.applyRemotePrepare();
       this.sendResponse(req, true, {});
       // 会话就绪后再告知客户端可以下发配置（断点等，第五十轮 D10）
       this.sendEvent('initialized', {});
@@ -283,6 +297,7 @@ export class GdbDebugAdapter implements vscode.DebugAdapter {
     this.program = args.program ?? '';
     this.cwd = args.cwd ?? '';
     this.attached = true;
+    this.searchDirs = Array.isArray(args.searchDirs) ? (args.searchDirs as unknown[]).filter((d): d is string => typeof d === 'string' && !!d) : [];
 
     this.openSession();
     try {
@@ -290,11 +305,15 @@ export class GdbDebugAdapter implements vscode.DebugAdapter {
         gdbPath: this.gdbPath,
         cwd: this.cwd,
         env: (args.environment as Record<string, string>) ?? {},
+        // R5：GDB 命令行附加参数（对齐 CB debugger settings user arguments）
+        args: splitCommandLineArgs(String(vscode.workspace.getConfiguration('codeblocks').get<string>('debug.userArguments', '') ?? '')),
       });
       // 可选符号文件（附加前加载；失败不阻断，可用 Send user command 手动 add-symbol-file）
       if (this.program) {
         try { await this.session!.sendExact(`-file-exec-and-symbols ${this.session!.quote(this.program)}`); } catch { /* 符号可选 */ }
       }
+      // R3：源目录搜索在连接目标前注入（对齐 CB Prepare 顺序）
+      await this.applySourceDirs();
       await this.session!.sendExact(`-target-attach ${pid}`);
       await this.applyDebugSettings();
       this.sendResponse(req, true, {});
@@ -337,14 +356,25 @@ export class GdbDebugAdapter implements vscode.DebugAdapter {
     const flavor = cfg.get<string>('debug.disassemblyFlavor', 'default');
     const charset = cfg.get<string>('debug.charset', '');
     const init = cfg.get<string[]>('debug.initCommands', []) ?? [];
+    const instructionSet = String(cfg.get<string>('debug.instructionSet', '') ?? '').trim();
 
     const sends: string[] = [
+      // R5：对齐 gdb_driver.cpp:145-174 Prepare 的固定初始化命令（老 GDB 不支持的项单项失败并被忽略）
+      '-gdb-set confirm off',
+      '-gdb-set width 0',
+      '-gdb-set height 0',
+      '-gdb-set breakpoint pending on',
+      '-gdb-set print asm-demangle on',
+      '-gdb-set unwindonsignal on',
+      '-gdb-set filename-display absolute',
+      '-gdb-set style enabled off',
       // 异步模式（对齐其它 MI 前端）：让 Pause/-exec-interrupt 在支持的 GDB 上生效；老版 GDB 不支持则忽略
       '-gdb-set mi-async on',
       `-gdb-set print pretty ${pretty ? 'on' : 'off'}`,
     ];
     if (elements > 0) sends.push(`-gdb-set print elements ${Math.floor(elements)}`);
     if (flavor === 'intel' || flavor === 'att') sends.push(`-gdb-set disassembly-flavor ${flavor}`);
+    else if (flavor === 'custom' && instructionSet) sends.push(`-gdb-set disassembly-flavor ${instructionSet}`);
     if (charset) sends.push(`-gdb-set charset ${charset}`);
     for (const s of sends) {
       try { await this.session.sendExact(s); } catch { /* 单条失败不致命 */ }
@@ -352,6 +382,39 @@ export class GdbDebugAdapter implements vscode.DebugAdapter {
     for (const cmd of init) {
       if (!cmd || !cmd.trim()) continue;
       try { await this.session.sendExact(`-interpreter-exec console ${this.session.quote(cmd)}`); } catch { /* 忽略 */ }
+    }
+  }
+
+  /**
+   * R3：源目录搜索（对齐 debuggergdb AddSourceDir → GDB `directory` 命令；单个失败不致命）。
+   */
+  private async applySourceDirs(): Promise<void> {
+    if (!this.session || !this.searchDirs.length) return;
+    for (const cmd of buildSourceDirCommands(this.searchDirs)) {
+      try {
+        await this.session.sendExact(`-interpreter-exec console ${this.session.quote(cmd)}`);
+      } catch { /* 单个目录失败不致命 */ }
+    }
+  }
+
+  /**
+   * R4：远程目标准备（对齐 gdb_driver.cpp:141-260 Prepare 固定顺序）：
+   * additional_cmds_before → shell before → set remotebaud（串口）→ target [extended-]remote
+   * → additional_cmds → shell after；连接后由 configurationDone 以 continue 启动。
+   */
+  private async applyRemotePrepare(): Promise<void> {
+    if (!this.session || !this.remote) return;
+    const steps = buildRemoteDebugCommands(this.remote);
+    if (!steps.length) return;
+    this.isRemoteDebugging = true;
+    for (const step of steps) {
+      const cli = step.kind === 'shell' ? `shell ${step.command}` : step.command;
+      try {
+        await this.session.sendExact(`-interpreter-exec console ${this.session.quote(cli)}`);
+      } catch (err) {
+        // 连接失败等必须可见（对齐 CB GdbCmd_RemoteTarget ParseOutput 的提示路径）
+        this.sendOutput('stderr', `远程调试命令失败（${cli}）: ${(err as Error).message}`);
+      }
     }
   }
 
@@ -530,7 +593,8 @@ export class GdbDebugAdapter implements vscode.DebugAdapter {
     // 断点已设置：新起会话启动程序；附加会话目标已在运行（附加后处于停止态，等用户继续）
     if (this.session && !this.attached) {
       try {
-        await this.session.send('-exec-run');
+        // R4：远程目标已运行——用 continue 而非 run（对齐 gdb_driver.cpp:279-292 远程 Start 语义）
+        await this.session.send(this.isRemoteDebugging ? '-exec-continue' : '-exec-run');
       } catch (err) {
         // 启动失败必须可见（如 GDB 与目标架构不匹配：not in executable format，第五十轮 D9）
         this.sendOutput('stderr', `无法启动程序: ${(err as Error).message}`);

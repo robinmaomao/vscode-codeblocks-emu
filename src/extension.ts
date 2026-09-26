@@ -19,7 +19,7 @@ import { CompilerOptionsLoader } from './compiler/optionsLoader';
 import { CodeBlocksConfig } from './compiler/codeblocksConfig';
 import { detectAllCompilers, detectAllCompilersAsync, DetectedCompiler } from './compiler/detector';
 import { CompilerOptionsPanel } from './ui/compilerOptionsPanel';
-import { ProjectPropertiesPanel, TargetEditData, FileEditData, BuildOptionsEditData, SearchDirsEditData, ProjectSettingsEditData, BuildScriptsEditData, NotesEditData, VirtualTargetEditData } from './ui/projectPropertiesPanel';
+import { ProjectPropertiesPanel, TargetEditData, FileEditData, BuildOptionsEditData, SearchDirsEditData, ProjectSettingsEditData, BuildScriptsEditData, NotesEditData, VirtualTargetEditData, DebuggerSettingsEditData } from './ui/projectPropertiesPanel';
 import { ProjectTreeProvider } from './ui/projectTreeProvider';
 import { registerStatusBarMenu, MenuDynamicData } from './ui/statusBarMenu';
 import { BuildLogTreeProvider, BuildLogProject, BuildLogDiagnostic } from './ui/buildLogTreeProvider';
@@ -49,6 +49,7 @@ import { applyHeaderGuard } from './tools/headerGuard';
 import { tidyCommentBlock } from './tools/tidyComments';
 import { parseToolsSetting, buildToolInvocation, ToolContext } from './tools/toolRunner';
 import { applyCustomVariables } from './model/customVariables';
+import { parseProjectDebuggerConfig, mergeRemoteOptions, applyProjectDebuggerConfig, RemoteDebuggingOptions } from './model/projectDebuggerExtensions';
 import { setProjectDependencies, wouldCreateCycle } from './model/workspaceWriter';
 import { generateMakefile } from './build/makefileExporter';
 import { buildProjectFromImport, importDevProject, importDspProject, importVcxproj } from './project/projectImporter';
@@ -197,11 +198,15 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       { placeHolder: '选择要附加的进程', matchOnDescription: true },
     );
     if (!pick) return;
+    const attachSearchDirs = activeProject
+      ? debugSearchDirs(activeProject, cbBuiltinVars(activeProject.basePath, '', '', '', activeProject.title, activeProject.filename, ''))
+      : [];
     await vscode.debug.startDebugging(undefined, {
       type: 'codeblocks',
       request: 'attach',
       name: `附加: ${pick.label} (${pick.pid})`,
       pid: pick.pid,
+      searchDirs: attachSearchDirs,
     });
   }));
 
@@ -1788,8 +1793,8 @@ function activateRelativeProject(delta: number): void {
 
 /** 打开工程属性面板（initialTab 可直达指定 tab，如 notes） */
 function showProjectPropertiesPanel(project: Project, extensionUri: vscode.Uri, initialTab?: string): void {
-  ProjectPropertiesPanel.show(project, extensionUri, async (targets, files, options, searchDirs, projectSettings, buildScripts, notes, virtualTargets) => {
-    await saveProjectProperties(project, targets, files, options, searchDirs, projectSettings, buildScripts, notes, virtualTargets);
+  ProjectPropertiesPanel.show(project, extensionUri, async (targets, files, options, searchDirs, projectSettings, buildScripts, notes, virtualTargets, debuggerSettings) => {
+    await saveProjectProperties(project, targets, files, options, searchDirs, projectSettings, buildScripts, notes, virtualTargets, debuggerSettings);
   }, initialTab);
 }
 
@@ -2611,6 +2616,7 @@ async function saveProjectProperties(
   buildScripts: BuildScriptsEditData,
   notes: NotesEditData,
   virtualTargets: VirtualTargetEditData[],
+  debuggerSettings: DebuggerSettingsEditData,
 ): Promise<void> {
   // 项目设置（标题/默认编译器/虚拟文件夹）—— 先应用，files 的自定义命令按新默认编译器写入
   project.title = projectSettings.title.trim() || project.title;
@@ -2627,6 +2633,8 @@ async function saveProjectProperties(
   if (cvResult.skipped.length) {
     outputChannel.warn(`[Code::Blocks] 自定义变量名不合法已跳过（不能含空格等）：${cvResult.skipped.join(', ')}`);
   }
+  // 调试器配置（R3/R4：Extensions/debugger —— search_path + remote_debugging；保留其它扩展节点）
+  project.extensions = applyProjectDebuggerConfig(project.extensions, debuggerSettings);
   project.notes = notes.notes;
   project.showNotesOnLoad = notes.showNotesOnLoad;
   project.buildScripts = buildScripts.project.scripts;
@@ -5088,6 +5096,15 @@ async function debug(): Promise<void> {
   const env: Record<string, string> = {};
   for (const ev of [...project.envVars, ...target.envVars]) env[ev.name] = ev.value;
 
+  // R3/R4：工程调试器扩展配置（源目录 search_path + 远程目标 remote_debugging）
+  const searchDirs = debugSearchDirs(project, vars);
+  const dc = parseProjectDebuggerConfig(project.extensions);
+  const mergedRemote = mergeRemoteOptions(
+    dc.remote.find((r) => !r.target),
+    dc.remote.find((r) => r.target === target.title),
+  );
+  const remoteDebugging = mergedRemote ? expandRemoteOptions(mergedRemote, vars, project) : undefined;
+
   const started = await vscode.debug.startDebugging(undefined, {
     type: 'codeblocks',
     name: `Debug: ${target.title}`,
@@ -5097,6 +5114,8 @@ async function debug(): Promise<void> {
     gdbPath: gdb.path,
     args: splitCommandLine(argsStr),
     environment: env,
+    searchDirs,
+    remoteDebugging,
   });
 
   if (!started) {
@@ -5114,6 +5133,54 @@ function splitCommandLine(s: string): string[] {
     out.push(m[1] ?? m[2] ?? m[3]);
   }
   return out;
+}
+
+/**
+ * R3：调试器源搜索目录（对齐 debuggergdb ParseSearchDirs + AddSourceDir）：
+ * 工程根 + 公共顶层目录 + `<Extensions><debugger><search_path>`（支持 $(VAR) 宏）；
+ * 设置 codeblocks.debug.addOtherProjectDirs 开启时追加其它已打开工程的目录（对齐 add_other_search_dirs，默认关）。
+ */
+function debugSearchDirs(project: Project, vars: Record<string, string>): string[] {
+  let addOthers = false;
+  try {
+    addOthers = vscode.workspace.getConfiguration('codeblocks').get<boolean>('debug.addOtherProjectDirs', false) === true;
+  } catch { addOthers = false; }
+  const dc = parseProjectDebuggerConfig(project.extensions);
+  const out: string[] = [];
+  const add = (p: string): void => {
+    const t = String(p ?? '').trim();
+    if (t && !out.includes(t)) out.push(t);
+  };
+  add(project.basePath);
+  if (project.commonTopLevelPath && project.commonTopLevelPath !== project.basePath) add(project.commonTopLevelPath);
+  for (const p of dc.searchPaths) {
+    add(p.includes('$') ? replaceCbMacros(p, { vars, customVars: project.customVariables ?? {}, basePath: project.basePath }) : p);
+  }
+  if (addOthers) {
+    for (const op of openProjects) {
+      if (op.filename === project.filename) continue;
+      add(op.basePath);
+      if (op.commonTopLevelPath && op.commonTopLevelPath !== op.basePath) add(op.commonTopLevelPath);
+    }
+  }
+  return out;
+}
+
+/** R4：远程调试命令的宏展开（对齐 CB Prepare 中对每条命令 ReplaceMacros） */
+function expandRemoteOptions(
+  rd: RemoteDebuggingOptions,
+  vars: Record<string, string>,
+  project: Project,
+): RemoteDebuggingOptions {
+  const expand = (s: string): string =>
+    s ? replaceCbMacros(s, { vars, customVars: project.customVariables ?? {}, basePath: project.basePath }) : s;
+  return {
+    ...rd,
+    additionalCmds: expand(rd.additionalCmds),
+    additionalCmdsBefore: expand(rd.additionalCmdsBefore),
+    additionalShellCmdsAfter: expand(rd.additionalShellCmdsAfter),
+    additionalShellCmdsBefore: expand(rd.additionalShellCmdsBefore),
+  };
 }
 
 /**
