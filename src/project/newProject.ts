@@ -1,8 +1,9 @@
 /**
  * 新建工程向导 —— 对标 Code::Blocks 的 New Project 模板
  *
- * 提供 Console App / Static Lib / Shared Lib / Empty Project 四类模板，
- * 生成 .cbp（Debug/Release 双目标）+ 骨架源文件。
+ * 提供 12 类内置模板（Console C/C++ / Static / Shared / Empty / GLFW / SDL2 /
+ * wxWidgets / Qt / AVR / MSP430 / OpenCV），生成 .cbp（Debug/Release 双目标）+ 骨架源文件。
+ * 用户自定义模板见 `userTemplates.ts`（R13）。
  */
 import * as path from 'path';
 import {
@@ -180,6 +181,86 @@ const QT_README = `Qt 模板说明
    工程变大后建议改用 CMake（Qt 官方推荐）。
 `;
 
+const AVR_MAIN_C = `#include <avr/io.h>
+#include <util/delay.h>
+
+int main(void)
+{
+    DDRB |= (1 << PB5);            /* Arduino Uno 板载 LED：PB5 */
+
+    while (1)
+    {
+        PORTB ^= (1 << PB5);
+        _delay_ms(500);
+    }
+    return 0;
+}
+`;
+
+const AVR_README = `AVR 模板说明（对齐 Code::Blocks AVR 向导）
+==================
+1. 需安装 AVR 工具链（avr-gcc / avr-objcopy / avrdude），并在「编译器设置」中
+   把编译器指向 avr-gcc（如 C:/WinAVR/bin/avr-gcc.exe 或 Arduino 自带的 avr-gcc）。
+2. 已预置编译选项 -mmcu=atmega328p -DF_CPU=16000000UL -Os（按目标芯片修改
+   -mmcu 与 F_CPU）。
+3. 链接库通常还需 -lm；烧录可用 Tools → Configure Tools… 添加 avrdude 自定义工具：
+   avrdude -c arduino -p m328p -P COM3 -b 115200 -U flash:w:$(TARGET_OUTPUT_FILE):i
+4. 十六进制输出（.hex）可通过 Tools 自定义工具调用 avr-objcopy：
+   avr-objcopy -O ihex -R .eeprom <工程输出>.elf app.hex
+`;
+
+const MSP430_MAIN_C = `#include <msp430.h>
+
+int main(void)
+{
+    WDTCTL = WDTPW | WDTHOLD;      /* 关闭看门狗 */
+
+    P1DIR |= BIT0;                 /* P1.0 输出（LaunchPad 板载 LED） */
+    for (;;)
+    {
+        P1OUT ^= BIT0;
+        __delay_cycles(1000000);
+    }
+    return 0;
+}
+`;
+
+const MSP430_README = `MSP430 模板说明（对齐 Code::Blocks MSP430 向导）
+=====================
+1. 需安装 MSP430 工具链（msp430-gcc / msp430-gdb），并在「编译器设置」中指向
+   msp430-gcc（如 C:/ti/msp430-gcc/bin/msp430-gcc.exe）。
+2. 已预置编译选项 -mmcu=msp430g2553 -Os（LaunchPad MSP-EXP430G2 标配芯片；
+   按实际芯片修改 -mmcu）。
+3. 调试：在「项目属性 → 调试器」中选择 msp430-gdb 并启用远程/串口调试
+   （msp430-gdb 常配 msp430-gdbproxy，或使用板载 eZ430 调试器）。
+4. 烧录可使用 TI UniFlash / mspdebug 单独完成；或在 Tools → Configure Tools… 
+   添加 mspdebug 自定义工具。
+`;
+
+const OPENCV_MAIN_CPP = `#include <opencv2/opencv.hpp>
+
+int main()
+{
+    cv::Mat image = cv::Mat::zeros(480, 640, CV_8UC3);
+    cv::circle(image, cv::Point(320, 240), 100, cv::Scalar(0, 200, 255), 2);
+    cv::putText(image, "OpenCV + Code::Blocks", cv::Point(150, 60),
+                cv::FONT_HERSHEY_SIMPLEX, 0.8, cv::Scalar(255, 255, 255), 2);
+    cv::imshow("OpenCV window", image);
+    cv::waitKey(0);
+    return 0;
+}
+`;
+
+const OPENCV_README = `OpenCV 模板说明（对齐 Code::Blocks OpenCV 向导）
+================
+1. 需安装 OpenCV（Windows 官方包或 MSYS2/MinGW 包）；本模板按 MinGW 命名预置链接库：
+   opencv_core / opencv_imgproc / opencv_imgcodecs / opencv_highgui（OpenCV 4 已合并为
+   opencv_world 发行时，可把链接库改为 opencv_world）。
+2. include 目录加入 OpenCV 的 include 与其子目录（OpenCV 4 起头文件平铺在 include/opencv4）。
+3. 库目录加入 OpenCV 的 lib（MinGW 静态库为 libopencv_*.a，动态库为 libopencv_*.dll.a）。
+4. 「链接库」如使用动态库发行包，运行前需把 OpenCV bin 目录加入 PATH。
+`;
+
 /** 工程模板列表（对齐 Code::Blocks 常用 New Project 模板） */
 export const PROJECT_TEMPLATES: ProjectTemplate[] = [
   {
@@ -263,6 +344,40 @@ export const PROJECT_TEMPLATES: ProjectTemplate[] = [
     skeleton: [
       { name: 'main.cpp', content: QT_MAIN_CPP },
       { name: 'README-模板说明.txt', content: QT_README },
+    ],
+  },
+  {
+    id: 'avr',
+    label: 'AVR application (C, avr-gcc)',
+    description: 'AVR 裸机程序（atmega328p；-mmcu/-DF_CPU 可按芯片修改）',
+    targetType: TargetType.ConsoleOnly,
+    compilerOptions: ['-mmcu=atmega328p', '-DF_CPU=16000000UL', '-Os'],
+    skeleton: [
+      { name: 'main.c', content: AVR_MAIN_C },
+      { name: 'README-模板说明.txt', content: AVR_README },
+    ],
+  },
+  {
+    id: 'msp430',
+    label: 'MSP430 application (C, msp430-gcc)',
+    description: 'MSP430 裸机程序（msp430g2553；配合 msp430-gdb 调试）',
+    targetType: TargetType.ConsoleOnly,
+    compilerOptions: ['-mmcu=msp430g2553', '-Os'],
+    skeleton: [
+      { name: 'main.c', content: MSP430_MAIN_C },
+      { name: 'README-模板说明.txt', content: MSP430_README },
+    ],
+  },
+  {
+    id: 'opencv',
+    label: 'OpenCV application (C++)',
+    description: 'OpenCV 图像窗口程序（链接库按 OpenCV 4 MinGW 命名预置）',
+    targetType: TargetType.ConsoleOnly,
+    compilerOptions: ['-std=c++17'],
+    linkLibs: ['opencv_core', 'opencv_imgproc', 'opencv_imgcodecs', 'opencv_highgui'],
+    skeleton: [
+      { name: 'main.cpp', content: OPENCV_MAIN_CPP },
+      { name: 'README-模板说明.txt', content: OPENCV_README },
     ],
   },
 ];

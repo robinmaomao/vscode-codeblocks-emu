@@ -100,6 +100,14 @@ export const CHILD_ICONS: Record<string, string> = {
   'Default Config…': 'file-code',
   'Build & Log…': 'output',
   'clangd / IntelliSense…': 'lightbulb',
+  'From Template…': 'library',
+  'Save Project as Template…': 'save',
+  'Debug Information': 'info',
+  'Current Stack Frame': 'debug-stackframe',
+  'Loaded Libraries': 'library',
+  'Targets and Files': 'file',
+  'FPU Status': 'symbol-numeric',
+  'Signal Handling': 'bell',
 };
 
 /** 分隔线占位 */
@@ -118,12 +126,14 @@ export const MENU_STRUCTURE: MenuDef[] = [
     children: [
       { label: 'New…', command: 'workbench.action.files.newUntitledFile' },
       { label: 'New Project…', command: 'codeblocks.newProject' },
+      { label: 'From Template…', command: 'codeblocks.newProjectFromTemplate' },
       { label: 'Open Project…', command: 'codeblocks.openProject' },
       { label: 'Import Project…', command: 'codeblocks.importProject' },
       SEP,
       { label: 'Save File', command: 'workbench.action.files.save' },
       { label: 'Save File As…', command: 'workbench.action.files.saveAs' },
       { label: 'Save All Files', command: 'workbench.action.files.saveAll' },
+      { label: 'Save Project as Template…', command: 'codeblocks.saveProjectAsTemplate', needsProject: true },
       SEP,
       { label: 'Close Editor', command: 'workbench.action.closeActiveEditor' },
       { label: 'Close All Files', command: 'workbench.action.closeAllEditors' },
@@ -312,6 +322,17 @@ export const MENU_STRUCTURE: MenuDef[] = [
       { label: 'Step Out', command: 'workbench.action.debug.stepOut' },
       SEP,
       { label: 'Toggle Breakpoint', command: 'editor.debug.action.toggleBreakpoint' },
+      SEP,
+      {
+        label: 'Debug Information',
+        children: [
+          { label: 'Current Stack Frame', command: 'codeblocks.debug.infoFrame' },
+          { label: 'Loaded Libraries', command: 'codeblocks.debug.infoSharedLibrary' },
+          { label: 'Targets and Files', command: 'codeblocks.debug.infoFiles' },
+          { label: 'FPU Status', command: 'codeblocks.debug.infoFloat' },
+          { label: 'Signal Handling', command: 'codeblocks.debug.infoSignals' },
+        ],
+      },
       SEP,
       { label: 'Run and Debug View', command: 'workbench.view.debug' },
     ],

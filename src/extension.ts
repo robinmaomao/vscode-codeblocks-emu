@@ -14,6 +14,7 @@ import { ProjectParser, WorkspaceParser } from './model/parser';
 import { Project, BuildTarget, ProjectFile, TargetType, CommandType, Workspace, OptionsRelation, OptionsRelationType, LinkerExecutableOption, supportsCurrentPlatform, PLATFORM_ALL } from './model/types';
 import { serializeProject } from './model/projectWriter';
 import { createProjectFromTemplate, PROJECT_TEMPLATES } from './project/newProject';
+import { instantiateUserTemplate, listUserTemplates, saveAsUserTemplate } from './project/userTemplates';
 import { Compiler } from './compiler/compiler';
 import { CompilerOptionsLoader } from './compiler/optionsLoader';
 import { CodeBlocksConfig } from './compiler/codeblocksConfig';
@@ -731,6 +732,52 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       await createNewProject();
     }),
   );
+
+  // 从用户模板新建（对齐 CB File → New → From template…）
+  context.subscriptions.push(
+    vscode.commands.registerCommand('codeblocks.newProjectFromTemplate', async () => {
+      const items = userTemplateQuickPickItems();
+      if (!items.length) {
+        const pick = await vscode.window.showInformationMessage('暂无用户模板：先用「Save Project as Template…」把现有工程存为模板', '立即保存');
+        if (pick === '立即保存') await vscode.commands.executeCommand('codeblocks.saveProjectAsTemplate');
+        return;
+      }
+      const pick = await vscode.window.showQuickPick(items, { placeHolder: '选择用户模板', matchOnDescription: true });
+      if (!pick) return;
+      await createProjectFromUserTemplate(pick.templateId);
+    }),
+  );
+
+  // 保存工程为模板（对齐 CB File → Save project as template…）
+  context.subscriptions.push(
+    vscode.commands.registerCommand('codeblocks.saveProjectAsTemplate', async () => {
+      await saveProjectAsTemplate();
+    }),
+  );
+
+  // 调试信息快捷命令（对齐 CB debugger 的 Debug → Information 子菜单，debuggergdb.cpp:1812-1818）
+  for (const [cmd, gdb] of [
+    ['codeblocks.debug.infoFrame', 'info frame'],
+    ['codeblocks.debug.infoSharedLibrary', 'info sharedlibrary'],
+    ['codeblocks.debug.infoFiles', 'info files'],
+    ['codeblocks.debug.infoFloat', 'info float'],
+    ['codeblocks.debug.infoSignals', 'info signals'],
+  ] as [string, string][]) {
+    context.subscriptions.push(
+      vscode.commands.registerCommand(cmd, async () => {
+        const adapter = getActiveAdapter();
+        if (!adapter || !adapter.isActive()) { vscode.window.showWarningMessage('没有活动的 Code::Blocks 调试会话'); return; }
+        try {
+          const out = await adapter.sendUserCommand(gdb);
+          outputChannel.info(`[Code::Blocks] GDB ${gdb}:`);
+          outputChannel.info(out || '（无输出）');
+          outputChannel.show(true);
+        } catch (err) {
+          vscode.window.showErrorMessage(`GDB 命令失败: ${(err as Error).message}`);
+        }
+      }),
+    );
+  }
 
   // 构建
   context.subscriptions.push(
@@ -1626,12 +1673,20 @@ async function pickCompiler(): Promise<string | undefined> {
 
 /** 新建工程向导（模板选择 → 名称 → 目录 → 编译器 → 生成 .cbp + 骨架文件 → 打开） */
 async function createNewProject(): Promise<void> {
-  // 1. 选择模板
+  // 1. 选择模板（用户模板置顶，对齐 CB File → New 的 From template… 入口）
+  const userItems = userTemplateQuickPickItems();
   const tplPick = await vscode.window.showQuickPick(
-    PROJECT_TEMPLATES.map((t) => ({ label: t.label, description: t.description, template: t })),
-    { placeHolder: '选择工程模板', matchOnDescription: true },
+    [
+      ...userItems,
+      ...PROJECT_TEMPLATES.map((t) => ({ label: `$(file-code) ${t.label}`, description: t.description, template: t })),
+    ],
+    { placeHolder: '选择工程模板（带 $(library) 者为用户模板）', matchOnDescription: true },
   );
   if (!tplPick) return;
+  if ((tplPick as any).templateId) {
+    await createProjectFromUserTemplate((tplPick as any).templateId);
+    return;
+  }
   const tpl = (tplPick as any).template;
 
   // 2. 输入工程名
@@ -1685,6 +1740,129 @@ async function createNewProject(): Promise<void> {
 
   // 5. 打开
   await openProject(project.filename);
+}
+
+// ———— 用户工程模板（第五十九轮 R13） ————
+
+/** 用户模板根目录：<globalStorage>/templates（跨工程持久，随扩展卸载清理） */
+function userTemplateRoot(): string {
+  return path.join(extContext!.globalStorageUri.fsPath, 'templates');
+}
+
+/** 模板列表 → QuickPick 项（label 带 $(library) 图标，description 展示骨架文件数 / 描述） */
+function userTemplateQuickPickItems(): (vscode.QuickPickItem & { templateId: string })[] {
+  try {
+    return listUserTemplates(userTemplateRoot()).map((m) => ({
+      label: `$(library) ${m.name}`,
+      description: [m.description, `${(m.files ?? []).length} 个骨架文件`, m.compilerId].filter(Boolean).join(' · '),
+      templateId: m.id,
+    }));
+  } catch {
+    return [];
+  }
+}
+
+/** 选择父目录（默认工作区根；与新建向导同口径） */
+async function pickBaseDir(title: string): Promise<string | undefined> {
+  const defaultUri = vscode.workspace.workspaceFolders?.[0]?.uri;
+  const dirUris = await vscode.window.showOpenDialog({
+    canSelectFiles: false,
+    canSelectFolders: true,
+    canSelectMany: false,
+    defaultUri,
+    openLabel: '选择父目录',
+    title,
+  });
+  if (dirUris?.[0]?.fsPath) return dirUris[0].fsPath;
+  return defaultUri?.fsPath;
+}
+
+/** 从用户模板实例化工程（复制骨架 + 写 <新名>.cbp），随后打开 */
+async function createProjectFromUserTemplate(templateId: string): Promise<void> {
+  const name = await vscode.window.showInputBox({
+    prompt: '输入工程名称（基于模板）',
+    placeHolder: 'my-project',
+    validateInput: (v) => {
+      if (!v.trim()) return '工程名不能为空';
+      if (/[<>:"/\\|?*\x00-\x1f]/.test(v)) return '工程名含非法字符';
+      return undefined;
+    },
+  });
+  if (!name?.trim()) return;
+  const basePath = await pickBaseDir('选择工程存放目录');
+  if (!basePath) {
+    vscode.window.showWarningMessage('请先打开一个工作区文件夹，或选择一个目录');
+    return;
+  }
+  try {
+    const res = instantiateUserTemplate(userTemplateRoot(), templateId, name.trim(), basePath);
+    outputChannel.info(
+      `[Code::Blocks] 已从模板创建工程: ${res.manifest.name} → ${res.cbpPath}（${res.copiedFiles} 个骨架文件` +
+        `${res.missingFiles.length ? `，缺失 ${res.missingFiles.length}` : ''}）`,
+    );
+    await openProject(res.cbpPath);
+  } catch (err) {
+    vscode.window.showErrorMessage(`从模板创建工程失败: ${(err as Error).message}`);
+  }
+}
+
+/** 把当前工程保存为用户模板（对齐 CB File → Save project as template…） */
+async function saveProjectAsTemplate(): Promise<void> {
+  const project = requireProject();
+  if (!project) return;
+  await saveAllBeforeBuild();
+
+  const name = await vscode.window.showInputBox({
+    prompt: '模板名称',
+    value: project.title,
+    validateInput: (v) => (v.trim() ? undefined : '模板名称不能为空'),
+  });
+  if (!name?.trim()) return;
+  const description = await vscode.window.showInputBox({
+    prompt: '模板描述（可留空）',
+    placeHolder: '例如：嵌入式控制台工程骨架',
+  });
+  if (description === undefined) return;
+
+  const root = userTemplateRoot();
+  const existing = listUserTemplates(root).some((m) => m.name === name.trim());
+  if (existing) {
+    const ok = await vscode.window.showWarningMessage(`模板「${name.trim()}」已存在，覆盖？`, { modal: true }, '覆盖');
+    if (ok !== '覆盖') return;
+  }
+
+  // 骨架文件：工程目录下被引用的文件（排除 .cbp 自身与构建产物目录）
+  const projectDir = project.basePath || path.dirname(project.filename);
+  const rels = project.files
+    .map((f) => path.relative(projectDir, f.absolutePath || path.join(projectDir, f.relativeFilename)))
+    .filter((rel) => rel && !rel.startsWith('..') && !path.isAbsolute(rel))
+    .filter((rel) => !/^(obj|bin)[\\/]/i.test(rel));
+
+  try {
+    const manifest = saveAsUserTemplate({
+      root,
+      name: name.trim(),
+      description,
+      projectDir,
+      cbpPath: project.filename,
+      projectTitle: project.title,
+      compilerId: project.compilerId,
+      fileRels: rels,
+      overwrite: existing,
+    });
+    outputChannel.info(
+      `[Code::Blocks] 已保存模板: ${manifest.name}（${manifest.files.length} 个骨架文件）→ ${path.join(root, manifest.id)}`,
+    );
+    const pick = await vscode.window.showInformationMessage(
+      `已保存模板「${manifest.name}」（${manifest.files.length} 个骨架文件）`,
+      '打开模板目录',
+    );
+    if (pick === '打开模板目录') {
+      await vscode.commands.executeCommand('revealFileInOS', vscode.Uri.file(path.join(root, manifest.id)));
+    }
+  } catch (err) {
+    vscode.window.showErrorMessage(`保存模板失败: ${(err as Error).message}`);
+  }
 }
 
 async function openProject(filename: string): Promise<void> {
