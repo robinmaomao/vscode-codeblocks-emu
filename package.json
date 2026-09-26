@@ -2,7 +2,7 @@
   "name": "codeblocks-vscode",
   "displayName": "Code::Blocks for VS Code",
   "description": "原生移植 Code::Blocks 核心功能到 VS Code：项目模型、构建引擎、编译器管理与调试引擎",
-  "version": "0.8.84-dev",
+  "version": "0.8.85-dev",
   "icon": "resources/icon.png",
   "publisher": "robinmaomao",
   "author": {
@@ -44,6 +44,16 @@
         "command": "codeblocks.newProject",
         "title": "Code::Blocks: New Project",
         "icon": "$(new-file)"
+      },
+      {
+        "command": "codeblocks.newProjectFromTemplate",
+        "title": "Code::Blocks: New Project from Template…",
+        "icon": "$(library)"
+      },
+      {
+        "command": "codeblocks.saveProjectAsTemplate",
+        "title": "Code::Blocks: Save Project as Template…",
+        "icon": "$(save)"
       },
       {
         "command": "codeblocks.openProject",
@@ -410,6 +420,31 @@
         "command": "codeblocks.debug.attachToProcess",
         "title": "Code::Blocks: Attach to Process…",
         "icon": "$(debug-alt)"
+      },
+      {
+        "command": "codeblocks.debug.infoFrame",
+        "title": "Code::Blocks: Debug Info · Current Stack Frame",
+        "icon": "$(debug-stackframe)"
+      },
+      {
+        "command": "codeblocks.debug.infoSharedLibrary",
+        "title": "Code::Blocks: Debug Info · Loaded Libraries",
+        "icon": "$(library)"
+      },
+      {
+        "command": "codeblocks.debug.infoFiles",
+        "title": "Code::Blocks: Debug Info · Targets and Files",
+        "icon": "$(file)"
+      },
+      {
+        "command": "codeblocks.debug.infoFloat",
+        "title": "Code::Blocks: Debug Info · FPU Status",
+        "icon": "$(symbol-numeric)"
+      },
+      {
+        "command": "codeblocks.debug.infoSignals",
+        "title": "Code::Blocks: Debug Info · Signal Handling",
+        "icon": "$(bell)"
       }
     ],
     "languages": [

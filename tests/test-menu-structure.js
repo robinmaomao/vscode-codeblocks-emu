@@ -176,6 +176,9 @@ const expectCommands = [
   'codeblocks.configureTools', 'codeblocks.showCompilerCommands', 'codeblocks.exportMakefile',
   'codeblocks.workspace.editDependencies', 'codeblocks.importProject',
   'codeblocks.openDefaultConfig',
+  'codeblocks.newProjectFromTemplate', 'codeblocks.saveProjectAsTemplate',
+  'codeblocks.debug.infoFrame', 'codeblocks.debug.infoSharedLibrary', 'codeblocks.debug.infoFiles',
+  'codeblocks.debug.infoFloat', 'codeblocks.debug.infoSignals',
 ];
 const missing = expectCommands.filter((c) => !all.some((it) => it.command === c));
 check('第四十四轮关键命令均在菜单中', missing.length === 0, missing, '无缺失');
