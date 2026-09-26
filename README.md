@@ -4,7 +4,7 @@
 
 直接在 VS Code 中打开 `.cbp` / `.workspace` 工程，即可获得与 Code::Blocks 对齐的构建、调试与工程浏览体验。
 
-> **作者**：Robinmaomao ｜ **版本**：0.8.68-dev
+> **作者**：Robinmaomao ｜ **版本**：0.8.69-dev
 
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE.md)
 
@@ -75,7 +75,7 @@ npx tsc -p ./
 npx vsce package --allow-missing-repository
 
 # 4. 安装
-code --install-extension codeblocks-vscode-0.8.68-dev.vsix --force
+code --install-extension codeblocks-vscode-0.8.69-dev.vsix --force
 ```
 
 > Windows 下建议使用 `npm.cmd` / `npx.cmd`（PSReadLine 执行策略）。
@@ -93,7 +93,8 @@ code --extensionDevelopmentPath="." --disable-extensions --new-window
 1. 打开包含 `.cbp` / `.workspace` 的文件夹（自动检测并提示选择要打开的工程），或执行命令面板的 **`Code::Blocks: Open Project (.cbp)`**。
 2. 左侧活动栏点击 **Code::Blocks** 图标，展开面板：
    - **Project**：工程树（多项目 + 嵌套目录 + 文件浏览；项目行悬停有 Build / Rebuild / Clean / Properties 快捷按钮）
-   - **Symbols**：符号浏览器（函数 / 宏 / 类型 / 变量分组，点击跳转）
+   - **Analysis**：工程分析（按工程展示 `.cbp` 重要属性；悬停显示对应配置片段，点击在 `.cbp` 中定位，右键可复制；顶部为「最近构建」入口）
+   - **Symbols**：符号浏览器（默认隐藏，可从 ⋯ → Views 调出或设置 `codeblocks.ui.symbolsView` 控制）
    - **Build Log**：结构化构建摘要，位于**底部 Panel 的「Build Log」标签页**（`Ctrl+J` 打开）
 3. 状态栏最左为 **`⊞ Menu`**（Code::Blocks 菜单栏：点击弹出两级菜单，悬停就地展开常用命令链接）。
 4. 状态栏另有 **构建目标（Target）**、**构建菜单（Build）**、**编译器（Compiler）**；构建菜单包含 Build / Rebuild / **Build Workspace** / **Rebuild Workspace**；构建中点击 Build 项可停止构建。

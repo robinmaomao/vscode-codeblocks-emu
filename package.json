@@ -2,7 +2,7 @@
   "name": "codeblocks-vscode",
   "displayName": "Code::Blocks for VS Code",
   "description": "原生移植 Code::Blocks 核心功能到 VS Code：项目模型、构建引擎、编译器管理与调试引擎",
-  "version": "0.8.68-dev",
+  "version": "0.8.69-dev",
   "icon": "resources/icon.png",
   "publisher": "robinmaomao",
   "author": {
@@ -99,6 +99,19 @@
       {
         "command": "codeblocks.resetViewLayout",
         "title": "Code::Blocks: Reset View Layout"
+      },
+      {
+        "command": "codeblocks.analysis.refresh",
+        "title": "Code::Blocks: Refresh Analysis",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "codeblocks.analysis.locate",
+        "title": "Code::Blocks: Locate in .cbp"
+      },
+      {
+        "command": "codeblocks.analysis.copyXml",
+        "title": "Code::Blocks: Copy .cbp Snippet"
       },
       {
         "command": "codeblocks.clean",
@@ -339,6 +352,11 @@
           ],
           "markdownDescription": "Project 视图标题栏常驻按钮（当选中的按钮在标题栏显示时，不再出现在 ⋯ 溢出菜单）。可选值：`newProject` / `openProject` / `build` / `rebuild` / `clean` / `run` / `debug` / `buildWorkspace` / `rebuildWorkspace` / `cleanWorkspace` / `compilerOptions` / `projectProperties` / `codeStats`"
         },
+        "codeblocks.ui.symbolsView": {
+          "type": "boolean",
+          "default": true,
+          "description": "显示 Symbols 视图（初始默认隐藏，可从视图容器的 ⋯ → Views 菜单调出；关闭此设置后强制隐藏）"
+        },
         "codeblocks.compilerPrograms": {
           "type": "object",
           "default": {},
@@ -436,7 +454,15 @@
           "id": "codeblocks.symbols",
           "name": "Symbols",
           "icon": "resources/project.svg",
-          "initialSize": 9
+          "initialSize": 9,
+          "visibility": "hidden",
+          "when": "config.codeblocks.ui.symbolsView"
+        },
+        {
+          "id": "codeblocks.analysis",
+          "name": "Analysis",
+          "icon": "resources/analysis.svg",
+          "initialSize": 14
         }
       ],
       "codeblocks-buildPanel": [
@@ -581,6 +607,11 @@
           "group": "4_tools@1"
         },
         {
+          "command": "codeblocks.analysis.refresh",
+          "when": "view == codeblocks.analysis",
+          "group": "navigation@1"
+        },
+        {
           "command": "codeblocks.buildLog.toggleErrorsOnly",
           "when": "view == codeblocks.buildLog && !codeblocks.buildLog.errorsOnly",
           "group": "navigation@1"
@@ -592,6 +623,16 @@
         }
       ],
       "view/item/context": [
+        {
+          "command": "codeblocks.analysis.locate",
+          "when": "view == codeblocks.analysis && viewItem == analysisItem",
+          "group": "1_locate@1"
+        },
+        {
+          "command": "codeblocks.analysis.copyXml",
+          "when": "view == codeblocks.analysis && viewItem == analysisItem",
+          "group": "9_copy@1"
+        },
         {
           "command": "codeblocks.buildLog.copyMessage",
           "when": "view == codeblocks.buildLog && viewItem =~ /^diagnostic/",
