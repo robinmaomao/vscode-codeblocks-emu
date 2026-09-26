@@ -2,7 +2,7 @@
   "name": "codeblocks-vscode",
   "displayName": "Code::Blocks for VS Code",
   "description": "原生移植 Code::Blocks 核心功能到 VS Code：项目模型、构建引擎、编译器管理与调试引擎",
-  "version": "0.8.81-dev",
+  "version": "0.8.82-dev",
   "icon": "resources/icon.png",
   "publisher": "robinmaomao",
   "author": {
@@ -497,6 +497,11 @@
             "default": [],
             "description": "调试会话启动后注入的 GDB 命令（按 CLI 逐条执行，如 set pagination off）；对齐 Code::Blocks Debugger settings 的初始化命令"
           },
+          "codeblocks.debug.userArguments": {
+            "type": "string",
+            "default": "",
+            "description": "附加到 GDB 命令行的参数（引号感知分词，如 --nx）；对齐 Code::Blocks Debugger settings 的 user arguments"
+          },
           "codeblocks.debug.printPretty": {
             "type": "boolean",
             "default": false,
@@ -510,9 +515,14 @@
           },
           "codeblocks.debug.disassemblyFlavor": {
             "type": "string",
-            "enum": ["default", "intel", "att"],
+            "enum": ["default", "intel", "att", "custom"],
             "default": "default",
-            "description": "反汇编语法风格（GDB set disassembly-flavor）；default = 不设置（跟随 GDB 默认）"
+            "description": "反汇编语法风格（GDB set disassembly-flavor）；default = 不设置（跟随 GDB 默认）；custom = 使用 instructionSet 的值"
+          },
+          "codeblocks.debug.instructionSet": {
+            "type": "string",
+            "default": "",
+            "description": "自定义反汇编风格参数：仅当 disassemblyFlavor = custom 时作为 set disassembly-flavor 的值（对齐 Code::Blocks 的 instruction set）"
           },
           "codeblocks.debug.charset": {
             "type": "string",
@@ -534,6 +544,11 @@
             "type": "boolean",
             "default": false,
             "description": "Registers 视图读取寄存器值（默认关闭：部分 MinGW GDB 8.1 构建在读取寄存器时会让 GDB 进程崩溃、调试会话中断；确认你的 GDB 无此问题后再开启）"
+          },
+          "codeblocks.debug.addOtherProjectDirs": {
+            "type": "boolean",
+            "default": false,
+            "description": "把其它已打开工程的目录加入调试源搜索（对齐 Code::Blocks debugger settings 的 add other project search dirs；默认关）"
           }
         }
       },

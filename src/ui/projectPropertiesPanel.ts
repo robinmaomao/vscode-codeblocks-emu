@@ -10,6 +10,7 @@
  */
 import * as vscode from 'vscode';
 import { Project, BuildTarget, OptionsRelationType } from '../model/types';
+import { parseProjectDebuggerConfig, defaultRemoteOptions } from '../model/projectDebuggerExtensions';
 
 /** WebView 前后端交换的目标编辑数据 */
 export interface TargetEditData {
@@ -119,6 +120,32 @@ export interface VirtualTargetEditData {
   targets: string[];
 }
 
+/** 远程调试配置（R4；字段对齐 remotedebugging.h / debuggergdb.cpp SetRemoteDebuggingMap） */
+export interface RemoteDebuggingEditData {
+  /** 目标标题；'' = 项目级默认（XML target 缺省） */
+  target: string;
+  /** 0=TCP 1=UDP 2=Serial */
+  connType: number;
+  serialPort: string;
+  serialBaud: string;
+  ip: string;
+  ipPort: string;
+  additionalCmds: string;
+  additionalCmdsBefore: string;
+  additionalShellCmdsAfter: string;
+  additionalShellCmdsBefore: string;
+  skipLDpath: boolean;
+  extendedRemote: boolean;
+}
+
+/** 工程调试器配置（R3/R4：search_path + remote_debugging） */
+export interface DebuggerSettingsEditData {
+  /** 额外源搜索目录（<debugger><search_path add>） */
+  searchPaths: string[];
+  /** 远程调试条目（含项目级默认 target=''） */
+  remote: RemoteDebuggingEditData[];
+}
+
 const TARGET_TYPE_NAMES: Record<number, string> = {
   0: '可执行文件 (Executable)',
   1: '控制台程序 (Console application)',
@@ -154,6 +181,7 @@ export class ProjectPropertiesPanel {
       buildScripts: BuildScriptsEditData,
       notes: NotesEditData,
       virtualTargets: VirtualTargetEditData[],
+      debuggerSettings: DebuggerSettingsEditData,
     ) => Promise<void>,
     /** 打开时直达的 tab（默认 targets；如 'notes'） */
     private initialTab: string | undefined = undefined,
@@ -184,6 +212,7 @@ export class ProjectPropertiesPanel {
       buildScripts: BuildScriptsEditData,
       notes: NotesEditData,
       virtualTargets: VirtualTargetEditData[],
+      debuggerSettings: DebuggerSettingsEditData,
     ) => Promise<void>,
     initialTab?: string,
   ): void {
@@ -275,6 +304,18 @@ export class ProjectPropertiesPanel {
       targets: [...vt.targets],
     }));
 
+    // R3/R4：调试器配置（search_path + 每目标 remote_debugging；未配置目标回退项目级默认）
+    const dc = parseProjectDebuggerConfig(this.project.extensions);
+    const debuggerData = {
+      searchPaths: [...dc.searchPaths],
+      remote: [
+        { ...(dc.remote.find((r) => !r.target) ?? defaultRemoteOptions('')) },
+        ...this.project.buildTargets.map((t) => ({
+          ...(dc.remote.find((r) => r.target === t.title) ?? defaultRemoteOptions(t.title)),
+        })),
+      ],
+    };
+
     const typeOptions = Object.entries(TARGET_TYPE_NAMES)
       .map(([v, name]) => `<option value="${v}">${this.escapeHtml(name)}</option>`)
       .join('');
@@ -296,6 +337,7 @@ export class ProjectPropertiesPanel {
       targetScripts,
       notes,
       virtualTargets,
+      debugger: debuggerData,
       icons: ICONS,
     }).replace(/</g, '\\u003c');
 
@@ -440,6 +482,7 @@ export class ProjectPropertiesPanel {
       <button class="tab" data-tab="scripts" id="tabbtn-scripts"><span class="tab-icon">${ICONS.settings}</span>构建脚本</button>
       <button class="tab" data-tab="settings" id="tabbtn-settings"><span class="tab-icon">${ICONS.settings}</span>项目设置</button>
       <button class="tab" data-tab="notes" id="tabbtn-notes"><span class="tab-icon">${ICONS.file}</span>备注</button>
+      <button class="tab" data-tab="debugger" id="tabbtn-debugger"><span class="tab-icon">${ICONS.options}</span>调试器</button>
     </nav>
     <div class="content">
       <div id="tab-targets" class="tab-pane">
@@ -490,6 +533,9 @@ export class ProjectPropertiesPanel {
       <div id="tab-notes" class="tab-pane" style="display:none">
         <div class="form" id="ntform"></div>
       </div>
+      <div id="tab-debugger" class="tab-pane" style="display:none">
+        <div class="form" id="dbgform"></div>
+      </div>
     </div>
   </div>
 
@@ -507,6 +553,7 @@ export class ProjectPropertiesPanel {
     let targetScripts = data.targetScripts.map(s => ({ scripts: [...s.scripts], before: [...s.before], after: [...s.after] }));
     let notes = { notes: data.notes.notes, showNotesOnLoad: data.notes.showNotesOnLoad };
     let virtualTargets = data.virtualTargets.map(v => ({ ...v, targets: [...v.targets] }));
+    let dbg = { searchPaths: [...((data.debugger && data.debugger.searchPaths) || [])], remote: ((data.debugger && data.debugger.remote) || []).map(r => ({ ...r })) };
     let selected = 0;
     let selectedFile = 0;
     let selectedVT = 0;
@@ -521,7 +568,7 @@ export class ProjectPropertiesPanel {
     // ---- tab 切换 ----
     function switchTab(tab) {
       activeTab = tab;
-      ['targets', 'vtargets', 'files', 'options', 'dirs', 'scripts', 'settings', 'notes'].forEach(name => {
+      ['targets', 'vtargets', 'files', 'options', 'dirs', 'scripts', 'settings', 'notes', 'debugger'].forEach(name => {
         document.getElementById('tabbtn-' + name).classList.toggle('active', tab === name);
         document.getElementById('tab-' + name).style.display = tab === name ? '' : 'none';
       });
@@ -532,6 +579,7 @@ export class ProjectPropertiesPanel {
       if (tab === 'scripts') renderScriptsForm();
       if (tab === 'settings') renderSettingsForm();
       if (tab === 'notes') renderNotesForm();
+      if (tab === 'debugger') renderDebugForm();
     }
     document.getElementById('tabbtn-targets').addEventListener('click', () => { collectTargetForm(); switchTab('targets'); });
     document.getElementById('tabbtn-vtargets').addEventListener('click', () => { collectTargetForm(); switchTab('vtargets'); });
@@ -541,6 +589,7 @@ export class ProjectPropertiesPanel {
     document.getElementById('tabbtn-scripts').addEventListener('click', () => { collectTargetForm(); switchTab('scripts'); });
     document.getElementById('tabbtn-settings').addEventListener('click', () => { collectTargetForm(); switchTab('settings'); });
     document.getElementById('tabbtn-notes').addEventListener('click', () => { collectTargetForm(); switchTab('notes'); });
+    document.getElementById('tabbtn-debugger').addEventListener('click', () => { collectTargetForm(); switchTab('debugger'); });
 
     // ---- 构建目标 tab ----
     function renderList() {
@@ -1044,6 +1093,75 @@ export class ProjectPropertiesPanel {
       notes.showNotesOnLoad = document.getElementById('nt-show').checked;
     }
 
+    // ---- 调试器 tab（R3/R4）----
+    let selectedDebugScope = '';
+    function dbgRemoteFor(target) {
+      let r = dbg.remote.find(x => x.target === target);
+      if (!r) {
+        r = { target: target, connType: 0, serialPort: '', serialBaud: '115200', ip: '', ipPort: '', additionalCmds: '', additionalCmdsBefore: '', additionalShellCmdsAfter: '', additionalShellCmdsBefore: '', skipLDpath: false, extendedRemote: false };
+        dbg.remote.push(r);
+      }
+      return r;
+    }
+    function renderDebugForm() {
+      const el = document.getElementById('dbgform');
+      if (selectedDebugScope !== '' && Number(selectedDebugScope) >= targets.length) selectedDebugScope = '';
+      const scopes = [{ v: '', label: '项目级默认' }].concat(targets.map((t, i) => ({ v: String(i), label: t.title })));
+      const scopeSel = '<select id="dbg-scope">' + scopes.map(s => '<option value="' + s.v + '">' + esc(s.label) + '</option>').join('') + '</select>';
+      const scopeName = selectedDebugScope === '' ? '' : targets[Number(selectedDebugScope)].title;
+      const r = selectedDebugScope === '' ? dbgRemoteFor('') : dbgRemoteFor(scopeName);
+      const connSel = [[0, 'TCP (IP:端口)'], [1, 'UDP (IP:端口)'], [2, '串口 Serial']]
+        .map(c => '<option value="' + c[0] + '">' + c[1] + '</option>').join('');
+      el.innerHTML =
+        '<label><span class="field-name">作用域</span>' + scopeSel +
+        '<div class="hint">项目级默认 = 未单独配置的目标共用（对齐 CB 的 &lt;Project&gt; 行）；同名时目标覆盖项目</div></label>' +
+        '<label><span class="field-name">源搜索目录（每行一个）</span>' +
+        '<textarea id="dbg-paths">' + esc(dbg.searchPaths.join('\\n')) + '</textarea>' +
+        '<div class="hint">调试会话向 GDB 发 directory 命令（对齐 CB debugger search paths；支持 $(VAR) 宏与相对项目根路径）</div></label>' +
+        '<details open class="fg"><summary>远程目标（' + esc(scopeName || '项目级默认') + '）</summary>' +
+        '<label><span class="field-name">连接类型</span><select id="dbg-conn">' + connSel + '</select></label>' +
+        '<label><span class="field-name">串口</span><input id="dbg-serial" value="' + escAttr(r.serialPort) + '" placeholder="COM3 / /dev/ttyUSB0"></label>' +
+        '<label><span class="field-name">波特率</span><input id="dbg-baud" value="' + escAttr(r.serialBaud) + '"></label>' +
+        '<label><span class="field-name">IP 地址</span><input id="dbg-ip" value="' + escAttr(r.ip) + '"></label>' +
+        '<label><span class="field-name">端口</span><input id="dbg-port" value="' + escAttr(r.ipPort) + '"></label>' +
+        '<label class="check"><input type="checkbox" id="dbg-ext"' + (r.extendedRemote ? ' checked' : '') + '> 使用 extended-remote</label>' +
+        '<label class="check"><input type="checkbox" id="dbg-skip"' + (r.skipLDpath ? ' checked' : '') + '> 跳过 PATH/LD_LIBRARY_PATH 注入</label>' +
+        '<label><span class="field-name">连接前命令（每行一条，任意调试均执行）</span><textarea id="dbg-before">' + esc(r.additionalCmdsBefore) + '</textarea></label>' +
+        '<label><span class="field-name">连接前 shell 命令（每行一条）</span><textarea id="dbg-before-shell">' + esc(r.additionalShellCmdsBefore) + '</textarea></label>' +
+        '<label><span class="field-name">连接后命令（每行一条）</span><textarea id="dbg-after">' + esc(r.additionalCmds) + '</textarea></label>' +
+        '<label><span class="field-name">连接后 shell 命令（每行一条）</span><textarea id="dbg-after-shell">' + esc(r.additionalShellCmdsAfter) + '</textarea></label>' +
+        '<div class="hint">连接顺序（对齐 CB）：连接前命令 → 连接前 shell → [set remotebaud] → target [extended-]remote → 连接后命令 → 连接后 shell；有效连接（串口需端口+波特率；TCP/UDP 需 IP+端口）时启动用 continue 而非 run</div>' +
+        '</details>';
+      document.getElementById('dbg-scope').value = selectedDebugScope;
+      document.getElementById('dbg-conn').value = String(r.connType);
+      document.getElementById('dbg-scope').addEventListener('change', () => {
+        collectDebugForm();
+        selectedDebugScope = document.getElementById('dbg-scope').value;
+        renderDebugForm();
+      });
+      ['dbg-paths', 'dbg-conn', 'dbg-serial', 'dbg-baud', 'dbg-ip', 'dbg-port', 'dbg-ext', 'dbg-skip', 'dbg-before', 'dbg-before-shell', 'dbg-after', 'dbg-after-shell'].forEach(id => {
+        document.getElementById(id).addEventListener('change', () => collectDebugForm());
+      });
+    }
+    function collectDebugForm() {
+      const paths = document.getElementById('dbg-paths');
+      if (!paths) return;
+      dbg.searchPaths = optionsLines(paths.value);
+      const scopeName = selectedDebugScope === '' ? '' : targets[Number(selectedDebugScope)].title;
+      const cur = dbgRemoteFor(scopeName);
+      cur.connType = Number(document.getElementById('dbg-conn').value) || 0;
+      cur.serialPort = document.getElementById('dbg-serial').value.trim();
+      cur.serialBaud = document.getElementById('dbg-baud').value.trim() || '115200';
+      cur.ip = document.getElementById('dbg-ip').value.trim();
+      cur.ipPort = document.getElementById('dbg-port').value.trim();
+      cur.extendedRemote = document.getElementById('dbg-ext').checked;
+      cur.skipLDpath = document.getElementById('dbg-skip').checked;
+      cur.additionalCmdsBefore = document.getElementById('dbg-before').value;
+      cur.additionalShellCmdsBefore = document.getElementById('dbg-before-shell').value;
+      cur.additionalCmds = document.getElementById('dbg-after').value;
+      cur.additionalShellCmdsAfter = document.getElementById('dbg-after-shell').value;
+    }
+
     // ---- 保存 ----
     function doSave(close) {
       collectTargetForm();
@@ -1054,6 +1172,7 @@ export class ProjectPropertiesPanel {
       collectScriptsForm();
       collectSettingsForm();
       collectNotesForm();
+      collectDebugForm();
       vscode.postMessage({
         type: 'save',
         targets: targets,
@@ -1064,6 +1183,7 @@ export class ProjectPropertiesPanel {
         projectSettings: projSettings,
         notes: notes,
         virtualTargets: virtualTargets,
+        debuggerSettings: { searchPaths: dbg.searchPaths, remote: dbg.remote },
         close: close,
       });
     }
@@ -1180,8 +1300,26 @@ export class ProjectPropertiesPanel {
         alias: String(v.alias ?? ''),
         targets: Array.isArray(v.targets) ? v.targets.map((x: any) => String(x)) : [],
       }));
+      const remoteItem = (r: any): RemoteDebuggingEditData => ({
+        target: String(r?.target ?? ''),
+        connType: Number(r?.connType ?? 0) || 0,
+        serialPort: String(r?.serialPort ?? ''),
+        serialBaud: String(r?.serialBaud ?? '').trim() || '115200',
+        ip: String(r?.ip ?? ''),
+        ipPort: String(r?.ipPort ?? ''),
+        additionalCmds: String(r?.additionalCmds ?? ''),
+        additionalCmdsBefore: String(r?.additionalCmdsBefore ?? ''),
+        additionalShellCmdsAfter: String(r?.additionalShellCmdsAfter ?? ''),
+        additionalShellCmdsBefore: String(r?.additionalShellCmdsBefore ?? ''),
+        skipLDpath: r?.skipLDpath === true,
+        extendedRemote: r?.extendedRemote === true,
+      });
+      const debuggerSettings: DebuggerSettingsEditData = {
+        searchPaths: strArr(msg.debuggerSettings?.searchPaths),
+        remote: Array.isArray(msg.debuggerSettings?.remote) ? msg.debuggerSettings.remote.map(remoteItem) : [],
+      };
       try {
-        await this.onSave(targets, files, options, searchDirs, projectSettings, buildScripts, notes, virtualTargets);
+        await this.onSave(targets, files, options, searchDirs, projectSettings, buildScripts, notes, virtualTargets, debuggerSettings);
         this.panel.webview.postMessage({ type: 'saved' });
         if (msg.close) {
           this.dispose();
