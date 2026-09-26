@@ -2,7 +2,7 @@
   "name": "codeblocks-vscode",
   "displayName": "Code::Blocks for VS Code",
   "description": "原生移植 Code::Blocks 核心功能到 VS Code：项目模型、构建引擎、编译器管理与调试引擎",
-  "version": "0.8.83-dev",
+  "version": "0.8.84-dev",
   "icon": "resources/icon.png",
   "publisher": "robinmaomao",
   "author": {
@@ -173,6 +173,30 @@
       {
         "command": "codeblocks.todoList",
         "title": "Code::Blocks: TODO List"
+      },
+      {
+        "command": "codeblocks.todo.add",
+        "title": "Code::Blocks: Add TODO Item…"
+      },
+      {
+        "command": "codeblocks.bookmarks.toggle",
+        "title": "Code::Blocks: Toggle Bookmark"
+      },
+      {
+        "command": "codeblocks.bookmarks.prev",
+        "title": "Code::Blocks: Previous Bookmark"
+      },
+      {
+        "command": "codeblocks.bookmarks.next",
+        "title": "Code::Blocks: Next Bookmark"
+      },
+      {
+        "command": "codeblocks.bookmarks.clearAll",
+        "title": "Code::Blocks: Clear All Bookmarks"
+      },
+      {
+        "command": "codeblocks.openIncludeFile",
+        "title": "Code::Blocks: Open Include File"
       },
       {
         "command": "codeblocks.format",
@@ -683,6 +707,20 @@
             ],
             "description": "AStyle 格式化选项"
           },
+          "codeblocks.todo.keywords": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": [
+              "TODO",
+              "FIXME",
+              "NOTE",
+              "HACK",
+              "XXX"
+            ],
+            "description": "TODO 关键字（列表命令扫描 + Add TODO Item 类型选项；对齐 CB todo 插件关键字设置）"
+          },
           "codeblocks.tools": {
             "type": "array",
             "items": {
@@ -1112,6 +1150,21 @@
       {
         "command": "workbench.action.quickOpen",
         "key": "alt+g"
+      },
+      {
+        "command": "codeblocks.bookmarks.toggle",
+        "key": "alt+k",
+        "when": "editorTextFocus"
+      },
+      {
+        "command": "codeblocks.bookmarks.prev",
+        "key": "alt+h",
+        "when": "editorTextFocus"
+      },
+      {
+        "command": "codeblocks.bookmarks.next",
+        "key": "alt+l",
+        "when": "editorTextFocus"
       },
       {
         "command": "codeblocks.projectTree.focus",

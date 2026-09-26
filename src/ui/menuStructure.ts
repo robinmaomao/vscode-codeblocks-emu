@@ -175,6 +175,18 @@ export const MENU_STRUCTURE: MenuDef[] = [
       SEP,
       { label: 'Goto Matching Brace', command: 'editor.action.jumpToBracket' },
       SEP,
+      {
+        label: 'Bookmarks',
+        children: [
+          { label: 'Toggle Bookmark', command: 'codeblocks.bookmarks.toggle', shortcut: 'Alt+K' },
+          { label: 'Previous Bookmark', command: 'codeblocks.bookmarks.prev', shortcut: 'Alt+H' },
+          { label: 'Next Bookmark', command: 'codeblocks.bookmarks.next', shortcut: 'Alt+L' },
+          SEP,
+          { label: 'Clear All Bookmarks', command: 'codeblocks.bookmarks.clearAll' },
+        ],
+      },
+      { label: 'Add Todo Item…', command: 'codeblocks.todo.add' },
+      SEP,
       { label: 'Swap Header / Source', command: 'codeblocks.swapHeaderSource' },
       { label: 'Insert Header Guard', command: 'codeblocks.insertHeaderGuard' },
       { label: 'Tidy Comments', command: 'codeblocks.tidyComments' },
@@ -224,6 +236,7 @@ export const MENU_STRUCTURE: MenuDef[] = [
       { label: 'Goto File…', command: 'workbench.action.quickOpen', shortcut: 'Alt+G' },
       SEP,
       { label: 'TODO List', command: 'codeblocks.todoList' },
+      { label: 'Open Include File…', command: 'codeblocks.openIncludeFile' },
     ],
   },
   {

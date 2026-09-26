@@ -32,7 +32,7 @@ import { applyGeneratedFiles } from './build/generatedFiles';
 import { cbBuiltinVars, replaceCbMacros, globalVariables, envVarMap } from './compiler/cbMacros';
 import { buildLogPrefs, msg, quietSuccess } from './build/logLang';
 import { decodeText } from './tools/encoding';
-import { clearBackticksCache } from './compiler/commandGenerator';
+import { clearBackticksCache, CommandGenerator } from './compiler/commandGenerator';
 import { OutputParser } from './build/outputParser';
 import { collectClangdEntries, writeClangdDatabase, CompileCommandEntry } from './build/compileCommands';
 import { detectClangd, queryCompilerSystemIncludes, queryCompilerTarget, updateClangdUserConfig, clangdUserConfigPath } from './tools/clangd';
@@ -43,6 +43,8 @@ import { parsePsList, parseTasklist, ProcessInfo } from './debug/miParse';
 import { resolveGdbPath } from './debug/gdbLocate';
 import { RegistersTreeProvider } from './ui/registersTreeProvider';
 import { scanTodos } from './tools/todoScanner';
+import { Bookmark, toggleBookmark, nextBookmark, prevBookmark, locateBookmarkLine } from './tools/bookmarks';
+import { parseIncludeDirective, resolveIncludePath } from './tools/includeResolver';
 import { countFiles, isSourceFile } from './tools/codeStats';
 import { formatActiveDocument } from './tools/astyle';
 import { applyHeaderGuard } from './tools/headerGuard';
@@ -1183,6 +1185,48 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   context.subscriptions.push(
     vscode.commands.registerCommand('codeblocks.todoList', async () => {
       await showTodoList();
+    }),
+    vscode.commands.registerCommand('codeblocks.todo.add', async () => {
+      await addTodoItemCmd();
+    }),
+  );
+
+  // R10：书签（对齐 CB Edit → Bookmarks；存 workspaceState，文本随存用于行漂移回找）
+  bmStore = context.workspaceState;
+  bookmarks = bmStore.get<Bookmark[]>('codeblocks.bookmarks', []) ?? [];
+  context.subscriptions.push(
+    vscode.commands.registerCommand('codeblocks.bookmarks.toggle', async () => {
+      await bookmarkToggle();
+    }),
+    vscode.commands.registerCommand('codeblocks.bookmarks.next', async () => {
+      await bookmarkGoto(1);
+    }),
+    vscode.commands.registerCommand('codeblocks.bookmarks.prev', async () => {
+      await bookmarkGoto(-1);
+    }),
+    vscode.commands.registerCommand('codeblocks.bookmarks.clearAll', async () => {
+      if (!bookmarks.length) {
+        vscode.window.showInformationMessage('没有书签');
+        return;
+      }
+      const ok = await vscode.window.showWarningMessage(`清除全部 ${bookmarks.length} 个书签？`, { modal: true }, 'Clear');
+      if (ok !== 'Clear') return;
+      bookmarks = [];
+      await persistBookmarks();
+      vscode.window.visibleTextEditors.forEach((e) => e.setDecorations(bookmarkDecoration, []));
+      outputChannel.info('[Code::Blocks] 已清除全部书签');
+    }),
+    vscode.window.onDidChangeActiveTextEditor((e) => refreshBookmarkDecorations(e ?? undefined)),
+    vscode.workspace.onDidChangeTextDocument((e) => {
+      const ed = vscode.window.visibleTextEditors.find((v) => v.document === e.document);
+      if (ed) refreshBookmarkDecorations(ed);
+    }),
+  );
+
+  // R11：Open include file（对齐 CB Search → Open include file）
+  context.subscriptions.push(
+    vscode.commands.registerCommand('codeblocks.openIncludeFile', async () => {
+      await openIncludeFileCmd();
     }),
   );
 
@@ -3357,7 +3401,10 @@ async function showTodoList(): Promise<void> {
   if (!project) return;
 
   const files = project.files.map((f) => f.absolutePath);
-  const todos = scanTodos(files);
+  // R12：关键字可由设置自定义（codeblocks.todo.keywords）
+  const cfg = vscode.workspace.getConfiguration('codeblocks');
+  const keywords = (cfg.get<string[]>('todo.keywords', []) ?? []).map((k) => String(k).trim()).filter(Boolean);
+  const todos = scanTodos(files, keywords.length ? { startStrings: keywords, allowedTypes: keywords } : undefined);
 
   if (todos.length === 0) {
     vscode.window.showInformationMessage('项目中没有 TODO/FIXME/NOTE 标记');
@@ -3372,6 +3419,133 @@ async function showTodoList(): Promise<void> {
     outputChannel.info(`${t.type}${user} ${loc}: ${t.text}`);
   }
   outputChannel.show(true);
+}
+
+/**
+ * R10：书签存储与装饰（对齐 CB Edit → Bookmarks）——
+ * workspaceState 持久化；概览尺标装饰；行漂移时按保存的文本在 ±50 行内回找。
+ */
+let bmStore: vscode.Memento | undefined;
+let bookmarks: Bookmark[] = [];
+const bookmarkDecoration = vscode.window.createTextEditorDecorationType({
+  overviewRulerColor: new vscode.ThemeColor('editorGutter.addedBackground'),
+  overviewRulerLane: vscode.OverviewRulerLane.Right,
+});
+
+async function persistBookmarks(): Promise<void> {
+  if (bmStore) await bmStore.update('codeblocks.bookmarks', bookmarks);
+}
+
+/** 用当前编辑器的书签刷新概览尺装饰 */
+function refreshBookmarkDecorations(editor?: vscode.TextEditor): void {
+  const ed = editor ?? vscode.window.activeTextEditor;
+  if (!ed) return;
+  const lines = ed.document.getText().split(/\r?\n/);
+  const file = ed.document.uri.fsPath;
+  const ranges = bookmarks
+    .filter((b) => b.file.toLowerCase() === file.toLowerCase())
+    .map((b) => {
+      const ln = locateBookmarkLine(b, lines) - 1;
+      return new vscode.Range(Math.max(0, ln), 0, Math.max(0, ln), 0);
+    });
+  ed.setDecorations(bookmarkDecoration, ranges);
+}
+
+/** 切换当前行书签（已存在则移除） */
+async function bookmarkToggle(): Promise<void> {
+  const ed = vscode.window.activeTextEditor;
+  if (!ed) return;
+  const pos = ed.selection.active;
+  const text = ed.document.lineAt(pos.line).text;
+  const r = toggleBookmark(bookmarks, ed.document.uri.fsPath, pos.line + 1, text);
+  bookmarks = r.list;
+  await persistBookmarks();
+  refreshBookmarkDecorations(ed);
+  outputChannel.info(`[Code::Blocks] ${r.added ? '添加' : '移除'}书签: ${path.basename(ed.document.uri.fsPath)}:${pos.line + 1}`);
+}
+
+/** 跳到上/下一个书签（跨文件按文件→行排序；回绕） */
+async function bookmarkGoto(dir: 1 | -1): Promise<void> {
+  const ed = vscode.window.activeTextEditor;
+  const file = ed?.document.uri.fsPath ?? '';
+  const line = ed ? ed.selection.active.line + 1 : 1;
+  const bm = dir > 0 ? nextBookmark(bookmarks, file, line) : prevBookmark(bookmarks, file, line);
+  if (!bm) {
+    vscode.window.showInformationMessage('没有书签');
+    return;
+  }
+  const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(bm.file));
+  const editor = await vscode.window.showTextDocument(doc);
+  const lines = doc.getText().split(/\r?\n/);
+  const ln = Math.max(0, locateBookmarkLine(bm, lines) - 1);
+  const pos = new vscode.Position(ln, 0);
+  editor.selection = new vscode.Selection(pos, pos);
+  editor.revealRange(new vscode.Range(pos, pos), vscode.TextEditorRevealType.InCenter);
+  refreshBookmarkDecorations(editor);
+}
+
+/** R11：打开光标处 #include 指向的文件（当前文件目录 → 目标 include 搜索目录） */
+async function openIncludeFileCmd(): Promise<void> {
+  const ed = vscode.window.activeTextEditor;
+  if (!ed) return;
+  const directive = parseIncludeDirective(ed.document.lineAt(ed.selection.active.line).text);
+  if (!directive) {
+    vscode.window.showWarningMessage('光标所在行不是 #include 指令');
+    return;
+  }
+  const fromDir = path.dirname(ed.document.uri.fsPath);
+  const dirs: string[] = [];
+  const project = activeProject;
+  if (project) {
+    const target = project.buildTargets.find((t) => t.title === getSelectedTarget(project)) ?? project.buildTargets[0];
+    const compiler = getCompiler(target?.compilerId || project.compilerId);
+    const vars = {
+      ...envVarMap(project.envVars, target?.envVars),
+      ...cbBuiltinVars(project.basePath, target?.outputFilename ?? '', target?.title ?? '', target?.objectOutput ?? '', project.title, project.filename, compiler.masterPath),
+    };
+    if (target) {
+      const gen = new CommandGenerator(project, compiler);
+      for (const d of gen.orderedIncludeDirs(target)) {
+        if (!d) continue;
+        if (d === '.') { dirs.push(project.basePath); continue; }
+        const expanded = replaceCbMacros(d, { vars, customVars: project.customVariables ?? {}, basePath: project.basePath });
+        if (!expanded) continue;
+        dirs.push(path.isAbsolute(expanded) ? expanded : path.join(project.basePath, expanded));
+      }
+    }
+  }
+  const hit = resolveIncludePath(directive, fromDir, dirs, fs.existsSync);
+  if (!hit) {
+    vscode.window.showWarningMessage(`未找到包含文件: ${directive.name}（已搜索 ${(directive.quoted ? 1 : 0) + dirs.length} 个目录）`);
+    return;
+  }
+  const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(hit));
+  await vscode.window.showTextDocument(doc);
+}
+
+/** R12：在当前行下方插入 TODO 注释（对齐 CB todo 插件 Add Todo item；类型来自 codeblocks.todo.keywords） */
+async function addTodoItemCmd(): Promise<void> {
+  const ed = vscode.window.activeTextEditor;
+  if (!ed) return;
+  const cfg = vscode.workspace.getConfiguration('codeblocks');
+  const keywords = (cfg.get<string[]>('todo.keywords', []) ?? []).map((k) => String(k).trim()).filter(Boolean);
+  const list = keywords.length ? keywords : ['TODO', 'FIXME', 'NOTE', 'HACK', 'XXX'];
+  const type = await vscode.window.showQuickPick(list, { placeHolder: 'TODO 类型（codeblocks.todo.keywords 可配置）' });
+  if (!type) return;
+  const userInput = await vscode.window.showInputBox({ prompt: '用户名（可留空）', value: process.env.USERNAME ?? process.env.USER ?? '' });
+  if (userInput === undefined) return;
+  const text = await vscode.window.showInputBox({ prompt: 'TODO 内容' });
+  if (text === undefined) return;
+  const pos = ed.selection.active;
+  const line = ed.document.lineAt(pos.line);
+  const indent = (/^\s*/.exec(line.text) ?? [''])[0];
+  const comment = `// ${type}${userInput.trim() ? `(${userInput.trim()})` : ''}: ${text.trim()}`;
+  await ed.edit((eb) => {
+    eb.insert(new vscode.Position(pos.line, line.text.length), '\n' + indent + comment);
+  });
+  const newPos = new vscode.Position(pos.line + 1, indent.length + comment.length);
+  ed.selection = new vscode.Selection(newPos, newPos);
+  outputChannel.info(`[Code::Blocks] 已插入 TODO: ${path.basename(ed.document.uri.fsPath)}:${pos.line + 2}`);
 }
 
 /** 更新底部状态栏的构建目标显示 */
