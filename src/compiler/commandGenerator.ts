@@ -542,6 +542,15 @@ export class CommandGenerator {
     );
   }
 
+  /**
+   * 公开：目标 include 搜索目录（项目/目标关系合并；含反引号派生与 include_prj/file_cwd——
+   * 与构建依赖扫描同口径）。供「Open include file」定位使用。
+   */
+  public orderedIncludeDirs(target: BuildTarget): string[] {
+    const c = this.cache.get(target.title);
+    return c ? [...c.compilerSearchDirs] : [...this.getOrderedIncludeDirs(target)];
+  }
+
   private getOrderedLibDirs(target: BuildTarget): string[] {
     return combineOptions(
       this.project.libDirs,

@@ -38,7 +38,7 @@ for (const b of cfg) {
     byKey[k] = v;
   }
 }
-check('设置项总数 = 42', keys.length === 42, keys.length);
+check('设置项总数 = 43', keys.length === 43, keys.length);
 check('无重复键', new Set(keys).size === keys.length, keys.length - new Set(keys).size);
 
 // ---- 关键项抽查 ----
