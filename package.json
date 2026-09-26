@@ -2,7 +2,7 @@
   "name": "codeblocks-vscode",
   "displayName": "Code::Blocks for VS Code",
   "description": "原生移植 Code::Blocks 核心功能到 VS Code：项目模型、构建引擎、编译器管理与调试引擎",
-  "version": "0.8.72-dev",
+  "version": "0.8.74-dev",
   "icon": "resources/icon.png",
   "publisher": "robinmaomao",
   "author": {
@@ -309,6 +309,19 @@
       {
         "command": "codeblocks.keybindings.reset",
         "title": "Code::Blocks: Reset Keybindings"
+      },
+      {
+        "command": "codeblocks.keybindings.panel",
+        "title": "Code::Blocks: Keybinding Settings",
+        "icon": "$(keyboard)"
+      },
+      {
+        "command": "codeblocks.keybindings.export",
+        "title": "Code::Blocks: Export Keybinding Scheme"
+      },
+      {
+        "command": "codeblocks.keybindings.import",
+        "title": "Code::Blocks: Import Keybinding Scheme"
       }
     ],
     "languages": [
@@ -419,12 +432,12 @@
         "codeblocks.keybindings.cbStyle": {
           "type": "boolean",
           "default": false,
-          "markdownDescription": "启用 Code::Blocks 保真键位（默认关闭，全部避开 VS Code 默认）：`F5` 切换断点 / `Shift+F8` 停止调试 / `F2` 打开 Build Log / `Ctrl+R` 替换 / `Ctrl+Shift+B` 跳转匹配括号 / `Ctrl+Shift+C` 注释 / `Ctrl+Shift+S` 全部保存 / `Ctrl+Q` 退出 / `F12` 折叠 / `F7`·`Shift+F7`·`Ctrl+F7` 单步。开启后这些键将覆盖 VS Code 默认；关闭即恢复。用命令 `Code::Blocks: Check Keybinding Conflicts` 查看冲突清单。"
+          "markdownDescription": "启用 Code::Blocks 保真键位（默认关闭，全部避开 VS Code 默认）：`F5` 切换断点 / `Shift+F8` 停止调试 / `F2` 打开 Build Log / `Ctrl+R` 替换 / `Ctrl+Shift+B` 跳转匹配括号 / `Ctrl+Shift+C` 注释 / `Ctrl+Shift+S` 全部保存 / `Ctrl+Q` 退出 / `F12` 折叠 / `F7`·`Shift+F7`·`Ctrl+F7` 单步。开启后这些键将覆盖 VS Code 默认；关闭即恢复。可打开 [可视化快捷键设置面板](command:codeblocks.keybindings.panel) 逐项微调或单独解绑，用 [检查键位冲突](command:codeblocks.keybindings.check) 查看冲突清单。"
         },
         "codeblocks.keybindings.overrides": {
           "type": "object",
           "default": {},
-          "markdownDescription": "逐命令自定义快捷键（键名 = 命令短 id，值 = 键位串，空字符串 = 解绑）。修改后自动写入用户 `keybindings.json`（仅增删托管条目 + 移除默认键的 `-command` 规则；首次写入前备份为 `keybindings.json.codeblocks-backup`）。推荐用命令 `Code::Blocks: Configure Keybindings…` 可视化修改，`Reset Keybindings` 一键恢复。常用键名：`build` / `rebuild` / `clean` / `run` / `buildAndRun` / `compileCurrentFile` / `debug` / `nextError` / `prevError` / `activatePriorProject` / `activateNextProject` / `moveProjectUp` / `moveProjectDown` / `projectTreeFocus` / `buildLogFocus`；CB 保真组 `cb*`（`cbToggleBreakpoint` / `cbBuildLog` / `cbReplace` / `cbStepOver` 等 12 项）；外部别名 `aliasGotoFile` / `aliasReplaceInFiles` / `aliasSelectNextMatch`。示例：`{ \"build\": \"ctrl+alt+b\", \"cbQuit\": \"\" }`"
+          "markdownDescription": "逐命令自定义快捷键（键名 = 命令短 id，值 = 键位串，空字符串 = 解绑）。修改后自动写入用户 `keybindings.json`（仅增删托管条目 + 移除默认键的 `-command` 规则；首次写入前备份为 `keybindings.json.codeblocks-backup`）。推荐直接点开 [可视化快捷键设置面板](command:codeblocks.keybindings.panel)：按键录入 / 手动输入 / 解绑 / 恢复默认 / 导出·导入方案 / 全部重置。常用键名：`build` / `rebuild` / `clean` / `run` / `buildAndRun` / `compileCurrentFile` / `debug` / `nextError` / `prevError` / `activatePriorProject` / `activateNextProject` / `moveProjectUp` / `moveProjectDown` / `projectTreeFocus` / `buildLogFocus`；CB 保真组 `cb*`（`cbToggleBreakpoint` / `cbBuildLog` / `cbReplace` / `cbStepOver` 等 12 项）；外部别名 `aliasGotoFile` / `aliasReplaceInFiles` / `aliasSelectNextMatch`。示例：`{ \"build\": \"ctrl+alt+b\", \"cbQuit\": \"\" }`"
         },
         "codeblocks.compilerPrograms": {
           "type": "object",
