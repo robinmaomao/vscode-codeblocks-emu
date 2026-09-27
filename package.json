@@ -2,7 +2,7 @@
   "name": "codeblocks-vscode",
   "displayName": "Code::Blocks for VS Code",
   "description": "原生移植 Code::Blocks 核心功能到 VS Code：项目模型、构建引擎、编译器管理与调试引擎",
-  "version": "0.8.90-dev",
+  "version": "0.8.91-dev",
   "icon": "resources/icon.png",
   "publisher": "robinmaomao",
   "author": {
@@ -305,6 +305,26 @@
         "command": "codeblocks.fileProperties",
         "title": "Properties...",
         "icon": "$(gear)"
+      },
+      {
+        "command": "codeblocks.renameFile",
+        "title": "Rename File...",
+        "icon": "$(edit)"
+      },
+      {
+        "command": "codeblocks.newVirtualFolder",
+        "title": "Add New Virtual Folder...",
+        "icon": "$(new-folder)"
+      },
+      {
+        "command": "codeblocks.renameVirtualFolder",
+        "title": "Rename Virtual Folder...",
+        "icon": "$(edit)"
+      },
+      {
+        "command": "codeblocks.deleteVirtualFolder",
+        "title": "Delete Virtual Folder",
+        "icon": "$(trash)"
       },
       {
         "command": "codeblocks.removeFile",
@@ -1142,6 +1162,31 @@
           "command": "codeblocks.fileProperties",
           "when": "view == codeblocks.projectTree && viewItem =~ /^file/",
           "group": "1_file@4"
+        },
+        {
+          "command": "codeblocks.renameFile",
+          "when": "view == codeblocks.projectTree && viewItem =~ /^file/",
+          "group": "1_file@5"
+        },
+        {
+          "command": "codeblocks.newVirtualFolder",
+          "when": "view == codeblocks.projectTree && viewItem == project",
+          "group": "5_vf@1"
+        },
+        {
+          "command": "codeblocks.newVirtualFolder",
+          "when": "view == codeblocks.projectTree && viewItem == virtualFolder",
+          "group": "5_vf@1"
+        },
+        {
+          "command": "codeblocks.renameVirtualFolder",
+          "when": "view == codeblocks.projectTree && viewItem == virtualFolder",
+          "group": "5_vf@2"
+        },
+        {
+          "command": "codeblocks.deleteVirtualFolder",
+          "when": "view == codeblocks.projectTree && viewItem == virtualFolder",
+          "group": "5_vf@3"
         },
         {
           "command": "codeblocks.toggleCompile",

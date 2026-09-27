@@ -59,6 +59,15 @@ import { generateMakefile } from './build/makefileExporter';
 import { buildProjectFromImport, importDevProject, importDspProject, importVcxproj } from './project/projectImporter';
 import { buildTargetExportProject } from './project/exportTarget';
 import { enumerateRecursiveSourceFiles, buildUnitXmlForTargets } from './project/recursiveAdd';
+import { renameUnitInCbpText } from './project/unitText';
+import {
+  addVirtualFolder,
+  renameVirtualFolder,
+  deleteVirtualFolder,
+  countFilesUnderVirtualFolder,
+  assignFileToVirtualFolder,
+  validateVirtualFolderPath,
+} from './model/virtualFolders';
 import { collectConflicts, normalizeKey, parseJsonc, KeybindingDef, ConflictItem } from './tools/keybindingConflicts';
 import {
   MANAGED_COMMANDS, MANAGED_KEYBINDINGS, buildExportPayload, buildKeybindingRows, computeDesiredEntries,
@@ -242,6 +251,23 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   });
   projectTreeProvider.dragAndDropController.onReorder = (src, target) => {
     reorderProjects(src, target);
+  };
+  // P4：文件拖入虚拟文件夹 / 物理目录 / 工程根（仅改模型 virtualFolder，磁盘文件不动）
+  projectTreeProvider.dragAndDropController.onAssignVirtualFolder = async (files, folder) => {
+    const project = files[0]?.project;
+    if (!project) return;
+    let changed = 0;
+    for (const { file } of files) {
+      if (file.virtualFolder !== folder) {
+        assignFileToVirtualFolder(file, folder);
+        changed++;
+      }
+    }
+    if (!changed) return;
+    outputChannel.info(
+      `[Code::Blocks] ${changed} 个文件归入虚拟文件夹: ${folder || '（工程根）'}`,
+    );
+    await persistProjectAndReload(project);
   };
   context.subscriptions.push(projectTreeView);
 
@@ -671,6 +697,81 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       const { project, file } = resolveFileNode(node);
       if (!project || !file) return;
       showProjectPropertiesPanel(project, context.extensionUri, 'files', file.relativeFilename);
+    }),
+  );
+
+  // 重命名文件（P3：磁盘改名 + 更新 .cbp 引用，保留全部选项与归属）
+  context.subscriptions.push(
+    vscode.commands.registerCommand('codeblocks.renameFile', async (node?: any) => {
+      const { project, file } = resolveFileNode(node);
+      if (!project || !file) return;
+      await renameProjectFile(project, file);
+    }),
+  );
+
+  // 虚拟文件夹管理（P4，对齐 ProjectManagerUI 三个菜单项）
+  context.subscriptions.push(
+    vscode.commands.registerCommand('codeblocks.newVirtualFolder', async (node?: any) => {
+      const project = (node?.project as Project | undefined) ?? activeProject;
+      if (!project) {
+        requireProject();
+        return;
+      }
+      const prefix = node?.kind === 'virtualFolder' && node?.dirKey ? `${node.dirKey}/` : '';
+      const input = await vscode.window.showInputBox({
+        prompt: '虚拟文件夹路径（可多级，如 Headers/Sub；不能含 “;” 或 “\\”）',
+        value: prefix,
+        validateInput: (v) => validateVirtualFolderPath(v, true),
+      });
+      if (input === undefined) return;
+      const res = addVirtualFolder(project, input);
+      if (!res.ok) {
+        vscode.window.showWarningMessage(`新建虚拟文件夹失败: ${res.reason}`);
+        return;
+      }
+      outputChannel.info(`[Code::Blocks] 已新建虚拟文件夹: ${input.trim()}`);
+      await persistProjectAndReload(project);
+    }),
+  );
+  context.subscriptions.push(
+    vscode.commands.registerCommand('codeblocks.renameVirtualFolder', async (node?: any) => {
+      const project: Project | undefined = node?.project;
+      const folder: string | undefined = node?.dirKey;
+      if (!project || !folder) return;
+      const input = await vscode.window.showInputBox({
+        prompt: '新的虚拟文件夹路径（保留子文件夹）',
+        value: folder,
+        validateInput: (v) => validateVirtualFolderPath(v, true),
+      });
+      if (input === undefined) return;
+      const res = renameVirtualFolder(project, folder, input);
+      if (!res.ok) {
+        vscode.window.showWarningMessage(`重命名虚拟文件夹失败: ${res.reason}`);
+        return;
+      }
+      outputChannel.info(
+        `[Code::Blocks] 重命名虚拟文件夹: ${folder} → ${input.trim()}（影响 ${res.affectedFiles} 个文件）`,
+      );
+      await persistProjectAndReload(project);
+    }),
+  );
+  context.subscriptions.push(
+    vscode.commands.registerCommand('codeblocks.deleteVirtualFolder', async (node?: any) => {
+      const project: Project | undefined = node?.project;
+      const folder: string | undefined = node?.dirKey;
+      if (!project || !folder) return;
+      const count = countFilesUnderVirtualFolder(project, folder);
+      const confirm = await vscode.window.showWarningMessage(
+        `删除虚拟文件夹 “${folder}”（含子文件夹）？其中 ${count} 个文件将移回工程根；磁盘文件不会被删除。`,
+        { modal: true },
+        'Delete',
+      );
+      if (confirm !== 'Delete') return;
+      const res = deleteVirtualFolder(project, folder);
+      outputChannel.info(
+        `[Code::Blocks] 已删除虚拟文件夹: ${folder}（${res.changedFolders} 个条目，${res.affectedFiles} 个文件回根）`,
+      );
+      await persistProjectAndReload(project);
     }),
   );
 
@@ -3369,6 +3470,169 @@ function buildUnitXml(rel: string, ext: string): string {
     return `\t\t<Unit filename="${rel}" />`;
   }
   return `\t\t<Unit filename="${rel}">\n\t\t\t<Option compilerVar="${compilerVar}" />\n\t\t</Unit>`;
+}
+
+/**
+ * P3 重命名文件（对齐 ProjectManagerUI::OnTreeItemRename，projectmanagerui.cpp:2852-2916）：
+ *   1. 拒绝自动生成文件（`pf->AutoGeneratedBy()` 时 CB 直接报错）；
+ *   2. 构建进行中 / 只读文件拒绝；
+ *   3. 编辑器已打开该文件时先保存并关闭（Windows 上占用会让 rename 失败）；
+ *   4. 磁盘改名（大小写仅变体允许；失败回退两段式改名）；
+ *   5. `.cbp` 文本手术：仅该 `<Unit filename>` 改新值（保留全部子 `<Option>`）；
+ *   6. 其它已打开工程引用同一绝对路径 → 仅提示（对齐 CB：只改当前工程）；
+ *   7. 重解析刷新 + 打开新文件。
+ */
+async function renameProjectFile(project: Project, file: ProjectFile): Promise<void> {
+  if (file.autoGeneratedBy) {
+    vscode.window.showErrorMessage(
+      `不能重命名自动生成的文件：${file.relativeFilename}（由 ${file.autoGeneratedBy} 生成）`,
+    );
+    return;
+  }
+  if (buildInProgress) {
+    vscode.window.showWarningMessage('构建进行中，请先停止或等待构建结束后再重命名文件');
+    return;
+  }
+
+  const abs = file.absolutePath;
+  if (!fs.existsSync(abs)) {
+    vscode.window.showErrorMessage(`文件不存在，无法重命名: ${abs}`);
+    return;
+  }
+  try {
+    fs.accessSync(abs, fs.constants.W_OK);
+  } catch {
+    vscode.window.showErrorMessage(`文件为只读，无法重命名: ${abs}`);
+    return;
+  }
+
+  const oldName = path.basename(abs);
+  const input = await vscode.window.showInputBox({
+    prompt: `重命名 ${file.relativeFilename}（仅文件名，不改变所在目录）`,
+    value: oldName,
+    validateInput: (v) => {
+      const name = v.trim();
+      if (!name) return '名称不能为空';
+      if (name === oldName) return '名称未变化';
+      if (/[\\/:*?"<>|]/.test(name)) return '名称不能包含 \\ / : * ? " < > | 字符';
+      if (name === '.' || name === '..') return '非法名称';
+      return undefined;
+    },
+  });
+  if (input === undefined) return;
+  const newName = input.trim();
+  if (newName === oldName) return;
+
+  const dir = path.dirname(abs);
+  const newAbs = path.join(dir, newName);
+  const caseOnly = newAbs.toLowerCase() === abs.toLowerCase();
+  if (!caseOnly && fs.existsSync(newAbs)) {
+    vscode.window.showErrorMessage(`目标文件已存在: ${newAbs}`);
+    return;
+  }
+
+  // 3. 编辑器占用：保存并关闭（否则 Windows 上可能 EPERM/EBUSY）
+  const docs = vscode.workspace.textDocuments.filter(
+    (d) => d.uri.scheme === 'file' && normPath(d.uri.fsPath).toLowerCase() === normPath(abs).toLowerCase(),
+  );
+  if (docs.length) {
+    const confirm = await vscode.window.showWarningMessage(
+      '该文件已在编辑器中打开，重命名前需保存并关闭。是否继续？',
+      { modal: true },
+      'Continue',
+    );
+    if (confirm !== 'Continue') return;
+    for (const doc of docs) {
+      try {
+        if (doc.isDirty) await doc.save();
+      } catch {
+        vscode.window.showErrorMessage(`保存失败，已中止重命名: ${doc.fileName}`);
+        return;
+      }
+    }
+    // 按 Tab 精确关闭（找不到同 uri 标签页时退化为关闭活动编辑器）
+    const tabs = vscode.window.tabGroups.all
+      .flatMap((g) => g.tabs)
+      .filter(
+        (t) =>
+          t.input instanceof vscode.TabInputText &&
+          normPath(t.input.uri.fsPath).toLowerCase() === normPath(abs).toLowerCase(),
+      );
+    if (tabs.length) {
+      await vscode.window.tabGroups.close(tabs);
+    }
+  }
+
+  // 4. 磁盘改名（大小写仅变体或占用失败 → 两段式）
+  try {
+    fs.renameSync(abs, newAbs);
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (caseOnly || code === 'EPERM' || code === 'EBUSY') {
+      const tmpAbs = path.join(dir, `.${oldName}.cb-rename-${process.pid}`);
+      try {
+        fs.renameSync(abs, tmpAbs);
+        fs.renameSync(tmpAbs, newAbs);
+      } catch (err2) {
+        try {
+          fs.renameSync(tmpAbs, abs);
+        } catch {
+          // 回滚也失败：保留现场，错误信息已足够定位
+        }
+        vscode.window.showErrorMessage(`重命名失败: ${(err2 as Error).message}`);
+        return;
+      }
+    } else {
+      vscode.window.showErrorMessage(`重命名失败: ${(err as Error).message}`);
+      return;
+    }
+  }
+
+  // 5. `.cbp` 文本手术（保留全部子节点与格式）
+  const oldRel = file.relativeFilename;
+  const relDir = path.relative(project.basePath, dir).replace(/\\/g, '/');
+  const newRel = relDir && !relDir.startsWith('..') ? `${relDir}/${newName}` : newName;
+  let cbpUpdated = false;
+  try {
+    const raw = fs.readFileSync(project.filename, 'utf-8');
+    const { text, replaced } = renameUnitInCbpText(raw, oldRel, newRel);
+    if (replaced) {
+      fs.writeFileSync(project.filename, text, 'utf-8');
+      cbpUpdated = true;
+      outputChannel.info(`[Code::Blocks] 已重命名文件: ${oldRel} → ${newRel}`);
+    }
+  } catch (err) {
+    vscode.window.showErrorMessage(`磁盘已重命名但更新工程引用失败: ${(err as Error).message}（请手动修正 .cbp）`);
+  }
+  if (!cbpUpdated) {
+    vscode.window.showWarningMessage(`未能在 .cbp 中更新引用 “${oldRel}”（磁盘文件已重命名）`);
+  }
+
+  // 6. 其它已打开工程引用同一文件 → 仅提示（对齐 CB 不自动修改）
+  const others = openProjects.filter(
+    (p) =>
+      p.filename !== project.filename &&
+      p.files.some((f) => normPath(f.absolutePath).toLowerCase() === normPath(abs).toLowerCase()),
+  );
+  if (others.length) {
+    vscode.window.setStatusBarMessage(
+      `注意：其它 ${others.length} 个已打开工程引用了该文件（仍指向旧路径，需手动修正）`,
+      6000,
+    );
+  }
+
+  // 7. 重解析刷新 + 打开新文件
+  const idx = openProjects.findIndex((p) => p.filename === project.filename);
+  if (idx !== -1) openProjects.splice(idx, 1);
+  const wasActive = activeProject?.filename === project.filename;
+  await openProject(project.filename);
+  if (wasActive) {
+    activeProject = openProjects.find((p) => p.filename === project.filename);
+    projectTreeProvider?.setActiveProject(activeProject);
+    updateTargetStatusBar();
+    updateCompilerStatusBar();
+  }
+  await vscode.window.showTextDocument(vscode.Uri.file(newAbs), { preview: false });
 }
 
 /**
