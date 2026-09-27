@@ -223,6 +223,8 @@ export class ProjectPropertiesPanel {
     ) => Promise<void>,
     /** 打开时直达的 tab（默认 targets；如 'notes'） */
     private initialTab: string | undefined = undefined,
+    /** 打开时在「文件」tab 定位高亮的文件（relativeFilename；M3：文件节点 Properties… 直达） */
+    private focusFile: string | undefined = undefined,
   ) {
     this.panel = vscode.window.createWebviewPanel(
       'codeblocks.projectProperties',
@@ -253,9 +255,10 @@ export class ProjectPropertiesPanel {
       debuggerSettings: DebuggerSettingsEditData,
     ) => Promise<void>,
     initialTab?: string,
+    focusFile?: string,
   ): void {
     ProjectPropertiesPanel.current?.dispose();
-    ProjectPropertiesPanel.current = new ProjectPropertiesPanel(project, extensionUri, onSave, initialTab);
+    ProjectPropertiesPanel.current = new ProjectPropertiesPanel(project, extensionUri, onSave, initialTab, focusFile);
   }
 
   private buildHtml(): string {
@@ -379,6 +382,8 @@ export class ProjectPropertiesPanel {
       .join('');
     // 初始 tab（供脚本注入；JSON.stringify 保证引号安全）
     const initialTabJs = JSON.stringify(this.initialTab ?? 'targets');
+    // M3：初始定位文件（文件 tab 高亮行；null = 不定位）
+    const focusFileJs = JSON.stringify(this.focusFile ?? null);
 
     const data = JSON.stringify({
       title: this.project.title,
@@ -622,6 +627,7 @@ export class ProjectPropertiesPanel {
     let selectedDirScope = 'project';
     let selectedScriptScope = 'project';
     let activeTab = ${initialTabJs};
+    let focusFile = ${focusFileJs};
 
     function esc(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
     function escAttr(s) { return esc(s).replace(/"/g, '&quot;'); }
@@ -1359,6 +1365,16 @@ export class ProjectPropertiesPanel {
     renderList(); renderForm();
     renderVTList();
     renderFileList();
+    // M3：定位文件（选中 + 滚动到可视区，再切入 files tab）
+    if (focusFile) {
+      const fi = files.findIndex(f => f.relativeFilename === focusFile);
+      if (fi >= 0) {
+        selectedFile = fi;
+        renderFileList();
+        const el = document.querySelector('#flist .item.selected');
+        if (el && el.scrollIntoView) el.scrollIntoView({ block: 'center' });
+      }
+    }
     switchTab(activeTab);
   </script>
 </body>

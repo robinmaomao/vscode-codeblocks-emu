@@ -2,7 +2,7 @@
   "name": "codeblocks-vscode",
   "displayName": "Code::Blocks for VS Code",
   "description": "原生移植 Code::Blocks 核心功能到 VS Code：项目模型、构建引擎、编译器管理与调试引擎",
-  "version": "0.8.89-dev",
+  "version": "0.8.90-dev",
   "icon": "resources/icon.png",
   "publisher": "robinmaomao",
   "author": {
@@ -290,6 +290,21 @@
         "command": "codeblocks.addFile",
         "title": "Add Files...",
         "icon": "$(add)"
+      },
+      {
+        "command": "codeblocks.addFilesRecursively",
+        "title": "Add Files Recursively...",
+        "icon": "$(add)"
+      },
+      {
+        "command": "codeblocks.findFile",
+        "title": "Find File...",
+        "icon": "$(search)"
+      },
+      {
+        "command": "codeblocks.fileProperties",
+        "title": "Properties...",
+        "icon": "$(gear)"
       },
       {
         "command": "codeblocks.removeFile",
@@ -717,6 +732,11 @@
             "minimum": 0,
             "maximum": 50,
             "description": "「最近工程」列表上限（状态栏菜单 Recent Projects；0 = 不记录）"
+          },
+          "codeblocks.ui.findFileOpen": {
+            "type": "boolean",
+            "default": false,
+            "description": "查找文件时同时打开选中的文件（对齐 Code::Blocks 的 Find file → “Open file” 复选框；默认仅在本工程树中定位）"
           }
         }
       },
@@ -1092,6 +1112,36 @@
           "command": "codeblocks.addFile",
           "when": "view == codeblocks.projectTree && viewItem == project",
           "group": "3_add@1"
+        },
+        {
+          "command": "codeblocks.addFilesRecursively",
+          "when": "view == codeblocks.projectTree && viewItem == project",
+          "group": "3_add@2"
+        },
+        {
+          "command": "codeblocks.addFile",
+          "when": "view == codeblocks.projectTree && viewItem =~ /^(folder|virtualFolder|fileGroup)$/",
+          "group": "3_add@1"
+        },
+        {
+          "command": "codeblocks.addFilesRecursively",
+          "when": "view == codeblocks.projectTree && viewItem =~ /^(folder|virtualFolder|fileGroup)$/",
+          "group": "3_add@2"
+        },
+        {
+          "command": "codeblocks.findFile",
+          "when": "view == codeblocks.projectTree && viewItem == project",
+          "group": "4_find@1"
+        },
+        {
+          "command": "codeblocks.findFile",
+          "when": "view == codeblocks.projectTree && viewItem =~ /^(folder|virtualFolder|fileGroup)$/",
+          "group": "4_find@1"
+        },
+        {
+          "command": "codeblocks.fileProperties",
+          "when": "view == codeblocks.projectTree && viewItem =~ /^file/",
+          "group": "1_file@4"
         },
         {
           "command": "codeblocks.toggleCompile",

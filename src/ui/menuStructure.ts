@@ -254,6 +254,7 @@ export const MENU_STRUCTURE: MenuDef[] = [
     icon: 'package',
     children: [
       { label: 'Add Files…', command: 'codeblocks.addFile', needsProject: true },
+      { label: 'Add Files Recursively…', command: 'codeblocks.addFilesRecursively', needsProject: true },
       SEP,
       {
         label: 'Project tree',
@@ -263,6 +264,8 @@ export const MENU_STRUCTURE: MenuDef[] = [
           SEP,
           { label: 'Activate Prior Project', command: 'codeblocks.activatePriorProject', shortcut: 'Alt+F5', needsProject: true },
           { label: 'Activate Next Project', command: 'codeblocks.activateNextProject', shortcut: 'Alt+F6', needsProject: true },
+          SEP,
+          { label: 'Find File…', command: 'codeblocks.findFile', needsProject: true },
           SEP,
           { label: 'Categorize by File Types', command: 'codeblocks.toggleCategorize' },
         ],

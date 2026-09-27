@@ -103,6 +103,14 @@ export class ProjectTreeProvider implements vscode.TreeDataProvider<TreeNode> {
   private iconCache = new Map<string, vscode.Uri>();
   /** 目录索引缓存：project.filename + 作用域 key → 目录索引（跨节点懒加载共享；LRU 上限防无界增长） */
   private dirIndexCache = new LruCache<string, DirIndex>(256);
+  /**
+   * 节点缓存：保证同一逻辑节点返回同一对象实例。
+   * 背景：vscode.TreeView.reveal() 依赖 getParent 链 + getChildren 返回的同一实例来定位节点，
+   * 若每次重建新对象，reveal 会因对象不等而找不到目标（P1 查找文件定位）。
+   */
+  private nodeCache = new Map<string, TreeNode>();
+  /** 父节点映射：实现 getParent（WeakMap 不阻碍节点回收） */
+  private parentMap = new WeakMap<TreeNode, TreeNode>();
 
   /** 设置资源根目录（用于加载图标） */
   setResourcesDir(dir: string): void {
@@ -125,6 +133,8 @@ export class ProjectTreeProvider implements vscode.TreeDataProvider<TreeNode> {
   setProjects(projects: Project[]): void {
     this.projects = projects;
     this.dirIndexCache.clear();
+    this.nodeCache.clear();
+    this.parentMap = new WeakMap<TreeNode, TreeNode>();
     this._onDidChangeTreeData.fire(undefined);
   }
 
@@ -138,7 +148,15 @@ export class ProjectTreeProvider implements vscode.TreeDataProvider<TreeNode> {
   setCategorize(categorize: boolean): void {
     if (this.categorize === categorize) return;
     this.categorize = categorize;
+    this.dirIndexCache.clear();
+    this.nodeCache.clear();
+    this.parentMap = new WeakMap<TreeNode, TreeNode>();
     this._onDidChangeTreeData.fire(undefined);
+  }
+
+  /** 父节点（树视图 reveal / 展开链路需要） */
+  getParent(element: TreeNode): TreeNode | undefined {
+    return this.parentMap.get(element);
   }
 
   getTreeItem(element: TreeNode): vscode.TreeItem {
@@ -156,29 +174,13 @@ export class ProjectTreeProvider implements vscode.TreeDataProvider<TreeNode> {
 
   getChildren(element?: TreeNode): TreeNode[] {
     if (!element) {
-      // 根：所有项目节点（顺序即编译顺序）
-      // 参考 Code::Blocks 的 project->GetTitle() 语义取「项目名」，
-      // 但当 .cbp 的 <Option title> 不足以区分（如多个 app.cbp）时，
-      // 用 .cbp 所在目录名（如 earphone / esop8）作为项目显示名。
-      return this.projects.map((p) => {
-        const dirName = path.basename(path.dirname(p.filename));
-        const node = new TreeNode(
-          dirName || p.title,
-          vscode.TreeItemCollapsibleState.Expanded,
-          'project',
-          p,
-        );
-        // 稳定 id：让 TreeView 在刷新时能正确识别/复用项目节点，配合 getTreeItem 更新图标
-        node.id = p.filename;
-        node.description = path.basename(p.filename);
-        node.tooltip = p.filename;
-        return node;
-      });
+      // 根：所有项目节点（顺序即编译顺序）；节点走缓存保证实例稳定（reveal 需要）
+      return this.projects.map((p) => this.projectNode(p));
     }
 
     if (element.kind === 'project') {
       // 项目节点下只构建顶层骨架（虚拟文件夹 / 分组 / 顶层目录与文件），子级展开时懒加载
-      return this.buildFileNodes(element.project!);
+      return this.buildFileNodes(element);
     }
 
     if (element.kind === 'folder' || element.kind === 'virtualFolder') {
@@ -192,22 +194,134 @@ export class ProjectTreeProvider implements vscode.TreeDataProvider<TreeNode> {
     return [];
   }
 
-  /** 创建目录节点（区分物理目录 / 虚拟文件夹）；dirKey 用于展开时懒加载子节点 */
-  private makeLazyDirNode(
-    name: string,
-    dirKey: string,
+  /** 项目节点（缓存；参考 Code::Blocks project->GetTitle() 语义取项目名） */
+  private projectNode(project: Project): TreeNode {
+    const key = `p\u0000${upperDrive(project.filename)}`;
+    let node = this.nodeCache.get(key);
+    if (!node) {
+      // 当 .cbp 的 <Option title> 不足以区分（如多个 app.cbp）时，
+      // 用 .cbp 所在目录名（如 earphone / esop8）作为项目显示名。
+      const dirName = path.basename(path.dirname(project.filename));
+      node = new TreeNode(dirName || project.title, vscode.TreeItemCollapsibleState.Expanded, 'project', project);
+      // 稳定 id：让 TreeView 在刷新时能正确识别/复用项目节点，配合 getTreeItem 更新图标
+      node.id = project.filename;
+      node.description = path.basename(project.filename);
+      node.tooltip = project.filename;
+      this.nodeCache.set(key, node);
+    }
+    return node;
+  }
+
+  /** 目录节点（缓存；区分物理目录 / 虚拟文件夹），dirKey 用于展开时懒加载子节点 */
+  private dirNode(
     project: Project,
+    kind: 'folder' | 'virtualFolder',
+    dirKey: string,
+    scopeKey: string,
+  ): TreeNode {
+    const key = `d\u0000${upperDrive(project.filename)}\u0000${scopeKey}\u0000${dirKey}`;
+    let node = this.nodeCache.get(key);
+    if (!node) {
+      const name = dirKey.split('/').pop() ?? dirKey;
+      node = new TreeNode(name, vscode.TreeItemCollapsibleState.Collapsed, kind, project);
+      node.iconPath = kind === 'virtualFolder'
+        ? (this.iconUri('vfolder.svg') ?? new vscode.ThemeIcon('folder-library'))
+        : (this.iconUri('folder.svg') ?? new vscode.ThemeIcon('folder'));
+      node.tooltip = kind === 'virtualFolder' ? `虚拟文件夹: ${dirKey}` : dirKey;
+      node.contextValue = kind === 'virtualFolder' ? 'virtualFolder' : 'folder';
+      node.dirKey = dirKey;
+      node.scopeKey = scopeKey;
+      this.nodeCache.set(key, node);
+    }
+    return node;
+  }
+
+  /** 文件类型分组节点（缓存） */
+  private groupNode(project: Project, name: string): TreeNode {
+    const key = `g\u0000${upperDrive(project.filename)}\u0000${name}`;
+    let node = this.nodeCache.get(key);
+    if (!node) {
+      node = new TreeNode(name, vscode.TreeItemCollapsibleState.Collapsed, 'fileGroup', project);
+      node.iconPath = this.iconUri('vfolder.svg') ?? new vscode.ThemeIcon('folder-library');
+      node.tooltip = `文件分组: ${name}`;
+      node.contextValue = 'fileGroup';
+      node.scopeKey = `group:${name}`;
+      this.nodeCache.set(key, node);
+    }
+    return node;
+  }
+
+  /**
+   * 查找某文件在树中的节点（P1「查找文件」定位用）。
+   * 按与 getChildren 相同的路径规则预先构建链条（带缓存），并登记父节点映射，
+   * 使 TreeView.reveal(node, {expand:true}) 能逐级展开到该文件。
+   */
+  findFileNode(project: Project, file: ProjectFile): TreeNode {
+    let parent = this.projectNode(project);
+    const rel = file.relativeToCommonTopLevelPath || file.relativeFilename;
+
+    if (file.virtualFolder) {
+      parent = this.linkDirChain(project, parent, file.virtualFolder, 'virtualFolder', 'vf');
+    } else if (this.categorize) {
+      const name = matchGroupName(path.basename(file.relativeFilename));
+      const g = this.groupNode(project, name);
+      this.parentMap.set(g, parent);
+      parent = this.linkDirChain(project, g, path.posix.dirname(cleanRelativePath(rel)), 'folder', `group:${name}`);
+    } else {
+      parent = this.linkDirChain(project, parent, path.posix.dirname(cleanRelativePath(rel)), 'folder', 'plain');
+    }
+
+    const node = this.fileNode(project, file);
+    this.parentMap.set(node, parent);
+    return node;
+  }
+
+  /** 逐级创建目录节点链并登记父映射（dirRel 为 '' 或 '.' 时返回原 parent） */
+  private linkDirChain(
+    project: Project,
+    parent: TreeNode,
+    dirRel: string,
     kind: 'folder' | 'virtualFolder',
     scopeKey: string,
   ): TreeNode {
-    const node = new TreeNode(name, vscode.TreeItemCollapsibleState.Collapsed, kind, project);
-    node.iconPath = kind === 'virtualFolder'
-      ? (this.iconUri('vfolder.svg') ?? new vscode.ThemeIcon('folder-library'))
-      : (this.iconUri('folder.svg') ?? new vscode.ThemeIcon('folder'));
-    node.tooltip = kind === 'virtualFolder' ? `虚拟文件夹: ${dirKey}` : dirKey;
-    node.dirKey = dirKey;
-    node.scopeKey = scopeKey;
-    return node;
+    const segs = cleanRelativePath(dirRel).split('/').filter((s) => s && s !== '.');
+    let dirKey = '';
+    for (const seg of segs) {
+      dirKey = dirKey ? `${dirKey}/${seg}` : seg;
+      const child = this.dirNode(project, kind, dirKey, scopeKey);
+      this.parentMap.set(child, parent);
+      parent = child;
+    }
+    return parent;
+  }
+
+  /**
+   * 某节点作用域下的全部文件（P1「查找文件」用；对应 ProjectManagerUI::ListNodes，
+   * projectmanagerui.cpp:2530-2567 的递归收集，不依赖懒加载状态）。
+   * 作用域：项目 = 全部文件；文件夹/虚拟文件夹 = 该目录及子目录；分组 = 该分组全部。
+   */
+  filesUnder(node: TreeNode): ProjectFile[] {
+    const project = node.project;
+    if (!project) return [];
+    if (node.kind === 'project') return [...project.files];
+    if (node.kind === 'file') return node.file ? [node.file] : [];
+    if (node.kind === 'folder' || node.kind === 'virtualFolder') {
+      const index = this.getDirIndex(project, node.scopeKey!);
+      const dirKey = node.dirKey ?? '';
+      const prefix = dirKey ? `${dirKey}/` : '';
+      const out: ProjectFile[] = [...(index.filesByDir.get(dirKey) ?? [])];
+      for (const [k, arr] of index.filesByDir) {
+        if (k !== dirKey && k.startsWith(prefix)) out.push(...arr);
+      }
+      return out;
+    }
+    if (node.kind === 'fileGroup') {
+      const index = this.getDirIndex(project, node.scopeKey!);
+      const out: ProjectFile[] = [];
+      for (const arr of index.filesByDir.values()) out.push(...arr);
+      return out;
+    }
+    return [];
   }
 
   /** 懒加载目录节点（folder / virtualFolder）子节点：首次展开时按 DirIndex 构建并缓存 */
@@ -220,6 +334,7 @@ export class ProjectTreeProvider implements vscode.TreeDataProvider<TreeNode> {
       element.kind as 'folder' | 'virtualFolder',
       index,
       element.scopeKey!,
+      element,
     );
     element.childrenLoaded = true;
     return element.children;
@@ -229,7 +344,7 @@ export class ProjectTreeProvider implements vscode.TreeDataProvider<TreeNode> {
   private getGroupChildren(element: TreeNode): TreeNode[] {
     if (element.childrenLoaded) return element.children;
     const index = this.getDirIndex(element.project!, element.scopeKey!);
-    element.children = this.childrenOfDir('', element.project!, 'folder', index, element.scopeKey!);
+    element.children = this.childrenOfDir('', element.project!, 'folder', index, element.scopeKey!, element);
     element.childrenLoaded = true;
     return element.children;
   }
@@ -324,13 +439,16 @@ export class ProjectTreeProvider implements vscode.TreeDataProvider<TreeNode> {
     project: Project,
     kind: 'folder' | 'virtualFolder',
     scopeKey: string,
+    parent: TreeNode,
   ): TreeNode[] {
     const nodes: TreeNode[] = [];
     for (const name of index.subdirsByDir.get('') ?? []) {
-      nodes.push(this.makeLazyDirNode(name, name, project, kind, scopeKey));
+      const node = this.dirNode(project, kind, name, scopeKey);
+      this.parentMap.set(node, parent);
+      nodes.push(node);
     }
     for (const f of index.filesByDir.get('') ?? []) {
-      nodes.push(this.fileToNode(project, f));
+      nodes.push(this.childFileNode(project, f, parent));
     }
     this.sortDirNodes(nodes);
     return nodes;
@@ -343,17 +461,27 @@ export class ProjectTreeProvider implements vscode.TreeDataProvider<TreeNode> {
     kind: 'folder' | 'virtualFolder',
     index: DirIndex,
     scopeKey: string,
+    parent: TreeNode,
   ): TreeNode[] {
     const nodes: TreeNode[] = [];
     for (const name of index.subdirsByDir.get(dirKey) ?? []) {
       const fullKey = dirKey ? `${dirKey}/${name}` : name;
-      nodes.push(this.makeLazyDirNode(name, fullKey, project, kind, scopeKey));
+      const node = this.dirNode(project, kind, fullKey, scopeKey);
+      this.parentMap.set(node, parent);
+      nodes.push(node);
     }
     for (const f of index.filesByDir.get(dirKey) ?? []) {
-      nodes.push(this.fileToNode(project, f));
+      nodes.push(this.childFileNode(project, f, parent));
     }
     this.sortDirNodes(nodes);
     return nodes;
+  }
+
+  /** 构建文件节点并登记父映射（统一入口，保证 findFileNode 与树中实例一致） */
+  private childFileNode(project: Project, f: ProjectFile, parent: TreeNode): TreeNode {
+    const node = this.fileNode(project, f);
+    this.parentMap.set(node, parent);
+    return node;
   }
 
   /** 目录节点排序：目录/分组在前、文件在后，同类按 label（对齐原 buildDirTree） */
@@ -367,13 +495,14 @@ export class ProjectTreeProvider implements vscode.TreeDataProvider<TreeNode> {
   }
 
   /** 构建项目节点下的顶层骨架：虚拟文件夹 / 分组 / 顶层目录与文件（子级展开时懒加载） */
-  private buildFileNodes(project: Project): TreeNode[] {
+  private buildFileNodes(projectElement: TreeNode): TreeNode[] {
+    const project = projectElement.project!;
     const rootNodes: TreeNode[] = [];
 
     // 1. 虚拟文件夹顶层（优先级最高，对齐 pf->virtual_path）
     const vfIndex = this.getDirIndex(project, 'vf');
     this.mergeEmptyVirtualFolders(project, vfIndex);
-    rootNodes.push(...this.dirNodesFromIndex(vfIndex, project, 'virtualFolder', 'vf'));
+    rootNodes.push(...this.dirNodesFromIndex(vfIndex, project, 'virtualFolder', 'vf', projectElement));
 
     // 2. 非虚拟文件夹文件：按类型分组（categorize）或纯目录
     const plainFiles = project.files.filter((f) => !f.virtualFolder);
@@ -382,15 +511,13 @@ export class ProjectTreeProvider implements vscode.TreeDataProvider<TreeNode> {
       const groupNames = new Set(plainFiles.map((f) => matchGroupName(path.basename(f.relativeFilename))));
       const sorted = [...groupNames].sort((a, b) => groupOrder(a) - groupOrder(b) || a.localeCompare(b));
       for (const name of sorted) {
-        const gn = new TreeNode(name, vscode.TreeItemCollapsibleState.Collapsed, 'fileGroup', project);
-        gn.iconPath = this.iconUri('vfolder.svg') ?? new vscode.ThemeIcon('folder-library');
-        gn.tooltip = `文件分组: ${name}`;
-        gn.scopeKey = `group:${name}`;
+        const gn = this.groupNode(project, name);
+        this.parentMap.set(gn, projectElement);
         rootNodes.push(gn);
       }
     } else {
       const plainIndex = this.getDirIndex(project, 'plain');
-      rootNodes.push(...this.dirNodesFromIndex(plainIndex, project, 'folder', 'plain'));
+      rootNodes.push(...this.dirNodesFromIndex(plainIndex, project, 'folder', 'plain', projectElement));
     }
 
     // 根层排序：目录/分组在前，文件在后；分组节点按 Code::Blocks 定义顺序（Sources→Headers→…→Others）
@@ -406,9 +533,13 @@ export class ProjectTreeProvider implements vscode.TreeDataProvider<TreeNode> {
     return rootNodes;
   }
 
-  private fileToNode(project: Project, f: ProjectFile): TreeNode {
+  /** 文件节点（缓存；目标归属仍在构建时计算一次） */
+  private fileNode(project: Project, f: ProjectFile): TreeNode {
+    const key = `f\u0000${upperDrive(project.filename)}\u0000${f.relativeFilename}`;
+    let node = this.nodeCache.get(key);
+    if (node) return node;
     const uri = vscode.Uri.file(f.absolutePath);
-    const node = new TreeNode(
+    node = new TreeNode(
       path.basename(f.relativeFilename),
       vscode.TreeItemCollapsibleState.None,
       'file',
@@ -434,6 +565,7 @@ export class ProjectTreeProvider implements vscode.TreeDataProvider<TreeNode> {
         node.tooltip = `目标: ${belongs.join(', ')}`;
       }
     }
+    this.nodeCache.set(key, node);
     return node;
   }
 }
