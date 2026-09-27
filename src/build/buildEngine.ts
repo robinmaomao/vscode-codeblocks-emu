@@ -870,7 +870,8 @@ export class BuildEngine {
     const compileStartMs = Date.now();
     const maxJobs = this.maxJobs();
     const results = await this.runInParallel(units, maxJobs, options, totalUnits);
-    if (deferredUnits.length) {
+    // 失败即停：常规编译出现失败时不再派发生成文件单元（对齐 CB OnJobEnd 清队列语义）
+    if (deferredUnits.length && !results.includes(undefined)) {
       results.push(...(await this.runInParallel(deferredUnits, maxJobs, options, totalUnits)));
     }
     const compileSec = ((Date.now() - compileStartMs) / 1000).toFixed(1);
@@ -881,12 +882,17 @@ export class BuildEngine {
       return this.cancelledStats(target, results.filter((r) => r).length, skippedCount);
     }
 
-    const failedCount = results.filter((r) => !r).length;
+    const failedCount = results.filter((r) => r === false).length;
     if (failedCount > 0) {
+      // 失败即停统计（对齐 CB 清队列）：未派发单元（undefined）不计入失败，仅提示
+      const notDispatched = results.filter((r) => r === undefined).length;
+      if (notDispatched > 0) {
+        this.output.info(`[Code::Blocks] ${msg(`编译失败，剩余 ${notDispatched} 个单元未派发（失败即停，对齐 CB 清队列）`, `Compilation failed: ${notDispatched} unit(s) not dispatched (fail-fast, CB queue-clear semantics)`)}`);
+      }
       this.output.error(`[Code::Blocks] 目标 "${target.title}" 编译失败`);
       return {
         success: false,
-        compiledCount: totalUnits - failedCount, // 编译成功的文件数
+        compiledCount: results.filter((r) => r === true).length, // 编译成功的文件数（未派发单元不计）
         skippedCount,
         failedCount,
         linkSuccess: false,
@@ -1803,11 +1809,14 @@ export class BuildEngine {
     return Math.max(1, os.cpus().length || 2);
   }
 
-  private async runInParallel(units: CompileUnit[], maxJobs: number, options: BuildOptions, totalCount: number): Promise<boolean[]> {
-    const results: boolean[] = new Array(units.length).fill(false);
+  private async runInParallel(units: CompileUnit[], maxJobs: number, options: BuildOptions, totalCount: number): Promise<(boolean | undefined)[]> {
+    const results: (boolean | undefined)[] = new Array(units.length).fill(undefined);
+    // 失败即停（对齐 CB OnJobEnd：compilergcc.cpp:4005-4017）——首个失败后不再派发新单元，
+    // 已在跑的任务自然结束；undefined = 未派发（不计入失败统计）
+    const stop = { stopped: false };
     // 按 weight 分组执行：同 weight 并行，跨 weight 串行（对齐 GetCompileCommands 的 COMPILER_WAIT 屏障）
     let groupStart = 0;
-    while (groupStart < units.length) {
+    while (groupStart < units.length && !stop.stopped) {
       let groupEnd = groupStart + 1;
       const w = units[groupStart].file.weight;
       while (groupEnd < units.length && units[groupEnd].file.weight === w) groupEnd++;
@@ -1816,25 +1825,29 @@ export class BuildEngine {
       const group = units.slice(groupStart, groupEnd);
       const pchIdx = group.map((u, i) => (u.isPch ? i : -1)).filter((i) => i >= 0);
       const normalIdx = group.map((u, i) => (!u.isPch ? i : -1)).filter((i) => i >= 0);
-      await this.runGroupSubset(group, pchIdx, groupStart, maxJobs, options, results, totalCount);
-      await this.runGroupSubset(group, normalIdx, groupStart, maxJobs, options, results, totalCount);
+      await this.runGroupSubset(group, pchIdx, groupStart, maxJobs, options, results, totalCount, stop);
+      if (!stop.stopped) {
+        await this.runGroupSubset(group, normalIdx, groupStart, maxJobs, options, results, totalCount, stop);
+      }
 
       groupStart = groupEnd;
     }
     return results;
   }
 
-  /** 编译一组单元（按 maxJobs 并行），结果写回全局 results（baseGlobalIdx + 组内下标） */
+  /** 编译一组单元（按 maxJobs 并行），结果写回全局 results（baseGlobalIdx + 组内下标；undefined=未派发） */
   private async runGroupSubset(
     group: CompileUnit[], localIdx: number[], baseGlobalIdx: number,
-    maxJobs: number, options: BuildOptions, results: boolean[], totalCount: number,
+    maxJobs: number, options: BuildOptions, results: (boolean | undefined)[], totalCount: number,
+    stop: { stopped: boolean },
   ): Promise<void> {
     if (!localIdx.length) return;
     let cursor = 0;
     const workers = Array.from({ length: Math.min(maxJobs, localIdx.length) }, async () => {
       while (cursor < localIdx.length) {
-        // 取消检查点：不再启动新的编译单元（已启动的由 cancel() 强杀整棵进程树）
-        if (options.cancel?.isCancelled()) break;
+        // 取消/失败短路检查点：不再启动新的编译单元（已启动的由 cancel() 强杀或自然完成）
+        // 对齐 CB OnJobEnd：失败时 m_CommandQueue.Clear()，in-flight 任务自然结束
+        if (stop.stopped || options.cancel?.isCancelled()) break;
         const pos = cursor++;
         const li = localIdx[pos];
         const u = group[li];
@@ -1859,6 +1872,7 @@ export class BuildEngine {
           this.output.warn(`⚠ [Interrupted] ${idx}-${totalCount} ${u.file.relativeFilename}`);
         } else {
           this.output.error(`✗ [Failed] ${idx}-${totalCount} ${u.file.relativeFilename} (${elapsedSec}s)`);
+          stop.stopped = true; // 失败即停：不再派发新单元（对齐 CB 清队列）
         }
         if (ok) {
           this.compileTimings.push({ file: u.file.relativeFilename, ms: elapsedMs });
