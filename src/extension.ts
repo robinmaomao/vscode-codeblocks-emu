@@ -9,6 +9,7 @@ import * as fs from 'fs';
 import * as crypto from 'crypto';
 import { spawn } from 'child_process';
 import { execFile } from 'child_process';
+import { spawnSync } from 'child_process';
 import { isExecutableTargetType, resolveExecutablePath } from './build/outputPath';
 import { ProjectParser, WorkspaceParser } from './model/parser';
 import { Project, BuildTarget, ProjectFile, TargetType, CommandType, Workspace, OptionsRelation, OptionsRelationType, LinkerExecutableOption, supportsCurrentPlatform, PLATFORM_ALL } from './model/types';
@@ -3348,6 +3349,25 @@ function writeUnitsToCbp(cbpPath: string, units: string[]): void {
   fs.writeFileSync(cbpPath, raw, 'utf-8');
 }
 
+/** 查询编译器版本字符串 —— 对齐 CompilerMINGW::SetVersionString（compilerMINGW.cpp:240-318）：`<C 程序> --version` 首行匹配 x.y.z */
+function queryCompilerVersionString(compiler: Compiler): string | undefined {
+  try {
+    const c = compiler.programs?.C;
+    if (!c) return undefined;
+    let exe = c;
+    if (!path.isAbsolute(exe) && compiler.masterPath) {
+      const inBin = path.join(compiler.masterPath, 'bin', c);
+      exe = fs.existsSync(inBin) ? inBin : path.join(compiler.masterPath, c);
+    }
+    const out = spawnSync(exe, ['--version'], { encoding: 'utf8', timeout: 8000 }).stdout ?? '';
+    const first = out.split(/\r?\n/)[0] ?? '';
+    const m = first.match(/\d+\.\d+\.\d+/);
+    return m ? m[0] : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 function getCompiler(compilerId?: string): Compiler {
   const cfg = vscode.workspace.getConfiguration('codeblocks');
   const id = compilerId ?? cfg.get<string>('compilerId', 'gcc');
@@ -3398,6 +3418,10 @@ function getCompiler(compilerId?: string): Compiler {
     const programs = cfg.get<Record<string, string>>('compilerPrograms', {});
     if (programs && programs.C) {
       compiler.programs = { ...compiler.programs, ...programs } as any;
+    }
+    // PCH include 前置需要 gcc 主版本号（对齐 Compiler::m_VersionString），惰性查询一次并缓存
+    if (compiler.switches.supportsPCH && !compiler.versionString) {
+      compiler.versionString = queryCompilerVersionString(compiler);
     }
     return applyGlobalDirs(compiler);
   }

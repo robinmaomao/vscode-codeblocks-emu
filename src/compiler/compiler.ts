@@ -79,6 +79,8 @@ export interface Compiler {
   id: string;
   name: string;
   masterPath: string;
+  /** 编译器版本字符串（对齐 Compiler::m_VersionString，`gcc --version` 首行取主版本号 "8.1.0"） */
+  versionString?: string;
   programs: CompilerPrograms;
   switches: CompilerSwitches;
   /** 按 CommandType 索引的命令模板列表 */
