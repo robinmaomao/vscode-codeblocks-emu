@@ -2,7 +2,7 @@
   "name": "codeblocks-vscode",
   "displayName": "Code::Blocks for VS Code",
   "description": "原生移植 Code::Blocks 核心功能到 VS Code：项目模型、构建引擎、编译器管理与调试引擎",
-  "version": "0.8.91-dev",
+  "version": "0.8.92-dev",
   "icon": "resources/icon.png",
   "publisher": "robinmaomao",
   "author": {
@@ -455,6 +455,16 @@
         "command": "codeblocks.debug.attachToProcess",
         "title": "Code::Blocks: Attach to Process…",
         "icon": "$(debug-alt)"
+      },
+      {
+        "command": "codeblocks.debug.detach",
+        "title": "Code::Blocks: Detach",
+        "icon": "$(debug-disconnect)"
+      },
+      {
+        "command": "codeblocks.debug.addSymbolFile",
+        "title": "Code::Blocks: Add Symbol File…",
+        "icon": "$(file-symlink-file)"
       },
       {
         "command": "codeblocks.debug.infoFrame",

@@ -205,6 +205,88 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       vscode.window.showErrorMessage(`设置下一条语句失败: ${(err as Error).message}`);
     }
   }));
+  // 第五轮批次二 D1：Detach（对齐 CB Debug → Detach，debuggergdb.cpp:2486-2491；
+  // 附加为 CB 语义，launch 为保护性扩展；分离后被调试进程继续运行、会话结束）
+  context.subscriptions.push(vscode.commands.registerCommand('codeblocks.debug.detach', async () => {
+    const adapter = getActiveAdapter();
+    if (!adapter || !adapter.isActive()) { vscode.window.showWarningMessage('没有活动的 Code::Blocks 调试会话'); return; }
+    if (adapter.isDetached()) return;
+    if (!adapter.isStopped()) {
+      vscode.window.showWarningMessage('请先暂停程序（对齐 Code::Blocks：仅暂停时提供 Detach）');
+      return;
+    }
+    try {
+      await adapter.detach();
+      vscode.window.setStatusBarMessage('已从进程分离；被调试进程继续运行', 5000);
+      outputChannel.info('[Code::Blocks] 已从被调试进程分离（进程继续运行）');
+    } catch (err) {
+      vscode.window.showErrorMessage(`分离失败: ${(err as Error).message}`);
+    }
+  }));
+
+  // 第五轮批次二 D2：Add symbol file（对齐 CB Debug → Add symbol file（其实现被注释）；
+  // 可用版：已加载库列表自动带地址 + 地址必填校验，实测 GDB 8.1 无地址必失败）
+  context.subscriptions.push(vscode.commands.registerCommand('codeblocks.debug.addSymbolFile', async () => {
+    const adapter = getActiveAdapter();
+    if (!adapter || !adapter.isActive()) { vscode.window.showWarningMessage('没有活动的 Code::Blocks 调试会话'); return; }
+    if (!adapter.isStopped()) {
+      vscode.window.showWarningMessage('请先暂停程序（对齐 Code::Blocks：仅暂停时提供 Add symbol file）');
+      return;
+    }
+    const libs = adapter.loadedLibraries();
+    const CHOOSE_FILE = '选择文件…';
+    const pick = await vscode.window.showQuickPick(
+      [
+        { label: CHOOSE_FILE, description: '从磁盘选择 .exe / .dll / .o / .elf' },
+        ...libs.map((l) => ({
+          label: l.name,
+          description: l.from ? `已加载库 · .text @ ${l.from}` : '已加载库（地址未知，需手工填写）',
+          lib: l,
+        })),
+      ],
+      { placeHolder: '符号来源：已加载库（自动带地址）或磁盘文件', matchOnDescription: true },
+    );
+    if (!pick) return;
+
+    let file: string;
+    let defaultAddr = '';
+    const lib = (pick as any).lib as { name: string; from?: string } | undefined;
+    if (lib) {
+      file = lib.name;
+      defaultAddr = lib.from ?? '';
+    } else {
+      const uris = await vscode.window.showOpenDialog({
+        canSelectFiles: true,
+        canSelectMany: false,
+        canSelectFolders: false,
+        openLabel: '加载符号',
+        filters: { '可执行文件与库': ['exe', 'dll', 'so', 'elf', 'o'], '所有文件': ['*'] },
+      });
+      if (!uris || uris.length === 0) return;
+      file = uris[0].fsPath;
+    }
+
+    const input = await vscode.window.showInputBox({
+      prompt: `符号文件的 .text 加载地址（GDB 要求；${path.basename(file)}）`,
+      value: defaultAddr,
+      placeHolder: '0x10000000',
+      validateInput: (v) => {
+        const t = v.trim();
+        if (!t) return '地址不能为空（GDB 对 add-symbol-file 要求 .text 加载地址）';
+        if (!/^0x[0-9a-f]+$/i.test(t) && !/^\d+$/.test(t)) return '地址格式：0x… 或十进制';
+        return undefined;
+      },
+    });
+    if (input === undefined) return;
+    try {
+      await adapter.addSymbolFile(file, input.trim());
+      vscode.window.setStatusBarMessage(`已加载符号: ${path.basename(file)}`, 5000);
+      outputChannel.info(`[Code::Blocks] 已加载附加符号: ${file} @ ${input.trim()}`);
+    } catch (err) {
+      vscode.window.showErrorMessage(`加载符号失败: ${(err as Error).message}`);
+    }
+  }));
+
   context.subscriptions.push(vscode.commands.registerCommand('codeblocks.debug.attachToProcess', async () => {
     const procs = await listProcesses();
     if (!procs.length) { vscode.window.showWarningMessage('未获取到进程列表'); return; }
