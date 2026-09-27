@@ -17,3 +17,5 @@ test-project/buildlog.html
 .cbtest.txt
 .cbmenu.txt
 .cbxrc*.txt
+.cb-*.js
+.cb-*.txt
