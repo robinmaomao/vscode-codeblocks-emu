@@ -58,6 +58,7 @@ import { setProjectDependencies, wouldCreateCycle } from './model/workspaceWrite
 import { generateMakefile } from './build/makefileExporter';
 import { buildProjectFromImport, importDevProject, importDspProject, importVcxproj } from './project/projectImporter';
 import { buildTargetExportProject } from './project/exportTarget';
+import { enumerateRecursiveSourceFiles, buildUnitXmlForTargets } from './project/recursiveAdd';
 import { collectConflicts, normalizeKey, parseJsonc, KeybindingDef, ConflictItem } from './tools/keybindingConflicts';
 import {
   MANAGED_COMMANDS, MANAGED_KEYBINDINGS, buildExportPayload, buildKeybindingRows, computeDesiredEntries,
@@ -642,6 +643,34 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         return;
       }
       await addFilesToProject(filename);
+    }),
+  );
+
+  // 递归添加文件到项目（对齐 ProjectManagerUI::OnAddFilesToProjectRecursively）
+  context.subscriptions.push(
+    vscode.commands.registerCommand('codeblocks.addFilesRecursively', async (node?: any) => {
+      const filename = resolveProjectFilename(node) ?? activeProject?.filename;
+      if (!filename) {
+        requireProject();
+        return;
+      }
+      await addFilesRecursivelyToProject(filename);
+    }),
+  );
+
+  // 查找文件（对齐 ProjectManagerUI::OnFindFile：选中节点作用域内模糊查找 + 树中定位）
+  context.subscriptions.push(
+    vscode.commands.registerCommand('codeblocks.findFile', async (node?: any) => {
+      await findFileCommand(node);
+    }),
+  );
+
+  // 文件属性（M3：直接打开工程属性面板的「文件」页并定位该文件）
+  context.subscriptions.push(
+    vscode.commands.registerCommand('codeblocks.fileProperties', (node?: any) => {
+      const { project, file } = resolveFileNode(node);
+      if (!project || !file) return;
+      showProjectPropertiesPanel(project, context.extensionUri, 'files', file.relativeFilename);
     }),
   );
 
@@ -2018,11 +2047,16 @@ function activateRelativeProject(delta: number): void {
   vscode.window.setStatusBarMessage(`活动工程: ${next.title}`, 2000);
 }
 
-/** 打开工程属性面板（initialTab 可直达指定 tab，如 notes） */
-function showProjectPropertiesPanel(project: Project, extensionUri: vscode.Uri, initialTab?: string): void {
+/** 打开工程属性面板（initialTab 可直达指定 tab，如 notes；focusFile 可在文件 tab 定位某文件） */
+function showProjectPropertiesPanel(
+  project: Project,
+  extensionUri: vscode.Uri,
+  initialTab?: string,
+  focusFile?: string,
+): void {
   ProjectPropertiesPanel.show(project, extensionUri, async (targets, files, options, searchDirs, projectSettings, buildScripts, notes, virtualTargets, debuggerSettings) => {
     await saveProjectProperties(project, targets, files, options, searchDirs, projectSettings, buildScripts, notes, virtualTargets, debuggerSettings);
-  }, initialTab);
+  }, initialTab, focusFile);
 }
 
 /** 序列化写回 .cbp 并重新解析刷新（供工程属性保存 / 执行参数修改共用） */
@@ -3335,6 +3369,187 @@ function buildUnitXml(rel: string, ext: string): string {
     return `\t\t<Unit filename="${rel}" />`;
   }
   return `\t\t<Unit filename="${rel}">\n\t\t\t<Option compilerVar="${compilerVar}" />\n\t\t</Unit>`;
+}
+
+/**
+ * 递归添加目录下所有源文件到项目（对齐 ProjectManagerUI::OnAddFilesToProjectRecursively，projectmanagerui.cpp:1625-1712）。
+ * 流程：选目录 → 递归枚举（过滤 SCM/obj/bin/*.cbp）→ 多选确认 → 多目标时选归属目标 → 写入 .cbp。
+ */
+async function addFilesRecursivelyToProject(filename: string): Promise<void> {
+  const project = openProjects.find((p) => p.filename === filename);
+  if (!project) {
+    vscode.window.showWarningMessage('项目未找到');
+    return;
+  }
+
+  const uris = await vscode.window.showOpenDialog({
+    canSelectFiles: false,
+    canSelectFolders: true,
+    canSelectMany: false,
+    openLabel: '递归添加此目录',
+    defaultUri: vscode.Uri.file(project.basePath),
+  });
+  if (!uris || uris.length === 0) return;
+  const rootDir = uris[0].fsPath;
+
+  // 递归枚举 + 转成相对项目根的路径（保护性差异：限制在工程目录子树内）
+  const existing = new Set(project.files.map((f) => f.relativeFilename));
+  const rels: { rel: string; abs: string }[] = [];
+  for (const r of enumerateRecursiveSourceFiles(rootDir)) {
+    const abs = path.join(rootDir, r);
+    const rel = path.relative(project.basePath, abs).replace(/\\/g, '/');
+    if (!rel || rel.startsWith('..') || path.isAbsolute(rel)) continue;
+    if (existing.has(rel)) continue;
+    rels.push({ rel, abs });
+  }
+  if (rels.length === 0) {
+    vscode.window.showInformationMessage('该目录下没有可添加的源文件（可能已全部在项目中）');
+    return;
+  }
+
+  // 多选确认（默认全选，对齐 MultiSelectDlg）
+  const picked = await vscode.window.showQuickPick(
+    rels.map(({ rel }) => ({ label: path.basename(rel), description: rel, picked: true })),
+    {
+      canPickMany: true,
+      matchOnDescription: true,
+      placeHolder: `递归添加 ${rels.length} 个文件到 ${path.basename(project.filename)}（默认全选）`,
+    },
+  );
+  if (!picked || picked.length === 0) return;
+  const chosen = picked.map((p) => p.description!).filter(Boolean);
+
+  // 归属目标：仅当多于一个构建目标时询问（对齐 CB：prj->GetBuildTargetsCount() != 1 才弹目标选择）
+  let subset: string[] | null = null;
+  if (project.buildTargets.length > 1) {
+    const ALL = '全部构建目标（默认）';
+    const tPick = await vscode.window.showQuickPick([ALL, ...project.buildTargets.map((t) => t.title)], {
+      placeHolder: '新添加的文件归属哪个构建目标？',
+    });
+    if (tPick === undefined) return;
+    if (tPick !== ALL) subset = [tPick];
+  }
+
+  const units = chosen.map((rel) => buildUnitXmlForTargets(rel, path.extname(rel).toLowerCase(), subset));
+  try {
+    writeUnitsToCbp(project.filename, units);
+    outputChannel.info(
+      `[Code::Blocks] 已向 ${path.basename(project.filename)} 递归添加 ${units.length} 个文件` +
+        (subset ? `（目标: ${subset[0]}）` : ''),
+    );
+    // 重新解析项目以刷新树（与「添加文件」一致：移除旧的再重新打开）
+    const idx = openProjects.findIndex((p) => p.filename === project.filename);
+    if (idx !== -1) openProjects.splice(idx, 1);
+    const wasActive = activeProject?.filename === project.filename;
+    await openProject(project.filename);
+    if (wasActive) {
+      activeProject = openProjects.find((p) => p.filename === project.filename);
+      projectTreeProvider?.setActiveProject(activeProject);
+      updateTargetStatusBar();
+      updateCompilerStatusBar();
+    }
+  } catch (err) {
+    vscode.window.showErrorMessage(`递归添加文件失败: ${(err as Error).message}`);
+  }
+}
+
+/** 查找文件候选条目 */
+interface FindFileEntry {
+  label: string;
+  description: string;
+  kind: 'file' | 'cbp';
+  project?: Project;
+  file?: ProjectFile;
+  filename?: string;
+}
+
+/**
+ * 查找文件（对齐 ProjectManagerUI::OnFindFile，projectmanagerui.cpp:2560-2690）：
+ *   - 作用域 = 选中节点（项目 / 文件夹 / 虚拟文件夹 / 文件分组）内的全部文件；命令面板 = 活动工程，多工程时列出全部
+ *   - 工作区场景额外列出工作区内的 *.cbp 条目（选中即打开工程，对齐 CB 的 fileNameMap 解析）
+ *   - 行为 = 在工程树中定位并选中（对齐 CB 的树定位）；codeblocks.ui.findFileOpen 打开时同时打开文件
+ *     （对齐 CB 的 "Open file" 复选框，配置 /find_file_open 默认 false）
+ */
+async function findFileCommand(node?: any): Promise<void> {
+  const entries: FindFileEntry[] = [];
+
+  if (node?.project) {
+    const project: Project = node.project;
+    const files = projectTreeProvider ? projectTreeProvider.filesUnder(node) : [...project.files];
+    for (const f of files) {
+      entries.push({
+        label: path.basename(f.relativeFilename),
+        description: `${path.basename(path.dirname(project.filename))} / ${f.relativeFilename}`,
+        kind: 'file',
+        project,
+        file: f,
+      });
+    }
+  } else {
+    for (const p of openProjects) {
+      for (const f of p.files) {
+        entries.push({
+          label: path.basename(f.relativeFilename),
+          description: `${path.basename(path.dirname(p.filename))} / ${f.relativeFilename}`,
+          kind: 'file',
+          project: p,
+          file: f,
+        });
+      }
+    }
+    // 工作区内的 .cbp（未打开的项目）：选中即打开工程
+    try {
+      const cbps = await vscode.workspace.findFiles('**/*.cbp', '**/{obj,bin,node_modules,.git}/**', 500);
+      for (const uri of cbps) {
+        if (openProjects.some((p) => normPath(p.filename) === normPath(uri.fsPath))) continue;
+        entries.push({
+          label: path.basename(uri.fsPath),
+          description: `工程文件: ${vscode.workspace.asRelativePath(uri)}`,
+          kind: 'cbp',
+          filename: uri.fsPath,
+        });
+      }
+    } catch {
+      // 未打开工作区：忽略
+    }
+  }
+
+  if (entries.length === 0) {
+    vscode.window.showInformationMessage('没有可查找的文件');
+    return;
+  }
+
+  const pick = await vscode.window.showQuickPick(
+    entries.map((e) => ({ label: e.label, description: e.description, entry: e })),
+    {
+      placeHolder: `查找文件（作用域内 ${entries.length} 个）`,
+      matchOnDescription: true,
+    },
+  );
+  if (!pick) return;
+
+  const chosen = (pick as any).entry as FindFileEntry;
+  if (chosen.kind === 'cbp' && chosen.filename) {
+    await vscode.commands.executeCommand('codeblocks.openProject', vscode.Uri.file(chosen.filename));
+    return;
+  }
+  if (!chosen.project || !chosen.file) return;
+
+  // 对齐 CB：默认仅在树中定位；勾选「Open file」时额外打开（设置 ui.findFileOpen）
+  const openAfter = vscode.workspace.getConfiguration('codeblocks').get<boolean>('ui.findFileOpen', false);
+  if (projectTreeProvider && projectTreeView) {
+    const treeNode = projectTreeProvider.findFileNode(chosen.project, chosen.file);
+    try {
+      await projectTreeView.reveal(treeNode as any, { select: true, focus: true, expand: true });
+    } catch {
+      // 视图/树不可用时退化为打开文件
+      await vscode.window.showTextDocument(vscode.Uri.file(chosen.file.absolutePath), { preview: false });
+      return;
+    }
+  }
+  if (openAfter) {
+    await vscode.window.showTextDocument(vscode.Uri.file(chosen.file.absolutePath), { preview: false });
+  }
 }
 
 /** 在 </Project> 之前插入 <Unit> 节点（保留原文件格式） */

@@ -30,7 +30,7 @@ const typeOptions = Object.entries({ 0:'可执行文件 (Executable)',1:'控制�
 const data = JSON.stringify({ title: project.title, compilerId: cmp, targets, files, projectOpts, targetOpts, projectDirs, targetDirs, projectSettings }).replace(/</g, '\\u003c');
 
 // 3. 插值
-let html = htmlTemplate.replace('${data}', data).replace('${typeOptions}', typeOptions).replace('${initialTabJs}', JSON.stringify('targets'));
+let html = htmlTemplate.replace('${data}', data).replace('${typeOptions}', typeOptions).replace('${initialTabJs}', JSON.stringify('targets')).replace('${focusFileJs}', JSON.stringify(null));
 
 // 4. 提取 script 内容
 const sm = html.match(/<script>([\s\S]*?)<\/script>/);
@@ -47,5 +47,20 @@ try {
   const lines = script.split('\n');
   console.error('脚本前 30 行:');
   lines.slice(0, 30).forEach((l, i) => console.error(String(i + 1).padStart(3), JSON.stringify(l)));
+  process.exit(1);
+}
+
+// 5b. M3：focusFile 注入（带文件名的场景语法仍合法，且定位块先于 switchTab 执行）
+const htmlFocus = htmlTemplate.replace('${data}', data).replace('${typeOptions}', typeOptions)
+  .replace('${initialTabJs}', JSON.stringify('files')).replace('${focusFileJs}', JSON.stringify('src/main.c'));
+const focusScript = htmlFocus.match(/<script>([\s\S]*?)<\/script>/)[1];
+try {
+  new Function(focusScript);
+  const focusAt = focusScript.indexOf('if (focusFile)');
+  const switchAt = focusScript.indexOf('switchTab(activeTab);');
+  if (focusAt < 0 || switchAt < 0 || focusAt > switchAt) throw new Error('focusFile 定位块缺失或顺序错误');
+  console.log('focusFile 注入语法 OK');
+} catch (e) {
+  console.error('focusFile 注入错误:', e.message);
   process.exit(1);
 }
