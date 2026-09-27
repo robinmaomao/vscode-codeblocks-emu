@@ -36,6 +36,8 @@ export interface CompilerSwitches {
   linkerNeedsPathResolved: boolean;
   supportsPCH: boolean;
   PCHExtension: string;       // gch
+  /** 日志详细度（compiler.cpp:943-952：full/simple/none；XML 值 default → undefined，交由扩展设置控制；CB defaultLogging=clogFull，扩展保护性不强制） */
+  logging?: 'full' | 'simple' | 'none';
   useFlatObjects: boolean;
   useFullSourcePaths: boolean;
   use83Paths: boolean;
@@ -168,6 +170,7 @@ export function getDefaultSwitches(): CompilerSwitches {
     linkerNeedsPathResolved: false,
     supportsPCH: true,
     PCHExtension: 'gch',
+    logging: undefined,
     useFlatObjects: false,
     useFullSourcePaths: true,
     use83Paths: false,

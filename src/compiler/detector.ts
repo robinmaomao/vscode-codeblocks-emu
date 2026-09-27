@@ -348,6 +348,68 @@ export function detectRiscv(): DetectedCompiler[] {
   return results;
 }
 
+/** 扫描根目录下以 prefix 开头的目录（对应 compiler_*.xml 的 <Search path="C:\WinAVR*"/> 语义） */
+function scanDirsByPrefix(root: string, prefix: string): string[] {
+  try {
+    return fs.readdirSync(root, { withFileTypes: true })
+      .filter((d) => d.isDirectory() && d.name.toLowerCase().startsWith(prefix.toLowerCase()))
+      .map((d) => path.join(root, d.name));
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * 通用工具链探测：PATH 查找 + master 候选目录（<master>/bin/<exe>）——
+ * 对齐 compiler_*.xml 的 <Search envVar="PATH" for="C"/> + <Search path>/<Fallback path> 语义。
+ */
+function detectToolchain(
+  id: string, name: string, exeName: string,
+  masterFallbacks: string[], wildcard?: { root: string; prefix: string },
+): DetectedCompiler | null {
+  const win = process.platform === 'win32';
+  const exe = win ? exeName + '.exe' : exeName;
+  let exePath = findInPath(exe, process.env.PATH ?? '');
+  let master = '';
+  if (exePath) {
+    master = path.dirname(path.dirname(exePath));
+  } else {
+    const masters = [...(wildcard ? scanDirsByPrefix(wildcard.root, wildcard.prefix) : []), ...masterFallbacks];
+    for (const m of masters) {
+      const b = path.join(m, 'bin', exe);
+      if (fs.existsSync(b)) { exePath = b; master = m; break; }
+    }
+  }
+  if (!exePath) return null;
+  let version: string | undefined;
+  try {
+    version = spawnSync(exePath, ['--version'], { encoding: 'utf8' }).stdout?.split(/\r?\n/)[0]?.trim();
+  } catch { version = undefined; }
+  return { id, name, masterPath: master, cCompilerPath: exePath, version };
+}
+
+/** 探测 AVR-GCC（对齐 compiler_avr-gcc.xml：PATH + C:\WinAVR* + C:\WinAVR / /usr） */
+export function detectAvr(): DetectedCompiler | null {
+  const win = process.platform === 'win32';
+  return detectToolchain('avr-gcc', 'GNU GCC Compiler for AVR', 'avr-gcc',
+    win ? ['C:\\WinAVR'] : ['/usr'],
+    win ? { root: 'C:\\', prefix: 'WinAVR' } : undefined);
+}
+
+/** 探测 MSP430-GCC（对齐 compiler_msp430-gcc.xml：PATH + C:\HighTec\Msp430 / /usr/local/msp430） */
+export function detectMsp430(): DetectedCompiler | null {
+  const win = process.platform === 'win32';
+  return detectToolchain('msp430-gcc', 'GNU GCC Compiler for MSP430 (HighTec)', 'msp430-gcc',
+    win ? ['C:\\HighTec\\Msp430'] : ['/usr/local/msp430']);
+}
+
+/** 探测 SDCC（对齐 compiler_sdcc.xml：PATH + %ProgramFiles%\sdcc / /usr/local/share/sdcc） */
+export function detectSdcc(): DetectedCompiler | null {
+  const win = process.platform === 'win32';
+  return detectToolchain('sdcc', 'Small Device C Compiler', 'sdcc',
+    win ? [path.join(process.env['ProgramFiles'] ?? 'C:\\Program Files', 'sdcc')] : ['/usr/local/share/sdcc']);
+}
+
 /** 统一探测所有可用编译器 */
 export function detectAllCompilers(masterPath = ''): DetectedCompiler[] {
   const result: DetectedCompiler[] = [];
@@ -358,6 +420,12 @@ export function detectAllCompilers(masterPath = ''): DetectedCompiler[] {
   const msvc = detectMsvc();
   if (msvc) result.push(msvc);
   result.push(...detectRiscv());
+  const avr = detectAvr();
+  if (avr) result.push(avr);
+  const msp430 = detectMsp430();
+  if (msp430) result.push(msp430);
+  const sdcc = detectSdcc();
+  if (sdcc) result.push(sdcc);
   return result;
 }
 
@@ -594,18 +662,66 @@ async function detectRiscvAsync(): Promise<DetectedCompiler[]> {
   return Promise.all([...hits.entries()].map(([gccPath, prefix]) => buildRiscvResultAsync(prefix, gccPath)));
 }
 
+/** 通用工具链探测（异步版：路径查找同步、版本查询异步） */
+async function detectToolchainAsync(
+  id: string, name: string, exeName: string,
+  masterFallbacks: string[], wildcard?: { root: string; prefix: string },
+): Promise<DetectedCompiler | null> {
+  const win = process.platform === 'win32';
+  const exe = win ? exeName + '.exe' : exeName;
+  let exePath = findInPath(exe, process.env.PATH ?? '');
+  let master = '';
+  if (exePath) {
+    master = path.dirname(path.dirname(exePath));
+  } else {
+    const masters = [...(wildcard ? scanDirsByPrefix(wildcard.root, wildcard.prefix) : []), ...masterFallbacks];
+    for (const m of masters) {
+      const b = path.join(m, 'bin', exe);
+      if (fs.existsSync(b)) { exePath = b; master = m; break; }
+    }
+  }
+  if (!exePath) return null;
+  const version = await queryVersionAsync(exePath);
+  return { id, name, masterPath: master, cCompilerPath: exePath, version };
+}
+
+async function detectAvrAsync(): Promise<DetectedCompiler | null> {
+  const win = process.platform === 'win32';
+  return detectToolchainAsync('avr-gcc', 'GNU GCC Compiler for AVR', 'avr-gcc',
+    win ? ['C:\\WinAVR'] : ['/usr'],
+    win ? { root: 'C:\\', prefix: 'WinAVR' } : undefined);
+}
+
+async function detectMsp430Async(): Promise<DetectedCompiler | null> {
+  const win = process.platform === 'win32';
+  return detectToolchainAsync('msp430-gcc', 'GNU GCC Compiler for MSP430 (HighTec)', 'msp430-gcc',
+    win ? ['C:\\HighTec\\Msp430'] : ['/usr/local/msp430']);
+}
+
+async function detectSdccAsync(): Promise<DetectedCompiler | null> {
+  const win = process.platform === 'win32';
+  return detectToolchainAsync('sdcc', 'Small Device C Compiler', 'sdcc',
+    win ? [path.join(process.env['ProgramFiles'] ?? 'C:\\Program Files', 'sdcc')] : ['/usr/local/share/sdcc']);
+}
+
 /** 统一探测所有可用编译器（异步并行版；弹窗后台探测用，不阻塞 UI） */
 export async function detectAllCompilersAsync(masterPath = ''): Promise<DetectedCompiler[]> {
-  const [gcc, clang, msvc, riscv] = await Promise.all([
+  const [gcc, clang, msvc, riscv, avr, msp430, sdcc] = await Promise.all([
     detectGccAsync(masterPath),
     detectClangAsync(),
     detectMsvcAsync(),
     detectRiscvAsync(),
+    detectAvrAsync(),
+    detectMsp430Async(),
+    detectSdccAsync(),
   ]);
   const result: DetectedCompiler[] = [];
   if (gcc) result.push(gcc);
   if (clang) result.push(clang);
   if (msvc) result.push(msvc);
   result.push(...riscv);
+  if (avr) result.push(avr);
+  if (msp430) result.push(msp430);
+  if (sdcc) result.push(sdcc);
   return result;
 }

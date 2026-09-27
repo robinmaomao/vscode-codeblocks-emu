@@ -241,6 +241,8 @@ export class ProjectParser {
       this.parseBuildTargets(projNode.Build, project);
       // 文件
       this.parseUnits(root.Project, project);
+      // legacy includeInTargetAll=true 目标 → 合成虚拟目标 "All"（对齐 projectloader.cpp:205-221）
+      this.synthesizeAllVirtualTarget(project);
       // 项目自定义变量（<Extensions><codeblocks_project_custom_variables>）
       this.parseProjectCustomVariables(root.Project, project);
     }
@@ -411,6 +413,18 @@ export class ProjectParser {
     }
   }
 
+  /**
+   * legacy includeInTargetAll=true 目标 → 合成 "All" 虚拟目标（对齐 projectloader.cpp:205-221）：
+   * 已存在同名虚拟目标则跳过；无 true 目标不合成。
+   */
+  private synthesizeAllVirtualTarget(project: Project): void {
+    if (project.virtualTargets.some((v) => v.title === 'All')) return;
+    const titles = project.buildTargets.filter((t) => t.includeInTargetAll).map((t) => t.title);
+    if (titles.length) {
+      project.virtualTargets.push({ title: 'All', targets: titles });
+    }
+  }
+
   private parseBuildTargets(buildNode: any, project: Project): void {
     if (!buildNode) return;
     let targets = buildNode.Target;
@@ -447,7 +461,7 @@ export class ProjectParser {
         prefixAuto: true,
         extensionAuto: true,
         useConsoleRunner: true,
-        includeInTargetAll: true,
+        includeInTargetAll: false,
         platforms: 0xff,
         commandsBeforeBuild: [],
         commandsAfterBuild: [],
@@ -549,8 +563,13 @@ export class ProjectParser {
       if (node['@_prefix_auto'] !== undefined) target.prefixAuto = String(node['@_prefix_auto']) !== '0';
       if (node['@_extension_auto'] !== undefined) target.extensionAuto = String(node['@_extension_auto']) !== '0';
       if (node['@_use_console_runner'] !== undefined) target.useConsoleRunner = node['@_use_console_runner'] === '1' || node['@_use_console_runner'] === 'true';
-      // <Option include_in_target_all="0/1">（DoBuildTargetOptions，默认 true）
-      if (node['@_include_in_target_all'] !== undefined) target.includeInTargetAll = node['@_include_in_target_all'] !== '0';
+      // <Option includeInTargetAll="0/1">（projectloader.cpp:619-620，legacy pre-1.5 属性；默认 false，:551）
+      // 兼容扩展旧版写出的下划线变体 include_in_target_all
+      if (node['@_includeInTargetAll'] !== undefined) {
+        target.includeInTargetAll = node['@_includeInTargetAll'] !== '0';
+      } else if (node['@_include_in_target_all'] !== undefined) {
+        target.includeInTargetAll = node['@_include_in_target_all'] !== '0';
+      }
       // 目标级平台过滤（projectloader.cpp:546-663：<Option platforms>，默认 spAll）
       if (node['@_platforms'] !== undefined) target.platforms = parsePlatforms(String(node['@_platforms']));
       // 关系属性（projectCompilerOptionsRelation 等）
