@@ -90,6 +90,9 @@ export class GdbDebugAdapter implements vscode.DebugAdapter {
   private attached = false;
   private stoppedState = false;
   private regNamesCache: string[] | null = null;
+  // 第五轮批次二 D1/D2：分离状态 + 已加载库缓存（=library-loaded；Add symbol file 地址预填数据源）
+  private detached = false;
+  private loadedLibs: { name: string; from?: string }[] = [];
   // 第五十轮：会话结束标记 / 日志断点消息表
   private ended = false;
   private logpoints = new Map<string, string>();
@@ -155,6 +158,12 @@ export class GdbDebugAdapter implements vscode.DebugAdapter {
   // ---- 公共访问（寄存器视图 / 调试辅助命令用，第四十九轮） ----
   isActive(): boolean { return this.session !== null; }
   isStopped(): boolean { return this.stoppedState; }
+  /** 是否附加到外部进程（对齐 CB IsAttachedToProcess；D1 Detach 的 UI 依据） */
+  isAttached(): boolean { return this.attached; }
+  /** 是否已从被调试进程分离（D1） */
+  isDetached(): boolean { return this.detached; }
+  /** 已加载库列表（=library-loaded 缓存；D2 Add symbol file 地址预填） */
+  loadedLibraries(): { name: string; from?: string }[] { return [...this.loadedLibs]; }
 
   /** 读取全部寄存器（名 + 十六进制值；对齐 CB cpuregistersdlg） */
   async registerValues(): Promise<{ name: string; value: string }[]> {
@@ -186,6 +195,49 @@ export class GdbDebugAdapter implements vscode.DebugAdapter {
     if (!this.session) throw new Error('调试会话未启动');
     const r = await this.session.sendExact(`-interpreter-exec console ${this.session.quote(`jump ${file}:${line}`)}`);
     this.sendOutput('console', r.raw);
+  }
+
+  /**
+   * Detach：从被调试进程分离（第五轮批次二 D1）。
+   * 对齐 CB：Debug → Detach → Drive()->Detach()（debuggergdb.cpp:2486-2491）
+   * → GdbCmd_Detach（gdb_commands.h:354-375，CLI `detach`）。
+   * MI 等价命令 `-target-detach`；已实测（GDB 8.1）：attach 与 launch 两种会话均可用，
+   * 分离后被调试进程**继续运行**，会话结束（attach 为 CB 语义，launch 为保护性扩展）。
+   */
+  async detach(): Promise<void> {
+    if (!this.session) throw new Error('调试会话未启动');
+    if (this.detached) return;
+    const r = await this.session.sendExact('-target-detach');
+    this.sendOutput('console', r.raw);
+    this.detached = true;
+    this.stoppedState = false;
+    if (!this.ended) {
+      this.ended = true;
+      this.sendEvent('terminated', {});
+    }
+    this.dispose();
+    debugStateChanged.fire();
+  }
+
+  /**
+   * Add symbol file：运行时加载附加符号（第五轮批次二 D2）。
+   * CB 菜单项存在但实现被注释（debuggergdb.cpp:1794 `// TODO: should reimplement`，:1807 入队命令被注释），
+   * 且原命令类未带地址参数（gdb_commands.h:268-291）；已实测 GDB 8.1 无地址必失败：
+   * `The address where <file> has been loaded is missing`。
+   * 本实现为**可用版**（保护性差异）：地址必填 + 输出写 Debug Console。
+   */
+  async addSymbolFile(file: string, address?: string): Promise<string> {
+    if (!this.session) throw new Error('调试会话未启动');
+    const f = file.trim();
+    const a = (address ?? '').trim();
+    if (!f) throw new Error('未指定符号文件');
+    if (!a) throw new Error('需要 .text 加载地址（GDB 对 add-symbol-file 要求地址参数；可从「已加载库」列表取）');
+    if (!/^0x[0-9a-f]+$/i.test(a) && !/^\d+$/.test(a)) throw new Error(`地址格式无效: ${a}`);
+    const r = await this.session.sendExact(
+      `-interpreter-exec console ${this.session.quote(`add-symbol-file ${this.session.quote(f)} ${a}`)}`,
+    );
+    this.sendOutput('console', r.raw);
+    return r.raw;
   }
 
   // ---- 响应/事件辅助 ----
@@ -253,6 +305,8 @@ export class GdbDebugAdapter implements vscode.DebugAdapter {
     }
 
     this.attached = false;
+    this.detached = false;
+    this.loadedLibs = [];
     this.searchDirs = Array.isArray(args.searchDirs) ? (args.searchDirs as unknown[]).filter((d): d is string => typeof d === 'string' && !!d) : [];
     this.remote = (args.remoteDebugging as RemoteDebuggingOptions) ?? undefined;
     this.isRemoteDebugging = false;
@@ -297,6 +351,8 @@ export class GdbDebugAdapter implements vscode.DebugAdapter {
     this.program = args.program ?? '';
     this.cwd = args.cwd ?? '';
     this.attached = true;
+    this.detached = false;
+    this.loadedLibs = [];
     this.searchDirs = Array.isArray(args.searchDirs) ? (args.searchDirs as unknown[]).filter((d): d is string => typeof d === 'string' && !!d) : [];
 
     this.openSession();
@@ -1012,6 +1068,11 @@ export class GdbDebugAdapter implements vscode.DebugAdapter {
   }
 
   private async onDisconnect(req: DapRequest): Promise<void> {
+    // 第五轮批次二 D1：附加会话先显式分离（实测即使不分离被附加进程也存活，显式化更稳；
+    // 对齐 CB「附加模式停止前先 Detach」语义）
+    if (this.attached && this.session && !this.detached) {
+      try { await this.session.sendExact('-target-detach'); this.detached = true; } catch { /* best-effort */ }
+    }
     this.sendResponse(req, true, {});
     this.dispose();
   }
@@ -1120,6 +1181,16 @@ export class GdbDebugAdapter implements vscode.DebugAdapter {
       const id = Number(rec.attrs['id'] ?? 0);
       this.threads = this.threads.filter((t) => t.id !== id);
       this.sendEvent('thread', { reason: 'exited', threadId: id });
+    } else if (rec.record === 'library-loaded') {
+      // D2：缓存已加载库（ranges 首段 = .text 加载范围，作 add-symbol-file 地址预填）
+      const name = rec.attrs['host-name'] || rec.attrs['id'] || '';
+      const from = (rec.attrs['ranges'] ?? '').match(/from="([^"]+)"/)?.[1];
+      if (name && !this.loadedLibs.some((l) => l.name === name)) {
+        this.loadedLibs.push({ name, from });
+      }
+    } else if (rec.record === 'library-unloaded') {
+      const name = rec.attrs['host-name'] || rec.attrs['id'] || '';
+      if (name) this.loadedLibs = this.loadedLibs.filter((l) => l.name !== name);
     }
   }
 

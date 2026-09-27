@@ -80,6 +80,8 @@ const builtinWhitelist = new Set([
   'workbench.action.debug.stepInto',
   'workbench.action.debug.stepOut',
   'editor.debug.action.toggleBreakpoint',
+  'editor.debug.action.runToCursor',
+  'workbench.debug.viewlet.action.removeAllBreakpoints',
   'workbench.view.debug',
   // Settings
   'workbench.action.openSettings',
@@ -181,6 +183,8 @@ const expectCommands = [
   'codeblocks.debug.infoFloat', 'codeblocks.debug.infoSignals',
   'codeblocks.findFile', 'codeblocks.addFilesRecursively',
   'codeblocks.newVirtualFolder',
+  'codeblocks.debug.detach', 'codeblocks.debug.addSymbolFile',
+  'codeblocks.debug.setNextStatement', 'codeblocks.debug.attachToProcess', 'codeblocks.debug.sendGdbCommand',
 ];
 const missing = expectCommands.filter((c) => !all.some((it) => it.command === c));
 check('第四十四轮关键命令均在菜单中', missing.length === 0, missing, '无缺失');
