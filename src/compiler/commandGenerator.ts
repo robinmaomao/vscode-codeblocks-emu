@@ -32,6 +32,21 @@ function toUnix(p: string): string {
   return p.replace(/\\/g, '/');
 }
 
+/**
+ * 汇编文件编译器选择（codeblocks.build.asmUsesCompilerVar）：
+ * true 时按 compilerVar 选择（对齐 CB：.s 默认 CPP → g++，compilercommandgenerator.cpp:258-288 无汇编特判）；
+ * 默认 false 保持扩展既有策略（汇编文件强制 C 编译器，避免 g++ 链接 C++ 运行库/嵌入式场景）。
+ */
+function asmUsesCompilerVar(): boolean {
+  try {
+    // 惰性 require：headless 单测无 vscode 宿主时回退默认
+    const vs: typeof import('vscode') = require('vscode');
+    return vs.workspace.getConfiguration('codeblocks').get<boolean>('build.asmUsesCompilerVar', false) === true;
+  } catch {
+    return false;
+  }
+}
+
 /** 如果字符串含空白则加引号（QuoteStringIfNeeded） */
 export function quoteIfNeeded(s: string): string {
   if (!s) return s;
@@ -661,7 +676,10 @@ export class CommandGenerator {
     // 与扩展既有策略一致，避免用 g++ 汇编、并防止 g++ 链接带入 C++ 运行库（嵌入式交叉编译器场景）。
     const ext = path.extname(unquote(params.file)).toLowerCase().replace('.', '');
     if (ext === 's' || ext === 'asm' || ext === 'ss' || ext === 's62') {
-      return { comp: prog.C, isCpp: false };
+      // 默认强制 C 编译器（扩展既有策略）；开启 codeblocks.build.asmUsesCompilerVar 时按 compilerVar（对齐 CB）
+      if (!asmUsesCompilerVar()) {
+        return { comp: prog.C, isCpp: false };
+      }
     }
     if (params.pf) {
       if (params.pf.compilerVar === 'CPP') return { comp: prog.CPP, isCpp: true };
