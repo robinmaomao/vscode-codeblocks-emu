@@ -1557,9 +1557,11 @@ export class BuildEngine {
     // PrintBanner:1788 的 CompilerValid 早退）；输出文件删除在 compiler 检查之外（对齐 981-988）
     const id = target.compilerId || this.project.compilerId;
     const resolved = this.resolveCompiler ? this.resolveCompiler(id) : this.compiler;
-    const invalid = !resolved || !this.isCompilerUsable(resolved);
-    if (invalid) {
-      this.output.debug(`[Code::Blocks] 目标 "${target.title}" 编译器无效，跳过对象清理`);
+    // 对齐 GetTargetCleanCommands（directcommands.cpp:958-977）：仅编译器未注册（nullptr）跳过对象删除；
+    // 编译器存在但 masterPath 无效仍删除对象（L18）
+    const unresolved = !resolved;
+    if (unresolved) {
+      this.output.debug(`[Code::Blocks] 目标 "${target.title}" 编译器未注册，跳过对象清理`);
     } else {
       // 每目标编译器（对齐 GetCompiler(target->GetCompilerID())，needDependencies 随目标编译器取）
       this.switchCompiler(target);
@@ -1567,7 +1569,7 @@ export class BuildEngine {
       this.printBanner('Clean', target);
     }
     let removed = 0;
-    if (!invalid) {
+    if (!unresolved) {
       // 对齐 GetProjectFilesSortedByWeight：目标文件列表权威（L6）
       const files = target.files;
       for (const file of files) {
@@ -1682,11 +1684,17 @@ export class BuildEngine {
     const objDir = target.objectOutput || '.objs';
     const rel = file.relativeToCommonTopLevelPath || file.relativeFilename;
     if (path.isAbsolute(rel)) {
-      // 绝对路径/跨卷文件（对齐 CB wxFileName::MakeRelativeTo 跨卷失败 → 保留绝对路径）：
-      // 对象放在该文件自身盘上的源文件旁，避免 path.join 把盘符误拼
+      // 跨卷文件对象路径（对齐 projectfile.cpp:474-492：objOut += 卷名，去卷路径拼接；
+      // 卷字母去冒号——CB 字面保留 'E:' 在 Windows 属非法路径段，取 'E' 为保护性差异）
       const parsedAbs = path.parse(rel);
+      const volLetter = (parsedAbs.root ?? '').replace(/[:\\/]/g, '');
       const extAbs = ft === FileType.Resource ? 'res' : this.compiler.switches.objectExtension;
       const nameAbs = this.project.extendedObjNames ? parsedAbs.base + '.' + extAbs : parsedAbs.name + '.' + extAbs;
+      if (volLetter) {
+        const withoutVol = parsedAbs.dir.slice(parsedAbs.root.length);
+        return path.join(objDir, volLetter, withoutVol, nameAbs);
+      }
+      // 无卷信息：回退源文件旁（原行为）
       return path.join(parsedAbs.dir, nameAbs);
     }
     const parsed = path.parse(rel);
@@ -1743,9 +1751,11 @@ export class BuildEngine {
     const objDir = target.objectOutput || '.objs';
     const ext = ft === FileType.Resource ? 'res' : this.compiler.switches.objectExtension;
     if (path.isAbsolute(file.relativeFilename)) {
-      // 跨卷文件：对象放自身盘上的源文件旁（对齐 MakeRelativeTo 跨卷失败语义）
+      // 跨卷文件扁平对象（对齐 projectfile.cpp:474-492 + flat=GetFullName：objOut + 卷名 + 文件名）
       const parsedAbs = path.parse(file.relativeFilename);
+      const volLetter = (parsedAbs.root ?? '').replace(/[:\\/]/g, '');
       const nameAbs = this.project.extendedObjNames ? parsedAbs.base + '.' + ext : parsedAbs.name + '.' + ext;
+      if (volLetter) return path.join(objDir, volLetter, nameAbs);
       return path.join(parsedAbs.dir, nameAbs);
     }
     const name = this.project.extendedObjNames
@@ -1811,6 +1821,15 @@ export class BuildEngine {
     const depsOut = target.depsOutput || '.deps';
     const rel = file.relativeToCommonTopLevelPath || file.relativeFilename;
     const name = path.parse(rel).name;
+    if (path.isAbsolute(rel)) {
+      // 跨卷：depsOut + 卷名 + 去卷目录（与对象路径规则一致，projectfile.cpp:474-492）
+      const parsedAbs = path.parse(rel);
+      const volLetter = (parsedAbs.root ?? '').replace(/[:\\/]/g, '');
+      if (volLetter) {
+        const withoutVol = parsedAbs.dir.slice(parsedAbs.root.length);
+        return path.join(this.project.basePath, depsOut, volLetter, withoutVol, name + '.depend');
+      }
+    }
     // 与对象路径一致（含目录），避免不同目录同名文件（a/foo.c、b/foo.c）的 deps 互相覆盖
     return path.join(this.project.basePath, depsOut, path.dirname(rel), name + '.depend');
   }
@@ -1923,7 +1942,7 @@ export class BuildEngine {
         resolve(false);
         return;
       }
-      const resp = applyResponseFile(command, respBase);
+      const resp = applyResponseFile(command, respBase, cwd);
       if (resp.respFile) {
         this.output.debug(`[Code::Blocks] 命令行过长，改用响应文件: ${resp.respFile}`);
       }

@@ -2,7 +2,7 @@
   "name": "codeblocks-vscode",
   "displayName": "Code::Blocks for VS Code",
   "description": "原生移植 Code::Blocks 核心功能到 VS Code：项目模型、构建引擎、编译器管理与调试引擎",
-  "version": "0.8.88-dev",
+  "version": "0.8.89-dev",
   "icon": "resources/icon.png",
   "publisher": "robinmaomao",
   "author": {
@@ -536,6 +536,17 @@
             "type": "boolean",
             "default": false,
             "description": "严格引号规则（对齐 Code::Blocks NeedQuotes：仅空格加引号）；默认关闭为宽规则（空格 + cmd 元字符，防 shell 二次解析）"
+          },
+          "codeblocks.build.asmUsesCompilerVar": {
+            "type": "boolean",
+            "default": false,
+            "description": "汇编文件（.s/.asm/.ss/.s62）按 compilerVar 选择编译程序（true=完全对齐 Code::Blocks：.s 默认 CPP 即 g++；false=保持扩展默认强制 C 编译器，嵌入式场景更安全）"
+          },
+          "codeblocks.build.responseFile": {
+            "type": "string",
+            "enum": ["safe", "cb"],
+            "default": "safe",
+            "description": "超长命令响应文件策略：safe=扩展保护性默认（阈值 8000、绝对路径引用、命名保留源扩展名 main.c.respFile）；cb=对齐 Code::Blocks（阈值 32767、命名 main.respFile、相对路径引用）"
           },
           "codeblocks.log.english": {
             "type": "boolean",

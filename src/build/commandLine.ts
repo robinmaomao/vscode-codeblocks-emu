@@ -26,9 +26,25 @@ export function compareFilesByWeight(a: ProjectFile, b: ProjectFile): number {
   return 0;
 }
 
-/** Windows cmd.exe 命令行上限 8191 字符，留余量 */
+/** Windows cmd.exe 命令行上限 8191 字符，留余量（safe 模式阈值） */
 export const MAX_CMD_LENGTH = 8000;
+/** CB 阈值（directcommands.cpp:202-211：Windows 32767 / Linux 131072） */
+export const CB_MAX_CMD_LENGTH = process.platform === 'win32' ? 32767 : 131072;
 let respFileCounter = 0;
+
+/** 响应文件模式（codeblocks.build.responseFile：safe=保护性默认；cb=对齐 CB 细节） */
+export type ResponseFileMode = 'safe' | 'cb';
+
+export function responseFileMode(): ResponseFileMode {
+  try {
+    // 惰性 require：headless 单测无 vscode 宿主时回退 safe
+    const vs: typeof import('vscode') = require('vscode');
+    const v = vs.workspace.getConfiguration('codeblocks').get<string>('build.responseFile', 'safe');
+    return v === 'cb' ? 'cb' : 'safe';
+  } catch {
+    return 'safe';
+  }
+}
 
 /** 响应文件处理结果 */
 export interface RespResult {
@@ -40,24 +56,37 @@ export interface RespResult {
  * 命令过长时改用响应文件；未超长或无法分割时原样返回。
  * @param command 待执行的命令字符串
  * @param respBase 响应文件基础路径（对齐 CB CheckForToLongCommandLine 命名：
- *                 编译 = 对象目录/源文件名.respFile，链接 = 对象输出目录/目标名_link.respFile）
+ *                 编译 = 对象目录/源文件名，链接 = 对象输出目录/目标名_link）
+ * @param cwd 构建工作目录（工程根；cb 模式下相对路径引用的基准）
  */
-export function applyResponseFile(command: string, respBase?: string): RespResult {
-  if (process.platform !== 'win32' || command.length <= MAX_CMD_LENGTH) {
+export function applyResponseFile(command: string, respBase?: string, cwd?: string): RespResult {
+  if (process.platform !== 'win32') {
+    return { command };
+  }
+  const mode = responseFileMode();
+  const maxLength = mode === 'cb' ? CB_MAX_CMD_LENGTH : MAX_CMD_LENGTH;
+  if (command.length <= maxLength) {
     return { command };
   }
 
-  // 对齐 CB：responseFileName.SetName(basename).SetExt("respFile")
-  const respFile = respBase
-    ? path.resolve(respBase + '.respFile')
-    : path.join(os.tmpdir(), `codeblocks-resp-${process.pid}-${++respFileCounter}.respFile`);
-  const respAbs = path.resolve(respFile);
-  const responseFileLength = respAbs.length + 5;
+  // 命名：safe=基础名追加 .respFile（保护性，保留源扩展名）；
+  // cb=SetName(basename).SetExt("respFile") 替换扩展名（对齐 CB directcommands.cpp:222-224 → main.respFile）
+  let rel: string;
+  if (mode === 'cb' && respBase) {
+    const p = path.parse(respBase);
+    rel = path.join(p.dir, p.name + '.respFile');
+  } else {
+    rel = respBase
+      ? respBase + '.respFile'
+      : path.join(os.tmpdir(), `codeblocks-resp-${process.pid}-${++respFileCounter}.respFile`);
+  }
+  const respAbs = cwd ? path.resolve(cwd, rel) : path.resolve(rel);
+  const responseFileLength = (mode === 'cb' ? rel.length : respAbs.length) + 5;
 
   // 从末尾向前找空格分割点（对齐 Code::Blocks rfind(' ', maxLength - responseFileLength)）
-  let startPos = command.lastIndexOf(' ', MAX_CMD_LENGTH - responseFileLength);
+  let startPos = command.lastIndexOf(' ', maxLength - responseFileLength);
   if (startPos <= 0) startPos = command.indexOf(' ');
-  if (startPos <= 0) return { command }; // 无法分割，原样返回
+  if (startPos <= 0) return { command }; // 无法分割：原样返回（CB 会告警仍继续，保护性返回）
 
   const rest = command.slice(startPos + 1);
   try {
@@ -70,5 +99,7 @@ export function applyResponseFile(command: string, respBase?: string): RespResul
     return { command };
   }
 
-  return { command: `${command.slice(0, startPos)} @"${respAbs}"`, respFile: respAbs };
+  // safe 引用绝对路径（保护性）；cb 引用相对路径（对齐 CB，构建 CWD=工程根）
+  const ref = mode === 'cb' ? rel : respAbs;
+  return { command: `${command.slice(0, startPos)} @"${ref}"`, respFile: respAbs };
 }
