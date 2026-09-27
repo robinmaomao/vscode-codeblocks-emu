@@ -22,9 +22,14 @@ import {
   OptionsRelationType,
   CommandType,
 } from '../model/types';
+import { FileType, fileTypeOf } from '../model/fileTypes';
 
 function toNative(p: string): string {
   return process.platform === 'win32' ? p.replace(/\//g, '\\') : p;
+}
+
+function toUnix(p: string): string {
+  return p.replace(/\\/g, '/');
 }
 
 /** 如果字符串含空白则加引号（QuoteStringIfNeeded） */
@@ -334,7 +339,61 @@ export class CommandGenerator {
     );
     // 追加编译器全局目录（对齐 GetOrderedIncludeDirs：项目/目标后追加 compiler->GetIncludeDirs()）
     dirs.push(...(this.compiler.includeDirs ?? []));
-    return this.joinIncludeEntries(dirs.map((d) => quoteIfNeeded(this.finalizeDir(d, target))));
+    // PCH include 前置（对齐 CompilerMINGWGenerator::SetupIncludeDirs，compilerMINGWgenerator.cpp:34-95）：
+    // 仅在 pchObjectDir 模式 + 存在编译头文件时，把各 PCH 头对象目录前置为 -iquote/-I，末尾补 -I.
+    const pchPrepend = this.pchIncludePrepend(target);
+    return pchPrepend + this.joinIncludeEntries(dirs.map((d) => quoteIfNeeded(this.finalizeDir(d, target))));
+  }
+
+  /**
+   * PCH 头文件 include 前置串 —— 对齐 CompilerMINGWGenerator::SetupIncludeDirs（compilerMINGWgenerator.cpp:34-95）。
+   * 仅 GCC 家族（supportsPCH 的 MINGW 生成器）且 pch_mode==pchObjectDir（默认 1）且工程内存在 compile=true 的头文件时生效：
+   *   - 逐目录去重；
+   *   - gcc≥4：每目录一条 `-iquote<dir> `；gcc<4：每目录一条 `<includeDirs><dir> ` + 末尾额外 `-I- `；
+   *   - 第二循环对同一批目录各补一条 `<includeDirs><dir> `；
+   *   - 末尾固定 `-I. `；
+   *   - UseFlatObjects 时目录取扁平对象目录（fn.GetFullName()），否则取带源层级目录（fn.GetFullPath()）。
+   */
+  private pchIncludePrepend(target: BuildTarget): string {
+    const s = this.compiler.switches;
+    // 仅 supportsPCH 的编译器（GCC 家族；clang/MSVC 不启用 MINGW 生成器）
+    if (!s.supportsPCH) return '';
+    if (this.project.pchMode !== 1) return '';
+    const flat = s.useFlatObjects;
+    const includedDirs: string[] = [];
+    let hasPch = false;
+    for (const f of this.project.files) {
+      if (f.compile && fileTypeOf(f.relativeFilename) === FileType.Header) {
+        // PCH 对象名（对齐 projectfile.cpp:229-243 SetObjName / pfDetails::Update pchObjectDir）：
+        // 保留原名 + '.' + PCHExtension（如 guard.h → guard.h.gch）
+        const rel = toUnix(f.relativeToCommonTopLevelPath || f.relativeFilename);
+        const objDir = target.objectOutput || '.objs';
+        // fn.GetFullName()：仅文件名（UseFlatObjects=true）；fn.GetFullPath()：带源目录层级
+        const full = flat ? path.basename(rel) + '.' + (s.PCHExtension || 'gch')
+                          : rel + '.' + (s.PCHExtension || 'gch');
+        const dir = toUnix(path.dirname(path.join(objDir, full)));
+        if (!includedDirs.includes(dir)) includedDirs.push(dir);
+        hasPch = true;
+      }
+    }
+    if (!hasPch) return '';
+
+    // 版本号主版本（对齐 m_VerStr.BeforeFirst('.').ToLong(&gcc_major)，空/解析失败默认 4）
+    const ver = this.compiler.versionString ?? '';
+    const gccMajor = ver ? (parseInt(ver.split('.')[0], 10) || 4) : 4;
+
+    let prepend = '';
+    const incSwitch = s.includeDirs; // -I
+    for (const dir of includedDirs) {
+      const q = quoteIfNeeded(dir);
+      prepend += (gccMajor < 4 ? incSwitch + q : '-iquote' + q) + ' ';
+    }
+    if (gccMajor < 4) prepend += '-I- ';
+    for (const dir of includedDirs) {
+      prepend += incSwitch + quoteIfNeeded(dir) + ' ';
+    }
+    prepend += '-I. ';
+    return prepend;
   }
 
   /** 按编译器开关拼接 include 条目：includeDirs 以 '(' 结尾 → INCDIR(path1;path2) 风格（对齐 CB GenerateCommandLine:361-367/389-395） */
