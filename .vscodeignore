@@ -11,4 +11,12 @@ node_modules/.cache/**
 package-lock.json
 .git-msg.txt
 *.vsix
+# 临时排查/测试产物（防止误入 VSIX）
+.cbgrep*.txt
+.cbtest.txt
+.cbmenu.txt
+.cbxrc*.txt
+.cb-*.js
+.cb-*.txt
+.cbpkg.txt
 
