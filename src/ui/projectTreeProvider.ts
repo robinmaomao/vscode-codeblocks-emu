@@ -59,7 +59,16 @@ class TreeNode extends vscode.TreeItem {
   }
 }
 
-/** 拖拽控制器：仅支持项目节点（根级）排序 */
+/** 拖拽载荷（结构化：项目排序 / 文件入虚拟文件夹） */
+interface TreeDragPayload {
+  type: 'project' | 'files';
+  /** type=project：被拖项目的 .cbp 路径 */
+  filename?: string;
+  /** type=files：被拖文件（项目 + 相对路径） */
+  items?: { project: string; rel: string }[];
+}
+
+/** 拖拽控制器：项目节点排序（根级）+ 文件拖入虚拟文件夹/目录（P4） */
 class ProjectDragAndDropController implements vscode.TreeDragAndDropController<TreeNode> {
   dropMimeTypes = ['application/vnd.code.tree.codeblocks'];
   dragMimeTypes = ['application/vnd.code.tree.codeblocks'];
@@ -67,19 +76,59 @@ class ProjectDragAndDropController implements vscode.TreeDragAndDropController<T
   /** 重排回调：把 sourceFilename 移到 targetFilename 之前（target 为空则移到最后） */
   onReorder: ((sourceFilename: string, targetFilename: string | undefined) => void) | undefined;
 
+  /** 文件入夹回调：把 files 归入 folder（'' = 工程根）；仅改模型（对齐 ProjectVirtualFolderDragged） */
+  onAssignVirtualFolder:
+    | ((files: { project: Project; file: ProjectFile }[], folder: string) => void)
+    | undefined;
+
   handleDrag(source: TreeNode[], dataTransfer: vscode.DataTransfer): void {
     const projectNode = source.find((n) => n.kind === 'project');
     if (projectNode?.project) {
-      dataTransfer.set('application/vnd.code.tree.codeblocks', new vscode.DataTransferItem(projectNode.project.filename));
+      const payload: TreeDragPayload = { type: 'project', filename: projectNode.project.filename };
+      dataTransfer.set('application/vnd.code.tree.codeblocks', new vscode.DataTransferItem(JSON.stringify(payload)));
+      return;
+    }
+    // P4：多选文件拖动（支持一次拖多个文件到同一虚拟文件夹）
+    const fileNodes = source.filter((n) => n.kind === 'file' && n.file && n.project);
+    if (fileNodes.length) {
+      const payload: TreeDragPayload = {
+        type: 'files',
+        items: fileNodes.map((n) => ({ project: n.project!.filename, rel: n.file!.relativeFilename })),
+      };
+      dataTransfer.set('application/vnd.code.tree.codeblocks', new vscode.DataTransferItem(JSON.stringify(payload)));
     }
   }
 
   handleDrop(target: TreeNode | undefined, dataTransfer: vscode.DataTransfer): void {
-    const filename = dataTransfer.get('application/vnd.code.tree.codeblocks')?.value;
-    if (typeof filename !== 'string' || !filename) return;
-    // 只允许拖到项目节点上（或根，即放在末尾）
-    if (target && target.kind !== 'project') return;
-    this.onReorder?.(filename, target?.project?.filename);
+    const raw = dataTransfer.get('application/vnd.code.tree.codeblocks')?.value;
+    if (typeof raw !== 'string' || !raw) return;
+    let payload: TreeDragPayload;
+    try {
+      payload = JSON.parse(raw) as TreeDragPayload;
+    } catch {
+      return;
+    }
+
+    if (payload.type === 'project') {
+      // 只允许拖到项目节点上（或根，即放在末尾）
+      if (target && target.kind !== 'project') return;
+      this.onReorder?.(payload.filename!, target?.project?.filename);
+      return;
+    }
+
+    if (payload.type === 'files') {
+      // 目标必须是模型节点：工程（回根）/ 物理目录 / 虚拟文件夹；文件分组（视图）不接受
+      if (!target?.project || !payload.items?.length) return;
+      if (target.kind !== 'project' && target.kind !== 'folder' && target.kind !== 'virtualFolder') return;
+      const folder = target.kind === 'project' ? '' : (target.dirKey ?? '');
+      const files: { project: Project; file: ProjectFile }[] = [];
+      for (const it of payload.items) {
+        if (it.project !== target.project.filename) continue; // 跨工程拖拽不支持
+        const file = target.project.files.find((f) => f.relativeFilename === it.rel);
+        if (file) files.push({ project: target.project, file });
+      }
+      if (files.length) this.onAssignVirtualFolder?.(files, folder);
+    }
   }
 }
 

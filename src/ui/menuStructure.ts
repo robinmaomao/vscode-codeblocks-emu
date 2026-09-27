@@ -267,6 +267,8 @@ export const MENU_STRUCTURE: MenuDef[] = [
           SEP,
           { label: 'Find File…', command: 'codeblocks.findFile', needsProject: true },
           SEP,
+          { label: 'Add New Virtual Folder…', command: 'codeblocks.newVirtualFolder', needsProject: true },
+          SEP,
           { label: 'Categorize by File Types', command: 'codeblocks.toggleCategorize' },
         ],
       },

@@ -1,0 +1,3 @@
+281: projectTreeProvider.dragAndDropController.onAssignVirtualFolder = async (files, folder) => {
+703: const count = (0, virtualFolders_1.countFilesUnderVirtualFolder)(project, folder);
+3290: const { text, replaced } = (0, unitText_1.renameUnitInCbpText)(raw, oldRel, newRel);
