@@ -231,6 +231,10 @@ export class CompilerOptionsLoader {
       case 'linkerNeedsPathResolved': s.linkerNeedsPathResolved = v === 'true'; break;
       case 'supportsPCH': s.supportsPCH = v === 'true'; break;
       case 'PCHExtension': s.PCHExtension = v; break;
+      case 'logging':
+        // 对齐 compiler.cpp:943-952：仅显式 full/simple/none 生效；default 值交由扩展设置控制（CB defaultLogging=clogFull，保护性差异）
+        s.logging = (v === 'full' || v === 'simple' || v === 'none') ? v : undefined;
+        break;
       case 'UseFlatObjects': s.useFlatObjects = v === 'true'; break;
       case 'UseFullSourcePaths': s.useFullSourcePaths = v === 'true'; break;
       case 'Use83Paths': s.use83Paths = v === 'true'; break;

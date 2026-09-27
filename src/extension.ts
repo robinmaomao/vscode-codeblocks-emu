@@ -2855,7 +2855,7 @@ function createEmptyTarget(): BuildTarget {
     prefixAuto: true,
     extensionAuto: true,
     useConsoleRunner: true,
-    includeInTargetAll: true,
+    includeInTargetAll: false,
     platforms: 0xff,
     commandsBeforeBuild: [],
     commandsAfterBuild: [],
@@ -4342,6 +4342,25 @@ async function buildOneProject(project: Project, targetTitle: string, rebuild: b
     if (!buildCmd) {
       outputChannel.error(`[Code::Blocks] makefile 项目 "${project.title}" 未配置 <MakeCommands><Build command=...>`);
       return false;
+    }
+    // 对齐 compilergcc.cpp:2560-2585：Build 前同步执行 askRebuildNeeded（0=已最新跳过构建）；
+    // clogSimple/clogNone 用 silentBuild 命令（无配置时回退 build，保护性差异）
+    const mkCompiler = getCompiler(target.compilerId || project.compilerId);
+    const askCmd = getMakeCommand(project, target, 'askRebuildNeeded');
+    if (askCmd) {
+      if (mkCompiler.switches.logging === 'full') {
+        outputChannel.info(`[Code::Blocks] Checking if target is up-to-date: ${askCmd}`);
+      }
+      const askCwd = project.executionDir ? path.resolve(project.basePath, project.executionDir) : project.basePath;
+      const ask = spawnSync(askCmd, { cwd: askCwd, shell: true, windowsHide: true, encoding: 'utf8' });
+      if ((ask.status ?? 1) === 0) {
+        outputChannel.info(`[Code::Blocks] Target '${targetTitle}' is up to date. Nothing to be done.`);
+        return true;
+      }
+    }
+    if (mkCompiler.switches.logging !== 'full') {
+      const silentCmd = getMakeCommand(project, target, 'silentBuild');
+      if (silentCmd) return await runMakeBuild(project, silentCmd, targetTitle);
     }
     return await runMakeBuild(project, buildCmd, targetTitle);
   }

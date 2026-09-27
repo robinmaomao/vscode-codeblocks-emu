@@ -81,6 +81,13 @@ function toUnix(p: string): string {
   return p.replace(/\\/g, '/');
 }
 
+/** hasCppFilesToLink 判定 —— 对齐 CB GenerateCommandLine:258-288/585 + directcommands.cpp:772/903：按 compilerVar（CPP→C++，CC→C），扩展名仅回退（L8） */
+function fileUsesCppCompiler(f: ProjectFile): boolean {
+  if (f.compilerVar === 'CPP') return true;
+  if (f.compilerVar === 'CC' || f.compilerVar === 'WINDRES') return false;
+  return isCppSource(f.relativeFilename);
+}
+
 export class BuildEngine {
   private parser: OutputParser;
   /** 编译/链接子进程环境（PATH 前置编译器 bin 目录，对齐 CodeBlocks Init 的 PATH 重构） */
@@ -338,8 +345,9 @@ export class BuildEngine {
       // 每目标编译器（对齐 GetCompiler(target->GetCompilerID())）
       this.switchCompiler(target);
       const generator = new CommandGenerator(this.project, this.compiler);
-      const files = target.files.length ? target.files : this.project.files;
-      const hasCpp = files.some((f) => isCppSource(f.relativeFilename));
+      // 对齐 GetProjectFilesSortedByWeight（directcommands.cpp:143-157）：目标文件列表权威，空目标不编译工程全部文件（L6）
+      const files = target.files;
+      const hasCpp = files.some((f) => fileUsesCppCompiler(f));
 
       for (const file of files) {
         // 跳过不参与编译的文件（<Option compile="0"/>）
@@ -400,9 +408,10 @@ export class BuildEngine {
       if (target.targetType === TargetType.CommandsOnly && !this.compileCommandsOnlyTargets()) continue;
       this.switchCompiler(target);
       const generator = new CommandGenerator(this.project, this.compiler);
-      const files = target.files.length ? target.files : this.project.files;
+      // 对齐 GetProjectFilesSortedByWeight：目标文件列表权威（L6）
+      const files = target.files;
       const sortedFiles = [...files].sort(compareFilesByWeight);
-      const hasCpp = sortedFiles.some((f) => isCppSource(f.relativeFilename));
+      const hasCpp = sortedFiles.some((f) => fileUsesCppCompiler(f));
 
       // 编译单元（与 buildTarget 1b 相同的过滤：compile=false / compilerVar 空）
       const compile: { object: string; source: string; command: string }[] = [];
@@ -459,7 +468,7 @@ export class BuildEngine {
           const cmd = generator.generate(this.linkCommandType(target), {
             target, pf: null, file: '', object: linkObjectStr,
             flatObject: linkObjectsFlat.join(isOw ? ' ' : this.compiler.switches.objectSeparator),
-            deps: resObjectStr, hasCppFilesToLink: hasCpp,
+            deps: resObjectStr, hasCppFilesToLink: linkFiles.some((f) => f.compilerVar === 'CPP'),
           });
           if (cmd) link = { kind: 'link', command: cmd, objects: allObjectsAbs };
         }
@@ -563,7 +572,8 @@ export class BuildEngine {
     }
     // 每目标编译器（对齐 GetCompiler(target->GetCompilerID())）
     this.switchCompiler(target);
-    const files = target.files.length ? target.files : this.project.files;
+    // 对齐 GetProjectFilesSortedByWeight：目标文件列表权威（L6）
+    const files = target.files;
     const file = files.find((f) => f.relativeFilename === fileRel);
     if (!file) {
       this.output.error(`[Code::Blocks] 文件不在目标 "${targetTitle}" 中: ${fileRel}`);
@@ -591,7 +601,7 @@ export class BuildEngine {
     }
 
     const generator = new CommandGenerator(this.project, this.compiler);
-    const hasCpp = files.some((f) => isCppSource(f.relativeFilename));
+    const hasCpp = files.some((f) => fileUsesCppCompiler(f));
     const made = this.makeCompileUnit(target, file, generator, hasCpp);
     if (made.reason === 'not-compilable') {
       this.output.info(`[Code::Blocks] 跳过（非可编译文件）: ${fileRel}`);
@@ -633,7 +643,8 @@ export class BuildEngine {
     if (!target) return;
     // 每目标编译器（对齐 GetCompiler(target->GetCompilerID())）
     this.switchCompiler(target);
-    const files = target.files.length ? target.files : this.project.files;
+    // 对齐 GetProjectFilesSortedByWeight：目标文件列表权威（L6）
+    const files = target.files;
     const file = files.find((f) => f.relativeFilename === fileRel);
     if (!file) return;
     // 对齐 GetBuildTargetForFile：文件未归属当前目标（或未归属任何目标）→ 静默跳过
@@ -746,10 +757,11 @@ export class BuildEngine {
 
     // 1. 编译所有文件（增量：跳过未变更文件）
     const units: CompileUnit[] = [];
-    const files = target.files.length ? target.files : this.project.files;
+    // 对齐 GetProjectFilesSortedByWeight：目标文件列表权威（L6）
+    const files = target.files;
     // 按 weight 排序（对齐 GetProjectFilesSortedByWeight：weight 升序，同 weight 按文件名）
     const sortedFiles = [...files].sort(compareFilesByWeight);
-    const hasCpp = sortedFiles.some((f) => isCppSource(f.relativeFilename));
+    const hasCpp = sortedFiles.some((f) => fileUsesCppCompiler(f));
 
     // 头文件依赖扫描（增量编译）：目录集 = 关系合并后的有序 include 目录 + 反引号派生目录（对齐 DepsSearchStart），
     // 再逐个展开宏（含项目自定义变量，对齐 depsAddSearchDir 前的 ReplaceMacros）
@@ -965,7 +977,7 @@ export class BuildEngine {
             object: linkObjectStr,
             flatObject: linkObjectsFlat.join(isOw ? ' ' : this.compiler.switches.objectSeparator),
             deps: resObjectStr,
-            hasCppFilesToLink: hasCpp,
+            hasCppFilesToLink: linkFiles.some((f) => f.compilerVar === 'CPP'),
           });
           if (linkCommand) {
             this.output.info(linkCommand);
@@ -1556,7 +1568,8 @@ export class BuildEngine {
     }
     let removed = 0;
     if (!invalid) {
-      const files = target.files.length ? target.files : this.project.files;
+      // 对齐 GetProjectFilesSortedByWeight：目标文件列表权威（L6）
+      const files = target.files;
       for (const file of files) {
         if (file.compile === false) continue;
         if (!file.buildTargets.includes(target.title) && file.buildTargets.length > 0) continue;
@@ -1639,9 +1652,10 @@ export class BuildEngine {
     }
   }
 
-  /** 详细输出开关（codeblocks.build.verboseOutput，默认 false） */
+  /** 详细输出开关（codeblocks.build.verboseOutput，默认 false；编译器 XML logging=full 时强制，对齐 CB clogFull） */
   private verboseOutput(): boolean {
-    return vscode.workspace.getConfiguration('codeblocks').get<boolean>('build.verboseOutput', false);
+    return vscode.workspace.getConfiguration('codeblocks').get<boolean>('build.verboseOutput', false)
+      || this.compiler.switches.logging === 'full';
   }
 
   /** 对象文件的绝对路径（增量判断用） */
@@ -1864,7 +1878,8 @@ export class BuildEngine {
         // 单行完成式：无交错、含进度序号与耗时（序号用连字符避免 Output 面板误判为路径链接）
         const idx = baseGlobalIdx + li + 1;
         if (ok) {
-          if (!buildLogPrefs().plain) {
+          // logging=none 时抑制每文件完成行（对齐 CB clogNone 无 Compiling 行；错误行不受影响）
+          if (!buildLogPrefs().plain && this.compiler.switches.logging !== 'none') {
             this.output.info(`✓ [Compiled] ${idx}-${totalCount} ${u.file.relativeFilename} (${elapsedSec}s)`);
           }
         } else if (options.cancel?.isCancelled()) {
