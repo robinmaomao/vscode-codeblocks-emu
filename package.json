@@ -2,7 +2,7 @@
   "name": "codeblocks-vscode",
   "displayName": "Code::Blocks for VS Code",
   "description": "原生移植 Code::Blocks 核心功能到 VS Code：项目模型、构建引擎、编译器管理与调试引擎",
-  "version": "0.8.97-dev",
+  "version": "0.8.98-dev",
   "icon": "resources/icon.png",
   "publisher": "robinmaomao",
   "author": {
@@ -729,8 +729,11 @@
           "codeblocks.clangd.suppressedWarnings": {
             "type": "array",
             "items": { "type": "string" },
-            "default": ["-Wunused-function"],
-            "description": "在 clangd 诊断中压制的警告类别（写入 Diagnostics.Suppress）。嵌入式 SDK 常用静态函数做编译期断言，-Wunused-function 是预期噪声"
+            "default": [
+              "-Wunused-function",
+              "redefinition_different_typedef"
+            ],
+            "description": "在 clangd 诊断中压制的诊断（写入 Diagnostics.Suppress；支持 -W 组名如 -Wunused-function，或 clangd 诊断名如 redefinition_different_typedef）。默认压制两项嵌入式 SDK 常见跨界误报：静态函数编译期断言未使用、以及 SDK 头文件与工具链系统头的 typedef 冲突（__int32_t 等）；移除对应项即恢复显示"
           },
           "codeblocks.clangd.suppressHeaderDiagnostics": {
             "type": "boolean",

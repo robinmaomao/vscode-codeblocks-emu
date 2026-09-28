@@ -21,4 +21,5 @@ package-lock.json
 .cb-*.js
 .cb-*.txt
 .cbpkg.txt
+.cb-tools/**
 
