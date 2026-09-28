@@ -21,6 +21,11 @@ export class LruCache<K, V> {
     return v;
   }
 
+  /** 是否存在（不改变最近使用顺序） */
+  has(key: K): boolean {
+    return this.map.has(key);
+  }
+
   set(key: K, value: V): void {
     if (this.map.has(key)) {
       this.map.delete(key);

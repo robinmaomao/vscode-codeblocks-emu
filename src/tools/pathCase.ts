@@ -8,6 +8,7 @@
  */
 
 import { spawnSync } from 'child_process';
+import { LruCache } from './lru';
 
 /** 盘符首字母大写（仅 win32 且形如 x: 开头；相对路径 / UNC 路径不变） */
 export function upperDrive(p: string): string {
@@ -17,8 +18,8 @@ export function upperDrive(p: string): string {
   return p;
 }
 
-/** Windows 短路径缓存（对齐 wxFileName::GetShortPath / GetShortPathName） */
-const shortPathCache = new Map<string, string>();
+/** Windows 短路径缓存（对齐 wxFileName::GetShortPath / GetShortPathName；LRU 512 防长会话无界增长） */
+const shortPathCache = new LruCache<string, string>(512);
 
 /**
  * 获取 Windows 8.3 短路径 —— 对齐 Code::Blocks 的 GetShortPath（windres 空格 bug 修复 + Use83Paths）。

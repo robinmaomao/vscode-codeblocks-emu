@@ -9,7 +9,6 @@ import * as fs from 'fs';
 import * as crypto from 'crypto';
 import { spawn } from 'child_process';
 import { execFile } from 'child_process';
-import { spawnSync } from 'child_process';
 import { isExecutableTargetType, resolveExecutablePath } from './build/outputPath';
 import { ProjectParser, WorkspaceParser } from './model/parser';
 import { Project, BuildTarget, ProjectFile, TargetType, CommandType, Workspace, OptionsRelation, OptionsRelationType, LinkerExecutableOption, supportsCurrentPlatform, PLATFORM_ALL } from './model/types';
@@ -17,6 +16,7 @@ import { serializeProject } from './model/projectWriter';
 import { createProjectFromTemplate, PROJECT_TEMPLATES } from './project/newProject';
 import { instantiateUserTemplate, listUserTemplates, saveAsUserTemplate } from './project/userTemplates';
 import { Compiler } from './compiler/compiler';
+import { queryCompilerVersionString } from './compiler/compilerVersion';
 import { CompilerOptionsLoader } from './compiler/optionsLoader';
 import { CodeBlocksConfig } from './compiler/codeblocksConfig';
 import { detectAllCompilers, detectAllCompilersAsync, DetectedCompiler } from './compiler/detector';
@@ -34,7 +34,7 @@ import { expandMacros } from './build/scriptRunner';
 import { applyGeneratedFiles } from './build/generatedFiles';
 import { buildLogBaseName, renderHtmlBuildLog } from './build/htmlBuildLog';
 import { cbBuiltinVars, replaceCbMacros, globalVariables, envVarMap } from './compiler/cbMacros';
-import { buildLogPrefs, msg, quietSuccess } from './build/logLang';
+import { buildLogPrefs, msg, quietSuccess, resetBuildLogPrefsCache } from './build/logLang';
 import { decodeText } from './tools/encoding';
 import { clearBackticksCache, CommandGenerator } from './compiler/commandGenerator';
 import { OutputParser } from './build/outputParser';
@@ -149,6 +149,17 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   applyDebugTrace();
   context.subscriptions.push(vscode.workspace.onDidChangeConfiguration((e) => {
     if (e.affectsConfiguration('codeblocks.debug.trace')) applyDebugTrace();
+  }));
+  // 日志/行为偏好缓存失效：plainCbLog / log.english / strictQuoting / quietSuccess 即时生效（免重载窗口）
+  context.subscriptions.push(vscode.workspace.onDidChangeConfiguration((e) => {
+    if (
+      e.affectsConfiguration('codeblocks.build.plainCbLog')
+      || e.affectsConfiguration('codeblocks.log.english')
+      || e.affectsConfiguration('codeblocks.build.strictQuoting')
+      || e.affectsConfiguration('codeblocks.ui.quietSuccess')
+    ) {
+      resetBuildLogPrefsCache();
+    }
   }));
   diagnosticCollection = vscode.languages.createDiagnosticCollection('codeblocks');
 
@@ -3912,25 +3923,7 @@ function writeUnitsToCbp(cbpPath: string, units: string[]): void {
   fs.writeFileSync(cbpPath, raw, 'utf-8');
 }
 
-/** 查询编译器版本字符串 —— 对齐 CompilerMINGW::SetVersionString（compilerMINGW.cpp:240-318）：`<C 程序> --version` 首行匹配 x.y.z */
-function queryCompilerVersionString(compiler: Compiler): string | undefined {
-  try {
-    const c = compiler.programs?.C;
-    if (!c) return undefined;
-    let exe = c;
-    if (!path.isAbsolute(exe) && compiler.masterPath) {
-      const inBin = path.join(compiler.masterPath, 'bin', c);
-      exe = fs.existsSync(inBin) ? inBin : path.join(compiler.masterPath, c);
-    }
-    const out = spawnSync(exe, ['--version'], { encoding: 'utf8', timeout: 8000 }).stdout ?? '';
-    const first = out.split(/\r?\n/)[0] ?? '';
-    const m = first.match(/\d+\.\d+\.\d+/);
-    return m ? m[0] : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
+/** 查询编译器版本字符串 —— 已移入 src/compiler/compilerVersion.ts（模块级缓存，避免重复同步 spawn） */
 function getCompiler(compilerId?: string): Compiler {
   const cfg = vscode.workspace.getConfiguration('codeblocks');
   const id = compilerId ?? cfg.get<string>('compilerId', 'gcc');
@@ -4922,8 +4915,8 @@ async function buildOneProject(project: Project, targetTitle: string, rebuild: b
       outputChannel.error(`[Code::Blocks] makefile 项目 "${project.title}" 未配置 <MakeCommands><Build command=...>`);
       return false;
     }
-    // 对齐 compilergcc.cpp:2560-2585：Build 前同步执行 askRebuildNeeded（0=已最新跳过构建）；
-    // clogSimple/clogNone 用 silentBuild 命令（无配置时回退 build，保护性差异）
+    // 对齐 compilergcc.cpp:2560-2585：Build 前执行 askRebuildNeeded（0=已最新跳过构建）；
+    // 审计修复：原 spawnSync 无超时同步阻塞主线程 → 改异步 spawn + 30s 超时 + 取消注册（语义同 CB）
     const mkCompiler = getCompiler(target.compilerId || project.compilerId);
     const askCmd = getMakeCommand(project, target, 'askRebuildNeeded');
     if (askCmd) {
@@ -4931,8 +4924,8 @@ async function buildOneProject(project: Project, targetTitle: string, rebuild: b
         outputChannel.info(`[Code::Blocks] Checking if target is up-to-date: ${askCmd}`);
       }
       const askCwd = project.executionDir ? path.resolve(project.basePath, project.executionDir) : project.basePath;
-      const ask = spawnSync(askCmd, { cwd: askCwd, shell: true, windowsHide: true, encoding: 'utf8' });
-      if ((ask.status ?? 1) === 0) {
+      const askCode = await runMakeAskRebuild(askCmd, askCwd, cancel);
+      if (askCode === 0) {
         outputChannel.info(`[Code::Blocks] Target '${targetTitle}' is up to date. Nothing to be done.`);
         return true;
       }
@@ -5861,6 +5854,41 @@ function getMakeCommand(project: Project, target: BuildTarget | undefined, key: 
 }
 
 /** makefile 项目模式：执行 make 命令（工作目录 = GetExecutionDir 语义：execution_dir 或项目根；退出码按 statusSuccess 判定） */
+/**
+ * make askRebuildNeeded 异步执行（0=已最新）——审计修复：原 spawnSync 无超时同步阻塞主线程。
+ * 行为保持：退出码 0 → 跳过构建；非 0 / 启动失败 / 超时(30s) / 被取消 → 返回 null，按“需构建”继续。
+ */
+function runMakeAskRebuild(askCmd: string, cwd: string, cancel?: BuildCancelHandle, timeoutMs = 30000): Promise<number | null> {
+  return new Promise((resolve) => {
+    let done = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const finish = (code: number | null): void => {
+      if (done) return;
+      done = true;
+      if (timer) clearTimeout(timer);
+      resolve(code);
+    };
+    let proc: ReturnType<typeof spawn>;
+    try {
+      proc = spawn(askCmd, { cwd, shell: true, windowsHide: true });
+    } catch {
+      resolve(null);
+      return;
+    }
+    timer = setTimeout(() => {
+      outputChannel.warn(`[Code::Blocks] make askRebuildNeeded 超时（${Math.round(timeoutMs / 1000)}s），按“需构建”继续`);
+      try { proc.kill(); } catch { /* ignore */ }
+      finish(null);
+    }, timeoutMs);
+    cancel?.register(proc);
+    proc.on('error', () => finish(null));
+    proc.on('close', (code) => {
+      cancel?.unregister(proc);
+      finish(code);
+    });
+  });
+}
+
 async function runMakeBuild(project: Project, command: string, targetTitle: string): Promise<boolean> {
   const compiler = getCompiler(project.compilerId);
   outputChannel.show(true);
