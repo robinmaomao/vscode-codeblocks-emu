@@ -5,6 +5,8 @@ dist/
 codeblocks-src/
 *.log
 *.zip
+/release/
+.cb-tools/
 
 # 娴嬭瘯宸ョ▼鏋勫缓浜х墿
 test-project/**/bin/
