@@ -10,6 +10,7 @@ codeblocks-src/
 test-project/**/bin/
 test-project/**/obj/
 test-project/buildlog.html
+test-project/*_build_log.html
 .git-msg.txt
 
 # 临时排查/测试产物（不应提交）

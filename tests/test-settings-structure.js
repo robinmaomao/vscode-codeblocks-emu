@@ -1,5 +1,5 @@
 // 设置结构回归（第53轮配置整理）：
-//  - configuration 为 7 个分区块（title+order），设置项总数 42、无重复键
+//  - configuration 为 7 个分区块（title+order），设置项总数 47、无重复键
 //  - 关键默认值/枚举/scope/数值校验/DBGconfig/描述无轮次标记
 //  - 全部设置键在 dist 中被读取（无死配置；ui.symbolsView 由 when 子句使用）
 const fs = require('fs');
@@ -38,7 +38,7 @@ for (const b of cfg) {
     byKey[k] = v;
   }
 }
-  check('设置项总数 = 46', keys.length === 46, keys.length);
+  check('设置项总数 = 47', keys.length === 47, keys.length);
 check('无重复键', new Set(keys).size === keys.length, keys.length - new Set(keys).size);
 
 // ---- 关键项抽查 ----
@@ -53,6 +53,9 @@ check('recentProjectsLimit 默认 8（0-50）',
   byKey['codeblocks.ui.recentProjectsLimit']?.default === 8
   && byKey['codeblocks.ui.recentProjectsLimit']?.minimum === 0
   && byKey['codeblocks.ui.recentProjectsLimit']?.maximum === 50, byKey['codeblocks.ui.recentProjectsLimit']);
+check('build.saveHtmlLog 默认 false（布尔，对齐 CB save_html_build_log）',
+  byKey['codeblocks.build.saveHtmlLog']?.type === 'boolean' && byKey['codeblocks.build.saveHtmlLog']?.default === false,
+  byKey['codeblocks.build.saveHtmlLog']);
 
 check('scope machine-overridable ×3（路径类设置）',
   ['codeblocks.masterPath', 'codeblocks.compilerPrograms', 'codeblocks.debug.gdbPath']
