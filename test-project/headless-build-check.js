@@ -126,6 +126,22 @@ async function singleFileCheck(cbp) {
   return true;
 }
 
+/** 自动还原 hello.exe（审计 P3.4；历史坑：脚本跑完 cleanTarget 会清掉它，调试 e2e 前需手工重编） */
+function restoreHelloExe() {
+  const binDir = path.join(__dirname, 'bin', 'Debug');
+  const exe = path.join(binDir, 'hello.exe');
+  const srcs = ['main.c', 'util.c'].map((f) => path.join(__dirname, f)).filter((p) => fs.existsSync(p));
+  if (!srcs.length) return;
+  try {
+    fs.mkdirSync(binDir, { recursive: true });
+    const r = require('child_process').spawnSync('gcc', ['-g', '-O0', '-o', exe, ...srcs], { encoding: 'utf8', windowsHide: true });
+    if (r.status === 0) console.log('[i] 已自动还原 hello.exe: ' + exe);
+    else console.log('[w] hello.exe 还原失败（调试 e2e 前请手工编译）: ' + String(r.stderr || r.error || '').split('\n')[0]);
+  } catch (e) {
+    console.log('[w] hello.exe 还原失败（gcc 不可用？）: ' + e.message);
+  }
+}
+
 (async () => {
   const args = process.argv.slice(2);
   const list = args.length
@@ -141,5 +157,8 @@ async function singleFileCheck(cbp) {
   // 单文件编译 / Clean（hello-cb，固定存在）
   const singleCbp = path.join(__dirname, 'hello-cb.cbp');
   if (fs.existsSync(singleCbp) && !(await singleFileCheck(singleCbp))) allOk = false;
+  // 审计修复（P3.4）：singleFileCheck 的 cleanTarget 会清掉 hello-cb 产物（含 hello.exe），
+  // 历史上每次跑完需手工 gcc 重编 → 这里自动还原（调试 e2e 依赖 test-project/bin/Debug/hello.exe）
+  restoreHelloExe();
   process.exit(allOk ? 0 : 1);
 })();

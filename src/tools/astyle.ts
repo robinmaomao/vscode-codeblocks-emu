@@ -7,7 +7,7 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
-import { spawnSync } from 'child_process';
+import { spawn } from 'child_process';
 
 /** 定位 astyle 可执行文件 */
 export function locateAstyle(): string | null {
@@ -24,19 +24,35 @@ export function locateAstyle(): string | null {
 }
 
 /**
- * 用 AStyle 格式化文件。
+ * 用 AStyle 格式化文件（异步）——审计修复：原 spawnSync 同步执行大文件可秒级阻塞窗口。
+ * 保持原语义：AStyle 无文件参数时从 stdin 读取；失败/无输出 → null（调用方回退内置格式化）。
  * @returns 格式化后的文本，失败返回 null
  */
-export function formatWithAstyle(source: string, options: string[] = ['--style=allman', '--indent=spaces=4']): string | null {
+export function formatWithAstyle(source: string, options: string[] = ['--style=allman', '--indent=spaces=4']): Promise<string | null> {
   const astyle = locateAstyle();
-  if (!astyle) return null;
-
-  const r = spawnSync(astyle, options, {
-    input: source,
-    encoding: 'utf8',
+  if (!astyle) return Promise.resolve(null);
+  return new Promise<string | null>((resolve) => {
+    let out = '';
+    let done = false;
+    const finish = (v: string | null): void => {
+      if (done) return;
+      done = true;
+      resolve(v);
+    };
+    let proc: ReturnType<typeof spawn>;
+    try {
+      proc = spawn(astyle, options, { windowsHide: true });
+    } catch {
+      resolve(null);
+      return;
+    }
+    proc.stdout?.on('data', (d: Buffer) => { out += d.toString(); });
+    proc.on('error', () => finish(null));
+    proc.on('close', (code) => finish(code === 0 && out ? out : null));
+    proc.stdin?.on('error', () => { /* AStyle 提前退出时的 EPIPE 忽略 */ });
+    proc.stdin?.write(source);
+    proc.stdin?.end();
   });
-  if (r.status !== 0 || !r.stdout) return null;
-  return r.stdout;
 }
 
 /**
@@ -51,7 +67,7 @@ export async function formatActiveDocument(): Promise<void> {
   const source = doc.getText();
   const astyleOptions = vscode.workspace.getConfiguration('codeblocks').get<string[]>('astyleOptions', ['--style=allman', '--indent=spaces=4']);
 
-  const formatted = formatWithAstyle(source, astyleOptions);
+  const formatted = await formatWithAstyle(source, astyleOptions);
   if (formatted !== null && formatted !== source) {
     const fullRange = new vscode.Range(
       doc.positionAt(0),

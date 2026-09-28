@@ -10,13 +10,14 @@ import * as crypto from 'crypto';
 import * as os from 'os';
 import * as vscode from 'vscode';
 import { spawnSync } from 'child_process';
+import { LruCache } from './lru';
 
 const EXE = process.platform === 'win32' ? 'clangd.exe' : 'clangd';
 
-/** 编译器 include 查询缓存（key = compilerPath|lang），避免重复同步 spawn 阻塞主线程 */
-const includesCache = new Map<string, string[]>();
-/** 编译器目标三元组缓存（key = compilerPath） */
-const targetCache = new Map<string, string | undefined>();
+/** 编译器 include 查询缓存（key = compilerPath|lang；LRU 128 防长会话无界增长/重复同步 spawn 阻塞主线程） */
+const includesCache = new LruCache<string, string[]>(128);
+/** 编译器目标三元组缓存（key = compilerPath；LRU 64） */
+const targetCache = new LruCache<string, string | undefined>(64);
 
 /** 通过 PATH 查找 clangd（Windows 用 where，其它用 which） */
 function findOnPath(): string | undefined {

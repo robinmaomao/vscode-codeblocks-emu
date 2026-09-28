@@ -23,6 +23,7 @@ import {
   CommandType,
 } from '../model/types';
 import { FileType, fileTypeOf } from '../model/fileTypes';
+import { LruCache } from '../tools/lru';
 
 function toNative(p: string): string {
   return process.platform === 'win32' ? p.replace(/\//g, '\\') : p;
@@ -167,8 +168,8 @@ interface PregenCache {
   linkerSearchDirs: string[];
 }
 
-/** 反引号命令缓存（对齐 globals.cpp m_Backticks：全局共享，CB 从不清理） */
-const backticksCache = new Map<string, string>();
+/** 反引号命令缓存（对齐 globals.cpp m_Backticks：全局共享；已改为 LRU 256 防无界增长，构建入口仍按 CB 语义清空） */
+const backticksCache = new LruCache<string, string>(256);
 
 /**
  * 反引号展开 —— 对齐 cbExpandBackticks（globals.cpp:867-927）：

@@ -43,7 +43,7 @@ export class KeybindingPanel {
       'codeblocks.keybindings',
       'Code::Blocks 快捷键设置',
       vscode.ViewColumn.One,
-      { enableScripts: true, retainContextWhenHidden: true },
+      { enableScripts: true },
     );
     this.panel.webview.html = this.buildHtml();
     this.panel.webview.onDidReceiveMessage((m) => void this.onMessage(m), this, this.disposables);
@@ -136,6 +136,7 @@ export class KeybindingPanel {
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline';">
 <style>
   body { font-family: var(--vscode-font-family); color: var(--vscode-foreground); padding: 0 14px 14px; }
   h2 { margin: 12px 0 6px; }

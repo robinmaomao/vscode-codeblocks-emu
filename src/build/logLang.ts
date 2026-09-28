@@ -43,3 +43,11 @@ export function strictQuoting(): boolean {
 export function quietSuccess(): boolean {
   return buildLogPrefs().quiet;
 }
+
+/**
+ * 清空偏好缓存 —— 设置变更监听调用，使 plainCbLog / log.english / strictQuoting / quietSuccess
+ * 在会话内即时生效（否则需重载窗口；UI 侧 F1 系列设置均为实时读取，此处补齐一致性）。
+ */
+export function resetBuildLogPrefsCache(): void {
+  cache = undefined;
+}

@@ -2,11 +2,13 @@
 codeblocks-src/**
 docs/**
 test-project/**
+release/**
 src/**
 tsconfig.json
 tests/**
 node_modules/.cache/**
 **/*.map
+*.zip
 .gitignore
 package-lock.json
 .git-msg.txt
