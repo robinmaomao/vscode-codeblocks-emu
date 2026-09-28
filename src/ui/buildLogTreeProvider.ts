@@ -145,6 +145,13 @@ export class BuildLogTreeProvider implements vscode.TreeDataProvider<BuildLogNod
     return this.gotoError(this.errorList[this.currentErrorIndex]);
   }
 
+  /** 跳转到第一个错误（对齐 CB auto_focus_build_errors：构建结束聚焦首个错误；不循环） */
+  gotoFirstError(): boolean {
+    if (this.errorList.length === 0) return false;
+    this.currentErrorIndex = 0;
+    return this.gotoError(this.errorList[0]);
+  }
+
   /** 跳转到上一个错误（循环），返回是否成功 */
   gotoPreviousError(): boolean {
     if (this.errorList.length === 0) return false;
