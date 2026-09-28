@@ -17,7 +17,7 @@
 - 📁 **原生工程解析**：直接加载 `.cbp` / `.workspace`（`fast-xml-parser`），完整还原 `Project` / `BuildTarget` / `ProjectFile` 内存模型，支持虚拟目标与虚拟文件夹。
 - 🔨 **真实构建引擎**：不依赖 `tasks.json`。内置 Code::Blocks 的命令模板 + 宏展开（`$compiler $options $includes ...`），直接 `spawn` 编译/链接进程。
 - ⚙️ **编译器管理**：完整解析 `options_<id>.xml`（含 `extends` 继承、`<if platform>` 平台分支、`<Common>` 引用），自动探测 GCC / MinGW / Clang / MSVC；支持从 Code::Blocks 的 `default.conf` 读取**用户自定义交叉编译器**（如 RISC-V）。
-- 🐞 **GDB 调试**：自研内联 DAP 调试适配器，直接驱动 `gdb -i=mi`；断点（条件/命中次数/日志）、单步（含指令级）、变量、调用栈、线程、表达式求值；**第四十九轮新增**：反汇编视图、Memory 内存查看、Registers 寄存器视图、数据断点、异常断点、运行到光标、Set Next Statement、附加进程、Send GDB Command（Debug Console `-` 前缀透传 MI）；**第五十轮实机加固**：程序输出转发、Step Out / 条件断点 / 寄存器读取等多项 GDB 兼容修复（GDB 7.6.1–8.1 实测，详见 docs/开发进度.md）；**第五十一轮**：指令断点（反汇编视图）、线程名解析修复、多调试会话路由（聚焦会话优先）。
+- 🐞 **GDB 调试**：自研内联 DAP 调试适配器，直接驱动 `gdb -i=mi`；断点（条件/命中次数/日志）、单步（含指令级）、变量、调用栈、线程、表达式求值、反汇编视图、Memory 内存查看、Registers 寄存器视图、数据断点、异常断点、运行到光标、Set Next Statement、指令断点、附加进程、Send GDB Command（Debug Console `-` 前缀透传 MI）、多调试会话路由（聚焦会话优先）；另有针对 MinGW GDB 7.6.1–8.1 的多项兼容修复（程序输出转发、Step Out / 条件断点 / 寄存器读取等，详见 [docs/使用说明.md](docs/使用说明.md)）。
 - ✨ **IntelliSense 补全**：自动生成 `compile_commands.json`（复用与 Code::Blocks 对齐的编译命令，写到工作区外缓存并更新 clangd 用户配置），配合 clangd 获得补全 / 跳转 / 悬停 / 重命名等能力；未安装 clangd 时自动回退到项目内轻量符号补全 / 悬停 / 跳转。
 - 🔍 **符号浏览器（Symbols）**：对齐 Code::Blocks Symbols 面板，按 函数 / 宏 / 类型 / 变量 分组展示项目符号，点击精确定位。
 - 🗂️ **多项目管理**：同时打开多个 `.cbp`，工程树支持拖拽排序（即编译顺序）、上移/下移、移除项目、活动项目高亮；打开工作区自动检测 `.cbp`，多选弹窗（目录名/文件名、默认全选）或状态栏入口随时重新打开。
@@ -65,6 +65,8 @@
 | **DAP 深层成员赋值** | 调试中修改变量值支持顶层变量与一层成员，二层以上嵌套暂不支持 |
 | **default.conf 全局设置编辑**（B1/B2/C4） | 评估后不做：default.conf 为 Code::Blocks 本体私有配置（CB 退出/打开设置时整文件覆写，写入竞态无法消除）；全局目录/选项/库/变量已被完整读取生效。替代：`Settings → Default Config…` 打开文件手工编辑 |
 
+> 完整限制清单、行为差异与替代方案见 [docs/使用说明.md](docs/使用说明.md) §16 与 [docs/对齐对照.md](docs/对齐对照.md)。
+
 ## 安装
 
 ### 从源码构建
@@ -74,10 +76,10 @@
 npm install
 
 # 2. 编译 TypeScript
-npx tsc -p ./
+npm run compile
 
 # 3. 打包 VSIX
-npx vsce package --allow-missing-repository
+npm run package
 
 # 4. 安装
 code --install-extension codeblocks-vscode-0.8.97-dev.vsix --force
@@ -117,52 +119,9 @@ code --extensionDevelopmentPath="." --disable-extensions --new-window
 
 > 构建为**增量编译**（源文件与 `#include` 头文件 mtime 比对，头文件更新也触发重编译）；`Rebuild` 对齐 Code::Blocks，先清理对象目录再全量重编译。链接库/外部依赖（`external_deps`）更新会自动触发重链接；Rebuild 后的纯增量构建不会重复执行 post-build 脚本（对齐 Code::Blocks）。
 
-### 多项目管理
+### 更多用法
 
-- 打开多个 `.cbp` 后，**Project** 视图按顺序列出各工程（顺序即编译顺序）
-- 拖动工程节点可调整编译顺序；右键工程节点可 **上移/下移/移除**
-- 点击工程节点将其设为**活动项目**（绿点标识），状态栏 Target/Compiler 针对它
-- 右键工程节点：**增量编译 / 全量编译 / 添加文件**
-
-### 文件操作（右键工程树文件节点）
-
-- **打开文件**：单击文件节点
-- **Compile File / Link File**：切换该文件是否参与编译/链接（写回 `.cbp`）
-- **Remove File from Project**：从工程移除文件（保留磁盘文件，写回 `.cbp`）
-- **Open Containing Folder**：在系统文件管理器中打开所在目录
-
-### 错误定位与导航
-
-- 构建失败后，**Build Log** 视图以树形展示错误/警告，点击节点精确定位到 `文件:行:列`
-- **`F4`** 跳转下一个错误，**`Shift+F4`** 跳转上一个错误（循环）
-- 错误数超过上限（默认 50，可在设置 `codeblocks.maxReportedErrors` 调整）时自动截断
-
-### 快捷键（与 Code::Blocks 对齐）
-
-| 功能 | 快捷键 |
-|------|--------|
-| Build | `Ctrl+F9` |
-| Build and Run | `F9` |
-| Run | `Ctrl+F10` |
-| Rebuild | `Ctrl+F11` |
-| Clean | `Ctrl+Shift+F9` |
-| Debug / Continue | `F8` |
-| Next Error | `F4` |
-| Previous Error | `Shift+F4` |
-
-### 命令
-
-- `Code::Blocks: Open Project (.cbp)`
-- `Code::Blocks: Build` / `Rebuild` / `Build and Run` / `Clean` / `Run`
-- `Build File` / `Clean File`（工程树右键文件：单文件编译 / 单文件清理）
-- `Code::Blocks: Stop Build`（编译随时停止）
-- `Code::Blocks: Select Build Target`
-- `Code::Blocks: Detect Compilers`
-- `Code::Blocks: Compiler Options`
-- `Code::Blocks: Debug`
-- `Code::Blocks: Next Error` / `Previous Error`
-- `Code::Blocks: Code Statistics` / `TODO List` / `Format with AStyle`
-- `Code::Blocks: Generate compile_commands.json (IntelliSense)`
+工程树操作（多项目拖拽排序 / 文件编译·链接开关 / 单文件 Build·Clean）、错误导航（`F4` / `Shift+F4`）、快捷键与命令全集、各面板说明，见 **[docs/使用说明.md](docs/使用说明.md)**（§3 界面 / §6 构建 / §11 快捷键 / §13 设置）——README 不再重复维护。
 
 ## 配置
 
@@ -181,6 +140,8 @@ code --extensionDevelopmentPath="." --disable-extensions --new-window
 | `codeblocks.clangd.buildLogDiagnostics` | `build` | 检测到 clangd 时 Build Log 的诊断来源：`build` = 构建引擎完整诊断（默认）；`clangd` = clangd 诊断（仅打开过的文件） |
 | `codeblocks.clangd.forcedIncludes` | `["global.h"]` | clangd 分析头文件时强制预包含的基础头文件名（默认 `global.h`：typedef/macro/sfr/clib 上下文；勿用 `include.h` 这类全量主头文件，否则递归包含产生误报） |
 | `codeblocks.clangd.suppressedWarnings` | `["-Wunused-function"]` | 在 clangd 诊断中压制的警告类别（嵌入式 SDK 常用静态函数做编译期断言，`-Wunused-function` 是预期噪声） |
+
+> 完整 53 项设置（7 个分区）见 [docs/使用说明.md](docs/使用说明.md) §13。
 
 ## 架构
 
