@@ -2923,7 +2923,8 @@ async function generateClangdForWorkspaceInternal(interactive: boolean): Promise
       }
 
       // 更新用户级 clangd 配置（工作区外，If.PathMatch 作用域到本工程树）
-      const suppressedWarnings = cfg.get<string[]>('clangd.suppressedWarnings', ['-Wunused-function']);
+      // 默认压制：嵌入式 SDK 预期噪声（-Wunused-function）+ 跨界 typedef 冲突误报（redefinition_different_typedef，SDK 头 vs 工具链系统头）
+      const suppressedWarnings = cfg.get<string[]>('clangd.suppressedWarnings', ['-Wunused-function', 'redefinition_different_typedef']);
       updateClangdUserConfig([{
         dir: scope,
         databaseDir: cacheDir,

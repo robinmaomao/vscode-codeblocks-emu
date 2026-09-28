@@ -269,7 +269,7 @@ export interface ClangdScopeConfig {
   databaseDir: string;
   /** 头文件（无编译命令）的回退编译 flag：-I / -isystem / --target 等独立 argv 元素 */
   headerFlags?: string[];
-  /** 需要压制的警告类别（如 -Wunused-function，写入主片段 Diagnostics.Suppress） */
+  /** 需要压制的诊断（-W 组名或 clangd 诊断名，如 -Wunused-function / redefinition_different_typedef，写入主片段 Diagnostics.Suppress） */
   suppressedWarnings?: string[];
   /** 是否在头文件中压制全部诊断（SDK 头文件不自包含，单独分析必然产生大量误报） */
   suppressHeaderDiagnostics?: boolean;
@@ -342,7 +342,8 @@ export function updateClangdUserConfig(scopes: ClangdScopeConfig[]): void {
 
   // 多片段之间用单个 --- 分隔（YAML 文档分隔符），每个片段内部已含头文件子片段
   const ours = newFrags.join('\n---\n');
-  const out = existing ? existing + '\n---\n' + ours + '\n' : ours + '\n';
+  // 空作用域（清理场景）时不留悬空 ---
+  const out = !ours ? existing + '\n' : (existing ? existing + '\n---\n' + ours + '\n' : ours + '\n');
 
   // 内容未变则跳过写入，避免 clangd 无谓地重新加载配置
   let old = '';
