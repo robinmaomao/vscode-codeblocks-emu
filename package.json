@@ -2,7 +2,7 @@
   "name": "codeblocks-vscode",
   "displayName": "Code::Blocks for VS Code",
   "description": "原生移植 Code::Blocks 核心功能到 VS Code：项目模型、构建引擎、编译器管理与调试引擎",
-  "version": "0.8.98-dev",
+  "version": "0.8.99-dev",
   "icon": "resources/icon.png",
   "publisher": "robinmaomao",
   "author": {
@@ -606,6 +606,11 @@
             "enum": ["safe", "cb"],
             "default": "safe",
             "description": "超长命令响应文件策略：safe=扩展保护性默认（阈值 8000、绝对路径引用、命名保留源扩展名 main.c.respFile）；cb=对齐 Code::Blocks（阈值 32767、命名 main.respFile、相对路径引用）"
+          },
+          "codeblocks.build.cleanResponseFiles": {
+            "type": "boolean",
+            "default": false,
+            "description": "Clean/Rebuild 时同时删除目标对象目录下的响应文件（*.respFile：超长命令生成的 @file 临时输入，链接/编译均可能产生）。Code::Blocks 从不清理响应文件，默认关闭保持对齐；开启后 Clean/Rebuild 一并清理，避免旧响应文件永久遗留（响应文件随时可安全删除，需要时会自动重新生成）"
           },
           "codeblocks.build.saveHtmlLog": {
             "type": "boolean",

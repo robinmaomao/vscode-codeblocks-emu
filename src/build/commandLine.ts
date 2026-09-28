@@ -32,6 +32,15 @@ export const MAX_CMD_LENGTH = 8000;
 export const CB_MAX_CMD_LENGTH = process.platform === 'win32' ? 32767 : 131072;
 let respFileCounter = 0;
 
+/**
+ * 链接/打包响应文件基础路径 —— 对齐 CB CheckForToLongCommandLine 的 path 参数（directcommands.cpp:925：
+ * target->GetObjectOutput()）：对象输出目录为空时用 `.objs`（对齐 CompileTargetBase::GetObjectOutput
+ * 的空值默认，compiletargetbase.cpp:203-216），避免响应文件散落到工程根目录。
+ */
+export function linkRespBase(basePath: string, objectOutput: string, targetTitle: string): string {
+  return path.join(basePath, objectOutput || '.objs', `${targetTitle}_link`);
+}
+
 /** 响应文件模式（codeblocks.build.responseFile：safe=保护性默认；cb=对齐 CB 细节） */
 export type ResponseFileMode = 'safe' | 'cb';
 

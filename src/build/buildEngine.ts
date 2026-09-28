@@ -20,7 +20,7 @@ import { buildLogPrefs, msg } from './logLang';
 import { BuildCancelHandle } from './cancelToken';
 import { decodeText } from '../tools/encoding';
 import { isExecutableTargetType, resolveExecutablePath, executableCandidates } from './outputPath';
-import { applyResponseFile, compareFilesByWeight } from './commandLine';
+import { applyResponseFile, compareFilesByWeight, linkRespBase } from './commandLine';
 import { upperDrive, shortPathWin } from '../tools/pathCase';
 import { getWindowsSystemPath } from '../tools/windowsPath';
 import { LruCache } from '../tools/lru';
@@ -1013,8 +1013,8 @@ export class BuildEngine {
             this.output.info(`[Code::Blocks] Linking ${this.linkKind(target)}: ${this.expandedOutputFilename(target)}`);
             const linkStartMs = Date.now();
             linkExecuted = true;
-            // 链接响应文件基础名对齐 CheckForToLongCommandLine：对象输出目录 + <title>_link.respFile
-            const respBase = path.join(this.project.basePath, target.objectOutput, `${target.title}_link`);
+            // 链接响应文件基础名对齐 CheckForToLongCommandLine：对象输出目录（空→.objs）+ <title>_link.respFile
+            const respBase = linkRespBase(this.project.basePath, target.objectOutput, target.title);
             const linkOk = await this.runCommand(linkCommand, this.project.basePath, options, respBase);
             const linkSec = ((Date.now() - linkStartMs) / 1000).toFixed(1);
             if (!linkOk) {
@@ -1112,7 +1112,7 @@ export class BuildEngine {
             this.output.info(`[Code::Blocks] Linking ${this.linkKind(target)}: ${this.expandedOutputFilename(target)}`);
             const arStartMs = Date.now();
             archiveExecuted = true;
-            const respBase = path.join(this.project.basePath, target.objectOutput, `${target.title}_link`);
+            const respBase = linkRespBase(this.project.basePath, target.objectOutput, target.title);
             const ok = await this.runCommand(arCmd, this.project.basePath, options, respBase);
             const arSec = ((Date.now() - arStartMs) / 1000).toFixed(1);
             if (!ok) {
@@ -1719,7 +1719,46 @@ export class BuildEngine {
         }
       }
     }
+    // 响应文件清理（保护性增强，codeblocks.build.cleanResponseFiles，默认关；CB 从不清理）
+    removed += this.cleanResponseFiles(target);
     this.output.info(`[Code::Blocks] Cleaned "${this.project.title} - ${target.title}": 删除 ${removed} 个文件`);
+  }
+
+  /**
+   * 删除对象输出目录下的响应文件（*.respFile）——保护性增强（设置 codeblocks.build.cleanResponseFiles，默认关；
+   * Code::Blocks 从不清理响应文件，默认关保持对齐）。开启后 Clean/Rebuild 一并清理，避免旧响应文件永久遗留。
+   * 返回删除数量。
+   */
+  private cleanResponseFiles(target: BuildTarget): number {
+    if (vscode.workspace.getConfiguration('codeblocks').get<boolean>('build.cleanResponseFiles', false) !== true) {
+      return 0;
+    }
+    const objDir = path.join(this.project.basePath, target.objectOutput || '.objs');
+    const stale: string[] = [];
+    const walk = (dir: string): void => {
+      let entries: fs.Dirent[];
+      try {
+        entries = fs.readdirSync(dir, { withFileTypes: true });
+      } catch {
+        return; // 目录不存在等：无可清理
+      }
+      for (const e of entries) {
+        const p = path.join(dir, e.name);
+        if (e.isDirectory()) walk(p);
+        else if (e.isFile() && /\.respFile$/i.test(e.name)) stale.push(p);
+      }
+    };
+    walk(objDir);
+    let count = 0;
+    for (const p of stale) {
+      if (this.removeFileIfExists(p)) {
+        count++;
+        if (this.verboseOutput()) {
+          this.output.info(`[Clean] ${path.relative(this.project.basePath, p)}`);
+        }
+      }
+    }
+    return count;
   }
 
   /** 删除存在的文件，返回是否真的删除了 */
