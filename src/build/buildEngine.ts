@@ -10,7 +10,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import { spawn } from 'child_process';
 import { Project, BuildTarget, ProjectFile, TargetType, CommandType, CompilerLineType, supportsCurrentPlatform } from '../model/types';
-import { FileType, fileTypeOf, isCompilableFileType, isLinkableFileType, isCppSource, isClangdIndexable } from '../model/fileTypes';
+import { FileType, fileTypeOf, fileExt, isCompilableFileType, isLinkableFileType, isCppSource, isClangdIndexable } from '../model/fileTypes';
 import { Compiler } from '../compiler/compiler';
 import { CommandGenerator, computeStaticOutput, quoteIfNeeded, clearBackticksCache } from '../compiler/commandGenerator';
 import { OutputParser } from './outputParser';
@@ -865,8 +865,16 @@ export class BuildEngine {
       const outAbs = this.resolveOutputFile(target);
       if (fs.existsSync(outAbs)) {
         // CommandsOnly 已在上方 return，此处目标必为可链接类型
-        const externalForce = this.areExternalDepsOutdated(target, outAbs, []);
-        if (!externalForce) {
+        // 外部依赖缺失同样输出 WARNING（对齐 GetTargetLinkCommands:707-720）
+        const missing: string[] = [];
+        const externalForce = this.areExternalDepsOutdated(target, outAbs, missing);
+        if (missing.length) {
+          this.output.warn(`WARNING: Target '${this.project.title}/${target.title}': Unable to resolve ${missing.length} external dependency/ies:`);
+          for (const m of missing) this.output.debug(`        ${m}`);
+        }
+        // 链接输入（.ld 等，保护性增强）比输出新 → 强制重链接（继续进入链接/打包阶段，日志在链接块输出）
+        const linkInputForce = this.linkInputsOutdated(target, outAbs) !== null;
+        if (!externalForce && !linkInputForce) {
           this.output.info('[Code::Blocks] Nothing to be done (all items are up-to-date).');
           // 目标已最新（hasCommands=false）：仅当 alwaysRunPostBuildSteps 为真时才执行 post-build（对齐 CodeBlocks）
           if (!(await this.runPostBuild(target, macroVars, expandScriptMacros, false, options))) {
@@ -885,7 +893,7 @@ export class BuildEngine {
             hadCommands: false, outputFilename: target.outputFilename,
           };
         }
-        // 外部依赖更新：继续执行链接/打包阶段（重新检查会输出 WARNING）
+        // 外部依赖或链接输入更新：继续执行链接/打包阶段（重新检查会输出 WARNING / Re-linking 日志）
       }
       // 输出缺失但无新编译：仍尝试链接（对象可能已存在）
     }
@@ -966,6 +974,13 @@ export class BuildEngine {
         if (missing.length) {
           this.output.warn(`WARNING: Target '${this.project.title}/${target.title}': Unable to resolve ${missing.length} external dependency/ies:`);
           for (const m of missing) this.output.debug(`        ${m}`);
+        }
+        // 链接输入（.ld/.lds/.def 等非编译文件）比输出新 → 强制重链接（保护性增强；仿 CB AreExternalDepsOutdated 的 DebugLog 文案）
+        const newerLinkInput = this.linkInputsOutdated(target, outputAbs);
+        if (newerLinkInput) {
+          forceLink = true;
+          const rel = path.relative(this.project.basePath, newerLinkInput).replace(/\\/g, '/');
+          this.output.info(`[Code::Blocks] ${msg(`链接输入 "${rel}" 有更新，重新链接`, `Re-linking because '${rel}' is newer`)}`);
         }
         if (forceLink) {
           // 创建输出目录（如 Output\bin），否则链接器无法写 app.rv32；失败则中止本目标（对齐 GetTargetLinkCommands 的目录错误提示，用日志替代阻塞弹窗）
@@ -1056,6 +1071,13 @@ export class BuildEngine {
         let forceArchive = options.rebuild || !this.linkObjectsUpToDate(staticOutAbs, linkObjectsAbs);
         const missing: string[] = [];
         if (this.areExternalDepsOutdated(target, staticOutAbs, missing)) forceArchive = true;
+        // 链接输入（.ld 等）比静态库输出新 → 强制重新打包（保护性增强）
+        const newerArchiveInput = this.linkInputsOutdated(target, staticOutAbs);
+        if (newerArchiveInput) {
+          forceArchive = true;
+          const rel = path.relative(this.project.basePath, newerArchiveInput).replace(/\\/g, '/');
+          this.output.info(`[Code::Blocks] ${msg(`链接输入 "${rel}" 有更新，重新打包`, `Re-archiving because '${rel}' is newer`)}`);
+        }
         if (missing.length) {
           this.output.warn(`WARNING: Target '${this.project.title}/${target.title}': Unable to resolve ${missing.length} external dependency/ies:`);
           for (const m of missing) this.output.debug(`        ${m}`);
@@ -1415,6 +1437,50 @@ export class BuildEngine {
       if (timeExtDep > timeOutput) return true;
     }
     return false;
+  }
+
+  /** 链接输入扩展名列表（设置 codeblocks.build.linkInputExtensions，默认 ld/lds/icf/def/xm；空数组 = 关闭增强） */
+  private linkInputExtensions(): string[] {
+    const raw = vscode.workspace.getConfiguration('codeblocks').get<string[]>(
+      'build.linkInputExtensions',
+      ['ld', 'lds', 'icf', 'def', 'xm'],
+    );
+    if (!Array.isArray(raw)) return [];
+    return raw
+      .map((e) => String(e).trim().toLowerCase().replace(/^\./, ''))
+      .filter((e) => e.length > 0);
+  }
+
+  /**
+   * 链接输入新鲜度检查（保护性增强，非 CodeBlocks 原生行为）：
+   * 工程内非编译文件（ram.ld 链接脚本、app.xm 资源、.icf/.def/.lds 等）不产生对象文件，
+   * 改动后无法进入对象时间戳链路，此前仅 external_deps 能触发重链接。这里按扩展名白名单检查其 mtime：
+   * 比输出新 → 返回该文件绝对路径（调用方强制重链接/重新打包），否则返回 null。
+   * 输出不存在时不判定（既有逻辑必然重链接）；有自定义编译命令的文件由编译单元链路负责，不重复处理。
+   */
+  private linkInputsOutdated(target: BuildTarget, buildOutput: string): string | null {
+    const exts = this.linkInputExtensions();
+    if (!exts.length || !buildOutput) return null;
+    const timeOutput = this.fileMtime(buildOutput);
+    if (timeOutput <= 0) return null;
+    let newest: string | null = null;
+    let newestTime = 0;
+    for (const file of target.files) {
+      // 已参与编译/链接链路的文件由对象时间戳与 #include 扫描覆盖，这里只认非编译、非链接对象文件
+      const ft = fileTypeOf(file.relativeFilename);
+      if (isCompilableFileType(ft) || isLinkableFileType(ft)) continue;
+      if (file.customBuildCommands?.[target.compilerId]?.use) continue;
+      if (!exts.includes(fileExt(file.relativeFilename))) continue;
+      const abs = path.isAbsolute(file.relativeFilename)
+        ? file.relativeFilename
+        : path.join(this.project.basePath, file.relativeFilename);
+      const t = this.fileMtime(abs);
+      if (t > timeOutput && t > newestTime) {
+        newest = abs;
+        newestTime = t;
+      }
+    }
+    return newest;
   }
 
   /** 收集目标的 include 搜索目录（关系合并后的有序目录 + 反引号派生目录；对齐 DepsSearchStart 的 GetCompilerSearchDirs） */

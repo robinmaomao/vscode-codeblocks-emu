@@ -1,5 +1,5 @@
 // 设置结构回归（第53轮配置整理）：
-//  - configuration 为 7 个分区块（title+order），设置项总数 52、无重复键
+//  - configuration 为 7 个分区块（title+order），设置项总数 53、无重复键
 //  - 关键默认值/枚举/scope/数值校验/DBGconfig/描述无轮次标记
 //  - 全部设置键在 dist 中被读取（无死配置；ui.symbolsView 由 when 子句使用）
 const fs = require('fs');
@@ -38,10 +38,14 @@ for (const b of cfg) {
     byKey[k] = v;
   }
 }
-  check('设置项总数 = 52', keys.length === 52, keys.length);
+  check('设置项总数 = 53', keys.length === 53, keys.length);
 check('无重复键', new Set(keys).size === keys.length, keys.length - new Set(keys).size);
 check('disableInit 默认 true（对齐 CB disable_init）', byKey['codeblocks.debug.disableInit']?.default === true, byKey['codeblocks.debug.disableInit']);
 check('saveHtmlLogFullCommandLine 默认 false（对齐 CB full_command_line）', byKey['codeblocks.build.saveHtmlLogFullCommandLine']?.default === false, byKey['codeblocks.build.saveHtmlLogFullCommandLine']);
+check('linkInputExtensions 默认 ld/lds/icf/def/xm（保护性增强，可设 [] 关闭）',
+  byKey['codeblocks.build.linkInputExtensions']?.type === 'array'
+  && JSON.stringify(byKey['codeblocks.build.linkInputExtensions']?.default) === JSON.stringify(['ld', 'lds', 'icf', 'def', 'xm']),
+  byKey['codeblocks.build.linkInputExtensions']);
 check('buildLogAutoFocus 默认 errors + 四值枚举',
   JSON.stringify(byKey['codeblocks.ui.buildLogAutoFocus']?.enum) === JSON.stringify(['errors', 'errorsAndWarnings', 'always', 'never'])
   && byKey['codeblocks.ui.buildLogAutoFocus']?.default === 'errors', byKey['codeblocks.ui.buildLogAutoFocus']);
