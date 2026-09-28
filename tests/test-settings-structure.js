@@ -38,7 +38,7 @@ for (const b of cfg) {
     byKey[k] = v;
   }
 }
-  check('设置项总数 = 53', keys.length === 53, keys.length);
+  check('设置项总数 = 54', keys.length === 54, keys.length);
 check('无重复键', new Set(keys).size === keys.length, keys.length - new Set(keys).size);
 check('disableInit 默认 true（对齐 CB disable_init）', byKey['codeblocks.debug.disableInit']?.default === true, byKey['codeblocks.debug.disableInit']);
 check('saveHtmlLogFullCommandLine 默认 false（对齐 CB full_command_line）', byKey['codeblocks.build.saveHtmlLogFullCommandLine']?.default === false, byKey['codeblocks.build.saveHtmlLogFullCommandLine']);
@@ -46,6 +46,10 @@ check('linkInputExtensions 默认 ld/lds/icf/def/xm（保护性增强，可设 [
   byKey['codeblocks.build.linkInputExtensions']?.type === 'array'
   && JSON.stringify(byKey['codeblocks.build.linkInputExtensions']?.default) === JSON.stringify(['ld', 'lds', 'icf', 'def', 'xm']),
   byKey['codeblocks.build.linkInputExtensions']);
+check('cleanResponseFiles 默认 false（保护性增强；CB 不清理响应文件）',
+  byKey['codeblocks.build.cleanResponseFiles']?.type === 'boolean'
+  && byKey['codeblocks.build.cleanResponseFiles']?.default === false,
+  byKey['codeblocks.build.cleanResponseFiles']);
 check('buildLogAutoFocus 默认 errors + 四值枚举',
   JSON.stringify(byKey['codeblocks.ui.buildLogAutoFocus']?.enum) === JSON.stringify(['errors', 'errorsAndWarnings', 'always', 'never'])
   && byKey['codeblocks.ui.buildLogAutoFocus']?.default === 'errors', byKey['codeblocks.ui.buildLogAutoFocus']);
