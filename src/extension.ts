@@ -25,6 +25,7 @@ import { ProjectPropertiesPanel, TargetEditData, FileEditData, BuildOptionsEditD
 import { ProjectTreeProvider } from './ui/projectTreeProvider';
 import { registerStatusBarMenu, MenuDynamicData } from './ui/statusBarMenu';
 import { BuildLogTreeProvider, BuildLogProject, BuildLogDiagnostic } from './ui/buildLogTreeProvider';
+import { normalizeBuildLogAutoFocusMode, maybeAutoFocusBuildLog } from './ui/buildLogFocus';
 import { AnalysisTreeProvider, AnalysisData, AnalysisProjectInfo, LastBuildMeta } from './ui/analysisTreeProvider';
 import { SymbolTreeProvider } from './ui/symbolTreeProvider';
 import { BuildEngine } from './build/buildEngine';
@@ -4531,11 +4532,22 @@ async function stopDebuggerIfRunning(): Promise<boolean> {
   return true;
 }
 
+/** 失败静默模式（codeblocks.ui.quietFailure：构建失败不弹 toast；实时读取，与 logLang 的 quietSuccess 对称） */
+function quietFailure(): boolean {
+  return vscode.workspace.getConfiguration('codeblocks').get<boolean>('ui.quietFailure', false) === true;
+}
+
+/** 首个错误自动跳转开关（codeblocks.ui.buildLogFocusFirstError，默认 true 对齐 CB auto_focus_build_errors） */
+function focusFirstErrorOnBuildEnd(): boolean {
+  return vscode.workspace.getConfiguration('codeblocks').get<boolean>('ui.buildLogFocusFirstError', true) === true;
+}
+
 /**
  * 构建结果汇报：
  * - 默认（增强模式）：中文 + Emoji 通知
  * - codeblocks.log.english：英文文案
  * - codeblocks.build.plainCbLog：CB 风格 `=== Build finished: N error(s), N warning(s) (x minute(s), y second(s)) ===`，无 Emoji 通知
+ * - codeblocks.ui.quietFailure（第六轮 F1b）：失败不弹 toast（成功侧对应 quietSuccess）
  */
 function reportBuildResult(success: boolean, cancelled: boolean, buildStartMs: number, errorCount: number, warningCount: number): void {
   if (cancelled) {
@@ -4559,7 +4571,10 @@ function reportBuildResult(success: boolean, cancelled: boolean, buildStartMs: n
     }
   } else {
     outputChannel.error(msg('[Code::Blocks] 构建失败', '[Code::Blocks] Build failed'));
-    vscode.window.showErrorMessage(msg(`❌ 构建失败 · ${errorCount} 错误 · ${warningCount} 警告`, `Build failed: ${errorCount} error(s), ${warningCount} warning(s)`));
+    // 第六轮 F1b：quietFailure 时不弹错误 toast（仅日志 + Build Log/状态栏徽标）
+    if (!quietFailure()) {
+      vscode.window.showErrorMessage(msg(`❌ 构建失败 · ${errorCount} 错误 · ${warningCount} 警告`, `Build failed: ${errorCount} error(s), ${warningCount} warning(s)`));
+    }
   }
 }
 
@@ -5712,8 +5727,18 @@ function finishBuildSummary(allOk: boolean, buildStartMs: number): void {
   if (maxErrorsReached) {
     outputChannel.warn('[Code::Blocks] 错误数达到上限，后续错误不再显示（可在设置 codeblocks.maxReportedErrors 调整）');
   }
-  // 引导用户查看结构化摘要（不强制弹出）
-  vscode.commands.executeCommand('codeblocks.buildLog.focus');
+  // 第六轮 F1：按设置决定是否自动聚焦（对齐 CB message_manager：默认仅错误时动作，成功/取消不动作；
+  // 构建开始时的 outputChannel.show(true) 与 CB PrintBanner 一致，保持无条件）
+  maybeAutoFocusBuildLog(
+    normalizeBuildLogAutoFocusMode(vscode.workspace.getConfiguration('codeblocks').get<string>('ui.buildLogAutoFocus')),
+    errorCount,
+    warningCount,
+    () => { void vscode.commands.executeCommand('codeblocks.buildLog.focus'); },
+  );
+  // 第六轮 F1（auto_focus_build_errors，默认 true）：存在错误时跳转到第一个错误（独立开关）
+  if (errorCount > 0 && focusFirstErrorOnBuildEnd()) {
+    buildLogTreeProvider.gotoFirstError();
+  }
 }
 
 /**

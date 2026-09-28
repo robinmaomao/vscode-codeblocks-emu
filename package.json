@@ -2,7 +2,7 @@
   "name": "codeblocks-vscode",
   "displayName": "Code::Blocks for VS Code",
   "description": "原生移植 Code::Blocks 核心功能到 VS Code：项目模型、构建引擎、编译器管理与调试引擎",
-  "version": "0.8.94-dev",
+  "version": "0.8.95-dev",
   "icon": "resources/icon.png",
   "publisher": "robinmaomao",
   "author": {
@@ -738,6 +738,22 @@
             "type": "boolean",
             "default": false,
             "description": "构建成功静默模式：不弹成功 toast，仅输出日志与状态栏诊断徽标"
+          },
+          "codeblocks.ui.quietFailure": {
+            "type": "boolean",
+            "default": false,
+            "description": "构建失败静默模式：不弹失败 toast，仅输出日志 + Build Log 树 / 状态栏诊断徽标"
+          },
+          "codeblocks.ui.buildLogAutoFocus": {
+            "type": "string",
+            "enum": ["errors", "errorsAndWarnings", "always", "never"],
+            "default": "errors",
+            "description": "构建结束后自动聚焦 Build Log 面板的时机（对齐 Code::Blocks message_manager：默认仅错误时动作）：errors = 仅本次构建有错误（默认）；errorsAndWarnings = 有错误或警告；always = 总是（0.8.94 及以前的旧行为）；never = 从不（仍可从菜单/状态栏打开）"
+          },
+          "codeblocks.ui.buildLogFocusFirstError": {
+            "type": "boolean",
+            "default": true,
+            "description": "构建结束若存在错误，自动跳转到第一个错误（对齐 Code::Blocks 的 auto_focus_build_errors「Focus first error in the editor after build finishes」，默认开启）；与 buildLogAutoFocus 相互独立，关闭后仍可用 F4 逐个查看"
           },
           "codeblocks.ui.projectToolbar": {
             "type": "array",
