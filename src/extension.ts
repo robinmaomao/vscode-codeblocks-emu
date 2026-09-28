@@ -31,6 +31,7 @@ import { BuildEngine } from './build/buildEngine';
 import { BuildCancelSource, BuildCancelHandle } from './build/cancelToken';
 import { expandMacros } from './build/scriptRunner';
 import { applyGeneratedFiles } from './build/generatedFiles';
+import { buildLogBaseName, renderHtmlBuildLog } from './build/htmlBuildLog';
 import { cbBuiltinVars, replaceCbMacros, globalVariables, envVarMap } from './compiler/cbMacros';
 import { buildLogPrefs, msg, quietSuccess } from './build/logLang';
 import { decodeText } from './tools/encoding';
@@ -4693,6 +4694,7 @@ async function buildWorkspace(rebuild: boolean, clearLog = true): Promise<boolea
   const { errorCount, warningCount } = buildResultStats();
   reportBuildResult(allOk && !cancelled, cancelled, buildStartMs, errorCount, warningCount);
   finishBuildSummary(allOk && !cancelled, buildStartMs);
+  saveHtmlBuildLog(buildStartMs, 'workspace');
 
   return allOk && !cancelled;
 }
@@ -4780,6 +4782,7 @@ async function buildSingleProject(filename: string, rebuild: boolean): Promise<b
   const { errorCount, warningCount } = buildResultStats();
   reportBuildResult(ok && !cancelled, cancelled, buildStartMs, errorCount, warningCount);
   finishBuildSummary(ok && !cancelled, buildStartMs);
+  saveHtmlBuildLog(buildStartMs, 'project', project);
   return ok && !cancelled;
 }
 
@@ -5709,21 +5712,53 @@ function finishBuildSummary(allOk: boolean, buildStartMs: number): void {
   }
   // 引导用户查看结构化摘要（不强制弹出）
   vscode.commands.executeCommand('codeblocks.buildLog.focus');
-  // 对齐 CB SaveBuildLog（compilergcc.cpp:3898/4051）：构建结束写 buildlog.html（失败不影响构建）
-  try {
-    const projDir = activeProject?.basePath ?? openProjects[0]?.basePath;
-    if (projDir) {
-      const esc = (s: unknown): string => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-      const rows: string[] = [];
-      for (const p of currentBuildProjects) {
-        rows.push(`<tr><th colspan="4" style="text-align:left">${esc(p.projectName)} — ${esc(p.targetName)}</th></tr>`);
-        for (const d of p.diagnostics) {
-          rows.push(`<tr class="${esc(d.severity)}"><td>${esc(d.severity)}</td><td>${esc(d.file ?? '')}</td><td>${d.line ?? ''}</td><td>${esc(d.message)}</td></tr>`);
-        }
-      }
-      const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Build Log</title><style>table{border-collapse:collapse}td,th{border:1px solid #999;padding:2px 6px;font-family:monospace;font-size:12px}.error{color:#c00}.warning{color:#c60}</style></head><body><h2>Code::Blocks Build Log — ${esc(new Date().toLocaleString())}</h2><table>${rows.join('')}</table></body></html>`;
-      fs.writeFileSync(path.join(projDir, 'buildlog.html'), html, 'utf-8');
+}
+
+/**
+ * HTML 构建日志保存（对齐 CB SaveBuildLog/InitBuildLog）：
+ *  - 开关 `codeblocks.build.saveHtmlLog`（默认 false，对齐 default.conf /save_html_build_log；
+ *    CB 未启用时 SaveBuildLog 直接返回，compilergcc.cpp:3900-3903）；
+ *  - 文件名 `<工程文件名>_build_log.html`（工作区构建 `<工作区文件名>_build_log.html`，
+ *    对齐 InitBuildLog:3866-3893）；无 .workspace 文件时回退活动工程（保护性差异）；
+ *  - 失败非致命（对齐 CB 文件打开失败直接返回）。
+ */
+function saveHtmlBuildLog(buildStartMs: number, scope: 'project' | 'workspace', project?: Project): void {
+  if (!vscode.workspace.getConfiguration('codeblocks').get<boolean>('build.saveHtmlLog', false)) return;
+
+  let dir: string | undefined;
+  let base: string | undefined;
+  let name: string | undefined;
+  if (scope === 'workspace' && openedWorkspaceFile) {
+    dir = path.dirname(openedWorkspaceFile);
+    base = buildLogBaseName(openedWorkspaceFile);
+    name = base;
+  } else {
+    const p = project ?? activeProject ?? openProjects[0];
+    if (p) {
+      dir = p.basePath;
+      base = buildLogBaseName(p.filename);
+      name = p.title || base;
     }
+  }
+  if (!dir || !base || !name) return;
+
+  try {
+    const html = renderHtmlBuildLog({
+      title: `${name} build log`,
+      startMs: buildStartMs,
+      endMs: Date.now(),
+      projects: currentBuildProjects.map((p) => ({
+        projectName: p.projectName,
+        targetName: p.targetName,
+        diagnostics: p.diagnostics,
+      })),
+    });
+    const file = path.join(dir, `${base}_build_log.html`);
+    fs.writeFileSync(file, html, 'utf-8');
+    outputChannel.info(msg(
+      `[Code::Blocks] HTML 构建日志已保存: file:///${file.replace(/\\/g, '/')}`,
+      `[Code::Blocks] Build log saved as: file:///${file.replace(/\\/g, '/')}`,
+    ));
   } catch { /* 非致命：日志导出失败不影响构建 */ }
 }
 

@@ -2,7 +2,7 @@
   "name": "codeblocks-vscode",
   "displayName": "Code::Blocks for VS Code",
   "description": "原生移植 Code::Blocks 核心功能到 VS Code：项目模型、构建引擎、编译器管理与调试引擎",
-  "version": "0.8.92-dev",
+  "version": "0.8.93-dev",
   "icon": "resources/icon.png",
   "publisher": "robinmaomao",
   "author": {
@@ -592,6 +592,11 @@
             "enum": ["safe", "cb"],
             "default": "safe",
             "description": "超长命令响应文件策略：safe=扩展保护性默认（阈值 8000、绝对路径引用、命名保留源扩展名 main.c.respFile）；cb=对齐 Code::Blocks（阈值 32767、命名 main.respFile、相对路径引用）"
+          },
+          "codeblocks.build.saveHtmlLog": {
+            "type": "boolean",
+            "default": false,
+            "description": "构建结束保存 HTML 构建日志（对齐 Code::Blocks 的 save_html_build_log，默认关闭）：写为 <工程文件名>_build_log.html（工作区构建为 <工作区文件名>_build_log.html），内容为构建起止时间 + 诊断汇总表"
           },
           "codeblocks.log.english": {
             "type": "boolean",
