@@ -7,6 +7,9 @@
  *  - SaveBuildLog:3898-3938：开关 /save_html_build_log（默认 false）关闭时直接返回；
  *    正文含 "Build started on: dd-mm-yyyy at HH:MM.SS" 与 "Build ended on: <同格式>"。
  *  - 保护性差异（记录）：扩展正文为起止时间 + 诊断汇总表（CB 为全量日志文本）；文本做 HTML 转义。
+ *  - 第六轮 F8：full_command_line（默认 false，compilergcc.cpp:1330-1338）开启时在诊断表前追加
+ *    命令行块（逐命令一行，转义 + `<br />`，对齐 CB 行格式/LogMessage:3819-3831）。
+ *    CB 为「命令行/短消息」二选一，扩展为叠加（保护性差异：诊断表保留）。
  */
 import * as path from 'path';
 
@@ -40,13 +43,17 @@ export interface HtmlLogProject {
   projectName: string;
   targetName: string;
   diagnostics: HtmlLogDiagnostic[];
+  /** 实际执行命令（可选；仅 fullCommandLine 开启时渲染，对齐 CB full_command_line） */
+  commands?: string[];
 }
 
-/** 渲染 HTML 构建日志（<title> + 起止时间 + 诊断表） */
+/** 渲染 HTML 构建日志（<title> + 起止时间 + [命令行块] + 诊断表） */
 export function renderHtmlBuildLog(opts: {
   title: string;
   startMs: number;
   endMs: number;
+  /** 对齐 CB /save_html_build_log/full_command_line（默认 false）：在诊断表前输出命令行块 */
+  fullCommandLine?: boolean;
   projects: HtmlLogProject[];
 }): string {
   const rows: string[] = [];
@@ -54,6 +61,16 @@ export function renderHtmlBuildLog(opts: {
     rows.push(`<tr><th colspan="4" style="text-align:left">${escapeHtml(p.projectName)} — ${escapeHtml(p.targetName)}</th></tr>`);
     for (const d of p.diagnostics) {
       rows.push(`<tr class="${escapeHtml(d.severity)}"><td>${escapeHtml(d.severity)}</td><td>${escapeHtml(d.file ?? '')}</td><td>${d.line ?? ''}</td><td>${escapeHtml(d.message)}</td></tr>`);
+    }
+  }
+  // 第六轮 F8：full_command_line 命令行块（默认关闭；无命令的工程不输出块）
+  const commandLines: string[] = [];
+  if (opts.fullCommandLine) {
+    for (const p of opts.projects) {
+      const cmds = p.commands ?? [];
+      if (!cmds.length) continue;
+      commandLines.push(`<b>${escapeHtml(p.projectName)} — ${escapeHtml(p.targetName)}</b><br />`);
+      for (const c of cmds) commandLines.push(`${escapeHtml(c)}<br />`);
     }
   }
   return [
@@ -68,6 +85,7 @@ export function renderHtmlBuildLog(opts: {
     '<tt>',
     `Build started on: <u>${cbTimeStamp(opts.startMs)}</u><br />`,
     `Build ended on: <u>${cbTimeStamp(opts.endMs)}</u>`,
+    ...commandLines,
     `<table>${rows.join('')}</table>`,
     '</tt>',
     '</body>',

@@ -319,6 +319,8 @@ export class GdbDebugAdapter implements vscode.DebugAdapter {
         env: (args.environment as Record<string, string>) ?? {},
         // R5：GDB 命令行附加参数（对齐 CB debugger settings user arguments）
         args: splitCommandLineArgs(String(vscode.workspace.getConfiguration('codeblocks').get<string>('debug.userArguments', '') ?? '')),
+        // 第六轮 F5：-nx 不执行用户启动脚本（对齐 CB disable_init 默认 true；gdb_driver.cpp:104/127 launch+attach 均传）
+        nx: vscode.workspace.getConfiguration('codeblocks').get<boolean>('debug.disableInit', true),
       });
       // 程序与参数经 MI 注入（Windows 命令行空格安全，第五十轮修复）
       await this.session!.sendExact(`-file-exec-and-symbols ${this.session!.quote(this.program)}`);
@@ -363,6 +365,8 @@ export class GdbDebugAdapter implements vscode.DebugAdapter {
         env: (args.environment as Record<string, string>) ?? {},
         // R5：GDB 命令行附加参数（对齐 CB debugger settings user arguments）
         args: splitCommandLineArgs(String(vscode.workspace.getConfiguration('codeblocks').get<string>('debug.userArguments', '') ?? '')),
+        // 第六轮 F5：-nx 不执行用户启动脚本（对齐 CB disable_init 默认 true；gdb_driver.cpp:104/127 launch+attach 均传）
+        nx: vscode.workspace.getConfiguration('codeblocks').get<boolean>('debug.disableInit', true),
       });
       // 可选符号文件（附加前加载；失败不阻断，可用 Send user command 手动 add-symbol-file）
       if (this.program) {

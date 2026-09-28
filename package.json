@@ -2,7 +2,7 @@
   "name": "codeblocks-vscode",
   "displayName": "Code::Blocks for VS Code",
   "description": "原生移植 Code::Blocks 核心功能到 VS Code：项目模型、构建引擎、编译器管理与调试引擎",
-  "version": "0.8.93-dev",
+  "version": "0.8.94-dev",
   "icon": "resources/icon.png",
   "publisher": "robinmaomao",
   "author": {
@@ -598,6 +598,11 @@
             "default": false,
             "description": "构建结束保存 HTML 构建日志（对齐 Code::Blocks 的 save_html_build_log，默认关闭）：写为 <工程文件名>_build_log.html（工作区构建为 <工作区文件名>_build_log.html），内容为构建起止时间 + 诊断汇总表"
           },
+          "codeblocks.build.saveHtmlLogFullCommandLine": {
+            "type": "boolean",
+            "default": false,
+            "description": "HTML 构建日志中输出完整命令行（对齐 Code::Blocks 的 save_html_build_log/full_command_line“Always output the full command line in the generated HTML file”，默认关闭）。仅在 codeblocks.build.saveHtmlLog 开启时生效"
+          },
           "codeblocks.log.english": {
             "type": "boolean",
             "default": false,
@@ -624,7 +629,12 @@
           "codeblocks.debug.userArguments": {
             "type": "string",
             "default": "",
-            "description": "附加到 GDB 命令行的参数（引号感知分词，如 --nx）；对齐 Code::Blocks Debugger settings 的 user arguments"
+            "description": "附加到 GDB 命令行的参数（引号感知分词）；对齐 Code::Blocks Debugger settings 的 user arguments"
+          },
+          "codeblocks.debug.disableInit": {
+            "type": "boolean",
+            "default": true,
+            "description": "启动调试时给 GDB 传 -nx，不执行用户启动脚本（.gdbinit/gdb.ini）（对齐 Code::Blocks Debugger settings 的 Disable startup scripts (-nx)，CB 默认开启）。如需本机 .gdbinit 生效请关闭此设置"
           },
           "codeblocks.debug.printPretty": {
             "type": "boolean",
