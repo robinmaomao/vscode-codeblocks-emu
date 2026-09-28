@@ -2,6 +2,7 @@
 //  - 文件名基名 hello-cb.cbp → hello-cb（InitBuildLog:3888-3893）
 //  - CB 时间戳格式 %d-%m-%Y at %H:%M.%S（SaveBuildLog:3926/3929）
 //  - 渲染：<title> 转义 / 起止时间行 / 诊断表（severity/file/line/message）
+//  - 第六轮 F8：full_command_line 开启时在诊断表前追加命令行块（转义 + <br />，对齐 CB LogMessage:3819-3831）
 const path = require('path');
 const { buildLogBaseName, cbTimeStamp, escapeHtml, renderHtmlBuildLog } = require(path.resolve(__dirname, '../dist/build/htmlBuildLog.js'));
 
@@ -56,6 +57,33 @@ check('无诊断工程仅有表头行', html.includes('<tr><th colspan="4" style
 // ---- 无诊断（成功构建）也可渲染 ----
 const htmlOk = renderHtmlBuildLog({ title: 'hello-cb build log', startMs: t1, endMs: end, projects: [{ projectName: 'hello-cb', targetName: 'Debug', diagnostics: [] }] });
 check('成功构建：无诊断行但保留表头', htmlOk.includes('<th colspan="4" style="text-align:left">hello-cb — Debug</th>') && !htmlOk.includes('class="error"'), null);
+
+// ---- 第六轮 F8：full_command_line 命令行块（对齐 CB /save_html_build_log/full_command_line）----
+const cmd1 = 'gcc -c main.c -o obj/main.o && echo "pre<post"';
+const cmd2 = 'gcc obj/main.o -o bin/Debug/hello.exe';
+const htmlFull = renderHtmlBuildLog({
+  title: 'hello-cb build log',
+  startMs: t1,
+  endMs: end,
+  fullCommandLine: true,
+  projects: [{
+    projectName: 'hello-cb',
+    targetName: 'Debug',
+    diagnostics: [{ severity: 'error', message: 'boom', file: 'E:/ws/main.c', line: 1 }],
+    commands: [cmd1, cmd2],
+  }],
+});
+check('F8 启用：工程块头', htmlFull.includes('<b>hello-cb — Debug</b><br />'), null);
+check('F8 启用：命令行输出 + 转义（& <）', htmlFull.includes('gcc -c main.c -o obj/main.o &amp;&amp; echo "pre&lt;post"<br />'), null);
+check('F8 启用：链接命令输出', htmlFull.includes('gcc obj/main.o -o bin/Debug/hello.exe<br />'), null);
+const iBlock = htmlFull.indexOf('<b>hello-cb — Debug</b>');
+const iTable = htmlFull.indexOf('<table>');
+check('F8 启用：命令行块位于诊断表之前', iBlock >= 0 && iTable >= 0 && iBlock < iTable, { iBlock, iTable });
+const htmlNoFull = renderHtmlBuildLog({ title: 'x', startMs: t1, endMs: end, projects: [{ projectName: 'hello-cb', targetName: 'Debug', diagnostics: [], commands: [cmd1] }] });
+check('F8 关闭（缺省）：不输出命令行', !htmlNoFull.includes('gcc -c'), null);
+const htmlFlagNoCmds = renderHtmlBuildLog({ title: 'x', startMs: t1, endMs: end, fullCommandLine: true, projects: [{ projectName: 'p', targetName: 'T', diagnostics: [], commands: [] }] });
+check('F8 启用但无命令：不输出工程块头', !htmlFlagNoCmds.includes('<b>p — T</b>'), null);
+check('F8 缺省字段：旧输出无命令块', !html.includes('<b>hello-cb'), null);
 
 console.log(`HTML 构建日志回归: ${pass} pass, ${fail} fail`);
 process.exit(fail ? 1 : 0);

@@ -32,6 +32,8 @@ export interface GdbOptions {
   /** 仅作为信息保留；实际由适配器经 -file-exec-and-symbols 注入（见 start 注释） */
   program?: string;
   args?: string[];
+  /** -nx：不执行用户启动脚本（.gdbinit/gdb.ini）；对齐 CB debugger settings disable_init（gdb_driver.cpp:104-105/127-128，launch/attach 均传） */
+  nx?: boolean;
   cwd?: string;
   env?: Record<string, string>;
 }
@@ -60,7 +62,9 @@ export class GdbMiSession {
       // 第五十轮修复：程序/参数**不**作为命令行位置参数传入 —— MinGW GDB（已实证）会把含空格的
       // 路径按空格二次切分；改由适配器会话建立后用 MI 注入：-file-exec-and-symbols / -exec-arguments。
       // R5：opts.args = 用户附加参数（对齐 CB debugger settings user arguments）。
-      const args = ['-i=mi', '--quiet', ...(opts.args ?? [])];
+      // 第六轮 F5：opts.nx 对应 CB disable_init（默认 true）——传 -nx 不执行用户启动脚本
+      // （对齐 gdb_driver.cpp:104-105（launch）/127-128（attach）；userArguments 中重复的 --nx 不去重，GDB 容忍重复）。
+      const args = ['-i=mi', '--quiet', ...(opts.nx ? ['-nx'] : []), ...(opts.args ?? [])];
 
       this.proc = spawn(opts.gdbPath, args, {
         cwd: opts.cwd,

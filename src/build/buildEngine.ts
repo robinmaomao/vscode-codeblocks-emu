@@ -96,6 +96,11 @@ export class BuildEngine {
   lastStats: BuildTargetStats | undefined;
   /** 最近一次构建的单文件编译耗时（供汇总「最慢 Top 3」） */
   lastCompileTimings: { file: string; ms: number }[] = [];
+  /**
+   * 最近一次 build() 实际执行的命令（第六轮 F8；供 HTML 构建日志 full_command_line 命令行块）：
+   * 编译/链接/打包命令（响应文件改写后、spawn 前）+ pre/post 脚本命令，对齐 CB 记录队列命令（compilergcc.cpp:1330-1338）。
+   */
+  lastCommands: string[] = [];
   /** 本次构建的单文件编译耗时（并发 push，JS 单线程安全） */
   private compileTimings: { file: string; ms: number }[] = [];
 
@@ -160,6 +165,8 @@ export class BuildEngine {
   async build(targetTitle?: string | string[], options: BuildOptions = {}): Promise<boolean> {
     // 对齐 Build()/Rebuild()/BuildWorkspace()：每轮构建清空反引号缓存（cbClearBackticksCache，Clean 单命令不清）
     clearBackticksCache();
+    // 第六轮 F8：命令记录按每轮构建重置（HTML 日志 full_command_line）
+    this.lastCommands = [];
 
     // 编译/链接子进程 PATH 注入：bin + masterPath + extra_paths + 系统 PATH（对齐 SetupEnvironment:795-830：ReplaceMacros 展开 + 去尾分隔符 + 去重）
     const expandEnvPath = (p: string): string =>
@@ -223,8 +230,10 @@ export class BuildEngine {
       const first = targets[0];
       this.switchCompiler(first);
       this.output.info('[Code::Blocks] 执行项目 pre-build 脚本...');
+      const preCmds = this.project.commandsBeforeBuild.map((c) => this.expandScriptMacros(first, c));
+      this.lastCommands.push(...preCmds);
       const preOk = await runScriptCommands(
-        this.project.commandsBeforeBuild.map((c) => this.expandScriptMacros(first, c)),
+        preCmds,
         this.project.basePath,
         this.targetMacroVars(first),
         (l) => this.output.info(l),
@@ -288,8 +297,10 @@ export class BuildEngine {
       const last = targets[targets.length - 1];
       this.switchCompiler(last);
       this.output.info('[Code::Blocks] 执行项目 post-build 脚本...');
+      const postCmds = this.project.commandsAfterBuild.map((c) => this.expandScriptMacros(last, c));
+      this.lastCommands.push(...postCmds);
       const postOk = await runScriptCommands(
-        this.project.commandsAfterBuild.map((c) => this.expandScriptMacros(last, c)),
+        postCmds,
         this.project.basePath,
         this.targetMacroVars(last),
         (l) => this.output.info(l),
@@ -711,6 +722,7 @@ export class BuildEngine {
       const runAndCheck = async (cmds: string[], phase: 'pre' | 'post'): Promise<boolean | undefined> => {
         if (!cmds.length) return true;
         this.output.info(`[Code::Blocks] 执行目标 ${phase}-build 脚本 (${target.title})...`);
+        this.lastCommands.push(...cmds);
         const r = await runScriptCommands(cmds, this.project.basePath, macroVars, (l) => this.output.info(l), this.compilerBinPath(), options.cancel);
         if (r) return true;
         if (options.cancel?.isCancelled()) return undefined;
@@ -744,6 +756,7 @@ export class BuildEngine {
     // 0. pre-build 脚本
     if (preCommands.length) {
       this.output.info(`[Code::Blocks] 执行目标 pre-build 脚本 (${target.title})...`);
+      this.lastCommands.push(...preCommands);
       const preOk = await runScriptCommands(preCommands, this.project.basePath, macroVars, (l) => this.output.info(l), this.compilerBinPath(), options.cancel);
       if (!preOk) {
         // 取消优先判定（被强杀的脚本进程返回失败，但语义是取消）
@@ -1155,6 +1168,7 @@ export class BuildEngine {
 
     if (targetPost.length && (hasCommands || target.alwaysRunPostBuildSteps)) {
       this.output.info(`[Code::Blocks] 执行目标 post-build 脚本 (${target.title})...`);
+      this.lastCommands.push(...targetPost);
       const ok = await runScriptCommands(targetPost, this.project.basePath, macroVars, (l) => this.output.info(l), extraPath, options.cancel);
       if (!ok) {
         if (options.cancel?.isCancelled()) return false;
@@ -1947,6 +1961,8 @@ export class BuildEngine {
         this.output.debug(`[Code::Blocks] 命令行过长，改用响应文件: ${resp.respFile}`);
       }
       command = resp.command;
+      // 第六轮 F8：记录实际执行命令（响应文件改写后，对齐 CB 在队列生成期改写后记录 cmd->command）
+      this.lastCommands.push(command);
       const proc = spawn(command, {
         cwd: upperDrive(cwd),
         shell: true,

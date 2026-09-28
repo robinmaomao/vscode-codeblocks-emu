@@ -5015,6 +5015,8 @@ async function buildOneProject(project: Project, targetTitle: string, rebuild: b
     linkSkipped: stats.linkSkipped,
     outputFilename: stats.outputFilename,
     diagnostics,
+    // 第六轮 F8：HTML 构建日志 full_command_line 命令行块（build.saveHtmlLogFullCommandLine 开启时渲染）
+    commands: [...engine.lastCommands],
     files: [...projectFiles],
     durationMs,
     startTime: startMs,
@@ -5720,10 +5722,14 @@ function finishBuildSummary(allOk: boolean, buildStartMs: number): void {
  *    CB 未启用时 SaveBuildLog 直接返回，compilergcc.cpp:3900-3903）；
  *  - 文件名 `<工程文件名>_build_log.html`（工作区构建 `<工作区文件名>_build_log.html`，
  *    对齐 InitBuildLog:3866-3893）；无 .workspace 文件时回退活动工程（保护性差异）；
+ *  - 子开关 `codeblocks.build.saveHtmlLogFullCommandLine`（默认 false，对齐 /save_html_build_log/full_command_line；
+ *    开启后正文在诊断表前追加命令行块，对齐 compilergcc.cpp:1330-1338）；
  *  - 失败非致命（对齐 CB 文件打开失败直接返回）。
  */
 function saveHtmlBuildLog(buildStartMs: number, scope: 'project' | 'workspace', project?: Project): void {
   if (!vscode.workspace.getConfiguration('codeblocks').get<boolean>('build.saveHtmlLog', false)) return;
+  // 第六轮 F8：full_command_line 子开关（仅在上面的主开关开启后才会到达此处）
+  const fullCommandLine = vscode.workspace.getConfiguration('codeblocks').get<boolean>('build.saveHtmlLogFullCommandLine', false);
 
   let dir: string | undefined;
   let base: string | undefined;
@@ -5747,10 +5753,12 @@ function saveHtmlBuildLog(buildStartMs: number, scope: 'project' | 'workspace', 
       title: `${name} build log`,
       startMs: buildStartMs,
       endMs: Date.now(),
+      fullCommandLine,
       projects: currentBuildProjects.map((p) => ({
         projectName: p.projectName,
         targetName: p.targetName,
         diagnostics: p.diagnostics,
+        commands: p.commands ?? [],
       })),
     });
     const file = path.join(dir, `${base}_build_log.html`);
