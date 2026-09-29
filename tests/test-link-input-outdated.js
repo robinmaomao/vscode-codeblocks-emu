@@ -318,6 +318,47 @@ async function uBuild() {
   check('C21 静态库 compile=1 + 真实自定义命令 → 无修改也重新打包（条目计数补全）',
     c21.ok && hasArchived(c21.log), { archived: hasArchived(c21.log) });
 
+  // ==== F4：源缺失的编译文件 → WARNING 条目计入强制（CB else 分支 directcommands.cpp:562-566） ====
+  const mDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cb-li-missing-'));
+  fs.writeFileSync(path.join(mDir, 'main.c'), 'int main(void) { return 0; }\n');
+  // gone.ld 不进磁盘（缺失源文件，仍在工程中，compile=1）
+  fs.writeFileSync(path.join(mDir, 'missing.cbp'), `<?xml version="1.0" encoding="UTF-8" standalone="yes" ?>
+<CodeBlocks_project_file>
+\t<FileVersion major="1" minor="6" />
+\t<Project>
+\t\t<Option title="missing" />
+\t\t<Option compiler="gcc" />
+\t\t<Build>
+\t\t\t<Target title="Debug">
+\t\t\t\t<Option output="bin/Debug/missing" prefix_auto="1" extension_auto="1" />
+\t\t\t\t<Option type="1" />
+\t\t\t\t<Option compiler="gcc" />
+\t\t\t\t<Option object_output="obj/Debug/" />
+\t\t\t</Target>
+\t\t</Build>
+\t\t<Unit filename="main.c" />
+\t\t<Unit filename="gone.ld">
+\t\t\t<Option compile="1" />
+\t\t</Unit>
+\t\t<Extensions />
+\t</Project>
+</CodeBlocks_project_file>
+`, 'utf-8');
+  const mProject = new ProjectParser().parse(path.join(mDir, 'missing.cbp'));
+  const mSink = makeOutput();
+  const mEngine = makeEngine(mProject, mSink);
+  async function mBuild() {
+    mSink.reset();
+    const ok = await mEngine.build('Debug', {});
+    return { ok, log: mSink.log };
+  }
+  const c22a = await mBuild();
+  const c22b = await mBuild();
+  check('C22 源缺失（gone.ld）→ WARNING + 无修改再构建仍重链接（CB else 分支条目）',
+    c22a.ok && hasLinked(c22a.log) && c22b.ok && hasLinked(c22b.log)
+    && c22b.log.some((l) => l.includes("Can't read file's timestamp")) && !hasNothing(c22b.log),
+    { firstLinked: hasLinked(c22a.log), secondLinked: hasLinked(c22b.log), nothing: hasNothing(c22b.log) });
+
   console.log(`链接输入新鲜度回归: ${pass} pass, ${fail} fail`);
   process.exit(fail ? 1 : 0);
 })().catch((e) => { console.error(e); process.exit(2); });
