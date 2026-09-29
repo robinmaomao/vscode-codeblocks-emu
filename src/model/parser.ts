@@ -658,14 +658,26 @@ export class ProjectParser {
       const filename = String(unit['@_filename'] ?? '');
       if (!filename) continue;
 
-      const rel = toUnix(filename);
+      // 对齐 cbProject::AddFile（cbproject.cpp:880-904）：同盘绝对路径 MakeRelativeTo 相对化；
+      // 跨盘/UNC 绝对路径保留（absolutePath 直接取原路径，避免 base + 绝对路径拼接出无效路径——
+      // 此前该拼接导致绝对路径 Unit 被误判为"源缺失"，每次构建伪 WARNING + 强制重链）。
+      let rel = toUnix(filename);
+      if (path.isAbsolute(rel)) {
+        const baseRoot = path.parse(project.basePath).root.replace(/[\\/]/g, '').toLowerCase();
+        const relRoot = path.parse(rel).root.replace(/[\\/]/g, '').toLowerCase();
+        if (!relRoot || relRoot === baseRoot) {
+          // 同盘（含无卷信息）→ 相对化（path.relative 盘符比较不敏感，大小写盘符安全）
+          rel = toUnix(path.relative(project.basePath, rel));
+        }
+        // 跨盘/UNC：保留绝对路径（对象路径按 objectPathRelative 的 isAbsolute 分支处理）
+      }
       // 对齐 cbProject::AddFile：compile/link 默认值按文件类型决定，compilerVar 按扩展名决定；
       // 随后由显式 <Option compile/link/compilerVar> 覆盖（projectloader.cpp DoUnitOptions）。
       const ft = fileTypeOf(rel);
       const file: ProjectFile = {
         relativeFilename: rel,
         relativeToCommonTopLevelPath: rel,
-        absolutePath: unixJoin(project.basePath, rel),
+        absolutePath: path.isAbsolute(rel) ? rel : unixJoin(project.basePath, rel),
         buildTargets: [],
         explicitTargets: false,
         compilerVar: defaultCompilerVar(rel),
