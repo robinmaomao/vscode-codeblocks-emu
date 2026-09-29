@@ -12,6 +12,7 @@ import * as vscode from 'vscode';
 import { Project } from '../model/types';
 import { Compiler } from '../compiler/compiler';
 import { BuildEngine } from './buildEngine';
+import { CbOutput } from './cbChannel';
 
 export interface CompileCommandEntry {
   directory: string;
@@ -63,7 +64,7 @@ function bakeCommand(command: string, systemIncludes: string[]): string {
 export function collectClangdEntries(
   project: Project,
   compiler: Compiler,
-  output: vscode.LogOutputChannel,
+  output: CbOutput,
   systemIncludes: string[],
 ): CompileCommandEntry[] {
   const engine = new BuildEngine(project, compiler, output);

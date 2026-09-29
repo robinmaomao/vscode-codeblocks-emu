@@ -211,7 +211,7 @@ export class KeybindingPanel {
   }
   function rowHtml(r) {
     var okBadge = r.ok ? '<span class="tag ok">已生效</span>' : '<span class="tag warn">未写入</span>';
-    var note = r.note ? '<div class="note">⚠ ' + esc(r.note) + '</div>' : '';
+    var note = r.note ? '<div class="note">⚠️ ' + esc(r.note) + '</div>' : '';
     var defShow = r.status === 'default' ? '' : '<div class="def">默认: ' + esc(r.defaultsLabel) + '</div>';
     return '<tr data-id="' + esc(r.id) + '">'
       + '<td><div class="name">' + esc(r.label) + '</div>'
@@ -229,7 +229,7 @@ export class KeybindingPanel {
   function render() {
     var notices = document.getElementById('notices');
     notices.innerHTML = (state.notices && state.notices.length)
-      ? state.notices.map(function (n) { return '<div class="notice">⚠ ' + esc(n) + '</div>'; }).join('')
+      ? state.notices.map(function (n) { return '<div class="notice">⚠️ ' + esc(n) + '</div>'; }).join('')
       : '';
     var html = '';
     ['builtin', 'alias', 'cbStyle'].forEach(function (g) {

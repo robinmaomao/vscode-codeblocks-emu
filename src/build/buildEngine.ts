@@ -14,6 +14,7 @@ import { FileType, fileTypeOf, fileExt, isCompilableFileType, isLinkableFileType
 import { Compiler } from '../compiler/compiler';
 import { CommandGenerator, computeStaticOutput, quoteIfNeeded, clearBackticksCache } from '../compiler/commandGenerator';
 import { OutputParser } from './outputParser';
+import { CbOutput } from './cbChannel';
 import { runScriptCommands } from './scriptRunner';
 import { replaceCbMacros, cbBuiltinVars, envVarMap } from '../compiler/cbMacros';
 import { buildLogPrefs, msg } from './logLang';
@@ -107,7 +108,7 @@ export class BuildEngine {
   constructor(
     private project: Project,
     private compiler: Compiler,
-    private output: vscode.LogOutputChannel,
+    private output: CbOutput,
     private resolveCompiler?: (id: string) => Compiler | undefined,
   ) {
     // 使用编译器 XML 加载的正则；若为空则回退内置正则
@@ -1071,7 +1072,7 @@ export class BuildEngine {
               };
             }
             if (!buildLogPrefs().plain) {
-              this.output.info(`✓ [Linked] ${path.relative(this.project.basePath, outputAbs)} (${linkSec}s)`);
+              this.output.info(`✔️ [Linked] ${path.relative(this.project.basePath, outputAbs)} (${linkSec}s)`);
             }
           } else {
             // 对齐 GetTargetLinkCommands：无链接器程序时提示跳过
@@ -1178,7 +1179,7 @@ export class BuildEngine {
               };
             }
             if (!buildLogPrefs().plain) {
-              this.output.info(`✓ [Archived] ${staticOut} (${arSec}s)`);
+              this.output.info(`✔️ [Archived] ${staticOut} (${arSec}s)`);
             }
           } else {
             // 对齐 GetTargetLinkCommands：无打包程序时提示跳过
@@ -2086,11 +2087,11 @@ export class BuildEngine {
         if (ok) {
           // logging=none 时抑制每文件完成行（对齐 CB clogNone 无 Compiling 行；错误行不受影响）
           if (!buildLogPrefs().plain && this.compiler.switches.logging !== 'none') {
-            this.output.info(`✓ [Compiled] ${idx}-${totalCount} ${u.file.relativeFilename} (${elapsedSec}s)`);
+            this.output.info(`✔️ [Compiled] ${idx}-${totalCount} ${u.file.relativeFilename} (${elapsedSec}s)`);
           }
         } else if (options.cancel?.isCancelled()) {
           // 取消导致的失败不是错误：不打印红色 Failed，不参与最慢 Top3 统计
-          this.output.warn(`⚠ [Interrupted] ${idx}-${totalCount} ${u.file.relativeFilename}`);
+          this.output.warn(`⚠️ [Interrupted] ${idx}-${totalCount} ${u.file.relativeFilename}`);
         } else {
           this.output.error(`✗ [Failed] ${idx}-${totalCount} ${u.file.relativeFilename} (${elapsedSec}s)`);
           stop.stopped = true; // 失败即停：不再派发新单元（对齐 CB 清队列）

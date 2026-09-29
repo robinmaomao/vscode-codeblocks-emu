@@ -2,7 +2,7 @@
   "name": "codeblocks-vscode",
   "displayName": "Code::Blocks for VS Code",
   "description": "原生移植 Code::Blocks 核心功能到 VS Code：项目模型、构建引擎、编译器管理与调试引擎",
-  "version": "0.8.110-dev",
+  "version": "0.8.112-dev",
   "icon": "resources/icon.png",
   "publisher": "robinmaomao",
   "author": {
@@ -98,6 +98,11 @@
         "command": "codeblocks.buildLog.showAllMessages",
         "title": "Code::Blocks: Show All Messages (Build Log)",
         "icon": "$(filter-filled)"
+      },
+      {
+        "command": "codeblocks.buildLog.clearOutput",
+        "title": "Code::Blocks: Clear Build Output",
+        "icon": "$(clear-all)"
       },
       {
         "command": "codeblocks.buildLog.copyMessage",
@@ -591,6 +596,16 @@
             "type": "boolean",
             "default": false,
             "description": "纯 Code::Blocks 日志模式：关闭脚本编号/单行完成式/Emoji 汇总块/最慢 Top3，构建结束输出 CB 风格 === Build finished === 行"
+          },
+          "codeblocks.build.persistLog": {
+            "type": "boolean",
+            "default": false,
+            "description": "构建输出通道日志持久化（默认关）：开启后输出写入日志文件并跨窗口保留历史（%APPDATA%\\Code\\logs 下 CodeBlocks.log）；关闭时使用普通输出通道——窗口重载后历史自动清空，随时可用「Code::Blocks: Clear Build Output」命令清空。修改后需重载窗口生效"
+          },
+          "codeblocks.build.outputTimestamp": {
+            "type": "boolean",
+            "default": false,
+            "description": "普通输出通道每行是否输出时间戳（默认关；开启后格式 2026-09-29 15:11:20.222，与日志文件同款）。仅 persistLog 关闭（普通通道）时生效；修改后需重载窗口生效"
           },
           "codeblocks.build.strictQuoting": {
             "type": "boolean",
@@ -1115,6 +1130,11 @@
           "command": "codeblocks.buildLog.showAllMessages",
           "when": "view == codeblocks.buildLog && codeblocks.buildLog.errorsOnly",
           "group": "navigation@1"
+        },
+        {
+          "command": "codeblocks.buildLog.clearOutput",
+          "when": "view == codeblocks.buildLog",
+          "group": "navigation@2"
         }
       ],
       "view/item/context": [

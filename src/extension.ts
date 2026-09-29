@@ -30,6 +30,7 @@ import { AnalysisTreeProvider, AnalysisData, AnalysisProjectInfo, LastBuildMeta 
 import { SymbolTreeProvider } from './ui/symbolTreeProvider';
 import { createRunTerminal } from './ui/runTerminal';
 import { BuildEngine } from './build/buildEngine';
+import { createCbOutput, CbOutput } from './build/cbChannel';
 import { BuildCancelSource, BuildCancelHandle } from './build/cancelToken';
 import { expandMacros } from './build/scriptRunner';
 import { applyGeneratedFiles } from './build/generatedFiles';
@@ -86,7 +87,7 @@ let workspaceDeps: Record<string, string[]> = {};
 let openedWorkspaceFile: string | undefined;
 /** 当前活动项目（状态栏 Target/Compiler 针对的对象） */
 let activeProject: Project | undefined;
-let outputChannel: vscode.LogOutputChannel;
+let outputChannel: CbOutput;
 let diagnosticCollection: vscode.DiagnosticCollection;
 let compilerLoader: CompilerOptionsLoader | undefined;
 let compilerResourcesDir = '';
@@ -141,7 +142,16 @@ let restartClangdAfterGeneration = false;
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
   extContext = context;
   loadSelectedTargets();
-  outputChannel = vscode.window.createOutputChannel('Code::Blocks', { log: true });
+  outputChannel = createCbOutput(
+    'Code::Blocks',
+    // 输出清理核查 B：persistLog 默认 false = 普通输出通道（重载即空、可彻底 clear；每行可带时间戳（格式 2026-09-29 15:11:20.222，设置 build.outputTimestamp 控制，默认关），warn/error 带 ⚠️/❌ 标记）；
+    // true = 日志通道（写盘保留历史，便于跨会话取证）。修改后需重载窗口生效。
+    vscode.workspace.getConfiguration('codeblocks').get<boolean>('build.persistLog', false),
+    {
+      plainCb: () => buildLogPrefs().plain,
+      timestamp: vscode.workspace.getConfiguration('codeblocks').get<boolean>('build.outputTimestamp', false),
+    },
+  );
   // DAP 跟踪（codeblocks.debug.trace）：写入本输出通道
   setDebugTraceSink((line) => outputChannel.appendLine(line));
   const applyDebugTrace = () => setDebugTraceEnabled(
@@ -1185,11 +1195,27 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     }),
   );
 
-  // 清除全部编译错误（对齐 Build → Errors → Clear all errors）
+  // 清除构建输出（输出清理核查 A）：输出通道 + Build Log 树 + Problems 诊断（对齐 CB ClearLog）。
+  // clangd 接管诊断时扩展集合为空，clangd 自身诊断不受影响（由其自行刷新）。
+  const clearBuildOutput = () => {
+    outputChannel.clear();
+    buildLogTreeProvider?.setSummary(undefined);
+    diagnosticCollection.clear();
+  };
+
+  // 清除全部编译错误（对齐 Build → Errors → Clear all errors；增强：同时清空输出面板与 Problems 诊断）
   context.subscriptions.push(
     vscode.commands.registerCommand('codeblocks.clearErrors', () => {
-      buildLogTreeProvider?.setSummary(undefined);
-      vscode.window.setStatusBarMessage('已清除 Build Log 中的编译错误', 3000);
+      clearBuildOutput();
+      vscode.window.setStatusBarMessage('已清除构建输出与编译错误', 3000);
+    }),
+  );
+
+  // 清除构建输出（Build Log 视图标题栏 $(clear-all) 按钮 / 命令面板）
+  context.subscriptions.push(
+    vscode.commands.registerCommand('codeblocks.buildLog.clearOutput', () => {
+      clearBuildOutput();
+      vscode.window.setStatusBarMessage('已清除构建输出', 3000);
     }),
   );
 
@@ -1299,7 +1325,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       outputChannel.show(true);
       if (!findings.length && !managed.length) {
         outputChannel.info('[Code::Blocks] 快捷键冲突检测：未发现冲突（无托管覆盖）');
-        vscode.window.showInformationMessage('未检测到快捷键冲突 ✓');
+        vscode.window.showInformationMessage('未检测到快捷键冲突 ✔️');
         return;
       }
       const report = [formatConflictReport(findings), ...managed.map((m) => m.line)].join('\n');
@@ -4551,8 +4577,8 @@ function focusFirstErrorOnBuildEnd(): boolean {
 function reportBuildResult(success: boolean, cancelled: boolean, buildStartMs: number, errorCount: number, warningCount: number): void {
   if (cancelled) {
     const en = 'Build cancelled (user interrupted)';
-    outputChannel.warn(buildLogPrefs().plain ? en : msg('[Code::Blocks] ⚠ 构建已取消（用户中断）', en));
-    vscode.window.showWarningMessage(buildLogPrefs().plain ? en : msg('⚠ 构建已取消', en));
+    outputChannel.warn(buildLogPrefs().plain ? en : msg('[Code::Blocks] ⚠️ 构建已取消（用户中断）', en));
+    vscode.window.showWarningMessage(buildLogPrefs().plain ? en : msg('⚠️ 构建已取消', en));
     return;
   }
   if (buildLogPrefs().plain) {
@@ -4707,6 +4733,8 @@ async function buildWorkspace(rebuild: boolean, clearLog = true): Promise<boolea
 
   const { errorCount, warningCount } = buildResultStats();
   reportBuildResult(allOk && !cancelled, cancelled, buildStartMs, errorCount, warningCount);
+  // 输出顺序调整：汇总块在「构建成功/失败」行之后输出（构建输出的最末尾）
+  printBuildSummaryBlocks();
   finishBuildSummary(allOk && !cancelled, buildStartMs);
   saveHtmlBuildLog(buildStartMs, 'workspace');
 
@@ -4795,6 +4823,8 @@ async function buildSingleProject(filename: string, rebuild: boolean): Promise<b
 
   const { errorCount, warningCount } = buildResultStats();
   reportBuildResult(ok && !cancelled, cancelled, buildStartMs, errorCount, warningCount);
+  // 输出顺序调整：汇总块在「构建成功/失败」行之后输出（构建输出的最末尾）
+  printBuildSummaryBlocks();
   finishBuildSummary(ok && !cancelled, buildStartMs);
   saveHtmlBuildLog(buildStartMs, 'project', project);
   return ok && !cancelled;
@@ -4826,6 +4856,8 @@ async function buildSingleFile(project: Project, file: ProjectFile): Promise<voi
   if (!target) return;
   const compiler = getCompiler(target.compilerId || project.compilerId);
 
+  // 输出清理核查 C：单文件编译开头清空输出（与整目标构建一致）
+  outputChannel.clear();
   outputChannel.show(true);
   const engine = new BuildEngine(project, compiler, outputChannel, (id) => resolveTargetCompiler(id));
   const cancelSource = new BuildCancelSource();
@@ -4869,7 +4901,7 @@ async function buildSingleFile(project: Project, file: ProjectFile): Promise<voi
   }
 
   if (cancelled) {
-    outputChannel.warn(buildLogPrefs().plain ? 'Compile cancelled (user interrupted)' : '[Code::Blocks] ⚠ 单文件编译已取消（用户中断）');
+    outputChannel.warn(buildLogPrefs().plain ? 'Compile cancelled (user interrupted)' : '[Code::Blocks] ⚠️ 单文件编译已取消（用户中断）');
   } else if (ok) {
     outputChannel.info(msg(`[Code::Blocks] ✅ 单文件编译成功: ${file.relativeFilename}`, `[Code::Blocks] Compile finished: ${file.relativeFilename}`));
   } else {
@@ -4891,6 +4923,8 @@ async function cleanSingleFile(project: Project, file: ProjectFile): Promise<voi
   const target = project.buildTargets.find((t) => t.title === targetTitle);
   if (!target) return;
   const compiler = getCompiler(target.compilerId || project.compilerId);
+  // 输出清理核查 C：单文件清理开头清空输出（与整目标清理一致）
+  outputChannel.clear();
   outputChannel.show(true);
   new BuildEngine(project, compiler, outputChannel, (id) => resolveTargetCompiler(id)).cleanFile(targetTitle, file.relativeFilename);
 }
@@ -4989,26 +5023,8 @@ async function buildOneProject(project: Project, targetTitle: string, rebuild: b
   const cancelled = !!stats.cancelled || !!cancel?.isCancelled();
   const projectName = path.basename(path.dirname(project.filename));
 
-  // === 构建完成汇总块（OUTPUT 文本，Emoji 风格；plainCbLog 模式跳过，对齐 CB 纯日志）===
-  if (!buildLogPrefs().plain) {
-    const doneSym = cancelled ? '⚠' : ok ? '✅' : '❌';
-    const errCount = diagnostics.filter((d) => d.severity === 'error').length;
-    const warnCount = diagnostics.filter((d) => d.severity === 'warning').length;
-    outputChannel.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-    outputChannel.info(`${doneSym} ${cancelled ? '构建已取消' : '构建完成'}: ${project.title} (${targetTitle})`);
-    outputChannel.info(`🔨 编译 ${stats.compiledCount} · ⏭️ 跳过 ${stats.skippedCount} · ❌ 失败 ${stats.failedCount}`);
-    if (!stats.linkSkipped) {
-      outputChannel.info(`${stats.linkSuccess ? '🔗' : '❌'} 链接${stats.linkSuccess ? '成功' : '失败'}${stats.outputFilename ? ` → ${stats.outputFilename}` : ''}`);
-    }
-    outputChannel.info(`🐞 错误 ${errCount} · ⚠️ 警告 ${warnCount}`);
-    outputChannel.info(`⏱️ 用时 ${(durationMs / 1000).toFixed(1)}s`);
-    // 最慢 Top 3（定位慢文件）
-    const top = [...engine.lastCompileTimings].sort((a, b) => b.ms - a.ms).slice(0, 3);
-    if (top.length) {
-      outputChannel.info(`🐢 最慢: ${top.map((t) => `${t.file} (${(t.ms / 1000).toFixed(1)}s)`).join(' · ')}`);
-    }
-    outputChannel.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-  }
+  // 输出顺序调整：构建完成汇总块不再在此输出，统一由 printBuildSummaryBlocks()
+  // 在「构建成功/失败」行之后输出（构建输出的最末尾）。
 
   // 项目源文件绝对路径（供「Build Log 使用 clangd 诊断」模式收集诊断）
   const projectFiles = new Set<string>();
@@ -5034,12 +5050,55 @@ async function buildOneProject(project: Project, targetTitle: string, rebuild: b
     files: [...projectFiles],
     durationMs,
     startTime: startMs,
+    // 输出顺序调整：汇总块数据（取消标记 / 标题 / 最慢 Top3），在输出最末尾渲染
+    cancelled,
+    projectTitle: project.title,
+    topTimings: [...engine.lastCompileTimings],
   });
 
   if (!ok && !cancelled) {
     outputChannel.error(`[Code::Blocks] 项目 "${project.title}" 编译失败`);
   }
   return ok;
+}
+
+/**
+ * 输出构建完成汇总块（Emoji 风格；plainCbLog 模式跳过，对齐 CB 纯日志）——
+ * 输出顺序调整：统一在「构建成功/失败」行之后输出（构建输出的最末尾）。
+ * 数据源 = currentBuildProjects（buildOneProject 推送），工作区构建逐项目按序输出。
+ */
+function printBuildSummaryBlocks(): void {
+  if (buildLogPrefs().plain) return;
+  for (const p of currentBuildProjects) {
+    const doneSym = p.cancelled ? '⚠️' : p.success ? '✅' : '❌';
+    const errCount = p.diagnostics.filter((d) => d.severity === 'error').length;
+    const warnCount = p.diagnostics.filter((d) => d.severity === 'warning').length;
+    outputChannel.info('━━━━━━━━━━  Build Log  ━━━━━━━━━━');
+    outputChannel.info(`${doneSym} ${p.cancelled ? '构建已取消' : '构建完成'}: ${p.projectTitle ?? p.projectName} (${p.targetName})`);
+    outputChannel.info(`🔨 编译 ${p.compiledCount} · ⏭️ 跳过 ${p.skippedCount} · ❌ 失败 ${p.failedCount}`);
+    if (!p.linkSkipped) {
+      outputChannel.info(`${p.linkSuccess ? '🔗' : '❌'} 链接${p.linkSuccess ? '成功' : '失败'}${p.outputFilename ? ` → ${p.outputFilename}` : ''}`);
+    }
+    outputChannel.info(`🐞 错误 ${errCount} · ⚠️ 警告 ${warnCount}`);
+    outputChannel.info(`⏱️ 用时 ${(p.durationMs / 1000).toFixed(1)}s`);
+    // 最慢 Top 3（定位慢文件）
+    const top = [...(p.topTimings ?? [])].sort((a, b) => b.ms - a.ms).slice(0, 3);
+    if (top.length) {
+      outputChannel.info(`🐢 最慢: ${top.map((t) => `${t.file} (${(t.ms / 1000).toFixed(1)}s)`).join(' · ')}`);
+    }
+    // 编译完成时间（构建结束时刻；startTime + durationMs 与「用时」保持一致）
+    const endMs = p.startTime !== undefined ? p.startTime + p.durationMs : Date.now();
+    outputChannel.info(`🕒 编译时间: ${formatDateTime(endMs)}`);
+    outputChannel.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+  }
+}
+
+/** 时间格式 YYYY-MM-DD HH:MM:SS（汇总块「编译时间」行用） */
+function formatDateTime(ms: number): string {
+  const d = new Date(ms);
+  const p = (n: number, w = 2): string => String(n).padStart(w, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} `
+    + `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
 }
 
 /** Build Log 是否使用 clangd 诊断（否则用构建引擎完整诊断） */
@@ -5315,8 +5374,9 @@ async function runConfiguredTool(index: number): Promise<void> {
     } catch { /* 忽略 */ }
     return;
   }
-  // output：专用输出通道（选中即运行，输出带工具名与退出码）
+  // output：专用输出通道（选中即运行，输出带工具名与退出码；输出清理核查 C：运行前清空，只保留本次输出）
   const channel = getToolsOutputChannel();
+  channel.clear();
   channel.show(true);
   channel.appendLine(`\n[${tool.name}] > ${[inv.command, ...inv.args].join(' ')}${cwd ? `   (cwd: ${cwd})` : ''}`);
   try {
@@ -5806,6 +5866,8 @@ async function clean(): Promise<void> {
   }
   // 清理前自动保存
   await saveAllBeforeBuild();
+  // 输出清理核查 C：清理开头清空输出（对齐 CB OnClean 语义）
+  outputChannel.clear();
   outputChannel.show(true);
   // 对齐 OnClean → Clean("") → GetTargetString：只清理选中目标（虚拟目标展开组）
   const targetTitle = getSelectedTarget(project) ?? project.buildTargets.find((t) => supportsCurrentPlatform(t.platforms))?.title;
