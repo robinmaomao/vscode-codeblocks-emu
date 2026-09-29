@@ -1485,9 +1485,9 @@ export class BuildEngine {
     return false;
   }
 
-  /** 链接输入扩展名列表（设置 codeblocks.build.linkInputExtensions，默认 ld/lds/icf/def/xm；显式空数组 [] = 关闭增强） */
+  /** 链接输入扩展名列表（设置 codeblocks.build.linkInputExtensions，默认 xm；显式空数组 [] = 关闭增强） */
   private linkInputExtensions(): string[] {
-    const defaults = ['ld', 'lds', 'icf', 'def', 'xm'];
+    const defaults = ['xm'];
     const raw = vscode.workspace.getConfiguration('codeblocks').get<unknown>('build.linkInputExtensions', defaults);
     // 误配容错（避免静默失效）：字符串（'ld, lds' / '.ld' / '*.ld'）按分隔符拆分；
     // 其它非数组值（true/数字/对象/空串）回退默认列表；仅显式空数组 [] 表示关闭（文档约定）。
