@@ -663,7 +663,9 @@ export class ProjectParser {
       // 跨盘/UNC 绝对路径保留（absolutePath 直接取原路径，避免 base + 绝对路径拼接出无效路径——
       // 此前该拼接导致绝对路径 Unit 被误判为"源缺失"，每次构建伪 WARNING + 强制重链）。
       let rel = toUnix(filename);
-      // 对齐 Normalize(wxPATH_NORM_TILDE)：展开前导 ~（~/...）为家目录（~user 形式不展开，极罕见）
+      // 前导 ~ / ~/ 展开为家目录（保护性增强）：CB Windows 用 wxPATH_DOS（wx Normalize 的
+      // NORM_TILDE 仅 UNIX 格式生效，且 CB 先拼工程根使 ~ 不再居首）→ 字面 ~ 目录；扩展展开
+      // 等价 CB Linux 行为。~user 形式不展开（Windows 无 getpwnam 等价机制，CB-Windows 亦不展开）。
       if (rel === '~' || rel.startsWith('~/')) {
         rel = toUnix(path.join(os.homedir(), rel === '~' ? '' : rel.slice(2)));
       }
