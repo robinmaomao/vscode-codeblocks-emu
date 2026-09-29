@@ -1862,13 +1862,18 @@ export class BuildEngine {
       // 跨卷文件对象路径（对齐 projectfile.cpp:474-492：objOut += 卷名，去卷路径拼接）。
       // CB 的 wxFileName::GetVolume() 不含冒号（SplitVolume 取 posFirstColon 之前）→ CB 输出
       // obj\Debug\D\Source\foo.o；此处同样取卷字母（去冒号）→ 与 CB 一致（非差异）。
+      // UNC（root 以 // 开头）：卷 = server/share 两个目录段（对齐 CB objOut += fileVol 的意图；
+      // 保护性修正——CB 自身因 AfterFirst 双重拼接会重复 server/share 段，不继承该 bug）。
       const parsedAbs = path.parse(rel);
       const volLetter = (parsedAbs.root ?? '').replace(/[:\\/]/g, '');
       const extAbs = ft === FileType.Resource ? 'res' : this.compiler.switches.objectExtension;
       const nameAbs = this.project.extendedObjNames ? parsedAbs.base + '.' + extAbs : parsedAbs.name + '.' + extAbs;
       if (volLetter) {
         const withoutVol = parsedAbs.dir.slice(parsedAbs.root.length);
-        return path.join(objDir, volLetter, withoutVol, nameAbs);
+        const volSegs = parsedAbs.root.startsWith('//')
+          ? parsedAbs.root.split('/').filter((s) => s.length > 0)
+          : [volLetter];
+        return path.join(objDir, ...volSegs, withoutVol, nameAbs);
       }
       // 无卷信息：回退源文件旁（原行为）
       return path.join(parsedAbs.dir, nameAbs);
@@ -1927,11 +1932,17 @@ export class BuildEngine {
     const objDir = target.objectOutput || '.objs';
     const ext = ft === FileType.Resource ? 'res' : this.compiler.switches.objectExtension;
     if (path.isAbsolute(file.relativeFilename)) {
-      // 跨卷文件扁平对象（对齐 projectfile.cpp:474-492 + flat=GetFullName：objOut + 卷名 + 文件名）
+      // 跨卷文件扁平对象（对齐 projectfile.cpp:474-492 + flat=GetFullName：objOut + 卷名 + 文件名；
+      // UNC 卷拆 server/share 两段，同 objectPathRelative 的保护性修正）
       const parsedAbs = path.parse(file.relativeFilename);
       const volLetter = (parsedAbs.root ?? '').replace(/[:\\/]/g, '');
       const nameAbs = this.project.extendedObjNames ? parsedAbs.base + '.' + ext : parsedAbs.name + '.' + ext;
-      if (volLetter) return path.join(objDir, volLetter, nameAbs);
+      if (volLetter) {
+        const volSegs = parsedAbs.root.startsWith('//')
+          ? parsedAbs.root.split('/').filter((s) => s.length > 0)
+          : [volLetter];
+        return path.join(objDir, ...volSegs, nameAbs);
+      }
       return path.join(parsedAbs.dir, nameAbs);
     }
     const name = this.project.extendedObjNames

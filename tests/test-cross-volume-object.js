@@ -79,6 +79,35 @@ check('链接对象相对路径在命令中', !!t.link && t.link.command.include
 check('链接对象绝对路径 = 工程 obj 目录下', !!t.link && t.link.objects.length === 1 && t.link.objects[0] === expectedObjAbs, t.link && t.link.objects);
 check('对象路径无盘符拼接缺陷（无内嵌绝对路径）', !t.compile[0].object.includes(path.join(dir, srcAbs)), t.compile[0].object);
 
+// ==== UNC：卷拆 server/share 两段（保护性修正：CB 因 AfterFirst 双重拼接会重复 server/share 段） ====
+fs.writeFileSync(path.join(dir, 'unc.cbp'), `<?xml version="1.0" encoding="UTF-8" standalone="yes" ?>
+<CodeBlocks_project_file>
+\t<FileVersion major="1" minor="6" />
+\t<Project>
+\t\t<Option title="unc" />
+\t\t<Option compiler="gcc" />
+\t\t<Build>
+\t\t\t<Target title="Debug">
+\t\t\t\t<Option output="bin/Debug/uncapp" prefix_auto="1" extension_auto="1" />
+\t\t\t\t<Option type="1" />
+\t\t\t\t<Option compiler="gcc" />
+\t\t\t\t<Option object_output="obj/Debug/" />
+\t\t\t</Target>
+\t\t</Build>
+\t\t<Unit filename="//server/share/src/f.c" />
+\t\t<Extensions />
+\t</Project>
+</CodeBlocks_project_file>
+`, 'utf-8');
+const pu = new ProjectParser().parse(path.join(dir, 'unc.cbp'));
+const eu = new BuildEngine(pu, c, out, (id) => (id === 'gcc' ? c : undefined));
+const tu = eu.collectMakefileData('Debug')[0];
+const uncObjRel = path.join('obj', 'Debug', 'server', 'share', 'src', 'f.o');
+const uncObjAbs = path.join(dir, uncObjRel);
+check('U1 UNC 对象绝对路径 = obj 目录下 server/share 两段', tu.compile[0].object === uncObjAbs, tu.compile[0].object);
+check('U2 UNC 编译命令 -o 含 server/share 两段', tu.compile[0].command.includes(uncObjRel), tu.compile[0].command);
+check('U3 UNC 链接对象绝对路径同规则', !!tu.link && tu.link.objects.length === 1 && tu.link.objects[0] === uncObjAbs, tu.link && tu.link.objects);
+
 // ==== 端到端：真实构建（C: 工程 + E: 源）→ 编译/链接/增量/单文件 Clean ====
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
