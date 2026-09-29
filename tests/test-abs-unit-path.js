@@ -115,6 +115,13 @@ function makeCbp(dir, absFile, name) {
   check('C1 UNC 保留绝对 relativeFilename', path.isAbsolute(f3.relativeFilename), f3.relativeFilename);
   check('C2 UNC absolutePath = 原路径（无 base 拼接）', f3.absolutePath === '//server/share/ext.c', f3.absolutePath);
 
+  // ==== D. 前导 ~ 展开（对齐 Normalize(wxPATH_NORM_TILDE)） ====
+  const cbpD = makeCbp(proj2, '~/cb-abs-tilde-probe.c', 'd.cbp');
+  const p4 = new ProjectParser().parse(cbpD);
+  const f4 = p4.files[0];
+  const homeAbs = path.join(os.homedir(), 'cb-abs-tilde-probe.c').replace(/\\/g, '/');
+  check('D1 ~ 展开为家目录（absolutePath 正确）', f4.absolutePath === homeAbs, f4.absolutePath);
+
   console.log(`绝对路径 Unit 回归: ${pass} pass, ${fail} fail`);
   process.exit(fail ? 1 : 0);
 })().catch((e) => { console.error(e); process.exit(2); });

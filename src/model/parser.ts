@@ -7,6 +7,7 @@
 import { XMLParser, XMLValidator } from 'fast-xml-parser';
 import * as path from 'path';
 import * as fs from 'fs';
+import * as os from 'os';
 import {
   Project,
   BuildTarget,
@@ -662,6 +663,10 @@ export class ProjectParser {
       // 跨盘/UNC 绝对路径保留（absolutePath 直接取原路径，避免 base + 绝对路径拼接出无效路径——
       // 此前该拼接导致绝对路径 Unit 被误判为"源缺失"，每次构建伪 WARNING + 强制重链）。
       let rel = toUnix(filename);
+      // 对齐 Normalize(wxPATH_NORM_TILDE)：展开前导 ~（~/...）为家目录（~user 形式不展开，极罕见）
+      if (rel === '~' || rel.startsWith('~/')) {
+        rel = toUnix(path.join(os.homedir(), rel === '~' ? '' : rel.slice(2)));
+      }
       if (path.isAbsolute(rel)) {
         const baseRoot = path.parse(project.basePath).root.replace(/[\\/]/g, '').toLowerCase();
         const relRoot = path.parse(rel).root.replace(/[\\/]/g, '').toLowerCase();
