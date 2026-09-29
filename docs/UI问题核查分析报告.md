@@ -20,6 +20,7 @@
 | **N3** | Build Log「只看错误」开关**无开/关视觉反馈** | `package.json:93`（icon `$(filter)`）+ `:1099/1104` 两条 when 互补但图标相同 | ✔ 已实施（0.8.110-dev） |
 | **N4** | 状态栏左区常驻 5 项，`Code::Blocks: N 项目` 与 Menu 功能重叠 | priority：Menu 1000 / cbp 110 / Target 100 / Build 90 / Compiler 70 | ○ 可选 |
 | **N5** | 两个 Webview 面板 `retainContextWhenHidden: true` | `compilerOptionsPanel.ts:28`、`projectPropertiesPanel.ts:235` | ○ 记录（有意保留状态） |
+| **N6** | 编译历史输出无法清除（日志通道持久化 + 清除命令缺失） | `extension.ts:144`（`{ log: true }`）、`:1188`（clearErrors 只清树） | ✔ 已实施（0.8.111-dev，A+C 做 / B persistLog 默认 false） |
 | **R1/R2/R3** | 打开文件策略 / ignore_output / 调试前自动构建 | 功能差异，见 §4 | ○ 记录 |
 
 ---
@@ -97,6 +98,13 @@
 - `compilerOptionsPanel.ts:28`、`projectPropertiesPanel.ts:235` 保留 `retainContextWhenHidden: true`（0.8.97 审计只移除了 keybindingPanel）。此属性使面板隐藏后驻留内存、保留未保存的编辑状态——**判断为有意保留表单状态，建议维持现状**，仅记录。
 - 三面板均已有 CSP（`default-src 'none'`），无安全问题。
 
+### N6 编译历史输出无法清除
+
+- 现象：构建历史输出在输出面板里清不掉（重载窗口后仍在）。
+- 根因：① 输出通道固定 `createOutputChannel('Code::Blocks', { log: true })`（`extension.ts:144`）——日志通道写盘持久化；② 唯一清除命令 `Clear All Errors`（`:1188`）只清 Build Log 树，不清输出文本与 Problems 诊断；③ 单文件编译/清理/`Code::Blocks Tools` 通道只追加不清理。
+- 已实施（0.8.111-dev，用户确认 A+C 做、B 加 `build.persistLog` 默认 false）：新命令 `Clear Build Output`（标题栏 `$(clear-all)`）+ `Clear All Errors` 同语义增强 + 通道按 `persistLog` 选择（默认普通通道，重载即空）+ 单文件编译/清理/Clean/工具 output 模式开头清空。
+- 后续优化（0.8.112-dev）：普通通道每行可带时间戳（格式 `2026-09-29 15:11:20.222`，设置 `build.outputTimestamp` 默认关）+ 警告/错误行 `⚠️`/`❌` 文本标记（输出面板无颜色渲染，纯文本高亮；`plainCbLog` 关闭标记）；构建完成汇总块统一输出在「构建成功/失败」行之后（构建输出最末尾，含「🕒 编译时间」行）。
+
 ---
 
 ## 4. 观察与记录（非 UI 开关类）
@@ -134,6 +142,7 @@
 | N3 | 「只看错误」状态反馈 | 拆两条命令配不同图标 | ✔ **已实施**：未开启态 `codeblocks.buildLog.toggleErrorsOnly`（`$(filter)`）；已开启态 `codeblocks.buildLog.showAllMessages`（`$(filter-filled)`，when 互补 + 命令面板隐藏） |
 | N4 | 状态栏精简 | cbp 项并入 Menu / 仅待打开时显示 | □ 做｜□ 维持现状 |
 | N5 | retainContextWhenHidden | — | □ 维持现状（推荐）｜□ 移除 |
+| N6 | 编译历史输出无法清除 | A：clearOutput 命令 + 标题栏按钮；B：persistLog 开关；C：单文件/清理/工具通道开头清空 | ✔ **已实施（0.8.111-dev）**：A+C 做，B `build.persistLog` 默认 false |
 | R3 | 调试前自动构建 | `codeblocks.debug.buildBeforeDebug` + 失败「仍要调试?」 | □ 做（默认对齐 CB＝true）｜□ 记录待办 |
 | R6① | tokenColor 自动写 settings.json | 加开关/首启确认 | □ 做｜□ 记录 |
 

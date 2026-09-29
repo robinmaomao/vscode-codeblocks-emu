@@ -38,7 +38,7 @@ for (const b of cfg) {
     byKey[k] = v;
   }
 }
-  check('设置项总数 = 54', keys.length === 54, keys.length);
+  check('设置项总数 = 56', keys.length === 56, keys.length);
 check('无重复键', new Set(keys).size === keys.length, keys.length - new Set(keys).size);
 check('disableInit 默认 true（对齐 CB disable_init）', byKey['codeblocks.debug.disableInit']?.default === true, byKey['codeblocks.debug.disableInit']);
 check('saveHtmlLogFullCommandLine 默认 false（对齐 CB full_command_line）', byKey['codeblocks.build.saveHtmlLogFullCommandLine']?.default === false, byKey['codeblocks.build.saveHtmlLogFullCommandLine']);
@@ -71,6 +71,12 @@ check('recentProjectsLimit 默认 8（0-50）',
 check('build.saveHtmlLog 默认 false（布尔，对齐 CB save_html_build_log）',
   byKey['codeblocks.build.saveHtmlLog']?.type === 'boolean' && byKey['codeblocks.build.saveHtmlLog']?.default === false,
   byKey['codeblocks.build.saveHtmlLog']);
+check('build.persistLog 默认 false（输出通道持久化默认关；开启后写盘跨窗口保留）',
+  byKey['codeblocks.build.persistLog']?.type === 'boolean' && byKey['codeblocks.build.persistLog']?.default === false,
+  byKey['codeblocks.build.persistLog']);
+check('build.outputTimestamp 默认 false（普通输出每行时间戳默认关，可开启）',
+  byKey['codeblocks.build.outputTimestamp']?.type === 'boolean' && byKey['codeblocks.build.outputTimestamp']?.default === false,
+  byKey['codeblocks.build.outputTimestamp']);
 
 check('scope machine-overridable ×3（路径类设置）',
   ['codeblocks.masterPath', 'codeblocks.compilerPrograms', 'codeblocks.debug.gdbPath']

@@ -112,7 +112,7 @@ export class CompilerOptionsPanel {
     });
     window.addEventListener('message', e => {
       if (e.data.type === 'applied') {
-        document.getElementById('status').textContent = '已应用 ✓';
+        document.getElementById('status').textContent = '已应用 ✔️';
       }
     });
   </script>

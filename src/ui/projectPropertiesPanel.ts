@@ -1356,7 +1356,7 @@ export class ProjectPropertiesPanel {
 
     window.addEventListener('message', e => {
       if (e.data.type === 'saved') {
-        document.getElementById('status').textContent = '已保存 ✓';
+        document.getElementById('status').textContent = '已保存 ✔️';
       } else if (e.data.type === 'error') {
         document.getElementById('status').textContent = '保存失败: ' + e.data.message;
       }

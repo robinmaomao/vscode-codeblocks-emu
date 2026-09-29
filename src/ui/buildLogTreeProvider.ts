@@ -40,6 +40,12 @@ export interface BuildLogProject {
   durationMs: number;
   /** 构建开始时间戳（毫秒） */
   startTime?: number;
+  /** 是否被取消（输出汇总块用 ⚠️ 构建已取消） */
+  cancelled?: boolean;
+  /** 项目标题（输出汇总块用；缺省回退 projectName） */
+  projectTitle?: string;
+  /** 单文件编译耗时（输出汇总块「最慢 Top 3」用） */
+  topTimings?: { file: string; ms: number }[];
 }
 
 /** 一次构建的整体摘要 */
