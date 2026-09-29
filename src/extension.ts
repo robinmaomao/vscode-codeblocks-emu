@@ -28,6 +28,7 @@ import { BuildLogTreeProvider, BuildLogProject, BuildLogDiagnostic } from './ui/
 import { normalizeBuildLogAutoFocusMode, maybeAutoFocusBuildLog } from './ui/buildLogFocus';
 import { AnalysisTreeProvider, AnalysisData, AnalysisProjectInfo, LastBuildMeta } from './ui/analysisTreeProvider';
 import { SymbolTreeProvider } from './ui/symbolTreeProvider';
+import { createRunTerminal } from './ui/runTerminal';
 import { BuildEngine } from './build/buildEngine';
 import { BuildCancelSource, BuildCancelHandle } from './build/cancelToken';
 import { expandMacros } from './build/scriptRunner';
@@ -5297,7 +5298,8 @@ async function runConfiguredTool(index: number): Promise<void> {
   const env = { ...process.env, ...(tool.env ?? {}) };
 
   if (tool.output === 'terminal') {
-    const term = vscode.window.createTerminal({ name: `CB Tool: ${tool.name}`, cwd, env: tool.env });
+    // UI 核查 N2（方案 C）：同名终端先弃后建，避免连续运行堆积同名标签
+    const term = createRunTerminal(`CB Tool: ${tool.name}`, { cwd, env: tool.env });
     term.sendText([inv.command, ...inv.args.map(quoteToolArg)].join(' '));
     term.show(true);
     return;
@@ -6094,7 +6096,8 @@ async function compileFileWithoutProject(): Promise<void> {
     if (e.exitCode === 0) {
       vscode.window.showInformationMessage('编译成功，是否运行生成的可执行文件？', '运行').then((pick) => {
         if (pick === '运行') {
-          const t = vscode.window.createTerminal({ name: 'Run (no project)', cwd: fileDir });
+          // UI 核查 N2（方案 C）：同名终端先弃后建，避免连续运行堆积同名标签
+          const t = createRunTerminal('Run (no project)', { cwd: fileDir });
           t.show();
           t.sendText(`"${path.join(fileDir, outName)}"`);
         }
@@ -6135,8 +6138,8 @@ async function run(): Promise<void> {
       vscode.window.showErrorMessage('You must select a host application to "run" a library...');
       return;
     }
-    const terminalLib = vscode.window.createTerminal({
-      name: `Run: ${target.title}`,
+    // UI 核查 N2（方案 C）：同名终端先弃后建，避免连续运行堆积同名标签
+    const terminalLib = createRunTerminal(`Run: ${target.title}`, {
       cwd: runWorkingDir(project, target, vars),
       env: Object.keys(env).length ? { ...(process.env as Record<string, string>), ...env } : undefined,
     });
@@ -6152,8 +6155,8 @@ async function run(): Promise<void> {
     return;
   }
 
-  const terminal = vscode.window.createTerminal({
-    name: `Run: ${target.title}`,
+  // UI 核查 N2（方案 C）：同名终端先弃后建，避免连续运行堆积同名标签
+  const terminal = createRunTerminal(`Run: ${target.title}`, {
     cwd: runWorkingDir(project, target, vars),
     env: Object.keys(env).length ? { ...(process.env as Record<string, string>), ...env } : undefined,
   });
