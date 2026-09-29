@@ -139,6 +139,45 @@ async function libBuild() {
   return { ok, log: libSink.log };
 }
 
+// ---------- 用户工程原样（compile=1 + 自定义空命令）→ CB 条目计数强制（directcommands.cpp:585） ----------
+const uDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cb-li-custom-'));
+fs.writeFileSync(path.join(uDir, 'main.c'), 'int main(void) { return 0; }\n');
+fs.writeFileSync(path.join(uDir, 'ram.ld'), '/* linker script placeholder */\n');
+fs.writeFileSync(path.join(uDir, 'custom.cbp'), `<?xml version="1.0" encoding="UTF-8" standalone="yes" ?>
+<CodeBlocks_project_file>
+\t<FileVersion major="1" minor="6" />
+\t<Project>
+\t\t<Option title="custom" />
+\t\t<Option compiler="gcc" />
+\t\t<Build>
+\t\t\t<Target title="Debug">
+\t\t\t\t<Option output="bin/Debug/custom" prefix_auto="1" extension_auto="1" />
+\t\t\t\t<Option type="1" />
+\t\t\t\t<Option compiler="gcc" />
+\t\t\t\t<Option object_output="obj/Debug/" />
+\t\t\t</Target>
+\t\t</Build>
+\t\t<Unit filename="main.c" />
+\t\t<Unit filename="ram.ld">
+\t\t\t<Option compile="1" />
+\t\t\t<Option compiler="gcc" use="1" buildCommand=" " />
+\t\t</Unit>
+\t\t<Extensions />
+\t</Project>
+</CodeBlocks_project_file>
+`, 'utf-8');
+
+const uProject = new ProjectParser().parse(path.join(uDir, 'custom.cbp'));
+const uSink = makeOutput();
+const uEngine = makeEngine(uProject, uSink);
+const hasStaleForce = (log) => log.some((l) => /强制链接|Forcing link|强制重新打包|Forcing archive/.test(l));
+
+async function uBuild() {
+  uSink.reset();
+  const ok = await uEngine.build('Debug', {});
+  return { ok, log: uSink.log };
+}
+
 (async () => {
   // C1 首次构建
   const c1 = await build();
@@ -207,6 +246,32 @@ async function libBuild() {
   // C10 静态库无改动 → Nothing to be done
   const c10 = await libBuild();
   check('C10 静态库无改动 → Nothing to be done', c10.ok && hasNothing(c10.log), { log: c10.log.filter((l) => l.includes('Nothing') || l.includes('Archived')) });
+
+  // ==== 用户工程原样：compile=1 + 自定义空命令 → CB 条目计数强制（对象永不产生，每次构建都重链接） ====
+  const c11 = await uBuild();
+  check('C11 用户工程原样首次构建 → 链接', c11.ok && hasLinked(c11.log), { linked: hasLinked(c11.log) });
+  await sleep(30);
+  const c12 = await uBuild();
+  check('C12 无任何修改再构建 → 仍重链接 + 强制日志（CB 条目计数）',
+    c12.ok && hasLinked(c12.log) && hasStaleForce(c12.log) && !hasNothing(c12.log),
+    { linked: hasLinked(c12.log), force: hasStaleForce(c12.log), nothing: hasNothing(c12.log) });
+  await sleep(30);
+  fs.appendFileSync(path.join(uDir, 'ram.ld'), '/* custom touch */\n');
+  const c13 = await uBuild();
+  check('C13 改 ram.ld → 仍重链接（CB 语义：每次构建都重链）',
+    c13.ok && hasLinked(c13.log) && hasStaleForce(c13.log), { linked: hasLinked(c13.log) });
+  // 去掉自定义命令（compile=1 不可编译）→ CB 产生 "Skipping file" 条目，同样强制
+  uProject.buildTargets[0].files.find((f) => f.relativeFilename === 'ram.ld').customBuildCommands = {};
+  const c14 = await uBuild();
+  check('C14 无自定义命令（compile=1 不可编译）→ 仍强制重链接（Skipping 条目对齐）',
+    c14.ok && hasLinked(c14.log) && hasStaleForce(c14.log), { linked: hasLinked(c14.log) });
+  // 静态库目标：条目计数强制 → 无修改也重新打包
+  const libLd = libProject.buildTargets[0].files.find((f) => f.relativeFilename === 'ram.ld');
+  libLd.compile = true;
+  libLd.customBuildCommands = { gcc: { command: ' ', use: true } };
+  const c15 = await libBuild();
+  check('C15 静态库 compile=1 自定义空命令 → 无修改也重新打包（CB 条目计数）',
+    c15.ok && hasArchived(c15.log) && hasStaleForce(c15.log), { archived: hasArchived(c15.log) });
 
   console.log(`链接输入新鲜度回归: ${pass} pass, ${fail} fail`);
   process.exit(fail ? 1 : 0);
