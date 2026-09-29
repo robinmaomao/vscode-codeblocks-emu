@@ -2,7 +2,7 @@
   "name": "codeblocks-vscode",
   "displayName": "Code::Blocks for VS Code",
   "description": "原生移植 Code::Blocks 核心功能到 VS Code：项目模型、构建引擎、编译器管理与调试引擎",
-  "version": "0.8.109-dev",
+  "version": "0.8.110-dev",
   "icon": "resources/icon.png",
   "publisher": "robinmaomao",
   "author": {
@@ -93,6 +93,11 @@
         "command": "codeblocks.buildLog.toggleErrorsOnly",
         "title": "Code::Blocks: Toggle Errors Only (Build Log)",
         "icon": "$(filter)"
+      },
+      {
+        "command": "codeblocks.buildLog.showAllMessages",
+        "title": "Code::Blocks: Show All Messages (Build Log)",
+        "icon": "$(filter-filled)"
       },
       {
         "command": "codeblocks.buildLog.copyMessage",
@@ -929,7 +934,7 @@
         {
           "id": "codeblocks.symbols",
           "name": "Symbols",
-          "icon": "resources/project.svg",
+          "icon": "resources/symbols.svg",
           "initialSize": 9,
           "visibility": "hidden",
           "when": "config.codeblocks.ui.symbolsView"
@@ -974,6 +979,12 @@
       }
     ],
     "menus": {
+      "commandPalette": [
+        {
+          "command": "codeblocks.buildLog.showAllMessages",
+          "when": "false"
+        }
+      ],
       "view/title": [
         {
           "command": "codeblocks.newProject",
@@ -1101,7 +1112,7 @@
           "group": "navigation@1"
         },
         {
-          "command": "codeblocks.buildLog.toggleErrorsOnly",
+          "command": "codeblocks.buildLog.showAllMessages",
           "when": "view == codeblocks.buildLog && codeblocks.buildLog.errorsOnly",
           "group": "navigation@1"
         }
