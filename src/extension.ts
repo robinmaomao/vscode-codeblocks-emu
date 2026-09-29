@@ -560,13 +560,17 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     }),
   );
 
-  // Build Log「只看错误」过滤（C2）
+  // Build Log「只看错误」过滤（C2）；UI 核查 N3：拆两条命令（图标不同）——
+  // 未开启时工具栏显示 toggleErrorsOnly（$(filter)），已开启时显示 showAllMessages（$(filter-filled)），
+  // 后者从命令面板隐藏（package.json menus.commandPalette when=false），两者共用同一开关处理器
+  const toggleErrorsOnly = () => {
+    const next = !(buildLogTreeProvider?.getErrorsOnly() ?? false);
+    buildLogTreeProvider?.setErrorsOnly(next);
+    vscode.commands.executeCommand('setContext', 'codeblocks.buildLog.errorsOnly', next);
+  };
   context.subscriptions.push(
-    vscode.commands.registerCommand('codeblocks.buildLog.toggleErrorsOnly', () => {
-      const next = !(buildLogTreeProvider?.getErrorsOnly() ?? false);
-      buildLogTreeProvider?.setErrorsOnly(next);
-      vscode.commands.executeCommand('setContext', 'codeblocks.buildLog.errorsOnly', next);
-    }),
+    vscode.commands.registerCommand('codeblocks.buildLog.toggleErrorsOnly', toggleErrorsOnly),
+    vscode.commands.registerCommand('codeblocks.buildLog.showAllMessages', toggleErrorsOnly),
   );
 
   // 复制诊断（C3）
