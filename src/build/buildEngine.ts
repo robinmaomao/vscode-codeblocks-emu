@@ -1859,8 +1859,9 @@ export class BuildEngine {
     const objDir = target.objectOutput || '.objs';
     const rel = file.relativeToCommonTopLevelPath || file.relativeFilename;
     if (path.isAbsolute(rel)) {
-      // 跨卷文件对象路径（对齐 projectfile.cpp:474-492：objOut += 卷名，去卷路径拼接；
-      // 卷字母去冒号——CB 字面保留 'E:' 在 Windows 属非法路径段，取 'E' 为保护性差异）
+      // 跨卷文件对象路径（对齐 projectfile.cpp:474-492：objOut += 卷名，去卷路径拼接）。
+      // CB 的 wxFileName::GetVolume() 不含冒号（SplitVolume 取 posFirstColon 之前）→ CB 输出
+      // obj\Debug\D\Source\foo.o；此处同样取卷字母（去冒号）→ 与 CB 一致（非差异）。
       const parsedAbs = path.parse(rel);
       const volLetter = (parsedAbs.root ?? '').replace(/[:\\/]/g, '');
       const extAbs = ft === FileType.Resource ? 'res' : this.compiler.switches.objectExtension;
