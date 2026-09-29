@@ -359,6 +359,49 @@ async function uBuild() {
     && c22b.log.some((l) => l.includes("Can't read file's timestamp")) && !hasNothing(c22b.log),
     { firstLinked: hasLinked(c22a.log), secondLinked: hasLinked(c22b.log), nothing: hasNothing(c22b.log) });
 
+  // ==== F4a + 缺失可链接源文件：gone.c（link=true，对象缺失 → 链接强制并失败，对齐 CB）+ gone2.ld（compilerVar 空）WARNING ====
+  const m2Dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cb-li-missing2-'));
+  fs.writeFileSync(path.join(m2Dir, 'main.c'), 'int main(void) { return 0; }\n');
+  fs.writeFileSync(path.join(m2Dir, 'missing2.cbp'), `<?xml version="1.0" encoding="UTF-8" standalone="yes" ?>
+<CodeBlocks_project_file>
+\t<FileVersion major="1" minor="6" />
+\t<Project>
+\t\t<Option title="missing2" />
+\t\t<Option compiler="gcc" />
+\t\t<Build>
+\t\t\t<Target title="Debug">
+\t\t\t\t<Option output="bin/Debug/missing2" prefix_auto="1" extension_auto="1" />
+\t\t\t\t<Option type="1" />
+\t\t\t\t<Option compiler="gcc" />
+\t\t\t\t<Option object_output="obj/Debug/" />
+\t\t\t</Target>
+\t\t</Build>
+\t\t<Unit filename="main.c" />
+\t\t<Unit filename="gone.c" />
+\t\t<Unit filename="gone2.ld">
+\t\t\t<Option compile="1" />
+\t\t\t<Option compilerVar="" />
+\t\t</Unit>
+\t\t<Extensions />
+\t</Project>
+</CodeBlocks_project_file>
+`, 'utf-8');
+  const m2Project = new ProjectParser().parse(path.join(m2Dir, 'missing2.cbp'));
+  const m2Sink = makeOutput();
+  const m2Engine = makeEngine(m2Project, m2Sink);
+  async function m2Build() {
+    m2Sink.reset();
+    const ok = await m2Engine.build('Debug', {});
+    return { ok, log: m2Sink.log };
+  }
+  const c23a = await m2Build();
+  const c23b = await m2Build();
+  const warnGoneC = c23b.log.some((l) => l.includes("Can't read file's timestamp") && l.includes('gone.c'));
+  const warnGoneLd = c23b.log.some((l) => l.includes("Can't read file's timestamp") && l.includes('gone2.ld'));
+  check('C23 缺失可链接源（gone.c）+ compilerVar 空缺失源（gone2.ld）→ 双 WARNING + 不再 Nothing to be done + 链接强制（失败，对齐 CB）',
+    warnGoneC && warnGoneLd && !hasNothing(c23b.log) && hasLinked(c23b.log) && c23a.ok === false && c23b.ok === false,
+    { warnGoneC, warnGoneLd, nothing: hasNothing(c23b.log), linked: hasLinked(c23b.log), firstOk: c23a.ok, secondOk: c23b.ok });
+
   console.log(`链接输入新鲜度回归: ${pass} pass, ${fail} fail`);
   process.exit(fail ? 1 : 0);
 })().catch((e) => { console.error(e); process.exit(2); });
