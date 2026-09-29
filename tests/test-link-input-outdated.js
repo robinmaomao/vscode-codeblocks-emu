@@ -69,6 +69,7 @@ fs.writeFileSync(path.join(dir, 'main.c'), 'int asm_helper(void);\nint main(void
 fs.writeFileSync(path.join(dir, 'start.S'), '#include "defs.h"\n    .text\n    .globl asm_helper\nasm_helper:\n    movl $VALUE, %eax\n    ret\n');
 fs.writeFileSync(path.join(dir, 'defs.h'), '#define VALUE 42\n');
 fs.writeFileSync(path.join(dir, 'ram.ld'), '/* linker script placeholder */\n');
+fs.writeFileSync(path.join(dir, 'app.xm'), '/* xm resource placeholder */\n');
 fs.writeFileSync(path.join(dir, 'notes.txt'), 'not a build input\n');
 fs.writeFileSync(path.join(dir, 'app.cbp'), `<?xml version="1.0" encoding="UTF-8" standalone="yes" ?>
 <CodeBlocks_project_file>
@@ -87,6 +88,7 @@ fs.writeFileSync(path.join(dir, 'app.cbp'), `<?xml version="1.0" encoding="UTF-8
 \t\t<Unit filename="main.c" />
 \t\t<Unit filename="start.S" />
 \t\t<Unit filename="ram.ld" />
+\t\t<Unit filename="app.xm" />
 \t\t<Unit filename="notes.txt" />
 \t\t<Unit filename="defs.h" />
 \t\t<Extensions />
@@ -186,6 +188,7 @@ async function uBuild() {
     { ok: c1.ok, compiled: compiledNames(c1.log), linked: hasLinked(c1.log) });
 
   // C2 改 ram.ld（编译单元为空 → 早退分支路径）
+  settings['build.linkInputExtensions'] = ['ld']; // 默认仅 xm；本场景需 ld
   await sleep(30);
   fs.appendFileSync(path.join(dir, 'ram.ld'), '/* touch1 */\n');
   const c2 = await build();
@@ -220,8 +223,8 @@ async function uBuild() {
   check('C6 设置 [] 关闭 → 改 ram.ld 仍 Nothing to be done',
     c6.ok && hasNothing(c6.log) && !hasRelinkMsg(c6.log), { linked: hasLinked(c6.log) });
 
-  // C7 恢复默认设置 → 改 ram.ld 再次触发
-  delete settings['build.linkInputExtensions'];
+  // C7 恢复 ld 白名单（默认仅 xm）→ 改 ram.ld 再次触发
+  settings['build.linkInputExtensions'] = ['ld'];
   await sleep(30);
   fs.appendFileSync(path.join(dir, 'ram.ld'), '/* touch5 */\n');
   const c7 = await build();
@@ -289,10 +292,10 @@ async function uBuild() {
 
   settings['build.linkInputExtensions'] = true;
   await sleep(30);
-  fs.appendFileSync(path.join(dir, 'ram.ld'), '/* f2-garbage */\n');
+  fs.appendFileSync(path.join(dir, 'app.xm'), '/* f2-garbage */\n');
   const c18 = await build();
-  check('C18 误配 true → 回退默认列表 → 改 ram.ld 重链接', c18.ok && hasLinked(c18.log) && hasRelinkMsg(c18.log), { linked: hasLinked(c18.log) });
-  delete settings['build.linkInputExtensions'];
+  check('C18 误配 true → 回退默认列表（xm）→ 改 app.xm 重链接', c18.ok && hasLinked(c18.log) && hasRelinkMsg(c18.log), { linked: hasLinked(c18.log) });
+  settings['build.linkInputExtensions'] = ['ld']; // C19（F3a）需 ld
 
   // ==== F3a：compile=false + 自定义命令 use=1 → 恢复 mtime 触发 ====
   const uLd = uProject.buildTargets[0].files.find((f) => f.relativeFilename === 'ram.ld');

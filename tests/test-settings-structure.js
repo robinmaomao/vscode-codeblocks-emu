@@ -42,9 +42,9 @@ for (const b of cfg) {
 check('无重复键', new Set(keys).size === keys.length, keys.length - new Set(keys).size);
 check('disableInit 默认 true（对齐 CB disable_init）', byKey['codeblocks.debug.disableInit']?.default === true, byKey['codeblocks.debug.disableInit']);
 check('saveHtmlLogFullCommandLine 默认 false（对齐 CB full_command_line）', byKey['codeblocks.build.saveHtmlLogFullCommandLine']?.default === false, byKey['codeblocks.build.saveHtmlLogFullCommandLine']);
-check('linkInputExtensions 默认 ld/lds/icf/def/xm（保护性增强，可设 [] 关闭）',
+check('linkInputExtensions 默认 xm（保护性增强，可设 [] 关闭；其它扩展名可自行添加）',
   byKey['codeblocks.build.linkInputExtensions']?.type === 'array'
-  && JSON.stringify(byKey['codeblocks.build.linkInputExtensions']?.default) === JSON.stringify(['ld', 'lds', 'icf', 'def', 'xm']),
+  && JSON.stringify(byKey['codeblocks.build.linkInputExtensions']?.default) === JSON.stringify(['xm']),
   byKey['codeblocks.build.linkInputExtensions']);
 check('cleanResponseFiles 默认 false（保护性增强；CB 不清理响应文件）',
   byKey['codeblocks.build.cleanResponseFiles']?.type === 'boolean'
