@@ -2,7 +2,7 @@
   "name": "codeblocks-vscode",
   "displayName": "Code::Blocks for VS Code",
   "description": "原生移植 Code::Blocks 核心功能到 VS Code：项目模型、构建引擎、编译器管理与调试引擎",
-  "version": "0.8.100-dev",
+  "version": "0.8.101-dev",
   "icon": "resources/icon.png",
   "publisher": "robinmaomao",
   "author": {
@@ -574,7 +574,7 @@
               "def",
               "xm"
             ],
-            "description": "增量编译识别的工程内链接输入文件扩展名（.ld/.lds 链接脚本、.icf、.def 等）：改动后自动重链接/重新打包（保护性增强；Code::Blocks 需手动填入 External dependencies）。设为空数组 [] 关闭该增强"
+            "description": "增量编译识别的工程内链接输入文件扩展名（.ld/.lds 链接脚本、.icf、.def 等）：改动后自动重链接/重新打包（保护性增强；Code::Blocks 需手动填入 External dependencies）。支持 `ld`/`.ld`/`*.ld` 形式（大小写不敏感；也可填逗号/分号分隔的字符串，误配自动回退默认）。设为空数组 [] 关闭该增强。仅作用于未显式参与编译（compile 默认 false）的文件；带 compile=\"1\" 的文件按 CB 条目计数规则每次构建强制重链"
           },
           "codeblocks.build.verboseOutput": {
             "type": "boolean",

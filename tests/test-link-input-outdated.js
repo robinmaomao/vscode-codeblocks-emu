@@ -273,6 +273,51 @@ async function uBuild() {
   check('C15 静态库 compile=1 自定义空命令 → 无修改也重新打包（CB 条目计数）',
     c15.ok && hasArchived(c15.log) && hasStaleForce(c15.log), { archived: hasArchived(c15.log) });
 
+  // ==== F2：设置误配容错（字符串 / *.ld / 非数组回退默认） ====
+  project.buildTargets[0].externalDeps = []; // 复位 C8 的外部依赖，避免其独立触发重链
+  settings['build.linkInputExtensions'] = 'ld, lds';
+  await sleep(30);
+  fs.appendFileSync(path.join(dir, 'ram.ld'), '/* f2-string */\n');
+  const c16 = await build();
+  check('C16 字符串设置 "ld, lds" → 改 ram.ld 重链接', c16.ok && hasLinked(c16.log) && hasRelinkMsg(c16.log), { linked: hasLinked(c16.log) });
+
+  settings['build.linkInputExtensions'] = ['*.ld'];
+  await sleep(30);
+  fs.appendFileSync(path.join(dir, 'ram.ld'), '/* f2-glob */\n');
+  const c17 = await build();
+  check('C17 设置 ["*.ld"]（通配符）→ 改 ram.ld 重链接', c17.ok && hasLinked(c17.log) && hasRelinkMsg(c17.log), { linked: hasLinked(c17.log) });
+
+  settings['build.linkInputExtensions'] = true;
+  await sleep(30);
+  fs.appendFileSync(path.join(dir, 'ram.ld'), '/* f2-garbage */\n');
+  const c18 = await build();
+  check('C18 误配 true → 回退默认列表 → 改 ram.ld 重链接', c18.ok && hasLinked(c18.log) && hasRelinkMsg(c18.log), { linked: hasLinked(c18.log) });
+  delete settings['build.linkInputExtensions'];
+
+  // ==== F3a：compile=false + 自定义命令 use=1 → 恢复 mtime 触发 ====
+  const uLd = uProject.buildTargets[0].files.find((f) => f.relativeFilename === 'ram.ld');
+  uLd.compile = false;
+  uLd.customBuildCommands = { gcc: { command: ' ', use: true } };
+  await sleep(30);
+  fs.appendFileSync(path.join(uDir, 'ram.ld'), '/* f3a */\n');
+  const c19 = await uBuild();
+  check('C19 compile=false + 自定义命令 use=1 → 改 ram.ld 重链接（F3a）',
+    c19.ok && hasLinked(c19.log) && hasRelinkMsg(c19.log), { linked: hasLinked(c19.log) });
+
+  // ==== F1：compile=1 + 真实自定义命令 → 编译单元条目强制（无修改也重链） ====
+  uLd.compile = true;
+  uLd.customBuildCommands = { gcc: { command: 'cmd /c echo cb-custom', use: true } };
+  const c20 = await uBuild();
+  check('C20 compile=1 + 真实自定义命令 → 无修改构建仍重链接（CB 条目计数补全）',
+    c20.ok && hasLinked(c20.log) && compiledNames(c20.log).includes('ram.ld'),
+    { linked: hasLinked(c20.log), compiled: compiledNames(c20.log) });
+
+  const libLd2 = libProject.buildTargets[0].files.find((f) => f.relativeFilename === 'ram.ld');
+  libLd2.customBuildCommands = { gcc: { command: 'cmd /c echo cb-custom', use: true } };
+  const c21 = await libBuild();
+  check('C21 静态库 compile=1 + 真实自定义命令 → 无修改也重新打包（条目计数补全）',
+    c21.ok && hasArchived(c21.log), { archived: hasArchived(c21.log) });
+
   console.log(`链接输入新鲜度回归: ${pass} pass, ${fail} fail`);
   process.exit(fail ? 1 : 0);
 })().catch((e) => { console.error(e); process.exit(2); });

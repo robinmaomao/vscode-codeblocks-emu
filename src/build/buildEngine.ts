@@ -1000,6 +1000,9 @@ export class BuildEngine {
           const names = staleNoopFiles.slice(0, 3).join('、') + (staleNoopFiles.length > 3 ? '…' : '');
           this.output.info(`[Code::Blocks] ${msg(`目标 "${target.title}" 含 ${staleNoopFiles.length} 个过期且无可执行命令的编译文件（${names}），强制链接（对齐 CB 条目计数）`, `Target "${target.title}" has ${staleNoopFiles.length} stale compile file(s) without an executable command (${names}); forcing link (CB entry-count parity)`)}`);
         }
+        // CB 条目计数补全（同 :585）：编译阶段产生过任何条目即强制——真实自定义命令本身也是条目，
+        // 其对象永不产生（如 ram.ld 自定义命令），对象时间戳链路无法触发重链；普通工程零影响（对象已更新→本就强制）。
+        if (totalUnits > 0) forceLink = true;
         if (forceLink) {
           // 创建输出目录（如 Output\bin），否则链接器无法写 app.rv32；失败则中止本目标（对齐 GetTargetLinkCommands 的目录错误提示，用日志替代阻塞弹窗）
           if (!this.ensureDir(path.dirname(outputAbs))) {
@@ -1102,6 +1105,8 @@ export class BuildEngine {
           const names = staleNoopFiles.slice(0, 3).join('、') + (staleNoopFiles.length > 3 ? '…' : '');
           this.output.info(`[Code::Blocks] ${msg(`目标 "${target.title}" 含 ${staleNoopFiles.length} 个过期且无可执行命令的编译文件（${names}），强制重新打包（对齐 CB 条目计数）`, `Target "${target.title}" has ${staleNoopFiles.length} stale compile file(s) without an executable command (${names}); forcing archive (CB entry-count parity)`)}`);
         }
+        // CB 条目计数补全（同 :585）：真实自定义命令本身也是条目 → 编译过任何单元即强制重新打包（对象永不产生时同样成立）
+        if (totalUnits > 0) forceArchive = true;
         if (missing.length) {
           this.output.warn(`WARNING: Target '${this.project.title}/${target.title}': Unable to resolve ${missing.length} external dependency/ies:`);
           for (const m of missing) this.output.debug(`        ${m}`);
@@ -1463,16 +1468,21 @@ export class BuildEngine {
     return false;
   }
 
-  /** 链接输入扩展名列表（设置 codeblocks.build.linkInputExtensions，默认 ld/lds/icf/def/xm；空数组 = 关闭增强） */
+  /** 链接输入扩展名列表（设置 codeblocks.build.linkInputExtensions，默认 ld/lds/icf/def/xm；显式空数组 [] = 关闭增强） */
   private linkInputExtensions(): string[] {
-    const raw = vscode.workspace.getConfiguration('codeblocks').get<string[]>(
-      'build.linkInputExtensions',
-      ['ld', 'lds', 'icf', 'def', 'xm'],
-    );
-    if (!Array.isArray(raw)) return [];
-    return raw
-      .map((e) => String(e).trim().toLowerCase().replace(/^\./, ''))
-      .filter((e) => e.length > 0);
+    const defaults = ['ld', 'lds', 'icf', 'def', 'xm'];
+    const raw = vscode.workspace.getConfiguration('codeblocks').get<unknown>('build.linkInputExtensions', defaults);
+    // 误配容错（避免静默失效）：字符串（'ld, lds' / '.ld' / '*.ld'）按分隔符拆分；
+    // 其它非数组值（true/数字/对象/空串）回退默认列表；仅显式空数组 [] 表示关闭（文档约定）。
+    let list: unknown[];
+    if (Array.isArray(raw)) list = raw;
+    else if (typeof raw === 'string' && raw.trim() !== '') list = raw.split(/[;,\s]+/);
+    else list = defaults;
+    return [...new Set(
+      list
+        .map((e) => String(e).trim().toLowerCase().replace(/^\*\./, '').replace(/^\./, ''))
+        .filter((e) => e.length > 0),
+    )];
   }
 
   /**
@@ -1481,9 +1491,9 @@ export class BuildEngine {
    * 改动后无法进入对象时间戳链路，此前仅 external_deps 能触发重链接。这里按扩展名白名单检查其 mtime：
    * 比输出新 → 返回该文件绝对路径（调用方强制重链接/重新打包），否则返回 null。
    * 输出不存在时不判定（既有逻辑必然重链接）。
-   * 有自定义编译命令（use=1）的文件不在此列：其链接强制由 CB 条目计数规则负责
-   * （见 staleNoopFiles，对齐 GetTargetCompileCommands:585——对象永不产生 → 每次构建都强制链接）；
-   * 此处按 mtime 触发仅为 compile=false 的普通链接输入服务，避免与条目计数双重计入。
+   * compile=1 且带自定义编译命令（use=1）的文件不在此列：其链接强制由 CB 条目计数规则负责
+   * （见 staleNoopFiles/编译单元，对齐 GetTargetCompileCommands:585——对象永不产生 → 每次构建都强制链接）；
+   * compile=false 的文件即便带自定义命令仍按 mtime 触发（命令不执行、CB 亦无动作，属保护性增强）。
    */
   private linkInputsOutdated(target: BuildTarget, buildOutput: string): string | null {
     const exts = this.linkInputExtensions();
@@ -1494,10 +1504,11 @@ export class BuildEngine {
     let newestTime = 0;
     for (const file of target.files) {
       // 已参与编译/链接链路的文件由对象时间戳与 #include 扫描覆盖，这里只认非编译、非链接对象文件；
-      // 带自定义编译命令（use=1）的文件由 CB 条目计数规则强制（staleNoopFiles），此处跳过避免重复判定
+      // compile=1 且带自定义编译命令（use=1）的文件由 CB 条目计数规则强制（staleNoopFiles/编译单元），
+      // 此处跳过避免双重计入；compile=false 的即便带自定义命令仍按 mtime 触发（命令不执行，保护性增强）
       const ft = fileTypeOf(file.relativeFilename);
       if (isCompilableFileType(ft) || isLinkableFileType(ft)) continue;
-      if (file.customBuildCommands?.[target.compilerId]?.use) continue;
+      if (file.customBuildCommands?.[target.compilerId]?.use && file.compile) continue;
       if (!exts.includes(fileExt(file.relativeFilename))) continue;
       const abs = path.isAbsolute(file.relativeFilename)
         ? file.relativeFilename
