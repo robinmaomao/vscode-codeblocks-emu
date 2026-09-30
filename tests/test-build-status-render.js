@@ -26,7 +26,8 @@ const ext = fs.readFileSync(path.resolve(__dirname, '../dist/extension.js'), 'ut
 check('B1 dist 使用 nextBuildSpinRender', ext.includes('nextBuildSpinRender'), null);
 check('B2 dist 状态机变量 spinRendered 已接入', ext.includes('spinRendered'), null);
 check('B3 dist 未删除 spinTimer 清理（dispose clearInterval）', ext.includes('clearInterval(spinTimer)'), null);
-check('B4 dist 空闲分支仍设置 Build 菜单命令（状态迁移时）', ext.includes("'codeblocks.build.menu'"), null);
+check('B4 dist 空闲分支仍设置 Build 菜单命令（tooltip→command 顺序特征，非宽泛断言）',
+  /buildStatusBar\.tooltip = buildStatusHoverTooltip\(\);\s*buildStatusBar\.command = 'codeblocks\.build\.menu'/.test(ext), null);
 
 console.log(`\nbuild-status-render: pass=${pass} fail=${fail}`);
 process.exit(fail ? 1 : 0);
