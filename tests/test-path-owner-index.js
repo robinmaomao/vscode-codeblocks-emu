@@ -77,7 +77,8 @@ const ext = fs.readFileSync(path.resolve(__dirname, '../dist/extension.js'), 'ut
 check('B1 dist 使用 buildPathOwnerIndex/findSoleOwner', ext.includes('buildPathOwnerIndex') && ext.includes('findSoleOwner'), null);
 check('B2 dist 含失效入口 invalidateOwnerIndex 且 openProject 接线', ext.includes('invalidateOwnerIndex'), null);
 check('B3 dist 无旧 O(项目×文件) 精确扫描残留', !ext.includes('p.files?.some'), null);
-check('B4 dist 保留回退前缀扫描（commonTopLevelPath）', ext.includes('commonTopLevelPath'), null);
+check('B4 dist 保留回退前缀扫描（treeOwners + 精确前缀比较，非宽泛断言）',
+  ext.includes('treeOwners') && ext.includes("norm.startsWith(root + '/')"), null);
 check('B5 dist 含事件记忆化 lastSyncMemo', ext.includes('lastSyncMemo'), null);
 
 console.log(`\npath-owner-index: pass=${pass} fail=${fail}`);
