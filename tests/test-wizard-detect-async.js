@@ -23,7 +23,7 @@ const loadCalls = (ext.match(/loadDetectCache\(\)/g) || []).length;
 check('A5 跨会话缓存读取 ≥2 处（状态栏命令 + 新建向导）', loadCalls >= 2, loadCalls, '>=2');
 const saveCalls = (ext.match(/saveDetectCache\(/g) || []).length;
 check('A6 探测结果落缓存 ≥2 处（状态栏命令 + 新建向导）', saveCalls >= 2, saveCalls, '>=2');
-check('A7 向导路径含 busy/快速失败容错（try/catch 回退空列表）', /detected = \[\]/.test(ext), null);
+check('A7 向导路径含快速失败容错（catch 回退空列表，非恒真断言）', /catch\s*\{\s*detected = \[\]/.test(ext), null);
 
 // ---- 3. pickCompiler 源码区段内无同步探测 ----
 {
