@@ -7,8 +7,12 @@
  * 宏替换顺序严格遵守 Code::Blocks 语义（$objects_output_dir 必须在 $object 之前）。
  */
 import * as path from 'path';
+import * as fs from 'fs';
+import { spawnSync } from 'child_process';
 import { Compiler } from '../compiler/compiler';
-import { upperDrive } from '../tools/pathCase';
+import { upperDrive, shortPathWin } from '../tools/pathCase';
+import { replaceCbMacros, cbBuiltinVars, envVarMap } from './cbMacros';
+import { strictQuoting } from '../build/logLang';
 import {
   Project,
   BuildTarget,
@@ -18,19 +22,42 @@ import {
   OptionsRelationType,
   CommandType,
 } from '../model/types';
+import { FileType, fileTypeOf } from '../model/fileTypes';
+import { LruCache } from '../tools/lru';
+
+function toNative(p: string): string {
+  return process.platform === 'win32' ? p.replace(/\//g, '\\') : p;
+}
 
 function toUnix(p: string): string {
   return p.replace(/\\/g, '/');
 }
 
-/** Windows 下转为反斜杠（对齐 Code::Blocks 在 Windows 生成命令行时的原生分隔符） */
-function toNative(p: string): string {
-  return process.platform === 'win32' ? p.replace(/\//g, '\\') : p;
+/**
+ * 汇编文件编译器选择（codeblocks.build.asmUsesCompilerVar）：
+ * true 时按 compilerVar 选择（对齐 CB：.s 默认 CPP → g++，compilercommandgenerator.cpp:258-288 无汇编特判）；
+ * 默认 false 保持扩展既有策略（汇编文件强制 C 编译器，避免 g++ 链接 C++ 运行库/嵌入式场景）。
+ */
+function asmUsesCompilerVar(): boolean {
+  try {
+    // 惰性 require：headless 单测无 vscode 宿主时回退默认
+    const vs: typeof import('vscode') = require('vscode');
+    return vs.workspace.getConfiguration('codeblocks').get<boolean>('build.asmUsesCompilerVar', false) === true;
+  } catch {
+    return false;
+  }
 }
 
 /** 如果字符串含空白则加引号（QuoteStringIfNeeded） */
 export function quoteIfNeeded(s: string): string {
   if (!s) return s;
+  // 严格模式（codeblocks.build.strictQuoting）：仅空格加引号，对齐 CB NeedQuotes
+  if (strictQuoting()) {
+    if (/[ \t]/.test(s) && !s.startsWith('"')) {
+      return `"${s}"`;
+    }
+    return s;
+  }
   // 含空白或 cmd 元字符（& | < > ^ ( )）时加引号，避免 shell 二次解析拆断路径
   if (/[ \t&|<>^()]/.test(s) && !s.startsWith('"')) {
     return `"${s}"`;
@@ -39,26 +66,48 @@ export function quoteIfNeeded(s: string): string {
 }
 
 /**
- * 计算库输出文件名（对齐 SetupOutputFilenames，compilercommandgenerator.cpp:747 / 773）：
- * prefix_auto（平台默认）时 basename 不以 libPrefix 开头则加 lib 前缀；
- * extension_auto（平台默认）时扩展名不是指定扩展名则追加。
+ * 计算库输出文件名（对齐 SetupOutputFilenames，compilercommandgenerator.cpp:648）：
+ * prefixAuto（平台默认）时 basename 不以 libPrefix 开头则加 lib 前缀；
+ * extensionAuto（平台默认）时扩展名不是指定扩展名则追加（对齐 CB：追加到完整文件名，
+ * multi-dot 安全——foo.d → libfoo.d.a；Windows 扩展名比较大小写不敏感，Linux 敏感）。
  */
-export function computeLibOutput(outputFilename: string, libPrefix: string, extension: string): string {
-  const parsed = path.parse(outputFilename);
-  let name = parsed.name;
-  if (libPrefix && !name.startsWith(libPrefix)) {
-    name = libPrefix + name;
+export function computeLibOutput(
+  outputFilename: string,
+  libPrefix: string,
+  extension: string,
+  prefixAuto = true,
+  extensionAuto = true,
+  insensitiveExt?: boolean,
+): string {
+  const dir = path.dirname(outputFilename);
+  let fullName = path.basename(outputFilename);
+  const name = path.basename(fullName, path.extname(fullName));
+  const curExt = path.extname(fullName).replace('.', '');
+  // 前缀策略（对齐 CB：检查 GetName() 是否以 libPrefix 开头）
+  if (prefixAuto && libPrefix && !name.startsWith(libPrefix)) {
+    fullName = libPrefix + fullName;
   }
-  let result = path.join(parsed.dir, name);
-  if (!result.endsWith('.' + extension)) {
-    result = result + '.' + extension;
+  // 扩展名策略（对齐 CB：静态库 756 按平台大小写，import 库 687 恒大小写不敏感 → insensitiveExt 参数）
+  if (extensionAuto && extension) {
+    const same = (insensitiveExt ?? process.platform === 'win32')
+      ? curExt.toLowerCase() === extension.toLowerCase()
+      : curExt === extension;
+    if (!same) {
+      fullName += '.' + extension;
+    }
   }
-  return result;
+  return path.join(dir, fullName);
 }
 
-/** 静态库/import 库输出（.a），复用 computeLibOutput */
-export function computeStaticOutput(outputFilename: string, switches: { libPrefix: string; libExtension: string }): string {
-  return computeLibOutput(outputFilename, switches.libPrefix, switches.libExtension);
+/** 静态库/import 库输出（.a），复用 computeLibOutput（策略默认平台默认，ttDynamicLib 调用方强制；import 库扩展名恒大小写不敏感 → insensitiveExt 透传） */
+export function computeStaticOutput(
+  outputFilename: string,
+  switches: { libPrefix: string; libExtension: string },
+  prefixAuto = true,
+  extensionAuto = true,
+  insensitiveExt?: boolean,
+): string {
+  return computeLibOutput(outputFilename, switches.libPrefix, switches.libExtension, prefixAuto, extensionAuto, insensitiveExt);
 }
 
 function unquote(s: string): string {
@@ -119,11 +168,54 @@ interface PregenCache {
   linkerSearchDirs: string[];
 }
 
+/** 反引号命令缓存（对齐 globals.cpp m_Backticks：全局共享；已改为 LRU 256 防无界增长，构建入口仍按 CB 语义清空） */
+const backticksCache = new LruCache<string, string>(256);
+
+/**
+ * 反引号展开 —— 对齐 cbExpandBackticks（globals.cpp:867-927）：
+ * 逐对 `` `cmd` `` 执行 `cmd /c cmd`（Windows）并把输出（逐行 trim 后空格拼接）替换回原位置；
+ * 结果按 cmd 全局缓存（m_Backticks）。onOutput 收到每条展开输出（对齐 SearchDirsFromBackticks 扫描源）。
+ */
+export function expandBackticks(str: string, onOutput?: (bt: string) => void): string {
+  if (!str.includes('`')) return str;
+  let out = str;
+  let guard = 0;
+  while (guard++ < 32) {
+    const start = out.indexOf('`');
+    if (start < 0) break;
+    const end = out.indexOf('`', start + 1);
+    if (end < 0) break;
+    const cmd = out.slice(start + 1, end).trim();
+    if (!cmd) break;
+    let bt = backticksCache.get(cmd);
+    if (bt === undefined) {
+      try {
+        const r = spawnSync(cmd, { shell: true, timeout: 15000, maxBuffer: 1024 * 1024, encoding: 'utf8' });
+        const text = (r.stdout ?? '').replace(/\r/g, '');
+        bt = text.split('\n').map((l) => l.trim()).filter(Boolean).join(' ');
+      } catch {
+        bt = '';
+      }
+      backticksCache.set(cmd, bt);
+    }
+    if (bt && onOutput) onOutput(bt);
+    out = out.slice(0, start) + bt + out.slice(end + 1);
+  }
+  return out;
+}
+
+/** 清空反引号缓存 —— 对齐 cbClearBackticksCache（Build/Rebuild/BuildWorkspace 入口调用；单目标 Clean 不清） */
+export function clearBackticksCache(): void {
+  backticksCache.clear();
+}
+
 export class CommandGenerator {
   private project: Project;
   private compiler: Compiler;
   /** 按 target title 索引的预生成缓存 */
   private cache = new Map<string, PregenCache>();
+  /** 反引号派生搜索目录（SearchDirsFromBackticks 语义，供 deps 扫描） */
+  private backtickDirs = new Map<string, { inc: string[]; lib: string[] }>();
 
   constructor(project: Project, compiler: Compiler) {
     this.project = project;
@@ -134,6 +226,17 @@ export class CommandGenerator {
   /** 对应 CompilerCommandGenerator::Init() */
   private init(): void {
     for (const target of this.project.buildTargets) {
+      // CommandsOnly 目标：空存根（对齐 Init:130-144——m_Output/m_Inc/m_CFlags 等全空，
+      // 编译命令不带选项/include/lib 目录）
+      if (target.targetType === TargetType.CommandsOnly) {
+        this.cache.set(target.title, {
+          output: '', staticOutput: '', defOutput: '',
+          inc: '', lib: '', rc: '',
+          cFlags: '', rcFlags: '', ldFlags: '', ldAdd: '',
+          compilerSearchDirs: [], linkerSearchDirs: [],
+        });
+        continue;
+      }
       const c: PregenCache = {
         output: this.setupOutputFilenames(target),
         staticOutput: this.setupStaticOutput(target),
@@ -148,29 +251,100 @@ export class CommandGenerator {
         compilerSearchDirs: this.getOrderedIncludeDirs(target),
         linkerSearchDirs: this.getOrderedLibDirs(target),
       };
+      // 依赖扫描目录追加 cwd 类目录（对齐 CB GetIncludeDirs:808-811）
+      if (this.compiler.includePrjCwd) c.compilerSearchDirs.push(this.project.basePath);
+      if (this.compiler.includeFileCwd) c.compilerSearchDirs.push('.');
       this.cache.set(target.title, c);
     }
   }
 
   private rel = OptionsRelationType;
 
+  /** 对齐 FixPathSeparators（compilercommandgenerator.cpp:629）：forceFwdSlashes 时 \→/（跳过 "\ " 转义空格） */
+  private fixSep(s: string): string {
+    return this.compiler.switches.forceFwdSlashes ? s.replace(/\\(?! )/g, '/') : s;
+  }
+
   private getRelation(target: BuildTarget, type: OptionsRelationType): OptionsRelation {
     return target.optionRelations[type] ?? OptionsRelation.AppendToParentOptions;
   }
 
+  /**
+   * 构建宏表（目标上下文）——`<Environment>` 变量（目标覆盖项目）+ 内置宏。
+   * 合并次序对齐 macrosmanager RecalcVars：环境变量在前、内置宏在后 → 内置宏优先。
+   */
+  private cbVars(target: BuildTarget): Record<string, string> {
+    return {
+      ...envVarMap(this.project.envVars, target.envVars),
+      ...cbBuiltinVars(
+        this.project.basePath,
+        target.outputFilename,
+        target.title,
+        target.objectOutput,
+        this.project.title,
+        this.project.filename,
+        this.compiler.masterPath,
+      ),
+    };
+  }
+
+  /** 对齐 CB ReplaceMacros（含 $(#var)、日期/时间、env 回退、反转义；compilercommandgenerator.cpp:579/806-1163） */
+  private expandCb(s: string, target: BuildTarget): string {
+    return replaceCbMacros(s, { vars: this.cbVars(target), customVars: this.project.customVariables ?? {}, basePath: this.project.basePath });
+  }
+
   private setupOutputFilenames(target: BuildTarget): string {
-    // 对齐 CodeBlocks SetupOutputFilenames：保留原生分隔符
-    // （FixPathSeparators 仅在 forceFwdSlashes=true 时转正斜杠，默认保持反斜杠）
-    return quoteIfNeeded(target.outputFilename);
+    // 对齐 CodeBlocks SetupOutputFilenames（compilercommandgenerator.cpp:654-656 先 ReplaceMacros，Quote 后 FixPathSeparators）：
+    // 保留原生分隔符（forceFwdSlashes=true 时 \ → /，默认保持反斜杠）
+    return quoteIfNeeded(this.fixSep(this.expandCb(target.outputFilename, target)));
   }
 
   private setupStaticOutput(target: BuildTarget): string {
-    return quoteIfNeeded(computeStaticOutput(target.outputFilename, this.compiler.switches));
+    // DynamicLib import 库：优先自定义 imp_lib，否则由 output 推导（对齐 GetDynamicLibImportFilename:390-404——
+    // 默认为 $(TARGET_OUTPUT_DIR)$(TARGET_OUTPUT_BASENAME) 即**输出去扩展名**，673 先 ReplaceMacros）；
+    // 对齐 SetupOutputFilenames：ttDynamicLib 的 import 库**强制**平台默认前缀/扩展（策略无视）且扩展名恒大小写不敏感（687 IsSameAs false）；Quote 后 FixPathSeparators
+    const force = target.targetType === TargetType.DynamicLib;
+    const base = target.impLib
+      ? this.expandCb(target.impLib, target)
+      : (force ? this.expandOutputBasename(target) : this.expandCb(target.outputFilename, target));
+    return quoteIfNeeded(this.fixSep(computeStaticOutput(
+      base,
+      this.compiler.switches,
+      force ? true : target.prefixAuto,
+      force ? true : target.extensionAuto,
+      force ? true : undefined,
+    )));
   }
 
   private setupDefOutput(target: BuildTarget): string {
-    // def 文件名同样加 lib 前缀（对齐 SetupOutputFilenames 第 773 行的 fname.SetExt("def")）
-    return quoteIfNeeded(computeLibOutput(target.outputFilename, this.compiler.switches.libPrefix, 'def'));
+    // def 文件名：优先自定义 def_file，否则由 output 推导（对齐 GetDynamicLibDefFilename:406-420——
+    // 默认为 $(TARGET_OUTPUT_DIR)$(TARGET_OUTPUT_BASENAME) 即**输出去扩展名**，700 先 ReplaceMacros）；
+    // 非动态：前缀随 prefix_auto 策略、扩展名恒替换为 def（对齐 SetupOutputFilenames:774 SetExt("def")，与 extension_auto 无关）；
+    // 动态：前缀随策略、扩展名追加且大小写不敏感（704-716）；Quote 后 FixPathSeparators
+    const isDyn = target.targetType === TargetType.DynamicLib;
+    const base = unquote(target.defFile
+      ? this.expandCb(target.defFile, target)
+      : (isDyn ? this.expandOutputBasename(target) : this.expandCb(target.outputFilename, target)));
+    const p = path.parse(base);
+    let name = p.name;
+    if (target.prefixAuto && this.compiler.switches.libPrefix && !name.startsWith(this.compiler.switches.libPrefix)) {
+      name = this.compiler.switches.libPrefix + name;
+    }
+    let defOut: string;
+    if (isDyn) {
+      const fullBase = name + p.ext;
+      defOut = path.join(p.dir, p.ext.toLowerCase() === '.def' ? fullBase : fullBase + '.def');
+    } else {
+      defOut = path.join(p.dir, name + '.def');
+    }
+    return quoteIfNeeded(this.fixSep(defOut));
+  }
+
+  /** 输出文件名去扩展名（含目录）—— 对齐 $(TARGET_OUTPUT_DIR)$(TARGET_OUTPUT_BASENAME)（compiletargetbase.cpp:396/412） */
+  private expandOutputBasename(target: BuildTarget): string {
+    const out = unquote(this.expandCb(target.outputFilename, target));
+    const p = path.parse(out);
+    return path.join(p.dir, p.name);
   }
 
   private setupIncludeDirs(target: BuildTarget): string {
@@ -179,7 +353,106 @@ export class CommandGenerator {
       target.includeDirs,
       this.getRelation(target, this.rel.IncludeDirs),
     );
-    return dirs.map((d) => this.compiler.switches.includeDirs + quoteIfNeeded(d)).join(this.compiler.switches.includeDirSeparator);
+    // 追加编译器全局目录（对齐 GetOrderedIncludeDirs：项目/目标后追加 compiler->GetIncludeDirs()）
+    dirs.push(...(this.compiler.includeDirs ?? []));
+    // PCH include 前置（对齐 CompilerMINGWGenerator::SetupIncludeDirs，compilerMINGWgenerator.cpp:34-95）：
+    // 仅在 pchObjectDir 模式 + 存在编译头文件时，把各 PCH 头对象目录前置为 -iquote/-I，末尾补 -I.
+    const pchPrepend = this.pchIncludePrepend(target);
+    return pchPrepend + this.joinIncludeEntries(dirs.map((d) => quoteIfNeeded(this.finalizeDir(d, target))));
+  }
+
+  /**
+   * PCH 头文件 include 前置串 —— 对齐 CompilerMINGWGenerator::SetupIncludeDirs（compilerMINGWgenerator.cpp:34-95）。
+   * 仅 GCC 家族（supportsPCH 的 MINGW 生成器）且 pch_mode==pchObjectDir（默认 1）且工程内存在 compile=true 的头文件时生效：
+   *   - 逐目录去重；
+   *   - gcc≥4：每目录一条 `-iquote<dir> `；gcc<4：每目录一条 `<includeDirs><dir> ` + 末尾额外 `-I- `；
+   *   - 第二循环对同一批目录各补一条 `<includeDirs><dir> `；
+   *   - 末尾固定 `-I. `；
+   *   - UseFlatObjects 时目录取扁平对象目录（fn.GetFullName()），否则取带源层级目录（fn.GetFullPath()）。
+   */
+  private pchIncludePrepend(target: BuildTarget): string {
+    const s = this.compiler.switches;
+    // 仅 supportsPCH 的编译器（GCC 家族；clang/MSVC 不启用 MINGW 生成器）
+    if (!s.supportsPCH) return '';
+    if (this.project.pchMode !== 1) return '';
+    const flat = s.useFlatObjects;
+    const includedDirs: string[] = [];
+    let hasPch = false;
+    for (const f of this.project.files) {
+      if (f.compile && fileTypeOf(f.relativeFilename) === FileType.Header) {
+        // PCH 对象名（对齐 projectfile.cpp:229-243 SetObjName / pfDetails::Update pchObjectDir）：
+        // 保留原名 + '.' + PCHExtension（如 guard.h → guard.h.gch）
+        const rel = toUnix(f.relativeToCommonTopLevelPath || f.relativeFilename);
+        const objDir = target.objectOutput || '.objs';
+        // fn.GetFullName()：仅文件名（UseFlatObjects=true）；fn.GetFullPath()：带源目录层级
+        const full = flat ? path.basename(rel) + '.' + (s.PCHExtension || 'gch')
+                          : rel + '.' + (s.PCHExtension || 'gch');
+        const dir = toUnix(path.dirname(path.join(objDir, full)));
+        if (!includedDirs.includes(dir)) includedDirs.push(dir);
+        hasPch = true;
+      }
+    }
+    if (!hasPch) return '';
+
+    // 版本号主版本（对齐 m_VerStr.BeforeFirst('.').ToLong(&gcc_major)，空/解析失败默认 4）
+    const ver = this.compiler.versionString ?? '';
+    const gccMajor = ver ? (parseInt(ver.split('.')[0], 10) || 4) : 4;
+
+    let prepend = '';
+    const incSwitch = s.includeDirs; // -I
+    for (const dir of includedDirs) {
+      const q = quoteIfNeeded(dir);
+      prepend += (gccMajor < 4 ? incSwitch + q : '-iquote' + q) + ' ';
+    }
+    if (gccMajor < 4) prepend += '-I- ';
+    for (const dir of includedDirs) {
+      prepend += incSwitch + quoteIfNeeded(dir) + ' ';
+    }
+    prepend += '-I. ';
+    return prepend;
+  }
+
+  /** 按编译器开关拼接 include 条目：includeDirs 以 '(' 结尾 → INCDIR(path1;path2) 风格（对齐 CB GenerateCommandLine:361-367/389-395） */
+  private joinIncludeEntries(entries: string[]): string {
+    const s = this.compiler.switches;
+    const sep = s.includeDirSeparator;
+    if (s.includeDirs.endsWith('(')) {
+      return s.includeDirs + entries.join(sep) + ')';
+    }
+    return entries.map((e) => s.includeDirs + e).join(sep);
+  }
+
+  /**
+   * 追加 cwd 类 include（对齐 GenerateCommandLine:347-403）：
+   * include_file_cwd → 当前编译文件目录；include_prj_cwd → 项目公共顶层目录；INCDIR 风格同样特判。
+   */
+  private applyCwdIncludes(inc: string, resInc: string, params: GenerateParams): { inc: string; resInc: string } {
+    const s = this.compiler.switches;
+    const paren = s.includeDirs.endsWith('(');
+    const appendOne = (cur: string, entry: string): string => {
+      if (!entry) return cur;
+      const q = quoteIfNeeded(this.fixSep(entry));
+      if (paren) {
+        const base = cur.endsWith(')') ? cur.slice(0, -1) : cur;
+        return base + s.includeDirSeparator + q + ')';
+      }
+      const sep = cur ? s.includeDirSeparator : '';
+      return cur + sep + s.includeDirs + q;
+    };
+    let ni = inc;
+    let nr = resInc;
+    if (this.compiler.includeFileCwd && params.file) {
+      const dir = path.dirname(unquote(params.file));
+      const entry = dir && dir !== '.' ? dir : '';
+      ni = appendOne(ni, entry);
+      nr = appendOne(nr, entry);
+    }
+    if (this.compiler.includePrjCwd) {
+      const entry = this.project.commonTopLevelPath || this.project.basePath;
+      ni = appendOne(ni, entry);
+      nr = appendOne(nr, entry);
+    }
+    return { inc: ni, resInc: nr };
   }
 
   private setupLibDirs(target: BuildTarget): string {
@@ -188,7 +461,10 @@ export class CommandGenerator {
       target.libDirs,
       this.getRelation(target, this.rel.LibDirs),
     );
-    return dirs.map((d) => this.compiler.switches.libDirs + quoteIfNeeded(d)).join(this.compiler.switches.libDirSeparator);
+    dirs.push(...(this.compiler.libDirs ?? []));
+    return dirs
+      .map((d) => this.compiler.switches.libDirs + quoteIfNeeded(this.finalizeDir(d, target)))
+      .join(this.compiler.switches.libDirSeparator);
   }
 
   private setupResourceIncludeDirs(target: BuildTarget): string {
@@ -197,7 +473,25 @@ export class CommandGenerator {
       target.resourceIncludeDirs,
       this.getRelation(target, this.rel.ResDirs),
     );
-    return dirs.map((d) => this.compiler.switches.includeDirs + quoteIfNeeded(d)).join(this.compiler.switches.includeDirSeparator);
+    dirs.push(...(this.compiler.resIncludeDirs ?? []));
+    return this.joinIncludeEntries(dirs.map((d) => quoteIfNeeded(this.finalizeDir(d, target))));
+  }
+
+  /**
+   * 目录宏展开 + 平台处理 —— 对齐 GetOrdered*Dirs 尾部循环：
+   * ReplaceMacros（含项目自定义变量）→ Use83Paths 短路径（目录存在时）→ 保留原生分隔符。
+   */
+  private finalizeDir(dir: string, target: BuildTarget): string {
+    // 对齐 GetOrdered*Dirs 尾部循环：ReplaceMacros（含 $(#var)/项目自定义变量）→ Use83Paths → 原生分隔符
+    let out = this.expandCb(dir, target);
+    if (process.platform === 'win32' && this.compiler.switches.use83Paths) {
+      const unquoted = unquote(out);
+      if (fs.existsSync(unquoted)) {
+        out = shortPathWin(unquoted);
+      }
+    }
+    // FixPathSeparators（对齐 GetOrdered*Dirs 尾部循环）
+    return this.fixSep(out);
   }
 
   private setupCompilerOptions(target: BuildTarget): string {
@@ -206,16 +500,24 @@ export class CommandGenerator {
       target.compilerOptions,
       this.getRelation(target, this.rel.CompilerOptions),
     );
-    return opts.join(' ');
+    // 追加编译器全局选项（对齐 SetupCompilerOptions:1017：关系合并后追加 compiler->GetCompilerOptions()）
+    opts.push(...(this.compiler.compilerOptions ?? []));
+    // 对齐 SetupCompilerOptions:1019-1022：合并后整体 ReplaceMacros → cbExpandBackticks → SearchDirsFromBackticks
+    const expanded = this.expandCb(opts.join(' '), target);
+    return expandBackticks(expanded, (bt) => this.collectBacktickDirs(target, bt));
   }
 
   private setupResourceCompilerOptions(target: BuildTarget): string {
     const opts = combineOptions(
-      (this.project as any).resourceCompilerOptions ?? [],
+      this.project.resourceCompilerOptions ?? [],
       target.resourceCompilerOptions,
       this.getRelation(target, this.rel.CompilerOptions),
     );
-    return opts.join(' ');
+    // 追加编译器全局资源选项（对齐 SetupResourceCompilerOptions:1161）
+    opts.push(...(this.compiler.resourceCompilerOptions ?? []));
+    // 对齐 SetupResourceCompilerOptions:1163-1166：合并后整体 ReplaceMacros → cbExpandBackticks → SearchDirsFromBackticks
+    const expanded = this.expandCb(opts.join(' '), target);
+    return expandBackticks(expanded, (bt) => this.collectBacktickDirs(target, bt));
   }
 
   private setupLinkerOptions(target: BuildTarget): string {
@@ -224,33 +526,87 @@ export class CommandGenerator {
       target.linkerOptions,
       this.getRelation(target, this.rel.LinkerOptions),
     );
-    return opts.join(' ');
+    // 追加编译器全局链接选项（对齐 SetupLinkerOptions:1046）
+    opts.push(...(this.compiler.linkerOptions ?? []));
+    // 对齐 SetupLinkerOptions:1048-1051：合并后整体 ReplaceMacros → cbExpandBackticks → SearchDirsFromBackticks
+    const expanded = this.expandCb(opts.join(' '), target);
+    return expandBackticks(expanded, (bt) => this.collectBacktickDirs(target, bt));
   }
 
+  /**
+   * 链接库构造 —— 对齐 SetupLinkLibraries（compilercommandgenerator.cpp:1106）：
+   * 项目+目标（选项关系）→ 追加编译器全局库 → FixupLinkLibraries → PathSearch（需要时）→ 逐库引号。
+   */
   private setupLinkLibraries(target: BuildTarget): string {
-    // 项目级 + 目标级库合并，沿用 linkerOptions 的选项关系（对齐 CodeBlocks SetupLinkLibraries → GetOrderedOptions）
+    // 项目级 + 目标级库合并，沿用 linkerOptions 的选项关系（对齐 SetupLinkLibraries → GetOrderedOptions）
     const libs = combineOptions(
       this.project.linkLibs,
       target.linkLibs,
       this.getRelation(target, this.rel.LinkerOptions),
     );
+    // 追加编译器全局链接库（对齐 SetupLinkLibraries：compiler->GetLinkLibs()）
+    libs.push(...(this.compiler.linkLibs ?? []));
     const s = this.compiler.switches;
-    return libs
-      .map((lib) => {
-        let name = lib;
-        // 去掉路径与扩展，应用 libPrefix/libExtension 规则
-        const base = path.basename(unquote(name));
-        let stem = base;
-        if (s.linkerNeedsLibPrefix) {
-          if (!stem.startsWith(s.libPrefix)) stem = s.libPrefix + stem;
-        } else if (stem.startsWith(s.libPrefix)) {
-          stem = stem.slice(s.libPrefix.length);
-        }
-        const ext = path.extname(stem);
-        if (ext) stem = stem.slice(0, stem.length - ext.length);
-        return s.linkLibs + stem;
-      })
-      .join(' ');
+    let result = '';
+    for (const lib of libs) {
+      if (!lib) continue;
+      let tmp = this.fixupLinkLibrary(lib);
+      // 需要时用库目录解析库全路径（对齐 SetupLinkLibraries 的 PathSearch）
+      if (s.linkerNeedsPathResolved) {
+        tmp = this.pathSearchLibrary(tmp, target);
+      }
+      if (result) result += s.objectSeparator;
+      result += quoteIfNeeded(tmp);
+    }
+    return result;
+  }
+
+  /** 单个链接库名修复 —— 对齐 FixupLinkLibraries（compilercommandgenerator.cpp:1055） */
+  private fixupLinkLibrary(lib: string): string {
+    if (!lib) return '';
+    const s = this.compiler.switches;
+    let result = quoteIfNeeded(lib);
+    // 含路径的库原样保留（不做前缀/扩展处理，不加 -l）
+    if (result.includes('/') || result.includes('\\')) {
+      return result;
+    }
+    // 剥 lib 前缀（linkerNeedsLibPrefix=false 时）
+    let hadLibPrefix = false;
+    if (!s.linkerNeedsLibPrefix && s.libPrefix && result.startsWith(s.libPrefix)) {
+      result = result.slice(s.libPrefix.length);
+      hadLibPrefix = true;
+    }
+    // 扩展处理（对齐 CB：剥前缀后才剥扩展；needsLibExtension 时补扩展）
+    if (!s.linkerNeedsLibExtension && result.length > s.libExtension.length && result.endsWith('.' + s.libExtension)) {
+      if (hadLibPrefix) result = result.slice(0, result.length - (s.libExtension.length + 1));
+    } else if (s.linkerNeedsLibExtension && s.libExtension) {
+      if (result.length <= s.libExtension.length || !result.endsWith('.' + s.libExtension)) {
+        result += '.' + s.libExtension;
+      }
+    }
+    return s.linkLibs + result;
+  }
+
+  /** 库目录解析库全路径 —— 对齐 SetupLinkLibraries 的 PathSearch（linkerNeedsPathResolved 时） */
+  private pathSearchLibrary(lib: string, target: BuildTarget): string {
+    let name = unquote(lib);
+    if (!name) return lib;
+    const linkSwitch = this.compiler.switches.linkLibs;
+    if (linkSwitch && name.startsWith(linkSwitch)) name = name.slice(linkSwitch.length);
+    // 已带路径或绝对路径：无需解析
+    if (name.includes('/') || name.includes('\\') || path.isAbsolute(name)) return lib;
+    const dirs = combineOptions(
+      this.project.libDirs,
+      target.libDirs,
+      this.getRelation(target, this.rel.LibDirs),
+    );
+    dirs.push(...(this.compiler.libDirs ?? []));
+    for (const d of dirs) {
+      const base = path.isAbsolute(d) ? d : path.join(this.project.basePath, d);
+      const cand = path.join(base, name);
+      if (fs.existsSync(cand)) return quoteIfNeeded(cand);
+    }
+    return lib;
   }
 
   private getOrderedIncludeDirs(target: BuildTarget): string[] {
@@ -261,12 +617,57 @@ export class CommandGenerator {
     );
   }
 
+  /**
+   * 公开：目标 include 搜索目录（项目/目标关系合并；含反引号派生与 include_prj/file_cwd——
+   * 与构建依赖扫描同口径）。供「Open include file」定位使用。
+   */
+  public orderedIncludeDirs(target: BuildTarget): string[] {
+    const c = this.cache.get(target.title);
+    return c ? [...c.compilerSearchDirs] : [...this.getOrderedIncludeDirs(target)];
+  }
+
   private getOrderedLibDirs(target: BuildTarget): string[] {
     return combineOptions(
       this.project.libDirs,
       target.libDirs,
       this.getRelation(target, this.rel.LibDirs),
     );
+  }
+
+  /**
+   * 反引号输出中的 -I/-L 目录扫描 —— 对齐 SearchDirsFromBackticks（compilercommandgenerator.cpp:1286-1337）：
+   * 按 includeDirs/libDirs 开关定位，取其后至空格为止的 token 作为搜索目录（不含开关本身）。
+   * 结果并入该目标的编译器搜索目录（DepsSearchStart 使用）。
+   */
+  private collectBacktickDirs(target: BuildTarget, bt: string): void {
+    const scan = (sw: string): string[] => {
+      const out: string[] = [];
+      if (!sw) return out;
+      let pos = 0;
+      while ((pos = bt.indexOf(sw, pos)) !== -1) {
+        pos += sw.length;
+        const space = bt.indexOf(' ', pos);
+        const token = (space === -1 ? bt.slice(pos) : bt.slice(pos, space)).trim();
+        if (token) out.push(token);
+        pos++;
+      }
+      return out;
+    };
+    let entry = this.backtickDirs.get(target.title);
+    if (!entry) {
+      entry = { inc: [], lib: [] };
+      this.backtickDirs.set(target.title, entry);
+    }
+    entry.inc.push(...scan(this.compiler.switches.includeDirs));
+    entry.lib.push(...scan(this.compiler.switches.libDirs));
+  }
+
+  /** 目标的 deps 扫描目录 = 关系合并后的有序 include 目录 + 反引号派生目录（对齐 m_CompilerSearchDirs） */
+  getCompilerSearchDirs(targetTitle: string): string[] {
+    const c = this.cache.get(targetTitle);
+    const extra = this.backtickDirs.get(targetTitle);
+    if (!c) return [];
+    return [...c.compilerSearchDirs, ...(extra?.inc ?? [])];
   }
 
   /** 选择编译/链接器程序（对应 GenerateCommandLine 里的 compExec 逻辑） */
@@ -276,7 +677,10 @@ export class CommandGenerator {
     // 与扩展既有策略一致，避免用 g++ 汇编、并防止 g++ 链接带入 C++ 运行库（嵌入式交叉编译器场景）。
     const ext = path.extname(unquote(params.file)).toLowerCase().replace('.', '');
     if (ext === 's' || ext === 'asm' || ext === 'ss' || ext === 's62') {
-      return { comp: prog.C, isCpp: false };
+      // 默认强制 C 编译器（扩展既有策略）；开启 codeblocks.build.asmUsesCompilerVar 时按 compilerVar（对齐 CB）
+      if (!asmUsesCompilerVar()) {
+        return { comp: prog.C, isCpp: false };
+      }
     }
     if (params.pf) {
       if (params.pf.compilerVar === 'CPP') return { comp: prog.CPP, isCpp: true };
@@ -333,17 +737,21 @@ export class CommandGenerator {
     const picked = this.pickCompilerProgram(params);
     const linkerProgram = this.pickLinkerProgram(params);
 
-    // 校验必需程序是否缺失
+    // 校验必需程序是否缺失（对齐 GenerateCommandLine:332-341：四个宏对应的程序任一为空且模板用到该宏 → 清空命令）
     if (
       (picked.comp === '' && template.includes('$compiler')) ||
-      (linkerProgram === '' && template.includes('$linker'))
+      (linkerProgram === '' && template.includes('$linker')) ||
+      (prog.LIB === '' && template.includes('$lib_linker')) ||
+      (prog.WINDRES === '' && template.includes('$rescomp'))
     ) {
       return '';
     }
 
     let cFlags = (cache?.cFlags ?? '').trim();
-    const inc = cache?.inc ?? '';
-    const resInc = cache?.rc ?? '';
+    let inc = cache?.inc ?? '';
+    let resInc = cache?.rc ?? '';
+    // 对齐 GenerateCommandLine:347-403：include_file_cwd / include_prj_cwd 追加（INCDIR 风格同样特判）
+    ({ inc, resInc } = this.applyCwdIncludes(inc, resInc, params));
     const lib = cache?.lib ?? '';
     const ldAdd = cache?.ldAdd ?? '';
     const ldFlags = cache?.ldFlags ?? '';
@@ -359,15 +767,24 @@ export class CommandGenerator {
     const file = params.file;
     // 默认将 $file/$file_dir 转为平台原生分隔符（Windows 反斜杠），对齐 Code::Blocks 命令行；
     // nativeSep=false 时保持正斜杠（clangd compile_commands.json 偏好正斜杠）
-    const fname = params.nativeSep === false ? unquote(file) : upperDrive(toNative(unquote(file)));
+    let fname = params.nativeSep === false ? unquote(file) : upperDrive(toNative(unquote(file)));
+    // Use83Paths 源文件短路径（对齐 GenerateCommandLine:417，仅 Windows 且文件存在）
+    if (process.platform === 'win32' && this.compiler.switches.use83Paths) {
+      const raw = unquote(fname);
+      if (fs.existsSync(raw)) fname = shortPathWin(raw);
+    }
+    // FixPathSeparators（对齐 GenerateCommandLine：forceFwdSlashes 时 \→/，跳过 "\ "）
+    fname = this.fixSep(fname);
     const ext = path.extname(fname);
     const baseName = path.basename(fname, ext);
-    const dirName = path.dirname(fname);
+    // 对齐 wxFileName::GetPath()：无目录（根目录下的文件）返回空串而非 "."
+    let dirName = path.dirname(fname);
+    if (dirName === '.') dirName = '';
     const fileExt = ext.replace('.', '');
 
-    const object = params.object;
-    const flatObject = params.flatObject;
-    const deps = params.deps;
+    const object = this.fixSep(params.object);
+    const flatObject = this.fixSep(params.flatObject);
+    const deps = this.fixSep(params.deps);
 
     // allObjectsQuoted 构造
     let allObjectsQuoted = object;
@@ -380,7 +797,7 @@ export class CommandGenerator {
     let macro = template;
 
     // 1. 编译器/链接器程序（含空格的路径需加引号，避免 shell 把 "C:\Program" 当命令）
-    macro = macro.replace(/\$compiler/g, quoteIfNeeded(picked.comp));
+    macro = macro.replace(/\$compiler/g, quoteIfNeeded(this.fixSep(picked.comp)));
     macro = macro.replace(/\$linker/g, quoteIfNeeded(linkerProgram));
     macro = macro.replace(/\$lib_linker/g, quoteIfNeeded(prog.LIB));
     macro = macro.replace(/\$rescomp/g, quoteIfNeeded(prog.WINDRES));
@@ -400,27 +817,32 @@ export class CommandGenerator {
     macro = macro.replace(/\$file/g, quoteIfNeeded(fname));
     macro = macro.replace(/\$dep_object/g, quoteIfNeeded(deps));
 
-    // 4. objects_output_dir 必须在 $object 之前
+    // 4. objects_output_dir 必须在 $object 之前（对齐 CB：GetObjectOutput + FixPathSeparators，原生分隔符）
     if (params.target) {
-      macro = macro.replace(/\$objects_output_dir/g, toUnix(params.target.objectOutput));
+      macro = macro.replace(/\$objects_output_dir/g, this.fixSep(params.target.objectOutput));
     }
     // 5. object / resource_output
     macro = macro.replace(/\$object/g, quoteIfNeeded(object));
     macro = macro.replace(/\$resource_output/g, quoteIfNeeded(object));
     // 6. exe 输出
+    let singleExeOut = '';
     if (params.target) {
       macro = macro.replace(/\$exe_output/g, cache?.output ?? '');
     } else {
-      // 单文件编译：从 object 推导 exe
+      // 单文件编译：从 object 推导 exe（对齐 GenerateCommandLine:506-516：SetExt(EXECUTABLE_EXT)→GetFullPath→Quote→FixPathSeparators）
       const outObj = path.parse(unquote(object));
       const exe = outObj.name + (process.platform === 'win32' ? '.exe' : '');
-      macro = macro.replace(/\$exe_output/g, quoteIfNeeded(toUnix(path.join(outObj.dir, exe))));
+      singleExeOut = toNative(path.join(outObj.dir, exe));
+      macro = macro.replace(/\$exe_output/g, this.fixSep(quoteIfNeeded(singleExeOut)));
     }
-    const exeOut = params.target ? unquote(cache?.output ?? '') : '';
+    const exeOut = params.target ? unquote(cache?.output ?? '') : singleExeOut;
     if (exeOut) {
       const p = path.parse(exeOut);
       macro = macro.replace(/\$exe_name/g, p.name);
-      macro = macro.replace(/\$exe_dir/g, toUnix(p.dir));
+      // 对齐 wxFileName::GetPath()：原生分隔符 + 无目录归一为空（对齐 GenerateCommandLine:522-524）
+      let exeDir = p.dir;
+      if (exeDir === '.') exeDir = '';
+      macro = macro.replace(/\$exe_dir/g, exeDir);
       macro = macro.replace(/\$exe_ext/g, p.ext.replace('.', ''));
     } else {
       macro = macro.replace(/\$exe_name/g, '').replace(/\$exe_dir/g, '').replace(/\$exe_ext/g, '');
@@ -460,26 +882,48 @@ export class CommandGenerator {
     macro = macro.replace(/\$TO_WINDOWS_PATH\{([^}]*)\}/g, (_, p: string) => p.replace(/\//g, '\\'));
     macro = macro.replace(/\$TO_UNIX_PATH\{([^}]*)\}/g, (_, p: string) => p.replace(/\\/g, '/'));
 
-    // 9. 展开 Code::Blocks 构建变量宏（$(TARGET_OBJECT_DIR)、$(PROJECT_NAME) 等）
+    // 9. 对齐 GenerateCommandLine:579：最终命令整体 ReplaceMacros
+    // （内置宏 + 项目自定义变量 + $(#全局编译器变量) + 环境变量回退 + $$/%% 反转义）
     if (params.target) {
-      macro = expandBuildVars(macro, this.project.basePath, params.target, this.project.title, this.project.filename);
+      macro = replaceCbMacros(macro, {
+        vars: this.cbVars(params.target),
+        customVars: this.project.customVariables ?? {},
+        basePath: this.project.basePath,
+      });
     }
-    return macro;
+    // 10. 对齐 compilergcc.cpp:1402：命令执行前整体 cbExpandBackticks
+    // （覆盖命令模板/自定义 buildCommand/脚本命令里直接书写的反引号；选项里的反引号已在 setup* 阶段展开）
+    return expandBackticks(macro);
   }
 
-  /** 获取指定 CommandType 的命令模板（按扩展名匹配，通配兜底） */
+  /** 获取指定 CommandType 的命令模板 —— 对齐 Compiler::GetCommand（compiler.cpp:306-332）：
+   * 扩展名为空（链接/打包）→ vec[0]（首条，无论其是否声明扩展名）；
+   * 扩展名精确匹配 → 该条；不匹配 → 最后一条空扩展名条目（无则 vec[0]）。 */
   private getCommandTemplate(ct: CommandType, fileExt: string): string {
     const vec = this.compiler.commands[ct];
     if (!vec || vec.length === 0) return '';
-    let catchAll = '';
-    for (const tool of vec) {
-      if (tool.extensions.length === 0) {
-        catchAll = tool.command;
-        continue;
+    let catchAll = 0;
+    if (fileExt) {
+      for (let i = 0; i < vec.length; i++) {
+        if (vec[i].extensions.length === 0) {
+          catchAll = i;
+          continue;
+        }
+        if (vec[i].extensions.includes(fileExt)) return vec[i].command;
       }
-      if (tool.extensions.includes(fileExt)) return tool.command;
     }
-    return catchAll;
+    return vec[catchAll].command;
+  }
+
+  /**
+   * 静态库 $±link_objects prependHack 前缀 —— 对齐 GetTargetLinkCommands:724-742：
+   * 扫描 LinkStaticCmd 模板中的 $([-+]+)link_objects（bcc/dmc 等链接器要求对象前加 -/+），
+   * 返回捕获的前缀（无此宏时为空串）。buildEngine 静态库打包时逐对象加前缀。
+   */
+  linkObjectsPrependHack(): string {
+    const tpl = this.getCommandTemplate(CommandType.LinkStaticCmd, '');
+    const m = tpl.match(/\$([-+]+)link_objects/);
+    return m ? m[1] : '';
   }
 
   /** 从 flags 字符串中过滤掉指定的 flag（对应 GetCPPOnlyFlags/GetCOnlyFlags 移除逻辑） */
@@ -487,40 +931,14 @@ export class CommandGenerator {
     if (!toRemove.length) return flags;
     let out = flags;
     for (const f of toRemove) {
+      // 对齐 CB GetCPPOnlyFlags/GetCOnlyFlags 过滤（aCflags.Index + RemoveAt）：仅移除首个匹配；
       // 匹配独立 flag（前有空白/行首，后有空白/行尾），避免误删带前缀/带值 flag，也不破坏带引号 flag
-      const re = new RegExp(`(^|\\s)${escapeRegExp(f)}(?=\\s|$)`, 'g');
-      out = out.replace(re, '$1');
+      const re = new RegExp(`(^|\\s)${escapeRegExp(f)}(?=\\s|$)`);
+      const m = out.match(re);
+      if (m && m.index !== undefined) {
+        out = out.slice(0, m.index + m[1].length) + out.slice(m.index + m[0].length);
+      }
     }
     return out.trim();
   }
-}
-
-/** 展开 Code::Blocks 构建变量宏（$(TARGET_OBJECT_DIR)、$(PROJECT_NAME) 等） */
-export function expandBuildVars(cmd: string, basePath: string, target: BuildTarget, projectTitle: string, projectFilename: string): string {
-  const u = (s: string) => s.replace(/\\/g, '/');
-  const out = u(target.outputFilename);
-  const outDir = out.includes('/') ? out.slice(0, out.lastIndexOf('/') + 1) : '';
-  const baseName = out.includes('/') ? out.slice(out.lastIndexOf('/') + 1) : out;
-  const stem = baseName.replace(/\.[^.]+$/, '');
-
-  const vars: Record<string, string> = {
-    TARGET_OUTPUT_FILE: out,
-    TARGET_OUTPUT_FILENAME: baseName,
-    TARGET_OUTPUT_BASENAME: stem,
-    TARGET_OUTPUT_DIR: outDir,
-    TARGET_NAME: target.title,
-    TARGET_OBJECT_DIR: u(target.objectOutput || 'obj/'),
-    PROJECT_DIR: basePath,
-    PROJECT_DIRECTORY: basePath,
-    PROJECT_NAME: projectTitle,
-    PROJECTNAME: projectTitle,
-    PROJECT_FILENAME: projectFilename,
-  };
-
-  let result = cmd;
-  for (const [key, value] of Object.entries(vars)) {
-    result = result.replace(new RegExp('\\$\\(' + key + '\\)', 'g'), value);
-    result = result.replace(new RegExp('\\$' + key + '(?![A-Za-z0-9_])', 'g'), value);
-  }
-  return result;
 }

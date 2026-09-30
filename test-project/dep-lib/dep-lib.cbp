@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes" ?>
+<CodeBlocks_project_file>
+	<FileVersion major="1" minor="6" />
+	<Project>
+		<Option title="dep-lib" />
+		<Option compiler="gcc" />
+		<Build>
+			<Target title="Debug">
+				<Option type="2" />
+				<Option compiler="gcc" />
+				<Option output="bin/Debug/libdep_lib.a" />
+				<Option object_output="obj/Debug/" />
+				<Compiler>
+					<Add option="-g" />
+					<Add option="-Wall" />
+				</Compiler>
+			</Target>
+		</Build>
+		<Unit filename="lib.c" />
+		<Unit filename="lib.h" />
+		<Extensions />
+	</Project>
+</CodeBlocks_project_file>

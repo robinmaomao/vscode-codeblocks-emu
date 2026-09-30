@@ -1,0 +1,9 @@
+{
+  "configuration.compiler.title": "编译器与工具链",
+  "configuration.build.title": "构建与日志",
+  "configuration.debug.title": "调试 (GDB)",
+  "configuration.intellisense.title": "IntelliSense (clangd)",
+  "configuration.ui.title": "界面",
+  "configuration.editor.title": "编辑器辅助与工具",
+  "configuration.keybindings.title": "快捷键"
+}

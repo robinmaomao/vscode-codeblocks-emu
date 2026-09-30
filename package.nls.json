@@ -1,0 +1,9 @@
+{
+  "configuration.compiler.title": "Compiler & Toolchain",
+  "configuration.build.title": "Build & Log",
+  "configuration.debug.title": "Debug (GDB)",
+  "configuration.intellisense.title": "IntelliSense (clangd)",
+  "configuration.ui.title": "UI",
+  "configuration.editor.title": "Editor & Tools",
+  "configuration.keybindings.title": "Keybindings"
+}

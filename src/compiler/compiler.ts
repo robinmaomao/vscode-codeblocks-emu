@@ -36,6 +36,8 @@ export interface CompilerSwitches {
   linkerNeedsPathResolved: boolean;
   supportsPCH: boolean;
   PCHExtension: string;       // gch
+  /** 日志详细度（compiler.cpp:943-952：full/simple/none；XML 值 default → undefined，交由扩展设置控制；CB defaultLogging=clogFull，扩展保护性不强制） */
+  logging?: 'full' | 'simple' | 'none';
   useFlatObjects: boolean;
   useFullSourcePaths: boolean;
   use83Paths: boolean;
@@ -79,6 +81,8 @@ export interface Compiler {
   id: string;
   name: string;
   masterPath: string;
+  /** 编译器版本字符串（对齐 Compiler::m_VersionString，`gcc --version` 首行取主版本号 "8.1.0"） */
+  versionString?: string;
   programs: CompilerPrograms;
   switches: CompilerSwitches;
   /** 按 CommandType 索引的命令模板列表 */
@@ -91,6 +95,26 @@ export interface Compiler {
   cOnlyFlags: string[];
   /** 仅 C++ 编译器的 flag（编译 C 时移除） */
   cppOnlyFlags: string[];
+  /** 编译器全局 include 目录（default.conf /compiler_sets/<id>/include_dirs，追加在项目/目标目录之后） */
+  includeDirs: string[];
+  /** 编译器全局库目录（/library_dirs） */
+  libDirs: string[];
+  /** 编译器全局资源 include 目录（/res_include_dirs） */
+  resIncludeDirs: string[];
+  /** 编译器全局链接库（/libraries，供外部依赖检查与 $libs 追加） */
+  linkLibs: string[];
+  /** 编译器附加搜索路径（default.conf /compiler_sets/<id>/extra_paths，SetupEnvironment PATH 注入 + IsValid 程序搜索） */
+  extraPaths: string[];
+  /** include_prj_cwd 开关（default.conf /compiler/include_prj_cwd，GenerateCommandLine:379：$includes 追加项目公共顶层目录） */
+  includePrjCwd: boolean;
+  /** include_file_cwd 开关（default.conf /compiler/include_file_cwd，GenerateCommandLine:347：$includes 追加当前编译文件目录） */
+  includeFileCwd: boolean;
+  /** 编译器全局编译选项（/compiler_options，SetupCompilerOptions:1017 追加在项目/目标之后） */
+  compilerOptions: string[];
+  /** 编译器全局链接选项（/linker_options，SetupLinkerOptions:1046） */
+  linkerOptions: string[];
+  /** 编译器全局资源编译选项（/resource_compiler_options，SetupResourceCompilerOptions:1161） */
+  resourceCompilerOptions: string[];
 }
 
 /** 每个 CommandType 下的命令模板数组（按扩展名匹配） */
@@ -146,6 +170,7 @@ export function getDefaultSwitches(): CompilerSwitches {
     linkerNeedsPathResolved: false,
     supportsPCH: true,
     PCHExtension: 'gch',
+    logging: undefined,
     useFlatObjects: false,
     useFullSourcePaths: true,
     use83Paths: false,
@@ -183,5 +208,15 @@ export function createGccCompiler(platform: NodeJS.Platform, masterPath = ''): C
     regexes: [],
     cOnlyFlags: [],
     cppOnlyFlags: [],
+    includeDirs: [],
+    libDirs: [],
+    resIncludeDirs: [],
+    linkLibs: [],
+    extraPaths: [],
+    includePrjCwd: false,
+    includeFileCwd: false,
+    compilerOptions: [],
+    linkerOptions: [],
+    resourceCompilerOptions: [],
   };
 }

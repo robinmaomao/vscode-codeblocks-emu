@@ -33,11 +33,19 @@ export interface BuildLogProject {
   linkSkipped: boolean;     // static lib 无链接步骤
   outputFilename?: string;
   diagnostics: BuildLogDiagnostic[];
+  /** 本次实际执行的命令（HTML 构建日志 full_command_line 命令行块用；第六轮 F8） */
+  commands?: string[];
   /** 项目源文件绝对路径（供「Build Log 使用 clangd 诊断」模式收集诊断） */
   files?: string[];
   durationMs: number;
   /** 构建开始时间戳（毫秒） */
   startTime?: number;
+  /** 是否被取消（输出汇总块用 ⚠️ 构建已取消） */
+  cancelled?: boolean;
+  /** 项目标题（输出汇总块用；缺省回退 projectName） */
+  projectTitle?: string;
+  /** 单文件编译耗时（输出汇总块「最慢 Top 3」用） */
+  topTimings?: { file: string; ms: number }[];
 }
 
 /** 一次构建的整体摘要 */
@@ -58,6 +66,10 @@ type BuildLogKind = 'root' | 'project' | 'info' | 'group' | 'diagnostic';
 class BuildLogNode extends vscode.TreeItem {
   /** 子节点（覆盖默认，允许后续赋值） */
   declare children: BuildLogNode[];
+  /** 诊断数据（diagnostic 节点，供右键复制） */
+  diag?: BuildLogDiagnostic;
+  /** 项目节点的错误诊断数（errorsOnly 过滤用） */
+  errorCount = 0;
 
   constructor(
     public readonly kind: BuildLogKind,
@@ -76,6 +88,16 @@ export class BuildLogTreeProvider implements vscode.TreeDataProvider<BuildLogNod
   readonly onDidChangeTreeData = this._onDidChangeTreeData.event;
 
   private summary: BuildLogSummary | undefined;
+  /** 只看错误过滤（C2） */
+  private errorsOnly = false;
+
+  /** 切换「只看错误」过滤并刷新视图 */
+  setErrorsOnly(v: boolean): void {
+    this.errorsOnly = v;
+    this._onDidChangeTreeData.fire(undefined);
+  }
+
+  getErrorsOnly(): boolean { return this.errorsOnly; }
   /** 资源根目录（用于加载彩色图标） */
   private resourcesDir?: vscode.Uri;
   /** 彩色图标缓存：key = icons/ 下文件名，value = URI */
@@ -129,6 +151,13 @@ export class BuildLogTreeProvider implements vscode.TreeDataProvider<BuildLogNod
     return this.gotoError(this.errorList[this.currentErrorIndex]);
   }
 
+  /** 跳转到第一个错误（对齐 CB auto_focus_build_errors：构建结束聚焦首个错误；不循环） */
+  gotoFirstError(): boolean {
+    if (this.errorList.length === 0) return false;
+    this.currentErrorIndex = 0;
+    return this.gotoError(this.errorList[0]);
+  }
+
   /** 跳转到上一个错误（循环），返回是否成功 */
   gotoPreviousError(): boolean {
     if (this.errorList.length === 0) return false;
@@ -154,7 +183,13 @@ export class BuildLogTreeProvider implements vscode.TreeDataProvider<BuildLogNod
 
   getChildren(element?: BuildLogNode): BuildLogNode[] {
     if (!this.summary) return [];
-    if (!element) return [this.buildRootNode(this.summary)];
+    if (!element) {
+      const root = this.buildRootNode(this.summary);
+      if (!this.errorsOnly) return [root];
+      // 过滤模式下仅展示含错误的项目
+      root.children = root.children.filter((p) => p.errorCount > 0);
+      return root.children.length ? [root] : [root];
+    }
     return element.children;
   }
 
@@ -179,10 +214,27 @@ export class BuildLogTreeProvider implements vscode.TreeDataProvider<BuildLogNod
       vscode.TreeItemCollapsibleState.Expanded,
       p.success ? this.icon('log-project.svg', 'package') : this.icon('log-error.svg', 'error'),
     );
+    const errCount = p.diagnostics.filter((d) => d.severity === 'error').length;
+    node.errorCount = errCount;
     node.description = `${p.targetName} · ${p.success ? '成功' : '失败'} · ${(p.durationMs / 1000).toFixed(1)}s`;
     node.tooltip = `${p.projectName} · 目标 ${p.targetName}`;
 
     const children: BuildLogNode[] = [];
+
+    // errorsOnly 过滤：仅保留错误分组（跳过编译器/统计/链接信息节点）
+    if (this.errorsOnly) {
+      const errors = p.diagnostics.filter((d) => d.severity === 'error');
+      const errorGroup = new BuildLogNode(
+        'group',
+        `错误 (${errors.length})`,
+        errors.length > 0 ? vscode.TreeItemCollapsibleState.Expanded : vscode.TreeItemCollapsibleState.None,
+        this.icon('log-error.svg', 'error'),
+      );
+      errorGroup.children = errors.map((d) => this.buildDiagnosticNode(d));
+      children.push(errorGroup);
+      node.children = children;
+      return node;
+    }
 
     // 编译器
     const compilerNode = new BuildLogNode('info', p.compilerPath, vscode.TreeItemCollapsibleState.None, this.icon('log-compiler.svg', 'tools'));
@@ -255,6 +307,10 @@ export class BuildLogTreeProvider implements vscode.TreeDataProvider<BuildLogNod
       isError ? this.icon('log-error.svg', 'error') : this.icon('log-warning.svg', 'warning'),
     );
     node.description = d.file ? d.message : undefined;
+    node.contextValue = isError ? 'diagnostic' : 'diagnostic-warning';
+    node.diag = d;
+    node.contextValue = isError ? 'diagnostic' : 'diagnostic-warning';
+    node.diag = d;
 
     const md = new vscode.MarkdownString();
     md.appendMarkdown(`**${d.message}**`);

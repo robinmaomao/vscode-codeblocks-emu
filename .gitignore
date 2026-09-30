@@ -5,3 +5,22 @@ dist/
 codeblocks-src/
 *.log
 *.zip
+/release/
+.cb-tools/
+
+# 娴嬭瘯宸ョ▼鏋勫缓浜х墿
+test-project/**/bin/
+test-project/**/obj/
+test-project/buildlog.html
+test-project/*_build_log.html
+.git-msg.txt
+
+# 临时排查/测试产物（不应提交）
+.cbgrep*.txt
+.cbtest.txt
+.cbmenu.txt
+.cbxrc*.txt
+.cb-*.js
+.cb-*.txt
+.cbpkg.txt
+.cbls.txt

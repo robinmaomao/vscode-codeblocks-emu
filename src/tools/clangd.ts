@@ -10,13 +10,14 @@ import * as crypto from 'crypto';
 import * as os from 'os';
 import * as vscode from 'vscode';
 import { spawnSync } from 'child_process';
+import { LruCache } from './lru';
 
 const EXE = process.platform === 'win32' ? 'clangd.exe' : 'clangd';
 
-/** 编译器 include 查询缓存（key = compilerPath|lang），避免重复同步 spawn 阻塞主线程 */
-const includesCache = new Map<string, string[]>();
-/** 编译器目标三元组缓存（key = compilerPath） */
-const targetCache = new Map<string, string | undefined>();
+/** 编译器 include 查询缓存（key = compilerPath|lang；LRU 128 防长会话无界增长/重复同步 spawn 阻塞主线程） */
+const includesCache = new LruCache<string, string[]>(128);
+/** 编译器目标三元组缓存（key = compilerPath；LRU 64） */
+const targetCache = new LruCache<string, string | undefined>(64);
 
 /** 通过 PATH 查找 clangd（Windows 用 where，其它用 which） */
 function findOnPath(): string | undefined {
@@ -91,8 +92,27 @@ function commonLocations(): string[] {
   return locs;
 }
 
-/** 检测 clangd 可执行文件路径（未找到返回 undefined） */
+/** 检测结果缓存（P7：避免每次生成 compile_commands 都 spawnSync where + 递归目录扫描；含负结果） */
+let detectClangdCache: { value: string | undefined; at: number } | undefined;
+const DETECT_CLANGD_CACHE_TTL_MS = 5 * 60 * 1000;
+
+/** 清除 clangd 检测缓存（clangd.path 配置变化 / 测试场景） */
+export function clearClangdDetectionCache(): void {
+  detectClangdCache = undefined;
+}
+
+/** 检测 clangd 可执行文件路径（未找到返回 undefined；结果带 TTL 缓存，含负结果） */
 export function detectClangd(): string | undefined {
+  if (detectClangdCache && Date.now() - detectClangdCache.at < DETECT_CLANGD_CACHE_TTL_MS) {
+    return detectClangdCache.value;
+  }
+  const value = detectClangdUncached();
+  detectClangdCache = { value, at: Date.now() };
+  return value;
+}
+
+/** 实际探测（无缓存；异常路径同样返回 undefined 并被上层负缓存） */
+function detectClangdUncached(): string | undefined {
   // 优先：clangd 扩展的 clangd.path 设置（用户手动指定的 clangd 路径，含 ${userHome} 变量展开）
   try {
     const configured = vscode.workspace.getConfiguration('clangd').get<string>('path', '');
@@ -268,7 +288,7 @@ export interface ClangdScopeConfig {
   databaseDir: string;
   /** 头文件（无编译命令）的回退编译 flag：-I / -isystem / --target 等独立 argv 元素 */
   headerFlags?: string[];
-  /** 需要压制的警告类别（如 -Wunused-function，写入主片段 Diagnostics.Suppress） */
+  /** 需要压制的诊断（-W 组名或 clangd 诊断名，如 -Wunused-function / redefinition_different_typedef，写入主片段 Diagnostics.Suppress） */
   suppressedWarnings?: string[];
   /** 是否在头文件中压制全部诊断（SDK 头文件不自包含，单独分析必然产生大量误报） */
   suppressHeaderDiagnostics?: boolean;
@@ -341,7 +361,8 @@ export function updateClangdUserConfig(scopes: ClangdScopeConfig[]): void {
 
   // 多片段之间用单个 --- 分隔（YAML 文档分隔符），每个片段内部已含头文件子片段
   const ours = newFrags.join('\n---\n');
-  const out = existing ? existing + '\n---\n' + ours + '\n' : ours + '\n';
+  // 空作用域（清理场景）时不留悬空 ---
+  const out = !ours ? existing + '\n' : (existing ? existing + '\n---\n' + ours + '\n' : ours + '\n');
 
   // 内容未变则跳过写入，避免 clangd 无谓地重新加载配置
   let old = '';
