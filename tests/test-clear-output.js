@@ -169,6 +169,9 @@ check('D8 dist 汇总块调用点 ≥2（单项目 + 工作区）', (ext.match(/
 check('D9 dist 汇总块含「编译时间」行（YYYY-MM-DD HH:MM:SS）', ext.includes('🕒 编译时间') && ext.includes('formatDateTime'), null);
 // G1：timestamp 惰性 getter（改设置即时生效）——extension 需传函数而非布尔
 check('D10 dist 传惰性 timestamp getter（G1）', /timestamp:\s*\(\)\s*=>/.test(ext), null);
+// G1 复核修复：逐行读取缓存值 + 配置监听刷新（避免每行 getConfiguration）
+check('D11 dist 监听 build.outputTimestamp 配置变化（G1 即时生效且免逐行读配置）',
+  ext.includes("affectsConfiguration('codeblocks.build.outputTimestamp')"), null);
 
 console.log(`\nclear-output: pass=${pass} fail=${fail}`);
 process.exit(fail ? 1 : 0);

@@ -147,6 +147,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   // Run 终端方案 B1：workspaceState 持久化「本扩展用过的终端名」注册表（WeakSet 重载即失效，注册表保证跨重载单一标签）
   setRunTerminalRegistry(createWorkspaceRunTerminalRegistry(context.workspaceState));
   loadSelectedTargets();
+  // G1：输出时间戳即时生效——启动读取一次 + 配置监听刷新（供输出通道逐行读取，
+  // 避免每行输出都调用 getConfiguration；与 buildLogPrefs 的「缓存 + 失效」同款模式）
+  let buildOutputTimestamp = vscode.workspace.getConfiguration('codeblocks').get<boolean>('build.outputTimestamp', false);
   outputChannel = createCbOutput(
     'Code::Blocks',
     // 输出清理核查 B：persistLog 默认 false = 普通输出通道（重载即空、可彻底 clear；每行可带时间戳（格式 2026-09-29 15:11:20.222，设置 build.outputTimestamp 控制，默认关），warn/error 带 ⚠️/❌ 标记）；
@@ -154,8 +157,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     vscode.workspace.getConfiguration('codeblocks').get<boolean>('build.persistLog', false),
     {
       plainCb: () => buildLogPrefs().plain,
-      // G1：惰性 getter——修改 codeblocks.build.outputTimestamp 即时生效（无需重载窗口）
-      timestamp: () => vscode.workspace.getConfiguration('codeblocks').get<boolean>('build.outputTimestamp', false),
+      timestamp: () => buildOutputTimestamp,
     },
   );
   // DAP 跟踪（codeblocks.debug.trace）：写入本输出通道
@@ -180,6 +182,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       || e.affectsConfiguration('codeblocks.ui.quietSuccess')
     ) {
       resetBuildLogPrefsCache();
+    }
+    // G1：输出时间戳即时生效（刷新缓存值；普通通道逐行读取该变量，避免逐行 getConfiguration）
+    if (e.affectsConfiguration('codeblocks.build.outputTimestamp')) {
+      buildOutputTimestamp = vscode.workspace.getConfiguration('codeblocks').get<boolean>('build.outputTimestamp', false);
     }
   }));
   diagnosticCollection = vscode.languages.createDiagnosticCollection('codeblocks');
@@ -3090,7 +3096,7 @@ function markFallbackIndexDirty(): void {
   if (symbolsViewVisible) void requestFallbackIndexBuild();
 }
 
-/** 按需构建兜底索引（单飞：进行中的构建被复用；构建期间再次置脏则下次请求重建） */
+/** 按需构建兜底索引（单飞：进行中的构建被复用；构建期间再次置脏则收尾时追加重建） */
 function requestFallbackIndexBuild(): Promise<void> {
   if (!fallbackIndexDirty) return Promise.resolve();
   if (!fallbackIndexBuild) {
@@ -3099,8 +3105,13 @@ function requestFallbackIndexBuild(): Promise<void> {
       try {
         await fallbackIndex.rebuildAsync(collectFallbackIndexFiles());
         symbolTreeProvider?.refresh();
+      } catch {
+        fallbackIndexDirty = true; // 构建异常：保留脏标记，下次请求重试
       } finally {
         fallbackIndexBuild = undefined;
+        // P2 复核修复：单飞期间再次置脏（如多工程连续打开）且视图可见 → 追加一次重建，
+        // 避免置脏被合并吞掉、索引停留在旧快照
+        if (fallbackIndexDirty && symbolsViewVisible) void requestFallbackIndexBuild();
       }
     })();
   }
