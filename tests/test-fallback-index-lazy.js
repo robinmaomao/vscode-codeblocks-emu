@@ -102,6 +102,10 @@ const missing = path.join(dir, 'gone.c'); // 不存在 → scanFile 静默跳过
   check('C5 dist 兜底 provider 传入 onDemand 回调',
     /registerFallbackIntelliSense\)\(fallbackIndex, \(\) => fallbackEnabled, requestFallbackIndexBuild\)/.test(ext), null);
   check('C6 dist 符号视图可见性触发构建', ext.includes('onDidChangeVisibility') && ext.includes('symbolsViewVisible'), null);
+  // P2 复核修复：单飞期间再次置脏 → 收尾追加重建（dirty 未消化且视图可见）；构建异常保留脏标记
+  check('C7 dist 单飞收尾追加重建（fallbackIndexDirty && symbolsViewVisible）',
+    /fallbackIndexDirty\s*&&\s*symbolsViewVisible/.test(ext), null);
+  check('C8 dist 构建异常保留脏标记（fallbackIndexDirty = true）', ext.includes('fallbackIndexDirty = true'), null);
 
   console.log(`\nfallback-index-lazy: pass=${pass} fail=${fail}`);
   process.exit(fail ? 1 : 0);
