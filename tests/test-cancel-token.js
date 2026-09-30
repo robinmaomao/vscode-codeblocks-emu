@@ -45,5 +45,21 @@ let killSafe = true;
 try { src3.cancel(); } catch { killSafe = false; }
 check('活动进程下 cancel 不抛异常', killSafe && src3.isCancelled() === true);
 
+// 7. G2：deactivate() 接线——关闭/重载窗口时取消进行中的构建（静态断言）
+{
+  const fs = require('fs');
+  const path = require('path');
+  const ext = fs.readFileSync(path.resolve(__dirname, '../dist/extension.js'), 'utf8');
+  const start = ext.indexOf('function deactivate');
+  check('G2-1 dist 含 deactivate 定义', start >= 0);
+  const region = start >= 0 ? ext.slice(start, start + 800) : '';
+  check('G2-2 deactivate 调用 currentBuildCancel?.cancel()', region.includes('currentBuildCancel?.cancel()'));
+  const iCancel = region.indexOf('currentBuildCancel?.cancel()');
+  const iDispose = region.indexOf('outputChannel.dispose()');
+  check('G2-3 取消先于资源销毁（无构建时零副作用）', iCancel >= 0 && iDispose >= 0 && iCancel < iDispose);
+  check('G2-4 deactivate 仍销毁输出通道与诊断集合（行为不回归）',
+    region.includes('outputChannel.dispose()') && region.includes('diagnosticCollection.dispose()'));
+}
+
 console.log('汇总: ' + pass + ' pass, ' + fail + ' fail');
 process.exit(fail ? 1 : 0);
