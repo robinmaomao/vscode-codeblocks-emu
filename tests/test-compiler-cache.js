@@ -52,7 +52,8 @@ check('C1 dist 使用 buildCompilerCacheKey', ext.includes('buildCompilerCacheKe
 check('C2 dist 含 compilerResultCache 缓存实例', ext.includes('compilerResultCache'), null);
 check('C3 dist 含无缓存构建函数 buildCompilerInstance', ext.includes('buildCompilerInstance'), null);
 check('C4 dist 缓存命中早退（compilerResultCache.get）', /compilerResultCache\.get\(/.test(ext), null);
-check('C5 dist 键含 compilerPrograms 配置读取', ext.includes("'compilerPrograms'"), null);
+check('C5 dist 缓存键调用含 compilerPrograms（精确形态，非宽泛断言）',
+  /buildCompilerCacheKey\)\(id, masterPath, cfg\.get\('compilerPrograms'/.test(ext), null);
 
 console.log(`\ncompiler-cache: pass=${pass} fail=${fail}`);
 process.exit(fail ? 1 : 0);
