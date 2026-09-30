@@ -1549,7 +1549,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       if (ok !== 'Clear') return;
       bookmarks = [];
       await persistBookmarks();
-      vscode.window.visibleTextEditors.forEach((e) => e.setDecorations(bookmarkDecoration, []));
+      // P1 复核修复：统一走 refreshBookmarkDecorations（空书签时清理装饰并同步 bookmarkDecoratedDocs 标记）
+      vscode.window.visibleTextEditors.forEach((e) => refreshBookmarkDecorations(e));
       outputChannel.info('[Code::Blocks] 已清除全部书签');
     }),
     vscode.window.onDidChangeActiveTextEditor((e) => refreshBookmarkDecorations(e ?? undefined)),
@@ -3096,22 +3097,24 @@ function markFallbackIndexDirty(): void {
   if (symbolsViewVisible) void requestFallbackIndexBuild();
 }
 
-/** 按需构建兜底索引（单飞：进行中的构建被复用；构建期间再次置脏则收尾时追加重建） */
+/** 按需构建兜底索引（单飞：进行中的构建被复用；构建期间再次置脏则收尾时追加重建，失败除外） */
 function requestFallbackIndexBuild(): Promise<void> {
   if (!fallbackIndexDirty) return Promise.resolve();
   if (!fallbackIndexBuild) {
     fallbackIndexDirty = false;
     fallbackIndexBuild = (async () => {
+      let failed = false;
       try {
         await fallbackIndex.rebuildAsync(collectFallbackIndexFiles());
         symbolTreeProvider?.refresh();
       } catch {
-        fallbackIndexDirty = true; // 构建异常：保留脏标记，下次请求重试
+        failed = true;
+        fallbackIndexDirty = true; // 构建异常：保留脏标记，由下一次外部触发重试（不在收尾立即重试，避免失败重试环）
       } finally {
         fallbackIndexBuild = undefined;
         // P2 复核修复：单飞期间再次置脏（如多工程连续打开）且视图可见 → 追加一次重建，
-        // 避免置脏被合并吞掉、索引停留在旧快照
-        if (fallbackIndexDirty && symbolsViewVisible) void requestFallbackIndexBuild();
+        // 避免置脏被合并吞掉、索引停留在旧快照；构建失败时不立即重试（failed 守卫）
+        if (!failed && fallbackIndexDirty && symbolsViewVisible) void requestFallbackIndexBuild();
       }
     })();
   }

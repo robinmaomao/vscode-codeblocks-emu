@@ -114,6 +114,9 @@ const ext = fs.readFileSync(extPath, 'utf8');
 check('B1 dist 使用 locateBookmarkLineInDocument', ext.includes('locateBookmarkLineInDocument'), null);
 check('B2 dist 无整文档 getText().split 热路径残留', !ext.includes('.getText().split(/\\r?\\n/)'), null);
 check('B3 dist 含空书签早退标记（bookmarkDecoratedDocs WeakSet）', ext.includes('bookmarkDecoratedDocs'), null);
+// 复核修复：清空全部书签统一走 refreshBookmarkDecorations（装饰与 WeakSet 标记同步）
+check('B4 dist 清空全部书签走统一刷新路径', ext.includes('forEach((e) => refreshBookmarkDecorations(e))'), null);
+check('B5 dist 无旧手工清装饰残留（e.setDecorations(bookmarkDecoration, [])）', !ext.includes('e.setDecorations(bookmarkDecoration, [])'), null);
 
 console.log(`\nbookmark-locate: pass=${pass} fail=${fail}`);
 process.exit(fail ? 1 : 0);
