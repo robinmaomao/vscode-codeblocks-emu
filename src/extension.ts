@@ -6600,6 +6600,10 @@ async function applyTokenColorCustomizations(): Promise<void> {
 }
 
 export function deactivate(): void {
+  // G2：关闭/重载窗口/禁用扩展时，终止进行中的构建——与「停止构建」同一语义
+  // （cancel 置位 + taskkill /T /F 杀 cmd.exe→gcc→cc1/as/ld 整棵进程树），
+  // 避免扩展宿主退出后遗留孤儿编译进程/未受控的半成品产物。无构建时为空操作。
+  currentBuildCancel?.cancel();
   if (outputChannel) outputChannel.dispose();
   if (diagnosticCollection) diagnosticCollection.dispose();
 }
