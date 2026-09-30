@@ -92,8 +92,27 @@ function commonLocations(): string[] {
   return locs;
 }
 
-/** 检测 clangd 可执行文件路径（未找到返回 undefined） */
+/** 检测结果缓存（P7：避免每次生成 compile_commands 都 spawnSync where + 递归目录扫描；含负结果） */
+let detectClangdCache: { value: string | undefined; at: number } | undefined;
+const DETECT_CLANGD_CACHE_TTL_MS = 5 * 60 * 1000;
+
+/** 清除 clangd 检测缓存（clangd.path 配置变化 / 测试场景） */
+export function clearClangdDetectionCache(): void {
+  detectClangdCache = undefined;
+}
+
+/** 检测 clangd 可执行文件路径（未找到返回 undefined；结果带 TTL 缓存，含负结果） */
 export function detectClangd(): string | undefined {
+  if (detectClangdCache && Date.now() - detectClangdCache.at < DETECT_CLANGD_CACHE_TTL_MS) {
+    return detectClangdCache.value;
+  }
+  const value = detectClangdUncached();
+  detectClangdCache = { value, at: Date.now() };
+  return value;
+}
+
+/** 实际探测（无缓存；异常路径同样返回 undefined 并被上层负缓存） */
+function detectClangdUncached(): string | undefined {
   // 优先：clangd 扩展的 clangd.path 设置（用户手动指定的 clangd 路径，含 ${userHome} 变量展开）
   try {
     const configured = vscode.workspace.getConfiguration('clangd').get<string>('path', '');

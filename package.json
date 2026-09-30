@@ -2,7 +2,7 @@
   "name": "codeblocks-vscode",
   "displayName": "Code::Blocks for VS Code",
   "description": "原生移植 Code::Blocks 核心功能到 VS Code：项目模型、构建引擎、编译器管理与调试引擎",
-  "version": "0.8.113-dev",
+  "version": "0.8.114-dev",
   "icon": "resources/icon.png",
   "publisher": "robinmaomao",
   "author": {
@@ -605,7 +605,7 @@
           "codeblocks.build.outputTimestamp": {
             "type": "boolean",
             "default": false,
-            "description": "普通输出通道每行是否输出时间戳（默认关；开启后格式 2026-09-29 15:11:20.222，与日志文件同款）。仅 persistLog 关闭（普通通道）时生效；修改后需重载窗口生效"
+            "description": "普通输出通道每行是否输出时间戳（默认关；开启后格式 2026-09-29 15:11:20.222，与日志文件同款）。仅 persistLog 关闭（普通通道）时生效；修改后即时生效"
           },
           "codeblocks.build.strictQuoting": {
             "type": "boolean",

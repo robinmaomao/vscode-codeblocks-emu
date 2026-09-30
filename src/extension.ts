@@ -17,9 +17,10 @@ import { createProjectFromTemplate, PROJECT_TEMPLATES } from './project/newProje
 import { instantiateUserTemplate, listUserTemplates, saveAsUserTemplate } from './project/userTemplates';
 import { Compiler } from './compiler/compiler';
 import { queryCompilerVersionString } from './compiler/compilerVersion';
+import { BoundedMap, buildCompilerCacheKey } from './compiler/compilerCache';
 import { CompilerOptionsLoader } from './compiler/optionsLoader';
 import { CodeBlocksConfig } from './compiler/codeblocksConfig';
-import { detectAllCompilers, detectAllCompilersAsync, DetectedCompiler } from './compiler/detector';
+import { detectAllCompilersAsync, DetectedCompiler } from './compiler/detector';
 import { CompilerOptionsPanel } from './ui/compilerOptionsPanel';
 import { ProjectPropertiesPanel, TargetEditData, FileEditData, BuildOptionsEditData, SearchDirsEditData, ProjectSettingsEditData, BuildScriptsEditData, NotesEditData, VirtualTargetEditData, DebuggerSettingsEditData } from './ui/projectPropertiesPanel';
 import { ProjectTreeProvider } from './ui/projectTreeProvider';
@@ -28,6 +29,7 @@ import { BuildLogTreeProvider, BuildLogProject, BuildLogDiagnostic } from './ui/
 import { normalizeBuildLogAutoFocusMode, maybeAutoFocusBuildLog } from './ui/buildLogFocus';
 import { AnalysisTreeProvider, AnalysisData, AnalysisProjectInfo, LastBuildMeta } from './ui/analysisTreeProvider';
 import { SymbolTreeProvider } from './ui/symbolTreeProvider';
+import { BuildSpinRenderState, nextBuildSpinRender } from './ui/buildStatusRender';
 import { createRunTerminal, setRunTerminalRegistry, createWorkspaceRunTerminalRegistry } from './ui/runTerminal';
 import { BuildEngine } from './build/buildEngine';
 import { createCbOutput, CbOutput } from './build/cbChannel';
@@ -41,7 +43,7 @@ import { decodeText } from './tools/encoding';
 import { clearBackticksCache, CommandGenerator } from './compiler/commandGenerator';
 import { OutputParser } from './build/outputParser';
 import { collectClangdEntries, writeClangdDatabase, CompileCommandEntry } from './build/compileCommands';
-import { detectClangd, queryCompilerSystemIncludes, queryCompilerTarget, updateClangdUserConfig, clangdUserConfigPath } from './tools/clangd';
+import { detectClangd, queryCompilerSystemIncludes, queryCompilerTarget, updateClangdUserConfig, clangdUserConfigPath, clearClangdDetectionCache } from './tools/clangd';
 import { SymbolIndex, registerFallbackIntelliSense } from './tools/codeCompletion';
 import { GdbDebugAdapter } from './debug/gdbDebugAdapter';
 import { debugStateChanged, getActiveAdapter, setDebugTraceEnabled, setDebugTraceSink } from './debug/debugRegistry';
@@ -49,7 +51,7 @@ import { parsePsList, parseTasklist, ProcessInfo } from './debug/miParse';
 import { resolveGdbPath } from './debug/gdbLocate';
 import { RegistersTreeProvider } from './ui/registersTreeProvider';
 import { scanTodos } from './tools/todoScanner';
-import { Bookmark, toggleBookmark, nextBookmark, prevBookmark, locateBookmarkLine } from './tools/bookmarks';
+import { Bookmark, toggleBookmark, nextBookmark, prevBookmark, locateBookmarkLineInDocument } from './tools/bookmarks';
 import { parseIncludeDirective, resolveIncludePath } from './tools/includeResolver';
 import { countFiles, isSourceFile } from './tools/codeStats';
 import { formatActiveDocument } from './tools/astyle';
@@ -59,6 +61,7 @@ import { parseToolsSetting, buildToolInvocation, ToolContext } from './tools/too
 import { applyCustomVariables } from './model/customVariables';
 import { parseProjectDebuggerConfig, mergeRemoteOptions, applyProjectDebuggerConfig, RemoteDebuggingOptions } from './model/projectDebuggerExtensions';
 import { setProjectDependencies, wouldCreateCycle } from './model/workspaceWriter';
+import { PathOwnerIndex, buildPathOwnerIndex, findSoleOwner, normFilePath } from './model/pathOwnerIndex';
 import { generateMakefile } from './build/makefileExporter';
 import { buildProjectFromImport, importDevProject, importDspProject, importVcxproj } from './project/projectImporter';
 import { buildTargetExportProject } from './project/exportTarget';
@@ -151,7 +154,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     vscode.workspace.getConfiguration('codeblocks').get<boolean>('build.persistLog', false),
     {
       plainCb: () => buildLogPrefs().plain,
-      timestamp: vscode.workspace.getConfiguration('codeblocks').get<boolean>('build.outputTimestamp', false),
+      // G1：惰性 getter——修改 codeblocks.build.outputTimestamp 即时生效（无需重载窗口）
+      timestamp: () => vscode.workspace.getConfiguration('codeblocks').get<boolean>('build.outputTimestamp', false),
     },
   );
   // DAP 跟踪（codeblocks.debug.trace）：写入本输出通道
@@ -162,6 +166,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   applyDebugTrace();
   context.subscriptions.push(vscode.workspace.onDidChangeConfiguration((e) => {
     if (e.affectsConfiguration('codeblocks.debug.trace')) applyDebugTrace();
+  }));
+  // P7：clangd.path 变化 → 清除检测缓存（下次生成时重新探测）
+  context.subscriptions.push(vscode.workspace.onDidChangeConfiguration((e) => {
+    if (e.affectsConfiguration('clangd.path')) clearClangdDetectionCache();
   }));
   // 日志/行为偏好缓存失效：plainCbLog / log.english / strictQuoting / quietSuccess 即时生效（免重载窗口）
   context.subscriptions.push(vscode.workspace.onDidChangeConfiguration((e) => {
@@ -425,6 +433,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     showCollapseAll: true,
   });
   context.subscriptions.push(symbolsTreeView);
+  // P2：符号视图可见性跟踪——索引改为懒构建后，视图可见（打开/恢复）时按需触发一次异步构建
+  symbolsViewVisible = symbolsTreeView.visible;
+  context.subscriptions.push(
+    symbolsTreeView.onDidChangeVisibility((e) => {
+      symbolsViewVisible = e.visible;
+      if (e.visible) void requestFallbackIndexBuild();
+    }),
+  );
 
   // 注册工程分析视图（概览 / 文件类型分布 / TODO 统计 / 构建目标 / 最近构建）
   analysisTreeProvider = new AnalysisTreeProvider(context.extensionUri, () => computeAnalysisData());
@@ -525,8 +541,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     }),
   );
 
-  // 兜底 IntelliSense（补全 / 悬停 / 跳转定义）：仅在 clangd 不可用时生效
-  context.subscriptions.push(...registerFallbackIntelliSense(fallbackIndex, () => fallbackEnabled));
+  // 兜底 IntelliSense（补全 / 悬停 / 跳转定义）：仅在 clangd 不可用时生效；
+  // P2：索引懒构建——首次请求时异步分片构建（clangd 用户兜底不生效，永不构建）
+  context.subscriptions.push(...registerFallbackIntelliSense(fallbackIndex, () => fallbackEnabled, requestFallbackIndexBuild));
 
   // 聚焦 Build Log 视图（菜单项 / 构建完成后引导）——位于底部 Panel 容器
   context.subscriptions.push(
@@ -619,20 +636,27 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   context.subscriptions.push(buildStatusBar);
 
   // 构建中旋转动画 + 实时秒数（buildInProgress 时 Build 项变 spinner + 点击变停止构建）
+  // P5：状态机驱动——仅状态/秒数变化才重建 text/tooltip/command（空闲零操作，不再每 tick 重建 MarkdownString）
   let buildingSince = 0;
+  let spinRendered: BuildSpinRenderState | undefined = 'idle'; // 上方创建时已渲染空闲态
   const spinTimer = setInterval(() => {
       if (!buildStatusBar) return;
-      if (buildInProgress) {
-        if (!buildingSince) buildingSince = Date.now();
-        const secs = Math.floor((Date.now() - buildingSince) / 1000);
-        buildStatusBar.text = `$(sync~spin) Building… (${secs}s)`;
-        buildStatusBar.tooltip = buildStopHoverTooltip(secs);
-        buildStatusBar.command = 'codeblocks.build.stop';
-      } else {
+      if (buildInProgress && !buildingSince) buildingSince = Date.now();
+      const elapsedSecs = buildInProgress && buildingSince
+        ? (Date.now() - buildingSince) / 1000
+        : 0;
+      const next = nextBuildSpinRender(spinRendered, buildInProgress, elapsedSecs);
+      if (next === undefined) return; // 无变化：跳过（空闲态零操作）
+      spinRendered = next;
+      if (next === 'idle') {
         buildingSince = 0;
         buildStatusBar.text = '$(package) Build';
         buildStatusBar.tooltip = buildStatusHoverTooltip();
         buildStatusBar.command = 'codeblocks.build.menu';
+      } else {
+        buildStatusBar.text = `$(sync~spin) Building… (${next}s)`;
+        buildStatusBar.tooltip = buildStopHoverTooltip(next);
+        buildStatusBar.command = 'codeblocks.build.stop';
       }
     }, 250);
   context.subscriptions.push({ dispose: () => clearInterval(spinTimer) });
@@ -1881,30 +1905,32 @@ async function findProjectFiles(): Promise<string[]> {
   return [...new Set([...cbps, ...wss].map((u) => u.fsPath))];
 }
 
-/** 编译器探测结果缓存（按 masterPath 失效） */
-let cachedCompilersMasterPath: string | undefined;
-let cachedCompilers: DetectedCompiler[] = [];
-
-/** 获取探测到的编译器（缓存；masterPath 变化时重新探测） */
-function getDetectedCompilers(masterPath: string): DetectedCompiler[] {
-  if (cachedCompilersMasterPath !== masterPath) {
-    cachedCompilersMasterPath = masterPath;
-    try {
-      cachedCompilers = detectAllCompilers(masterPath);
-    } catch {
-      cachedCompilers = [];
-    }
-  }
-  return cachedCompilers;
-}
-
 /** 选择编译器（内置模板 + 探测到的实际编译器），返回编译器 ID */
 async function pickCompiler(): Promise<string | undefined> {
   const cfg = vscode.workspace.getConfiguration('codeblocks');
   const defaultId = cfg.get<string>('compilerId', 'gcc');
   const masterPath = cfg.get<string>('masterPath', '');
 
-  const detected = getDetectedCompilers(masterPath);
+  // P4：改为异步并行探测（同步实现实测可达 0.3–1.5s 阻塞窗口，向导第 4 步会明显卡顿）。
+  // 优先用跨会话缓存预填（与状态栏「选择编译器」共用同一缓存）；首启无缓存时
+  // await 一次异步探测（约 0.25s，期间 UI 不冻结）；有缓存时后台异步刷新不阻塞向导。
+  let detected: DetectedCompiler[] = [];
+  const cached = loadDetectCache();
+  if (cached && cached.masterPath === masterPath && Array.isArray(cached.list)) {
+    detected = cached.list;
+    void detectAllCompilersAsync(masterPath)
+      .then((list) => {
+        try { saveDetectCache(masterPath, list); } catch { /* 非关键 */ }
+      })
+      .catch(() => { /* 探测失败：保留缓存列表 */ });
+  } else {
+    try {
+      detected = await detectAllCompilersAsync(masterPath);
+      saveDetectCache(masterPath, detected);
+    } catch {
+      detected = [];
+    }
+  }
 
   const seen = new Set<string>();
   const items: { label: string; description?: string }[] = [];
@@ -2126,6 +2152,8 @@ async function saveProjectAsTemplate(): Promise<void> {
 
 async function openProject(filename: string): Promise<void> {
   try {
+    // P3：工程集合/文件列表即将变化 → 失效属主索引（所有重解析路径均经由此处）
+    invalidateOwnerIndex();
     if (filename.endsWith('.workspace')) {
       openedWorkspaceFile = filename;
       const ws = new WorkspaceParser().parse(filename);
@@ -2175,8 +2203,8 @@ async function openProject(filename: string): Promise<void> {
     projectTreeProvider?.setProjects(openProjects);
     projectTreeProvider?.setActiveProject(activeProject);
 
-    // 重建兜底符号索引（clangd 不可用时提供项目内补全）
-    rebuildFallbackIndex();
+    // 标记兜底符号索引待重建（P2：懒构建，不再在打开工程时同步全量读文件）
+    markFallbackIndexDirty();
 
     // 每个工程各自默认选中第一个目标（对齐 CodeBlocks m_ActiveTarget = GetFirstValidBuildTargetName()，跳过不支持平台的目标）
     const titles = project.buildTargets.filter((t) => supportsCurrentPlatform(t.platforms)).map((t) => t.title);
@@ -2244,6 +2272,27 @@ function setSelectedTarget(project: Project, title: string): void {
 /** 归一化路径（正斜杠 + 小写，Windows 大小写不敏感比较） */
 function normPath(p: string): string {
   return p.replace(/\\/g, '/').toLowerCase();
+}
+
+// ———— P3：路径属主索引（活动工程跟随 / 共享文件判定离开热路径） ————
+/** 属主索引缓存（openProjects 或文件列表变化时失效；见 invalidateOwnerIndex） */
+let ownerIndexCache: PathOwnerIndex | undefined;
+/** 共享文件判定缓存（保留旧 hasSharedFiles 语义：含目标文件列表 + path.normalize） */
+let sharedFilesCache: boolean | undefined;
+/** 活动编辑器→属主 记忆化（同一文件重复触发时跳过查表/回退扫描） */
+let lastSyncMemo: { fsPath: string; owner?: Project } | undefined;
+
+/** 失效属主索引缓存（在工程打开/移除等模型变化点调用；下次访问惰性重建） */
+function invalidateOwnerIndex(): void {
+  ownerIndexCache = undefined;
+  sharedFilesCache = undefined;
+  lastSyncMemo = undefined;
+}
+
+/** 取（或惰性构建）属主索引 */
+function ownerPathIndex(): PathOwnerIndex {
+  if (!ownerIndexCache) ownerIndexCache = buildPathOwnerIndex(openProjects);
+  return ownerIndexCache;
 }
 
 /** 统一设置活动工程：更新全局状态、树高亮、状态栏，并按需持久化 */
@@ -2720,39 +2769,58 @@ async function restartClangd(): Promise<void> {
   }
 }
 
-/** 是否存在被多个工程共享的文件（同一源文件出现在多个 .cbp 中） */
+/**
+ * 是否存在被多个工程共享的文件（同一源文件出现在多个 .cbp 中）。
+ * P3：结果按索引代缓存（invalidateOwnerIndex 失效），不再每次活动工程切换全量重扫。
+ * 语义保留旧实现：统计 项目文件 + 目标文件（path.normalize + 小写）。
+ */
 function hasSharedFiles(): boolean {
-  const seen = new Set<string>();
-  for (const p of openProjects) {
-    const local = new Set<string>();
-    const addAll = (files: ProjectFile[]) => {
-      for (const f of files) {
-        local.add(path.normalize(f.absolutePath).toLowerCase());
+  if (sharedFilesCache === undefined) {
+    const seen = new Set<string>();
+    let shared = false;
+    for (const p of openProjects) {
+      const local = new Set<string>();
+      const addAll = (files: ProjectFile[]) => {
+        for (const f of files) {
+          local.add(path.normalize(f.absolutePath).toLowerCase());
+        }
+      };
+      addAll(p.files);
+      for (const t of p.buildTargets) addAll(t.files);
+      for (const key of local) {
+        if (seen.has(key)) {
+          shared = true;
+          break;
+        }
+        seen.add(key);
       }
-    };
-    addAll(p.files);
-    for (const t of p.buildTargets) addAll(t.files);
-    for (const key of local) {
-      if (seen.has(key)) return true;
-      seen.add(key);
+      if (shared) break;
     }
+    sharedFilesCache = shared;
   }
-  return false;
+  return sharedFilesCache;
 }
 
-/** 将活动工程同步到当前活动编辑器所属工程（文件被多个/零个工程拥有时保持现状） */
+/**
+ * 将活动工程同步到当前活动编辑器所属工程（文件被多个/零个工程拥有时保持现状）。
+ * P3 热路径优化：
+ *  1) 精确匹配改用属主索引 O(1) 查表（旧实现每次 O(项目×文件) normPath 扫描）；
+ *  2) 同一文件重复触发（输出面板/调试控制台焦点切换等）由 lastSyncMemo 短路。
+ */
 function syncActiveProjectToEditor(): void {
   const fsPath = vscode.window.activeTextEditor?.document?.uri?.fsPath;
   if (!fsPath) return;
+  if (lastSyncMemo && lastSyncMemo.fsPath === fsPath) {
+    const cached = lastSyncMemo.owner;
+    if (cached && cached.filename !== activeProject?.filename) {
+      setActiveProject(cached, { persist: true });
+    }
+    return;
+  }
   const norm = normPath(fsPath);
   // 精确匹配优先：文件被唯一工程收录时才切换
-  let owner: Project | undefined;
-  const exactOwners = openProjects.filter((p) =>
-    p.files?.some((f) => normPath(f.absolutePath || f.relativeFilename) === norm),
-  );
-  if (exactOwners.length === 1) {
-    owner = exactOwners[0];
-  } else {
+  let owner = findSoleOwner(ownerPathIndex(), fsPath);
+  if (!owner) {
     // 回退：按工程树（commonTopLevelPath）唯一包含判断
     const treeOwners = openProjects.filter((p) => {
       const root = normPath(p.commonTopLevelPath || p.basePath).replace(/\/+$/, '');
@@ -2760,6 +2828,7 @@ function syncActiveProjectToEditor(): void {
     });
     if (treeOwners.length === 1) owner = treeOwners[0];
   }
+  lastSyncMemo = { fsPath, owner };
   if (owner && owner.filename !== activeProject?.filename) {
     setActiveProject(owner, { persist: true });
   }
@@ -2990,8 +3059,21 @@ async function generateClangdForWorkspaceInternal(interactive: boolean): Promise
   }
 }
 
-/** 重建兜底符号索引（收集所有已打开项目及其目标的源文件） */
-function rebuildFallbackIndex(): void {
+/**
+ * 兜底符号索引懒构建（P2）——
+ * 原实现在每次 openProject/removeProject 时同步读取全部源文件（且 clangd 场景完全冗余：
+ * 兜底 provider 不生效、索引仅被 Symbols 视图使用）。现改为：
+ *  - markFallbackIndexDirty() 只置脏（打开/移除工程、归属变化等调用方沿用原调用点）；
+ *  - 首次兜底请求（补全/悬停/跳转/文档符号，均异步）或 Symbols 视图可见时，
+ *    requestFallbackIndexBuild() 异步分片构建一次（批间让出事件循环，单飞防重入）。
+ */
+let fallbackIndexDirty = false;
+let fallbackIndexBuild: Promise<void> | undefined;
+/** Symbols 视图当前是否可见（决定置脏时是否立即触发构建；不可见则等视图打开或首次兜底请求） */
+let symbolsViewVisible = false;
+
+/** 收集所有已打开项目及其目标的源文件（绝对路径去重） */
+function collectFallbackIndexFiles(): string[] {
   const files = new Set<string>();
   for (const p of openProjects) {
     for (const f of p.files) files.add(f.absolutePath);
@@ -2999,8 +3081,30 @@ function rebuildFallbackIndex(): void {
       for (const f of t.files) files.add(f.absolutePath);
     }
   }
-  fallbackIndex.rebuild([...files]);
-  symbolTreeProvider?.refresh();
+  return [...files];
+}
+
+/** 标记兜底索引需要重建（不立即读取文件）；Symbols 视图可见时顺带触发异步构建 */
+function markFallbackIndexDirty(): void {
+  fallbackIndexDirty = true;
+  if (symbolsViewVisible) void requestFallbackIndexBuild();
+}
+
+/** 按需构建兜底索引（单飞：进行中的构建被复用；构建期间再次置脏则下次请求重建） */
+function requestFallbackIndexBuild(): Promise<void> {
+  if (!fallbackIndexDirty) return Promise.resolve();
+  if (!fallbackIndexBuild) {
+    fallbackIndexDirty = false;
+    fallbackIndexBuild = (async () => {
+      try {
+        await fallbackIndex.rebuildAsync(collectFallbackIndexFiles());
+        symbolTreeProvider?.refresh();
+      } finally {
+        fallbackIndexBuild = undefined;
+      }
+    })();
+  }
+  return fallbackIndexBuild;
 }
 
 /** 持久化项目打开顺序到 workspaceState */
@@ -3362,13 +3466,14 @@ function removeProject(filename: string): void {
   const idx = openProjects.findIndex((p) => p.filename === filename);
   if (idx === -1) return;
   const [removed] = openProjects.splice(idx, 1);
+  invalidateOwnerIndex(); // P3：工程集合变化 → 属主索引失效
   if (activeProject?.filename === filename) {
     setActiveProject(openProjects[0], { persist: true });
   }
   projectTreeProvider?.setProjects(openProjects);
   refreshStatusBars();
   persistProjectOrder();
-  rebuildFallbackIndex();
+  markFallbackIndexDirty(); // P2：懒构建
   analysisTreeProvider?.refresh();
   outputChannel.info(`[Code::Blocks] 已移除项目: ${removed.title}`);
 }
@@ -3957,11 +4062,34 @@ function writeUnitsToCbp(cbpPath: string, units: string[]): void {
   fs.writeFileSync(cbpPath, raw, 'utf-8');
 }
 
+/** P6：编译器实例结果缓存（键 = id + masterPath + compilerPrograms；配置变化自动换键重建）。
+ *  全仓 getCompiler 调用点已核查为只读使用（无外部字段写入），可安全共享实例。 */
+const compilerResultCache = new BoundedMap<string, Compiler>(24);
+
 /** 查询编译器版本字符串 —— 已移入 src/compiler/compilerVersion.ts（模块级缓存，避免重复同步 spawn） */
 function getCompiler(compilerId?: string): Compiler {
   const cfg = vscode.workspace.getConfiguration('codeblocks');
   const id = compilerId ?? cfg.get<string>('compilerId', 'gcc');
   const masterPath = cfg.get<string>('masterPath', '');
+  // P6：缓存命中直接返回（不再重复读取/解析编译器 XML，含 extends 链）
+  const cacheKey = buildCompilerCacheKey(
+    id,
+    masterPath,
+    cfg.get<Record<string, string>>('compilerPrograms', {}),
+  );
+  const cached = compilerResultCache.get(cacheKey);
+  if (cached) return cached;
+  const built = buildCompilerInstance(id, masterPath, cfg);
+  compilerResultCache.set(cacheKey, built);
+  return built;
+}
+
+/** 构建编译器实例（无缓存路径；getCompiler 的内部实现，逻辑与原函数一致） */
+function buildCompilerInstance(
+  id: string,
+  masterPath: string,
+  cfg: vscode.WorkspaceConfiguration,
+): Compiler {
   // 编译器全局搜索目录 + 链接库（default.conf /compiler_sets/<id>，对齐 Compiler::LoadSettings）
   const applyGlobalDirs = (compiler: Compiler): Compiler => {
     const uc = codeBlocksConfig?.find(id);
@@ -4223,24 +4351,37 @@ const bookmarkDecoration = vscode.window.createTextEditorDecorationType({
   overviewRulerColor: new vscode.ThemeColor('editorGutter.addedBackground'),
   overviewRulerLane: vscode.OverviewRulerLane.Right,
 });
+/** 已实际设置过书签装饰的文档（WeakSet）——无书签文件在文本变更热路径上零开销早退（P1） */
+const bookmarkDecoratedDocs = new WeakSet<vscode.TextDocument>();
 
 async function persistBookmarks(): Promise<void> {
   if (bmStore) await bmStore.update('codeblocks.bookmarks', bookmarks);
 }
 
-/** 用当前编辑器的书签刷新概览尺装饰 */
+/**
+ * 用当前编辑器的书签刷新概览尺装饰。
+ * 性能约定（P1 热路径）：每次文本变更（含按键）都会走本函数——
+ * 1) 该文件无书签时直接早退（仅当此前设置过装饰才清理一次，跳过 setDecorations 调用）；
+ * 2) 行漂移定位按需读取书签行 ±50 行窗口（locateBookmarkLineInDocument），不再整文档 getText()+split。
+ */
 function refreshBookmarkDecorations(editor?: vscode.TextEditor): void {
   const ed = editor ?? vscode.window.activeTextEditor;
   if (!ed) return;
-  const lines = ed.document.getText().split(/\r?\n/);
   const file = ed.document.uri.fsPath;
-  const ranges = bookmarks
-    .filter((b) => b.file.toLowerCase() === file.toLowerCase())
-    .map((b) => {
-      const ln = locateBookmarkLine(b, lines) - 1;
-      return new vscode.Range(Math.max(0, ln), 0, Math.max(0, ln), 0);
-    });
+  const mine = bookmarks.filter((b) => b.file.toLowerCase() === file.toLowerCase());
+  if (!mine.length) {
+    if (bookmarkDecoratedDocs.has(ed.document)) {
+      ed.setDecorations(bookmarkDecoration, []);
+      bookmarkDecoratedDocs.delete(ed.document);
+    }
+    return;
+  }
+  const ranges = mine.map((b) => {
+    const ln = locateBookmarkLineInDocument(b, ed.document) - 1;
+    return new vscode.Range(Math.max(0, ln), 0, Math.max(0, ln), 0);
+  });
   ed.setDecorations(bookmarkDecoration, ranges);
+  bookmarkDecoratedDocs.add(ed.document);
 }
 
 /** 切换当前行书签（已存在则移除） */
@@ -4268,8 +4409,7 @@ async function bookmarkGoto(dir: 1 | -1): Promise<void> {
   }
   const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(bm.file));
   const editor = await vscode.window.showTextDocument(doc);
-  const lines = doc.getText().split(/\r?\n/);
-  const ln = Math.max(0, locateBookmarkLine(bm, lines) - 1);
+  const ln = Math.max(0, locateBookmarkLineInDocument(bm, doc) - 1);
   const pos = new vscode.Position(ln, 0);
   editor.selection = new vscode.Selection(pos, pos);
   editor.revealRange(new vscode.Range(pos, pos), vscode.TextEditorRevealType.InCenter);

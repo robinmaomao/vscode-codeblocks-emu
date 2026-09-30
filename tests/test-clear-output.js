@@ -95,7 +95,7 @@ const TS = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3} /;
 
 // ---- 关闭时间戳（build.outputTimestamp=false）：不加时间戳，标记保留 ----
 {
-  const out = createCbOutput('Code::Blocks', false, { timestamp: false });
+  const out = createCbOutput('Code::Blocks', false, { timestamp: () => false });
   const ch = created[created.length - 1];
   out.info('no-ts'); out.warn('w'); out.error('e');
   const lines = ch.entries.filter((e) => e[0] === 'appendLine').map((e) => e[1]);
@@ -103,6 +103,26 @@ const TS = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3} /;
   check('E2 标记仍保留（⚠️）', lines[1] === '⚠️ w', lines[1]);
   check('E3 标记仍保留（❌）', lines[2] === '❌ e', lines[2]);
   check('E4 info 原样', lines[0] === 'no-ts', lines[0]);
+}
+
+// ---- G1：timestamp 惰性 getter——每次输出时求值（设置改动即时生效，无需重载） ----
+{
+  let tsOn = false;
+  const out = createCbOutput('Code::Blocks', false, { timestamp: () => tsOn });
+  const ch = created[created.length - 1];
+  out.info('a');
+  tsOn = true; // 运行中切换（模拟修改设置后立即写日志）
+  out.info('b');
+  const lines = ch.entries.filter((e) => e[0] === 'appendLine').map((e) => e[1]);
+  check('G1-1 getter 返回 false 时行无时间戳', lines[0] === 'a', lines[0]);
+  check('G1-2 运行中切换为 true 后行带时间戳',
+    lines[1] !== undefined && TS.test(lines[1]) && lines[1].replace(TS, '') === 'b', lines[1]);
+  // 未提供 getter → 默认带时间戳（兼容旧行为）
+  const out2 = createCbOutput('Code::Blocks', false);
+  const ch2 = created[created.length - 1];
+  out2.info('c');
+  const lines2 = ch2.entries.filter((e) => e[0] === 'appendLine').map((e) => e[1]);
+  check('G1-3 未提供 getter 默认带时间戳', lines2[0] !== undefined && TS.test(lines2[0]), lines2[0]);
 }
 
 // ---- 已有 ⚠️/❌ 前缀不重复标记 ----
@@ -147,6 +167,8 @@ check('D6 dist 汇总块移到输出末尾（printBuildSummaryBlocks）', ext.in
 check('D7 dist 无任务跳过逻辑已移除', !ext.includes('nothingHappened'), null);
 check('D8 dist 汇总块调用点 ≥2（单项目 + 工作区）', (ext.match(/printBuildSummaryBlocks\(\)/g) || []).length >= 2, null);
 check('D9 dist 汇总块含「编译时间」行（YYYY-MM-DD HH:MM:SS）', ext.includes('🕒 编译时间') && ext.includes('formatDateTime'), null);
+// G1：timestamp 惰性 getter（改设置即时生效）——extension 需传函数而非布尔
+check('D10 dist 传惰性 timestamp getter（G1）', /timestamp:\s*\(\)\s*=>/.test(ext), null);
 
 console.log(`\nclear-output: pass=${pass} fail=${fail}`);
 process.exit(fail ? 1 : 0);
