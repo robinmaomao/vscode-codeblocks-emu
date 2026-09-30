@@ -16,7 +16,7 @@
 | **F6** | 构建进度通知 + 状态栏秒数固定开启（无开关） | `extension.ts:4645/4765/4832` + spinTimer `:594-609` | ○ 可选 |
 | **F7** | use_folders / hide_folder_name 无对应开关 | 仅 `projectTree.categorize` | ○ 记录不移植 |
 | **N1** | Symbols 视图与 Project 视图**共用同一图标** | `package.json` views：`codeblocks.symbols` icon=`resources/project.svg` | ✔ 已实施（0.8.110-dev） |
-| **N2** | 每次 Run 新建同名终端，重复运行堆积终端标签 | `extension.ts:6138/6155` 无复用逻辑 | ✔ 已实施（0.8.109-dev，方案 C） |
+| **N2** | 每次 Run 新建同名终端，重复运行堆积终端标签 | `extension.ts:6138/6155` 无复用逻辑 | ✔ 已实施（0.8.109-dev，方案 C；0.8.113-dev 方案 A：仅处置本扩展创建的终端 + 方案 B1：名称注册表跨重载回收） |
 | **N3** | Build Log「只看错误」开关**无开/关视觉反馈** | `package.json:93`（icon `$(filter)`）+ `:1099/1104` 两条 when 互补但图标相同 | ✔ 已实施（0.8.110-dev） |
 | **N4** | 状态栏左区常驻 5 项，`Code::Blocks: N 项目` 与 Menu 功能重叠 | priority：Menu 1000 / cbp 110 / Target 100 / Build 90 / Compiler 70 | ○ 可选 |
 | **N5** | 两个 Webview 面板 `retainContextWhenHidden: true` | `compilerOptionsPanel.ts:28`、`projectPropertiesPanel.ts:235` | ○ 记录（有意保留状态） |
@@ -138,7 +138,7 @@
 | F6 | 构建进度显示 | 新增 `codeblocks.build.showProgress`（枚举） | □ 做（默认 notification）｜□ 不做 |
 | F7 | use_folders/hide_folder_name | — | □ 记录不移植（推荐）｜□ 做两个布尔 |
 | N1 | Symbols 视图图标 | 补独立 `symbols.svg` | ✔ **已实施**：`resources/symbols.svg`（symbol-method 风格，currentColor 描边随主题） |
-| N2 | Run 终端复用 | 复用同名终端，避免堆积 | ✔ **已实施（方案 C，用户确认）**：`src/ui/runTerminal.ts` 同名先弃后建，4 处全改、无门控 |
+| N2 | Run 终端复用 | 复用同名终端，避免堆积 | ✔ **已实施（方案 C，用户确认）**：`src/ui/runTerminal.ts` 同名先弃后建，4 处全改、无门控；后续方案 A（0.8.113-dev）：WeakSet 记录本扩展创建的终端；方案 B1：workspaceState 名称注册表（重载后旧标签仍回收，单一标签保证跨重载成立） |
 | N3 | 「只看错误」状态反馈 | 拆两条命令配不同图标 | ✔ **已实施**：未开启态 `codeblocks.buildLog.toggleErrorsOnly`（`$(filter)`）；已开启态 `codeblocks.buildLog.showAllMessages`（`$(filter-filled)`，when 互补 + 命令面板隐藏） |
 | N4 | 状态栏精简 | cbp 项并入 Menu / 仅待打开时显示 | □ 做｜□ 维持现状 |
 | N5 | retainContextWhenHidden | — | □ 维持现状（推荐）｜□ 移除 |

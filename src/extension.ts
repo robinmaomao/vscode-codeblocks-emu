@@ -28,7 +28,7 @@ import { BuildLogTreeProvider, BuildLogProject, BuildLogDiagnostic } from './ui/
 import { normalizeBuildLogAutoFocusMode, maybeAutoFocusBuildLog } from './ui/buildLogFocus';
 import { AnalysisTreeProvider, AnalysisData, AnalysisProjectInfo, LastBuildMeta } from './ui/analysisTreeProvider';
 import { SymbolTreeProvider } from './ui/symbolTreeProvider';
-import { createRunTerminal } from './ui/runTerminal';
+import { createRunTerminal, setRunTerminalRegistry, createWorkspaceRunTerminalRegistry } from './ui/runTerminal';
 import { BuildEngine } from './build/buildEngine';
 import { createCbOutput, CbOutput } from './build/cbChannel';
 import { BuildCancelSource, BuildCancelHandle } from './build/cancelToken';
@@ -141,6 +141,8 @@ let restartClangdAfterGeneration = false;
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
   extContext = context;
+  // Run 终端方案 B1：workspaceState 持久化「本扩展用过的终端名」注册表（WeakSet 重载即失效，注册表保证跨重载单一标签）
+  setRunTerminalRegistry(createWorkspaceRunTerminalRegistry(context.workspaceState));
   loadSelectedTargets();
   outputChannel = createCbOutput(
     'Code::Blocks',
