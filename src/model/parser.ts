@@ -7,6 +7,7 @@
 import { XMLParser, XMLValidator } from 'fast-xml-parser';
 import * as path from 'path';
 import * as fs from 'fs';
+import * as os from 'os';
 import {
   Project,
   BuildTarget,
@@ -17,13 +18,48 @@ import {
   OptionsRelation,
   OptionsRelationType,
   LinkerExecutableOption,
+  EnvVariable,
+  MakeCommandsMap,
 } from './types';
-import {
-  fileTypeOf,
-  isCompilableFileType,
-  isLinkableFileType,
-  defaultCompilerVar,
-} from './fileTypes';
+import { fileTypeOf, defaultCompilerVar, defaultCompile, defaultLink } from './fileTypes';
+import { upperDrive } from '../tools/pathCase';
+import { LruCache } from '../tools/lru';
+
+/** XML 解析结果缓存条目 */
+interface XmlCacheEntry {
+  mtimeMs: number;
+  size: number;
+  result: any;
+}
+
+/**
+ * XML 解析缓存：.cbp/.workspace 的 readFile + fast-xml-parser 解析是最昂贵步骤。
+ * Parser 每次调用均新建实例（extension.ts 中 new ProjectParser()），故用模块级缓存，
+ * 按绝对路径（盘符归一化）+ mtime + size 失效，命中时直接复用 XML 解析结果（只读透传，不回写）。
+ * ProjectParser 与 WorkspaceParser 的 XMLParser 配置不同，故分别用独立缓存；LRU 上限防无界增长。
+ */
+const projectXmlCache = new LruCache<string, XmlCacheEntry>(128);
+const workspaceXmlCache = new LruCache<string, XmlCacheEntry>(128);
+
+function parseXmlCached(filename: string, parser: XMLParser, cache: LruCache<string, XmlCacheEntry>): any {
+  // 盘符归一化（e:\ → E:\），让同一文件以不同大小写盘符访问时命中同一缓存条目
+  const key = upperDrive(path.resolve(filename));
+  let st: fs.Stats;
+  try {
+    st = fs.statSync(key);
+  } catch {
+    // 保持原行为：文件不可读时让 readFileSync 抛出原始错误
+    return parser.parse(fs.readFileSync(key, 'utf-8'));
+  }
+  const entry = cache.get(key);
+  if (entry && entry.mtimeMs === st.mtimeMs && entry.size === st.size) {
+    return entry.result;
+  }
+  const raw = fs.readFileSync(key, 'utf-8');
+  const result = parser.parse(raw);
+  cache.set(key, { mtimeMs: st.mtimeMs, size: st.size, result });
+  return result;
+}
 
 function toUnix(p: string): string {
   return p.replace(/\\/g, '/');
@@ -87,6 +123,20 @@ function collectAddOptions(parent: any): string[] {
   return out;
 }
 
+/** 分号分隔列表（对齐 wx GetArrayFromString：去引号、忽略空项） */
+function splitList(v: string): string[] {
+  return v.split(';').map((s) => s.trim().replace(/^"|"$/g, '')).filter(Boolean);
+}
+
+/** 平台属性解析 —— 对齐 globals.cpp GetPlatformsFromString（子串语义：含 All 或 W+U+M → spAll，否则按含 Windows/Unix/Mac 置位） */
+function parsePlatforms(s: string): number {
+  const pW = s.includes('Windows');
+  const pU = s.includes('Unix');
+  const pM = s.includes('Mac');
+  if (s.includes('All') || (pW && pU && pM)) return 0xff;
+  return (pW ? 0x04 : 0) | (pU ? 0x02 : 0) | (pM ? 0x01 : 0);
+}
+
 /** 从 <Compiler>/<Linker> 的 <Add directory="..."/> 提取目录（对应 DoCompilerOptions/DoLinkerOptions） */
 function collectAddDirectories(parent: any): string[] {
   const out: string[] = [];
@@ -131,8 +181,7 @@ export class ProjectParser {
 
   /** 解析 .cbp 文件 */
   parse(filename: string): Project {
-    const raw = fs.readFileSync(filename, 'utf-8');
-    const result = this.parser.parse(raw);
+    const result = parseXmlCached(filename, this.parser, projectXmlCache);
 
     const root = result.CodeBlocks_project_file;
     if (!root) throw new Error('不是有效的 .cbp 文件：缺少 <CodeBlocks_project_file> 根节点');
@@ -142,6 +191,9 @@ export class ProjectParser {
       title: String(root.Project?.['@_title'] ?? path.basename(filename, '.cbp')),
       basePath,
       commonTopLevelPath: basePath,
+      pchMode: 1,
+      extendedObjNames: false,
+      platforms: 0xff,
       filename,
       compilerId: '',
       compilerOptions: [],
@@ -156,8 +208,20 @@ export class ProjectParser {
       virtualFolders: [],
       commandsBeforeBuild: [],
       commandsAfterBuild: [],
+      buildScripts: [],
+      notes: '',
+      showNotesOnLoad: false,
+      envVars: [],
+      alwaysRunPostBuildSteps: false,
+      makefileIsCustom: false,
+      makefile: '',
+      executionDir: '',
+      makeCommands: {},
+      customVariables: {},
       files: [],
-      extensions: root.Extensions ?? null,
+      // <Project><Extensions>…（空元素 '' 归一为 null；此前误从根节点读取导致恒为 null，保存会丢扩展数据）
+      extensions: root.Project?.Extensions || null,
+      rawProject: root.Project,
     };
 
     // 项目级选项（<Project><Option .../><Build><Target>...）
@@ -178,6 +242,10 @@ export class ProjectParser {
       this.parseBuildTargets(projNode.Build, project);
       // 文件
       this.parseUnits(root.Project, project);
+      // legacy includeInTargetAll=true 目标 → 合成虚拟目标 "All"（对齐 projectloader.cpp:205-221）
+      this.synthesizeAllVirtualTarget(project);
+      // 项目自定义变量（<Extensions><codeblocks_project_custom_variables>）
+      this.parseProjectCustomVariables(root.Project, project);
     }
 
     // 计算公共顶层路径并设置 relativeToCommonTopLevelPath（对应 CalculateCommonTopLevelPath）
@@ -234,6 +302,33 @@ export class ProjectParser {
     return rel.replace(/\\/g, '/');
   }
 
+  /**
+   * 项目自定义变量 —— 对应 cbProject 的 SetVariable（cbp <Extensions><codeblocks_project_custom_variables>）：
+   * 每个子节点名 = 变量名，value 属性 = 值；供构建宏展开（ReplaceMacros）使用。
+   */
+  private parseProjectCustomVariables(root: any, project: Project): void {
+    const ext = root.Extensions;
+    if (!ext || typeof ext !== 'object') return;
+    let node = ext['codeblocks_project_custom_variables'];
+    if (node === undefined) {
+      for (const key of Object.keys(ext)) {
+        if (key.toLowerCase().includes('custom_variables')) {
+          node = ext[key];
+          break;
+        }
+      }
+    }
+    if (!node) return;
+    if (Array.isArray(node)) node = node[0];
+    for (const key of Object.keys(node)) {
+      // 跳过属性前缀与 fast-xml-parser 的空白文本节点（#text）
+      if (key.startsWith('@_') || key.startsWith('#')) continue;
+      const v = node[key];
+      const val = v !== null && typeof v === 'object' ? String(v['@_value'] ?? '') : String(v ?? '');
+      project.customVariables[key] = val;
+    }
+  }
+
   private parseProjectOptions(optNodes: any, project: Project): void {
     if (!optNodes) return;
     let nodes = Array.isArray(optNodes) ? optNodes : [optNodes];
@@ -242,6 +337,37 @@ export class ProjectParser {
       if (node['@_compiler'] !== undefined) project.compilerId = String(node['@_compiler']);
       if (node['@_virtualFolders'] !== undefined) {
         project.virtualFolders = String(node['@_virtualFolders']).split(';').filter(Boolean);
+      }
+      // PCH 模式（projectloader.cpp:400-443：<Option pch_mode="0/1/2">，默认 pchObjectDir=1）
+      if (node['@_pch_mode'] !== undefined) {
+        const n = Number(node['@_pch_mode']);
+        if (!Number.isNaN(n) && n >= 0 && n <= 2) project.pchMode = n;
+      }
+      // 扩展对象命名（projectloader.cpp:1524：<Option extended_obj_names="1">）
+      if (node['@_extended_obj_names'] !== undefined) {
+        project.extendedObjNames = node['@_extended_obj_names'] === '1' || node['@_extended_obj_names'] === 'true';
+      }
+      // 项目级平台过滤（projectloader.cpp:399-463：<Option platforms>，默认 spAll）
+      if (node['@_platforms'] !== undefined) {
+        project.platforms = parsePlatforms(String(node['@_platforms']));
+      }
+      // makefile 模式（projectloader.cpp:418-425/464-466）
+      if (node['@_makefile_is_custom'] !== undefined) {
+        project.makefileIsCustom = node['@_makefile_is_custom'] === '1' || node['@_makefile_is_custom'] === 'true';
+      }
+      if (node['@_makefile'] !== undefined) project.makefile = toUnix(String(node['@_makefile']));
+      if (node['@_execution_dir'] !== undefined) project.executionDir = toUnix(String(node['@_execution_dir']));
+      // 项目备注：<Option show_notes="1"><notes><![CDATA[...]]></notes></Option>
+      if (node['@_show_notes'] !== undefined) {
+        project.showNotesOnLoad = String(node['@_show_notes']) !== '0';
+      }
+      const notesNode = node['notes'];
+      if (notesNode !== undefined) {
+        if (typeof notesNode === 'string') {
+          project.notes = notesNode;
+        } else if (notesNode && typeof notesNode === 'object') {
+          project.notes = String(notesNode['__cdata'] ?? notesNode['#text'] ?? '');
+        }
       }
     }
   }
@@ -262,6 +388,8 @@ export class ProjectParser {
   private parseResourceCompilerOptions(node: any, sink: Project | BuildTarget): void {
     if (!sink.resourceCompilerOptions) sink.resourceCompilerOptions = [];
     sink.resourceCompilerOptions.push(...collectAddOptions(node));
+    // <ResourceCompiler><Add directory=...> → resourceIncludeDirs（DoResourceCompilerOptions）
+    sink.resourceIncludeDirs.push(...collectAddDirectories(node));
   }
 
   private parseIncludeDirs(node: any, sink: { includeDirs: string[] }): void {
@@ -286,6 +414,18 @@ export class ProjectParser {
     }
   }
 
+  /**
+   * legacy includeInTargetAll=true 目标 → 合成 "All" 虚拟目标（对齐 projectloader.cpp:205-221）：
+   * 已存在同名虚拟目标则跳过；无 true 目标不合成。
+   */
+  private synthesizeAllVirtualTarget(project: Project): void {
+    if (project.virtualTargets.some((v) => v.title === 'All')) return;
+    const titles = project.buildTargets.filter((t) => t.includeInTargetAll).map((t) => t.title);
+    if (titles.length) {
+      project.virtualTargets.push({ title: 'All', targets: titles });
+    }
+  }
+
   private parseBuildTargets(buildNode: any, project: Project): void {
     if (!buildNode) return;
     let targets = buildNode.Target;
@@ -299,6 +439,12 @@ export class ProjectParser {
         compilerId: project.compilerId,
         outputFilename: '',
         objectOutput: '',
+        depsOutput: '',
+        executionParameters: '',
+        workingDir: '',
+        hostApplication: '',
+        runHostApplicationInTerminal: true,
+        makeCommands: {},
         optionRelations: defaultRelations(),
         compilerOptions: [],
         linkerOptions: [],
@@ -311,17 +457,28 @@ export class ProjectParser {
         linkerExecutable: LinkerExecutableOption.AutoDetect,
         createDefFile: false,
         createStaticLib: false,
-        useConsoleRunner: false,
-        includeInTargetAll: true,
+        impLib: '',
+        defFile: '',
+        prefixAuto: true,
+        extensionAuto: true,
+        useConsoleRunner: true,
+        includeInTargetAll: false,
+        platforms: 0xff,
         commandsBeforeBuild: [],
         commandsAfterBuild: [],
         commandsBeforeClean: [],
         commandsAfterClean: [],
+        buildScripts: [],
+        envVars: [],
+        alwaysRunPostBuildSteps: false,
+        externalDeps: [],
+        additionalOutput: [],
       };
 
       this.parseTargetOptions(tnode.Option, target);
       this.parseCompilerOptions(tnode.Compiler, target);
       this.parseLinkerOptions(tnode.Linker, target);
+      this.parseLinkerExe(tnode.Linker, target);
       this.parseResourceCompilerOptions(tnode.ResourceCompiler, target);
       this.parseIncludeDirs(tnode.IncludeDirs, target);
       this.parseLibDirs(tnode.LibDirs, target);
@@ -330,7 +487,54 @@ export class ProjectParser {
       this.parseExtraCommands(tnode.ExtraCommands, target);
       this.parseExtraCommands(tnode.MakeCommands, target);
 
+      // 目标级构建脚本 <Script file="..."/>
+      this.parseBuildScripts(tnode, target.buildScripts);
+
+      // 目标级环境变量 <Environment><Variable name value>
+      this.parseEnvironment(tnode.Environment, target);
+
       project.buildTargets.push(target);
+    }
+
+    // 项目级构建脚本（<Build><Script>，与目标并列于 Build 节点下）
+    this.parseBuildScripts(buildNode, project.buildScripts);
+
+    // 项目级环境变量（<Build><Environment>，位于 Target 之后）
+    this.parseEnvironment(buildNode.Environment, project);
+  }
+
+  /** 解析 <Script file="..."/> 到目标数组（对应 DoBuildTarget / DoBuild 的 Script 循环） */
+  private parseBuildScripts(parent: any, sink: string[]): void {
+    if (!parent?.Script) return;
+    let scripts = parent.Script;
+    if (!Array.isArray(scripts)) scripts = [scripts];
+    for (const s of scripts) {
+      const f = s['@_file'];
+      if (f !== undefined) sink.push(toUnix(String(f)));
+    }
+  }
+
+  /** 解析 <Linker><LinkerExe value="CCompiler|CppCompiler|Linker">（DoLinkerOptions） */
+  private parseLinkerExe(node: any, target: BuildTarget): void {
+    if (!node?.LinkerExe) return;
+    const value = String(node.LinkerExe['@_value'] ?? '');
+    switch (value) {
+      case 'CCompiler': target.linkerExecutable = LinkerExecutableOption.CCompiler; break;
+      case 'CppCompiler': target.linkerExecutable = LinkerExecutableOption.CppCompiler; break;
+      case 'Linker': target.linkerExecutable = LinkerExecutableOption.Linker; break;
+      default: target.linkerExecutable = LinkerExecutableOption.AutoDetect;
+    }
+  }
+
+  /** 解析 <Environment><Variable name value>（DoEnvironment） */
+  private parseEnvironment(node: any, sink: { envVars: EnvVariable[] }): void {
+    if (!node?.Variable) return;
+    let vars = node.Variable;
+    if (!Array.isArray(vars)) vars = [vars];
+    for (const v of vars) {
+      const name = String(v['@_name'] ?? '');
+      if (!name) continue;
+      sink.envVars.push({ name, value: toNativeSeparator(String(v['@_value'] ?? '')) });
     }
   }
 
@@ -343,15 +547,38 @@ export class ProjectParser {
       if (node['@_compiler'] !== undefined) target.compilerId = String(node['@_compiler']);
       if (node['@_output'] !== undefined) target.outputFilename = toNativeSeparator(String(node['@_output']));
       if (node['@_object_output'] !== undefined) target.objectOutput = toUnix(String(node['@_object_output']));
+      if (node['@_deps_output'] !== undefined) target.depsOutput = toUnix(String(node['@_deps_output']));
+      if (node['@_parameters'] !== undefined) target.executionParameters = String(node['@_parameters']);
+      if (node['@_working_dir'] !== undefined) target.workingDir = toUnix(String(node['@_working_dir']));
+      // 宿主程序（projectloader.cpp:609-614：host_application / run_host_application_in_terminal）
+      if (node['@_host_application'] !== undefined) target.hostApplication = toUnix(String(node['@_host_application']));
+      if (node['@_run_host_application_in_terminal'] !== undefined) target.runHostApplicationInTerminal = String(node['@_run_host_application_in_terminal']) !== '0';
+      // 外部依赖 / 附加输出（projectloader.cpp:594-598：分号分隔列表，Unix 路径）
+      if (node['@_external_deps'] !== undefined) target.externalDeps = splitList(String(node['@_external_deps']));
+      if (node['@_additional_output'] !== undefined) target.additionalOutput = splitList(String(node['@_additional_output']));
       if (node['@_createDefFile'] !== undefined) target.createDefFile = node['@_createDefFile'] === '1' || node['@_createDefFile'] === 'true';
       if (node['@_createStaticLib'] !== undefined) target.createStaticLib = node['@_createStaticLib'] === '1' || node['@_createStaticLib'] === 'true';
+      if (node['@_imp_lib'] !== undefined) target.impLib = toNativeSeparator(String(node['@_imp_lib']));
+      if (node['@_def_file'] !== undefined) target.defFile = toNativeSeparator(String(node['@_def_file']));
+      // 文件名生成策略（projectloader.cpp:579-583：atoi==1 → 平台默认，否则 tgfpNone）
+      if (node['@_prefix_auto'] !== undefined) target.prefixAuto = String(node['@_prefix_auto']) !== '0';
+      if (node['@_extension_auto'] !== undefined) target.extensionAuto = String(node['@_extension_auto']) !== '0';
       if (node['@_use_console_runner'] !== undefined) target.useConsoleRunner = node['@_use_console_runner'] === '1' || node['@_use_console_runner'] === 'true';
+      // <Option includeInTargetAll="0/1">（projectloader.cpp:619-620，legacy pre-1.5 属性；默认 false，:551）
+      // 兼容扩展旧版写出的下划线变体 include_in_target_all
+      if (node['@_includeInTargetAll'] !== undefined) {
+        target.includeInTargetAll = node['@_includeInTargetAll'] !== '0';
+      } else if (node['@_include_in_target_all'] !== undefined) {
+        target.includeInTargetAll = node['@_include_in_target_all'] !== '0';
+      }
+      // 目标级平台过滤（projectloader.cpp:546-663：<Option platforms>，默认 spAll）
+      if (node['@_platforms'] !== undefined) target.platforms = parsePlatforms(String(node['@_platforms']));
       // 关系属性（projectCompilerOptionsRelation 等）
       this.parseRelation(node['@_projectCompilerOptionsRelation'], OptionsRelationType.CompilerOptions, target);
       this.parseRelation(node['@_projectLinkerOptionsRelation'], OptionsRelationType.LinkerOptions, target);
       this.parseRelation(node['@_projectIncludeDirsRelation'], OptionsRelationType.IncludeDirs, target);
       this.parseRelation(node['@_projectLibDirsRelation'], OptionsRelationType.LibDirs, target);
-      this.parseRelation(node['@_projectResIncludeDirsRelation'], OptionsRelationType.ResDirs, target);
+      this.parseRelation(node['@_projectResourceIncludeDirsRelation'], OptionsRelationType.ResDirs, target);
     }
   }
 
@@ -364,8 +591,18 @@ export class ProjectParser {
   }
 
   /** 解析 pre/post build/clean 命令（DoExtraCommands + DoMakeCommands） */
-  private parseExtraCommands(node: any, sink: { commandsBeforeBuild: string[]; commandsAfterBuild: string[] }): void {
+  private parseExtraCommands(node: any, sink: { commandsBeforeBuild: string[]; commandsAfterBuild: string[]; alwaysRunPostBuildSteps?: boolean; makeCommands?: MakeCommandsMap }): void {
     if (!node) return;
+    // <ExtraCommands><Mode after="always"> → AlwaysRunPostBuildSteps
+    let modes = node.Mode;
+    if (modes !== undefined) {
+      if (!Array.isArray(modes)) modes = [modes];
+      for (const m of modes) {
+        if (String(m['@_after'] ?? '') === 'always') {
+          if (sink.alwaysRunPostBuildSteps !== undefined) sink.alwaysRunPostBuildSteps = true;
+        }
+      }
+    }
     // <ExtraCommands><Add before=".." after=".."/></ExtraCommands>
     let adds = node.Add;
     if (adds === undefined) return;
@@ -375,6 +612,20 @@ export class ProjectParser {
       const after = String(add['@_after'] ?? '');
       if (before) sink.commandsBeforeBuild.push(before);
       if (after) sink.commandsAfterBuild.push(after);
+    }
+    // makefile 模式：<MakeCommands><Build command="..."/><Clean .../>（DoMakeCommands:329-358）
+    if (sink.makeCommands) {
+      const phases: Array<keyof MakeCommandsMap> = ['build', 'compileFile', 'clean', 'distClean', 'askRebuildNeeded', 'silentBuild'];
+      const phaseNames: Record<keyof MakeCommandsMap, string> = {
+        build: 'Build', compileFile: 'CompileFile', clean: 'Clean', distClean: 'DistClean', askRebuildNeeded: 'AskRebuildNeeded', silentBuild: 'SilentBuild',
+      };
+      for (const phase of phases) {
+        let el = node[phaseNames[phase]];
+        if (el === undefined) continue;
+        if (Array.isArray(el)) el = el[0];
+        const cmd = String(el['@_command'] ?? '');
+        if (cmd) sink.makeCommands[phase] = cmd;
+      }
     }
     // 兼容 <MakeCommands><Build><Option before=".."/></Build>...
     for (const phase of ['Build', 'Clean']) {
@@ -408,20 +659,41 @@ export class ProjectParser {
       const filename = String(unit['@_filename'] ?? '');
       if (!filename) continue;
 
-      const rel = toUnix(filename);
+      // 对齐 cbProject::AddFile（cbproject.cpp:880-904）：同盘绝对路径 MakeRelativeTo 相对化；
+      // 跨盘/UNC 绝对路径保留（absolutePath 直接取原路径，避免 base + 绝对路径拼接出无效路径——
+      // 此前该拼接导致绝对路径 Unit 被误判为"源缺失"，每次构建伪 WARNING + 强制重链）。
+      let rel = toUnix(filename);
+      // 前导 ~ / ~/ 展开为家目录（保护性增强）：CB Windows 用 wxPATH_DOS（wx Normalize 的
+      // NORM_TILDE 仅 UNIX 格式生效，且 CB 先拼工程根使 ~ 不再居首）→ 字面 ~ 目录；扩展展开
+      // 等价 CB Linux 行为。~user 形式不展开（Windows 无 getpwnam 等价机制，CB-Windows 亦不展开）。
+      if (rel === '~' || rel.startsWith('~/')) {
+        rel = toUnix(path.join(os.homedir(), rel === '~' ? '' : rel.slice(2)));
+      }
+      if (path.isAbsolute(rel)) {
+        const baseRoot = path.parse(project.basePath).root.replace(/[\\/]/g, '').toLowerCase();
+        const relRoot = path.parse(rel).root.replace(/[\\/]/g, '').toLowerCase();
+        if (!relRoot || relRoot === baseRoot) {
+          // 同盘（含无卷信息）→ 相对化（path.relative 盘符比较不敏感，大小写盘符安全）
+          rel = toUnix(path.relative(project.basePath, rel));
+        }
+        // 跨盘/UNC：保留绝对路径（对象路径按 objectPathRelative 的 isAbsolute 分支处理）
+      }
       // 对齐 cbProject::AddFile：compile/link 默认值按文件类型决定，compilerVar 按扩展名决定；
       // 随后由显式 <Option compile/link/compilerVar> 覆盖（projectloader.cpp DoUnitOptions）。
       const ft = fileTypeOf(rel);
       const file: ProjectFile = {
         relativeFilename: rel,
         relativeToCommonTopLevelPath: rel,
-        absolutePath: unixJoin(project.basePath, rel),
+        absolutePath: path.isAbsolute(rel) ? rel : unixJoin(project.basePath, rel),
         buildTargets: [],
+        explicitTargets: false,
         compilerVar: defaultCompilerVar(rel),
-        compile: isCompilableFileType(ft),
-        link: isLinkableFileType(ft),
+        compile: defaultCompile(rel),
+        link: defaultLink(rel),
         customBuildCommands: {},
         weight: 50,
+        virtualFolder: '',
+        generatedFiles: [],
       };
 
       let foundTarget = false;
@@ -434,18 +706,26 @@ export class ProjectParser {
         for (const o of opts) {
           const targets = o['@_target'];
           if (targets !== undefined) {
-            const list = String(targets).split(';').filter(Boolean);
+            file.explicitTargets = true;
+            // Code::Blocks 用特殊值 <{~None~}> 表示「不归属任何目标」
+            const list = String(targets).split(';').filter((x) => x && x !== '<{~None~}>');
             if (list.length) {
               file.buildTargets.push(...list);
               foundTarget = true;
             } else {
-              noTarget = true; // <{~None~}>
+              noTarget = true;
             }
           }
           if (o['@_compilerVar'] !== undefined) file.compilerVar = String(o['@_compilerVar']);
           if (o['@_compile'] !== undefined) file.compile = String(o['@_compile']) !== '0';
           if (o['@_link'] !== undefined) file.link = String(o['@_link']) !== '0';
-          if (o['@_weight'] !== undefined) file.weight = Number(o['@_weight']) || 50;
+          // 对齐 projectloader.cpp:1307 QueryIntAttribute 直接赋值：weight 0-100 全合法（0 排最前），
+          // 勿用 `Number(x) || 50`（0 是合法值会被吞成默认 50）
+          if (o['@_weight'] !== undefined) {
+            const w = Number(o['@_weight']);
+            if (Number.isFinite(w) && w >= 0 && w <= 100) file.weight = w;
+          }
+          if (o['@_virtualFolder'] !== undefined) file.virtualFolder = toUnix(String(o['@_virtualFolder']));
           // custom build command：<Option compiler="id" use="1" buildCommand="..."/>
           // 对齐 DoUnitOptions：compiler 与 buildCommand 均非空（不 trim）才记录；
           // use 属性仅在此时读取（缺省为 0/false，即不启用）。
@@ -487,8 +767,7 @@ export class WorkspaceParser {
   }
 
   parse(filename: string): Workspace {
-    const raw = fs.readFileSync(filename, 'utf-8');
-    const result = this.parser.parse(raw);
+    const result = parseXmlCached(filename, this.parser, workspaceXmlCache);
     const root = result.CodeBlocks_workspace_file;
     if (!root) throw new Error('不是有效的 .workspace 文件');
 
@@ -498,17 +777,29 @@ export class WorkspaceParser {
       basePath,
       filename,
       projectPaths: [],
+      dependencies: {},
     };
 
-    let projects = root.Project;
+    let projects = root.Workspace?.Project;
     if (projects !== undefined) {
       if (!Array.isArray(projects)) projects = [projects];
       for (const p of projects) {
         const f = p['@_filename'];
-        if (f) {
-          const rel = toUnix(String(f));
-          ws.projectPaths.push(rel);
-          if (p['@_active'] === '1' || p['@_active'] === 'true') ws.activeProject = rel;
+        if (!f) continue;
+        const rel = toUnix(String(f));
+        ws.projectPaths.push(rel);
+        if (p['@_active'] === '1' || p['@_active'] === 'true') ws.activeProject = rel;
+
+        // 解析 <Depends filename="...">（对齐 workspaceloader.cpp 第二遍循环建立依赖）
+        let depends = p.Depends;
+        if (depends !== undefined) {
+          if (!Array.isArray(depends)) depends = [depends];
+          const deps: string[] = [];
+          for (const d of depends) {
+            const df = d['@_filename'];
+            if (df) deps.push(toUnix(String(df)));
+          }
+          if (deps.length) ws.dependencies[rel] = deps;
         }
       }
     }

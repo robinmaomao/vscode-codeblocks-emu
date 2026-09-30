@@ -17,6 +17,7 @@ import {
   CompilerSwitches,
 } from './compiler';
 import { CommandType } from '../model/types';
+import { convertPosixRegex } from './posixRegex';
 
 /** 带名字的子节点 */
 interface NamedNode {
@@ -64,6 +65,16 @@ export class CompilerOptionsLoader {
       regexes: [],
       cOnlyFlags: [],
       cppOnlyFlags: [],
+      includeDirs: [],
+      libDirs: [],
+      resIncludeDirs: [],
+      linkLibs: [],
+      extraPaths: [],
+      includePrjCwd: false,
+      includeFileCwd: false,
+      compilerOptions: [],
+      linkerOptions: [],
+      resourceCompilerOptions: [],
     };
 
     // 交叉编译器（如 riscv）无独立 XML，复用 GCC 的命令模板/选项/正则
@@ -220,6 +231,10 @@ export class CompilerOptionsLoader {
       case 'linkerNeedsPathResolved': s.linkerNeedsPathResolved = v === 'true'; break;
       case 'supportsPCH': s.supportsPCH = v === 'true'; break;
       case 'PCHExtension': s.PCHExtension = v; break;
+      case 'logging':
+        // 对齐 compiler.cpp:943-952：仅显式 full/simple/none 生效；default 值交由扩展设置控制（CB defaultLogging=clogFull，保护性差异）
+        s.logging = (v === 'full' || v === 'simple' || v === 'none') ? v : undefined;
+        break;
       case 'UseFlatObjects': s.useFlatObjects = v === 'true'; break;
       case 'UseFullSourcePaths': s.useFullSourcePaths = v === 'true'; break;
       case 'Use83Paths': s.use83Paths = v === 'true'; break;
@@ -299,23 +314,8 @@ export class CompilerOptionsLoader {
       msg,
       filename,
       line,
-      regex: this.convertPosixRegex(node.text),
+      regex: convertPosixRegex(node.text),
     };
-  }
-
-  /** 将 wxRegEx POSIX 字符类转换为 JS 正则 */
-  private convertPosixRegex(regex: string): string {
-    let out = regex;
-    // 处理复合字符类中嵌套的 POSIX 类（如 [][{}()[:blank:]...]）
-    out = out.replace(/\[:blank:\]/g, ' \\t');
-    // wxWidgets 的 [:alnum:] 在非 UTF-8 模式下等同于 ASCII 字母数字，
-    // 但为兼容含中文/CJK 的路径，需拓宽到非 ASCII（\u0080-\uFFFF），
-    // 否则编译错误行的文件路径会被截断，导致 Build Log 跳转路径错误。
-    out = out.replace(/\[:alnum:\]/g, 'A-Za-z0-9\\u0080-\\uFFFF');
-    // wxRegEx 中字符类开头的 ']' 是字面字符，JS 需转义为 '\]'
-    // 匹配形如 [][]、[]a、[][ 的「闭合方括号紧跟内容」模式
-    out = out.replace(/\[\]/g, '[\\]');
-    return out;
   }
 
   /** 对应 EvalXMLCondition 的 platform 分支（exec 条件简化返回 default） */

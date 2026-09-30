@@ -93,6 +93,26 @@ export class SymbolIndex {
     }
   }
 
+  /**
+   * 异步分片重建索引（P2：打开工程时不再同步全量读文件）。
+   * 每 chunkSize 个文件让出一次事件循环，避免长时间阻塞扩展宿主；
+   * 由调用方负责"按需触发 + 单飞"（见 extension.ts requestFallbackIndexBuild）。
+   */
+  async rebuildAsync(files: string[], opts: RebuildAsyncOptions = {}): Promise<void> {
+    this.byName.clear();
+    this.all = [];
+    const chunk = Math.max(1, Math.floor(opts.chunkSize ?? 64));
+    const yieldControl = opts.yieldControl
+      ?? ((): Promise<void> => new Promise((resolve) => setImmediate(resolve)));
+    let scanned = 0;
+    for (const file of files) {
+      if (!isIndexable(file)) continue;
+      this.scanFile(file);
+      scanned++;
+      if (scanned % chunk === 0) await yieldControl();
+    }
+  }
+
   lookup(name: string): SymbolEntry[] {
     return this.byName.get(name) ?? [];
   }
@@ -246,20 +266,33 @@ function toSymbolKind(kind: vscode.CompletionItemKind): vscode.SymbolKind {
 }
 
 /**
- * 注册兜底 IntelliSense（补全 / 悬停 / 跳转定义）。
+ * 异步分片重建选项（测试可注入 yieldControl 计数桩）。
+ */
+export interface RebuildAsyncOptions {
+  /** 每批扫描文件数（批间让出事件循环） */
+  chunkSize?: number;
+  /** 批间让出实现（默认 setImmediate） */
+  yieldControl?: () => Promise<void>;
+}
+
+/**
+ * 注册兜底 IntelliSense（补全 / 悬停 / 跳转定义 / 文档符号）。
  * @param index 项目符号索引
  * @param isEnabled 返回 true 时兜底生效（clangd 不可用时）
+ * @param onDemand 可选：请求前的"确保索引就绪"回调（P2 懒构建；应先判断 isEnabled 再调用）
  */
 export function registerFallbackIntelliSense(
   index: SymbolIndex,
   isEnabled: () => boolean,
+  onDemand?: () => Promise<void>,
 ): vscode.Disposable[] {
   const disposables: vscode.Disposable[] = [];
   const langs = ['c', 'cpp'];
 
   const completion = vscode.languages.registerCompletionItemProvider(langs, {
-    provideCompletionItems(document, position) {
+    async provideCompletionItems(document, position) {
       if (!isEnabled()) return undefined;
+      if (onDemand) await onDemand();
       const prefix = getPrefix(document, position);
       const items: vscode.CompletionItem[] = [];
       for (const e of index.allEntries()) {
@@ -278,8 +311,9 @@ export function registerFallbackIntelliSense(
   disposables.push(completion);
 
   const hover = vscode.languages.registerHoverProvider(langs, {
-    provideHover(document, position) {
+    async provideHover(document, position) {
       if (!isEnabled()) return undefined;
+      if (onDemand) await onDemand();
       const range = getWordRange(document, position);
       if (!range) return undefined;
       const word = document.getText(range);
@@ -295,8 +329,9 @@ export function registerFallbackIntelliSense(
   disposables.push(hover);
 
   const definition = vscode.languages.registerDefinitionProvider(langs, {
-    provideDefinition(document, position) {
+    async provideDefinition(document, position) {
       if (!isEnabled()) return undefined;
+      if (onDemand) await onDemand();
       const range = getWordRange(document, position);
       if (!range) return undefined;
       const word = document.getText(range);
@@ -310,8 +345,9 @@ export function registerFallbackIntelliSense(
 
   // 文档符号（大纲视图）：列出当前文件的索引符号
   const documentSymbols = vscode.languages.registerDocumentSymbolProvider(langs, {
-    provideDocumentSymbols(document) {
+    async provideDocumentSymbols(document) {
       if (!isEnabled()) return undefined;
+      if (onDemand) await onDemand();
       const file = document.uri.fsPath;
       const syms: vscode.SymbolInformation[] = [];
       for (const e of index.allEntries()) {

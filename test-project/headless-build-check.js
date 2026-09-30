@@ -1,0 +1,164 @@
+// 无头构建校验脚本（不打包进 VSIX，test-project/** 已在 .vscodeignore）
+// 用法: node test-project/headless-build-check.js [cbp路径...]
+// 在无 VS Code 宿主环境下用 dist 产物驱动 BuildEngine 真实编译/链接，验证 D1-D12 对齐改动。
+const Module = require('module');
+const origLoad = Module._load;
+Module._load = function (request, parent, isMain) {
+  if (request === 'vscode') {
+    const cfgStore = {
+      'build.verboseOutput': false,
+      'build.skipIncludeDeps': false,
+    };
+    return {
+      workspace: {
+        getConfiguration: () => ({
+          get: (key, def) => (key in cfgStore ? cfgStore[key] : def),
+        }),
+      },
+      window: { showWarningMessage: () => {}, showInformationMessage: () => {} },
+      LogOutputChannel: function () {},
+      DiagnosticSeverity: { Error: 0, Warning: 1 },
+      Diagnostic: function () {},
+      Uri: { file: (p) => ({ fsPath: p }) },
+    };
+  }
+  return origLoad(request, parent, isMain);
+};
+
+const path = require('path');
+const fs = require('fs');
+const { ProjectParser } = require('../dist/model/parser.js');
+const { applyGeneratedFiles } = require('../dist/build/generatedFiles.js');
+const { CompilerOptionsLoader } = require('../dist/compiler/optionsLoader.js');
+const { CodeBlocksConfig } = require('../dist/compiler/codeblocksConfig.js');
+const { BuildEngine } = require('../dist/build/buildEngine.js');
+
+const loader = new CompilerOptionsLoader(path.join(__dirname, '..', 'resources', 'compilers'));
+const cbCfg = new CodeBlocksConfig();
+cbCfg.load();
+const getCompiler = (id) => {
+  const c = loader.load(id);
+  const up = cbCfg.resolvePrograms(id);
+  if (up) {
+    c.programs = { ...c.programs, C: up.C, CPP: up.CPP, LD: up.LD, LIB: up.LIB };
+    c.masterPath = up.masterPath;
+  }
+  const sd = cbCfg.searchDirs(id);
+  if (sd) {
+    c.includeDirs = sd.includeDirs;
+    c.libDirs = sd.libDirs;
+    c.resIncludeDirs = sd.resIncludeDirs;
+    c.linkLibs = sd.linkLibs;
+    c.compilerOptions = sd.compilerOptions;
+    c.linkerOptions = sd.linkerOptions;
+    c.resourceCompilerOptions = sd.resourceCompilerOptions;
+  }
+  return c;
+};
+
+const out = {
+  info: (l) => console.log('[i] ' + l),
+  warn: (l) => console.log('[w] ' + l),
+  error: (l) => console.log('[e] ' + l),
+  debug: (l) => console.log('[d] ' + l),
+};
+
+async function buildOne(cbp) {
+  console.log('==== BUILD ' + cbp + ' ====');
+  const project = new ProjectParser().parse(cbp);
+  applyGeneratedFiles(project, getCompiler);
+  const compiler = getCompiler(project.buildTargets[0]?.compilerId || project.compilerId);
+  const engine = new BuildEngine(project, compiler, out, (id) => getCompiler(id));
+  const ok = await engine.build(undefined, {
+    onLine: (l, sev) => console.log('[' + (sev || 'i') + '] ' + l),
+  });
+  console.log('==== ' + (ok ? 'SUCCESS' : 'FAILED') + ' ====');
+  return ok;
+}
+
+// 单文件编译 / 单文件 Clean 校验（对齐 CompileFile / GetCleanSingleFileCommand）
+async function singleFileCheck(cbp) {
+  console.log('==== SINGLE FILE ' + cbp + ' ====');
+  const project = new ProjectParser().parse(cbp);
+  applyGeneratedFiles(project, getCompiler);
+  const compiler = getCompiler(project.buildTargets[0]?.compilerId || project.compilerId);
+  const engine = new BuildEngine(project, compiler, out, (id) => getCompiler(id));
+  const targetTitle = project.buildTargets[0].title;
+  // hello-cb.cbp：object_output=obj/Debug/，main.c 对象 = obj/Debug/main.o
+  const objAbs = path.join(project.basePath, 'obj', 'Debug', 'main.o');
+
+  // 1. Clean（残留对象应先被删）
+  engine.cleanFile(targetTitle, 'main.c');
+  if (fs.existsSync(objAbs)) {
+    console.log('[e] cleanFile 未删除对象: ' + objAbs);
+    return false;
+  }
+  // 2. Compile
+  const ok = await engine.compileFile(targetTitle, 'main.c', {
+    onLine: (l, sev) => console.log('[' + (sev || 'i') + '] ' + l),
+  });
+  if (!ok) {
+    console.log('[e] compileFile 失败');
+    return false;
+  }
+  if (!fs.existsSync(objAbs)) {
+    console.log('[e] 对象未产出: ' + objAbs);
+    return false;
+  }
+  // 3. Clean again
+  engine.cleanFile(targetTitle, 'main.c');
+  if (fs.existsSync(objAbs)) {
+    console.log('[e] cleanFile 未删除编译后的对象: ' + objAbs);
+    return false;
+  }
+  // 4. 目标级 Clean 范围（distclean）：预置 .depend 后 cleanTarget 应一并删除 deps 文件
+  //    （depsPathFor = basePath/.deps/<相对目录>/<名称>.depend；根目录文件 → .deps/util.depend）
+  const depAbs = path.join(project.basePath, '.deps', 'util.depend');
+  fs.mkdirSync(path.dirname(depAbs), { recursive: true });
+  fs.writeFileSync(depAbs, 'util.o: util.c util.h\n', 'utf-8');
+  engine.cleanTarget(project.buildTargets[0]);
+  if (fs.existsSync(depAbs)) {
+    console.log('[e] cleanTarget 未删除 deps 文件: ' + depAbs);
+    return false;
+  }
+  console.log('[i] cleanTarget distclean OK');
+  console.log('==== SINGLE FILE OK ====');
+  return true;
+}
+
+/** 自动还原 hello.exe（审计 P3.4；历史坑：脚本跑完 cleanTarget 会清掉它，调试 e2e 前需手工重编） */
+function restoreHelloExe() {
+  const binDir = path.join(__dirname, 'bin', 'Debug');
+  const exe = path.join(binDir, 'hello.exe');
+  const srcs = ['main.c', 'util.c'].map((f) => path.join(__dirname, f)).filter((p) => fs.existsSync(p));
+  if (!srcs.length) return;
+  try {
+    fs.mkdirSync(binDir, { recursive: true });
+    const r = require('child_process').spawnSync('gcc', ['-g', '-O0', '-o', exe, ...srcs], { encoding: 'utf8', windowsHide: true });
+    if (r.status === 0) console.log('[i] 已自动还原 hello.exe: ' + exe);
+    else console.log('[w] hello.exe 还原失败（调试 e2e 前请手工编译）: ' + String(r.stderr || r.error || '').split('\n')[0]);
+  } catch (e) {
+    console.log('[w] hello.exe 还原失败（gcc 不可用？）: ' + e.message);
+  }
+}
+
+(async () => {
+  const args = process.argv.slice(2);
+  const list = args.length
+    ? args.map((a) => path.resolve(a))
+    : [
+        path.join(__dirname, 'dep-lib', 'dep-lib.cbp'),
+        path.join(__dirname, 'dep-app', 'dep-app.cbp'),
+      ];
+  let allOk = true;
+  for (const c of list) {
+    if (!(await buildOne(c))) allOk = false;
+  }
+  // 单文件编译 / Clean（hello-cb，固定存在）
+  const singleCbp = path.join(__dirname, 'hello-cb.cbp');
+  if (fs.existsSync(singleCbp) && !(await singleFileCheck(singleCbp))) allOk = false;
+  // 审计修复（P3.4）：singleFileCheck 的 cleanTarget 会清掉 hello-cb 产物（含 hello.exe），
+  // 历史上每次跑完需手工 gcc 重编 → 这里自动还原（调试 e2e 依赖 test-project/bin/Debug/hello.exe）
+  restoreHelloExe();
+  process.exit(allOk ? 0 : 1);
+})();
