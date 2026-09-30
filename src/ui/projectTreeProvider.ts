@@ -160,6 +160,12 @@ export class ProjectTreeProvider implements vscode.TreeDataProvider<TreeNode> {
   private nodeCache = new Map<string, TreeNode>();
   /** 父节点映射：实现 getParent（WeakMap 不阻碍节点回收） */
   private parentMap = new WeakMap<TreeNode, TreeNode>();
+  /** 文件存在性缓存（P8：异步检查；key = upperDrive(absolutePath).toLowerCase()） */
+  private missingCache = new Map<string, boolean>();
+  /** 待异步检查的文件路径 → 需要刷新的节点集合（同路径多节点合并） */
+  private missingPending = new Map<string, Set<TreeNode>>();
+  /** 是否已调度异步检查（去抖 50ms 合并） */
+  private missingCheckScheduled = false;
 
   /** 设置资源根目录（用于加载图标） */
   setResourcesDir(dir: string): void {
@@ -184,6 +190,8 @@ export class ProjectTreeProvider implements vscode.TreeDataProvider<TreeNode> {
     this.dirIndexCache.clear();
     this.nodeCache.clear();
     this.parentMap = new WeakMap<TreeNode, TreeNode>();
+    this.missingCache.clear(); // P8：模型重载后文件存在性重新异步检查
+    this.missingPending.clear();
     this._onDidChangeTreeData.fire(undefined);
   }
 
@@ -200,6 +208,8 @@ export class ProjectTreeProvider implements vscode.TreeDataProvider<TreeNode> {
     this.dirIndexCache.clear();
     this.nodeCache.clear();
     this.parentMap = new WeakMap<TreeNode, TreeNode>();
+    this.missingCache.clear(); // P8：节点重建后文件存在性重新异步检查
+    this.missingPending.clear();
     this._onDidChangeTreeData.fire(undefined);
   }
 
@@ -599,23 +609,75 @@ export class ProjectTreeProvider implements vscode.TreeDataProvider<TreeNode> {
     // 文件图标：不显式设置 iconPath，交由 VS Code 依据 resourceUri
     // 使用当前文件图标主题（默认 Seti）渲染，与资源管理器保持一致。
 
-    // 文件归属目标展示（对齐 Code::Blocks：文件只出现一次，归属通过描述/提示体现）
-    const allTitles = project.buildTargets.map((t) => t.title);
-    if (allTitles.length) {
-      const belongs = f.buildTargets.filter((t) => allTitles.includes(t));
-      if (!fs.existsSync(f.absolutePath)) {
-        node.description = '缺失'; // 对应 ProjectFile::fvsMissing
-      } else if (belongs.length === 0) {
-        node.description = '（未归属任何目标）';
-      } else if (belongs.length < allTitles.length) {
-        node.description = belongs.join(', ');
-      }
-      if (belongs.length) {
-        node.tooltip = `目标: ${belongs.join(', ')}`;
-      }
+    // P8：文件存在性改为异步检查（不再在节点创建时同步 fs.existsSync 阻塞 UI 线程）。
+    // 初始按「存在」渲染；异步检查发现缺失后更新为「缺失」并局部刷新该节点（缓存防重复 stat）。
+    const missingKey = upperDrive(f.absolutePath).toLowerCase();
+    const cachedMissing = this.missingCache.get(missingKey);
+    if (cachedMissing === undefined) {
+      this.scheduleMissingCheck(missingKey, node);
     }
+    this.applyFilePresentation(node, project, f, cachedMissing === true);
     this.nodeCache.set(key, node);
     return node;
+  }
+
+  /** 计算文件节点的 description/tooltip（同步创建与异步缺失检查共用；对齐 Code::Blocks 归属展示） */
+  private applyFilePresentation(node: TreeNode, project: Project, f: ProjectFile, missing: boolean): void {
+    const allTitles = project.buildTargets.map((t) => t.title);
+    if (!allTitles.length) return;
+    const belongs = f.buildTargets.filter((t) => allTitles.includes(t));
+    if (missing) {
+      node.description = '缺失'; // 对应 ProjectFile::fvsMissing
+    } else if (belongs.length === 0) {
+      node.description = '（未归属任何目标）';
+    } else if (belongs.length < allTitles.length) {
+      node.description = belongs.join(', ');
+    } else {
+      node.description = undefined; // 全目标归属：无描述（含异步复查后从「缺失」恢复的场景）
+    }
+    if (belongs.length) {
+      node.tooltip = `目标: ${belongs.join(', ')}`;
+    }
+  }
+
+  /** 调度文件存在性异步检查（50ms 去抖合并；同路径多节点只检查一次） */
+  private scheduleMissingCheck(missingKey: string, node: TreeNode): void {
+    let set = this.missingPending.get(missingKey);
+    if (!set) {
+      set = new Set();
+      this.missingPending.set(missingKey, set);
+    }
+    set.add(node);
+    if (this.missingCheckScheduled) return;
+    this.missingCheckScheduled = true;
+    setTimeout(() => { void this.runMissingChecks(); }, 50);
+  }
+
+  /** 执行文件存在性检查（分片 64 个/批，批间让出事件循环；仅缺失节点需要局部刷新） */
+  private async runMissingChecks(): Promise<void> {
+    this.missingCheckScheduled = false;
+    const entries = [...this.missingPending.entries()];
+    this.missingPending.clear();
+    const CHUNK = 64;
+    for (let i = 0; i < entries.length; i += CHUNK) {
+      const batch = entries.slice(i, i + CHUNK);
+      await Promise.all(batch.map(async ([abs, nodes]) => {
+        let missing = false;
+        try {
+          await fs.promises.access(abs);
+        } catch {
+          missing = true; // 不存在/无权限 → 视作缺失（与原 existsSync 行为一致）
+        }
+        this.missingCache.set(abs, missing);
+        if (!missing) return;
+        for (const n of nodes) {
+          if (!n.project || !n.file) continue;
+          this.applyFilePresentation(n, n.project, n.file, true);
+          this._onDidChangeTreeData.fire(n); // 局部刷新该节点
+        }
+      }));
+      if (i + CHUNK < entries.length) await new Promise((r) => setImmediate(r));
+    }
   }
 }
 

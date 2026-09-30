@@ -72,19 +72,54 @@ export function prevBookmark(list: Bookmark[], file: string, line: number): Book
 }
 
 /**
+ * 行文本访问器（TextDocument 子集；便于单测注入）。
+ * 只要求按行读取，不要求持有全文——见 locateBookmarkLineInDocument。
+ */
+export interface LineSource {
+  /** 总行数 */
+  lineCount: number;
+  /** 0-based 行号取行（越界行为未定义，调用方保证范围内） */
+  lineAt(line: number): { text: string };
+}
+
+/**
+ * 行漂移回找（LineSource 版本）——与 locateBookmarkLine 同语义：
+ * 优先精确行号（文本匹配）；否则 ±半径内查找同文本行；再退回原行号。
+ *
+ * 性能约定（热路径 P1）：只按需读取书签行 ±radius 窗口内的行，
+ * 不读取整篇文档文本（避免每次文本变更 getText()+split 的 O(文档) 开销）。
+ * @returns 1-based 行号
+ */
+export function locateBookmarkLineInDocument(bm: Bookmark, doc: LineSource, radius = 50): number {
+  const norm = (s: string | undefined): string => String(s ?? '').trim();
+  const target = norm(bm.text);
+  const count = doc.lineCount;
+  const at = bm.line - 1;
+  const lineText = (i: number): string => {
+    try {
+      return doc.lineAt(i).text;
+    } catch {
+      return '';
+    }
+  };
+  if (at >= 0 && at < count && norm(lineText(at)) === target) return bm.line;
+  for (let d = 1; d <= radius; d++) {
+    const up = at - d;
+    if (up >= 0 && up < count && norm(lineText(up)) === target) return up + 1;
+    const down = at + d;
+    if (down >= 0 && down < count && norm(lineText(down)) === target) return down + 1;
+  }
+  return Math.min(Math.max(1, bm.line), Math.max(1, count));
+}
+
+/**
  * 行漂移回找：优先精确行号（文本匹配）；否则 ±半径内查找同文本行；再退回原行号。
+ * 兼容旧签名（整行数组）；新代码建议用 locateBookmarkLineInDocument 按需取行。
  * @returns 1-based 行号
  */
 export function locateBookmarkLine(bm: Bookmark, lines: string[], radius = 50): number {
-  const norm = (s: string | undefined): string => String(s ?? '').trim();
-  const target = norm(bm.text);
-  const at = bm.line - 1;
-  if (at >= 0 && at < lines.length && norm(lines[at]) === target) return bm.line;
-  for (let d = 1; d <= radius; d++) {
-    const up = at - d;
-    if (up >= 0 && up < lines.length && norm(lines[up]) === target) return up + 1;
-    const down = at + d;
-    if (down >= 0 && down < lines.length && norm(lines[down]) === target) return down + 1;
-  }
-  return Math.min(Math.max(1, bm.line), Math.max(1, lines.length));
+  return locateBookmarkLineInDocument(bm, {
+    lineCount: lines.length,
+    lineAt: (i) => ({ text: lines[i] }),
+  }, radius);
 }
