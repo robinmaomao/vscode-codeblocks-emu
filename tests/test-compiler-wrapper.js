@@ -127,12 +127,31 @@ engine1.warnCompilerCacheMissing();
 engine1.warnCompilerCacheMissing();
 const warns1 = logs1.filter((l) => l.startsWith('w|'));
 check('已启用未找到 → 告警恰好一次', warns1.length === 1 && warns1[0].includes('未找到可执行文件') && warns1[0].includes('回退使用原编译器'), warns1);
+const logs1b = [];
+const engine1b = new BuildEngine(project, compiler, makeOut(logs1b), (id) => compiler);
+engine1b.warnCompilerCacheMissing();
+check('跨引擎告警去抖：工作区构建（每项目一引擎）同一配置不重复告警', logs1b.filter((l) => l.startsWith('w|')).length === 0, logs1b);
 settings['build.compilerCache'] = 'none';
 clearCompilerCacheResolveCache();
 const logs2 = [];
 const engine2 = new BuildEngine(project, compiler, makeOut(logs2), (id) => compiler);
 engine2.warnCompilerCacheMissing();
 check('none 时无告警（零影响）', logs2.filter((l) => l.startsWith('w|')).length === 0, logs2);
+
+// 每构建重探：运行中补齐工具（不改设置）→ 下一个构建即为「找到」
+settings['build.compilerCache'] = 'ccache';
+settings['build.compilerCachePath'] = path.join(dir, 'no-such-dir', 'ccache.exe');
+fs.mkdirSync(path.dirname(settings['build.compilerCachePath']), { recursive: true });
+fs.writeFileSync(settings['build.compilerCachePath'], 'x');
+const realNow = Date.now;
+Date.now = () => realNow() + 11_000;
+const logs1c = [];
+const engine1c = new BuildEngine(project, compiler, makeOut(logs1c), (id) => compiler);
+engine1c.warnCompilerCacheMissing();
+Date.now = realNow;
+check('每构建重探：补齐工具后下一构建无告警（无需重载/重新检测）', logs1c.filter((l) => l.startsWith('w|')).length === 0, logs1c);
+check('每构建重探：生成命令立即前置（下一个构建即生效）',
+  generator.generate(CommandType.CompileObjectCmd, params) === path.resolve(settings['build.compilerCachePath']) + ' ' + baseline, null);
 
 // ---- 5. 静态接线（dist 源码断言） ----
 const beText = fs.readFileSync(path.resolve(__dirname, '../dist/build/buildEngine.js'), 'utf-8');
