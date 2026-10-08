@@ -631,7 +631,7 @@
             ],
             "enumDescriptions": [
               "关闭（默认）：不探测工具、不注入前缀，命令与既有行为完全一致",
-              "启用 ccache：标准编译命令前置 ccache（按预处理结果 + 选项 + 工具链哈希复用对象）",
+              "启用 ccache：标准编译命令前置 ccache（按预处理结果 + 选项 + 工具链哈希复用对象；适用 GCC/Clang，MSVC 请选 sccache）",
               "启用 sccache：标准编译命令前置 sccache（本地磁盘缓存，另支持云端后端）"
             ],
             "default": "none",

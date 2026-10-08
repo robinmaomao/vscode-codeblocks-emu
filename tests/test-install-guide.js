@@ -40,6 +40,7 @@ const needles = [
   ['提示标记 dontAsk', /codeblocks\.compilerCache\.dontAsk/],
   ['解析缓存失效调用', /clearCompilerCacheResolveCache/],
   ['winget 可用性探测', /async function hasWinget/],
+  ['启用提示按作用域写入（inspect）', /inspect\('build\.compilerCache'\)/],
 ];
 for (const [name, re] of needles) check('extension：' + name, re.test(ext), null);
 check('extension：安装提示按钮（如何安装/重新指定路径）', ext.includes('如何安装') && ext.includes('重新指定路径'), null);

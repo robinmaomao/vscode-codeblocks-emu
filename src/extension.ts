@@ -4354,7 +4354,14 @@ async function checkCompilerCachePrompt(manual = false): Promise<void> {
       if (idx >= 0) {
         const tool = action.tools[idx];
         const cfg = vscode.workspace.getConfiguration('codeblocks');
-        await cfg.update('build.compilerCache', tool, vscode.ConfigurationTarget.Global);
+        // 已有工作区/文件夹级覆盖时写到对应作用域（写 Global 会被覆盖 → 提示「已启用」但实际不生效）
+        const inspect = cfg.inspect<string>('build.compilerCache');
+        const target = inspect?.workspaceFolderValue !== undefined
+          ? vscode.ConfigurationTarget.WorkspaceFolder
+          : inspect?.workspaceValue !== undefined
+            ? vscode.ConfigurationTarget.Workspace
+            : vscode.ConfigurationTarget.Global;
+        await cfg.update('build.compilerCache', tool, target);
         clearCompilerCacheResolveCache();
         vscode.window.showInformationMessage(
           `已启用编译缓存 ${tool}（${det[tool]?.path ?? ''}），后续标准编译命令将前置 ${tool}。`,
