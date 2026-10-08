@@ -2,7 +2,7 @@
   "name": "codeblocks-vscode",
   "displayName": "Code::Blocks for VS Code",
   "description": "原生移植 Code::Blocks 核心功能到 VS Code：项目模型、构建引擎、编译器管理与调试引擎",
-  "version": "0.8.125-dev",
+  "version": "0.8.126-dev",
   "icon": "resources/icon.png",
   "publisher": "robinmaomao",
   "author": {
@@ -79,6 +79,11 @@
         "command": "codeblocks.build.stop",
         "title": "Code::Blocks: Stop Build",
         "icon": "$(debug-stop)"
+      },
+      {
+        "command": "codeblocks.installCompilerCache",
+        "title": "Code::Blocks: Install Compiler Cache (ccache/sccache)…",
+        "icon": "$(cloud-download)"
       },
       {
         "command": "codeblocks.buildAndRun",
@@ -616,6 +621,28 @@
             "minimum": 0,
             "maximum": 64,
             "description": "并行编译任务数（0 = 自动：逻辑核数 × 2，最多 64）。实测 Windows 下编译单元存在大量非 CPU 停顿（gcc→cc1→as 进程链 + 杀软扫描），超额订阅可显著缩短全量构建（基准实测：4C/8T 机器 8→16 并发全量构建约快 35%）；每个编译进程链常驻几十至几百 MB，内存紧张或机器卡顿时可显式指定较小值（含 1 = 串行）"
+          },
+          "codeblocks.build.compilerCache": {
+            "type": "string",
+            "enum": [
+              "none",
+              "ccache",
+              "sccache"
+            ],
+            "enumDescriptions": [
+              "关闭（默认）：不探测工具、不注入前缀，命令与既有行为完全一致",
+              "启用 ccache：标准编译命令前置 ccache（按预处理结果 + 选项 + 工具链哈希复用对象）",
+              "启用 sccache：标准编译命令前置 sccache（本地磁盘缓存，另支持云端后端）"
+            ],
+            "default": "none",
+            "scope": "machine-overridable",
+            "markdownDescription": "编译缓存（保护性增强，默认关闭）：启用后仅**标准编译命令**前置 `ccache`/`sccache`（链接/打包/资源编译、pre/post 脚本与 `compile_commands.json` 不注入）。工具位置自动探测（PATH → WinGet Links / WinGet Packages / Scoop shims / cargo bin / Chocolatey / Program Files），亦可由 `#codeblocks.build.compilerCachePath#` 显式指定；**未找到工具时构建回退原编译器**并输出一次告警，不影响构建结果。安装指引：命令面板运行 [Code::Blocks: Install Compiler Cache](command:codeblocks.installCompilerCache)"
+          },
+          "codeblocks.build.compilerCachePath": {
+            "type": "string",
+            "default": "",
+            "scope": "machine-overridable",
+            "markdownDescription": "编译缓存工具可执行文件的显式路径（如 `C:\\tools\\ccache\\ccache.exe`）；留空 = 自动探测（PATH → WinGet Links / WinGet Packages / Scoop shims / cargo bin / Chocolatey / Program Files）。仅在 [编译缓存](#codeblocks.build.compilerCache) 非 `none` 时生效；**路径无效等同未找到**（不静默改用 PATH，避免实际使用了非预期的缓存程序），构建回退原编译器"
           },
           "codeblocks.maxReportedErrors": {
             "type": "number",

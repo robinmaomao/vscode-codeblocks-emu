@@ -24,6 +24,7 @@ import { BuildProfiler } from './buildProfiler';
 import { decodeText } from '../tools/encoding';
 import { isExecutableTargetType, resolveExecutablePath, executableCandidates } from './outputPath';
 import { applyResponseFile, compareFilesByWeight, linkRespBase } from './commandLine';
+import { normalizeCompilerCacheKind, resolveCompilerCachePathCached } from './compilerCache';
 import { upperDrive, shortPathWin } from '../tools/pathCase';
 import { getWindowsSystemPath } from '../tools/windowsPath';
 import { LruCache } from '../tools/lru';
@@ -216,6 +217,8 @@ export class BuildEngine {
     clearBackticksCache();
     // 第六轮 F8：命令记录按每轮构建重置（HTML 日志 full_command_line）
     this.lastCommands = [];
+    // R4：编译缓存已启用但工具缺失 → 每轮构建告警一次（命令生成回退原编译器，构建行为不受影响）
+    this.warnCompilerCacheMissing();
     // M0 阶段计时探针：设置 codeblocks.build.profile 或环境变量 CB_BUILD_PROFILE=1 启用（默认关闭时零开销）
     this.profBuildStartMs = Date.now();
     const profEnabled = BuildProfiler.enabled()
@@ -402,7 +405,32 @@ export class BuildEngine {
   /** 展开 pre/post 命令中的编译宏（$compiler/$options/$includes 等），对齐 GenerateCommandLine */
   private expandScriptMacros(target: BuildTarget, cmd: string): string {
     const generator = new CommandGenerator(this.project, this.compiler);
-    return generator.generateFromTemplate(cmd, { target, pf: null, file: '', object: '', flatObject: '', deps: '' });
+    return generator.generateFromTemplate(cmd, { target, pf: null, file: '', object: '', flatObject: '', deps: '', noCompilerCache: true });
+  }
+
+  /**
+   * R4：编译缓存工具缺失告警（每个构建引擎实例一次；引擎按构建创建 → 即每轮构建一次）。
+   * 设置启用 ccache/sccache 但未解析到可执行文件时，命令生成静默回退原编译器；
+   * 这里在输出通道说明原因与出路（安装引导 / compilerCachePath 显式路径）。
+   */
+  private compilerCacheWarned = false;
+  private warnCompilerCacheMissing(): void {
+    if (this.compilerCacheWarned) return;
+    try {
+      const cfg = vscode.workspace.getConfiguration('codeblocks');
+      const kind = normalizeCompilerCacheKind(cfg.get<string>('build.compilerCache', 'none'));
+      if (kind === 'none') return;
+      const explicit = cfg.get<string>('build.compilerCachePath', '') || '';
+      if (resolveCompilerCachePathCached(kind, explicit)) return;
+      this.compilerCacheWarned = true;
+      this.output.warn(
+        `[Code::Blocks] 编译缓存 ${kind} 已启用但未找到可执行文件` +
+        `${explicit ? `（codeblocks.build.compilerCachePath = ${explicit} 无效）` : '（PATH 与常见安装目录均未命中）'}` +
+        `——本次构建回退使用原编译器；可运行命令「Code::Blocks: Install Compiler Cache」获取安装指引，或为 compilerCachePath 设置正确的可执行文件路径。`,
+      );
+    } catch {
+      // 无 vscode 宿主（headless 单测）或读取失败：静默（构建不受影响）
+    }
   }
 
   /**
@@ -452,6 +480,8 @@ export class BuildEngine {
           deps: this.depsPathFor(target, file),
           hasCppFilesToLink: hasCpp,
           nativeSep: false,
+          // R4：clangd 编译数据库不注入编译缓存前缀（保证 clangd 语义与工程真实命令行匹配）
+          noCompilerCache: true,
         });
         if (command) {
           entries.push({ directory: this.project.basePath, command, file: file.absolutePath, objectRel, targetTitle: target.title });
@@ -795,7 +825,7 @@ export class BuildEngine {
     // 展开 pre/post 命令中的编译宏（$compiler/$options/$includes 等），对齐 Code::Blocks GenerateCommandLine
     // （directcommands.cpp GetPreBuildCommands：GenerateCommandLine(cmd, target, 0, "", ...)）
     const expandScriptMacros = (cmd: string): string =>
-      generator.generateFromTemplate(cmd, { target, pf: null, file: '', object: '', flatObject: '', deps: '' });
+      generator.generateFromTemplate(cmd, { target, pf: null, file: '', object: '', flatObject: '', deps: '', noCompilerCache: true });
 
     // 构建脚本（<Script file>）：Code::Blocks 用 Squirrel 脚本引擎，扩展暂不支持，明确警告跳过
     const buildScripts = [...this.project.buildScripts, ...target.buildScripts];
@@ -1420,6 +1450,8 @@ export class BuildEngine {
       flatObject: this.objectPathRelativeFlat(target, file),
       deps: this.depsPathFor(target, file),
       hasCppFilesToLink: false,
+      // R4：自定义 buildCommand 不注入编译缓存前缀（命令内容由用户在工程内定义，保持逐字展开）
+      noCompilerCache: true,
     });
   }
 

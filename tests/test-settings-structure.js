@@ -1,5 +1,5 @@
 // 设置结构回归（第53轮配置整理）：
-//  - configuration 为 7 个分区块（title+order），设置项总数 57、无重复键
+//  - configuration 为 7 个分区块（title+order），设置项总数 59、无重复键
 //  - 关键默认值/枚举/scope/数值校验/DBGconfig/描述无轮次标记
 //  - 全部设置键在 dist 中被读取（无死配置；ui.symbolsView 由 when 子句使用）
 const fs = require('fs');
@@ -38,7 +38,7 @@ for (const b of cfg) {
     byKey[k] = v;
   }
 }
-  check('设置项总数 = 57', keys.length === 57, keys.length);
+  check('设置项总数 = 59', keys.length === 59, keys.length);
 check('无重复键', new Set(keys).size === keys.length, keys.length - new Set(keys).size);
 check('disableInit 默认 true（对齐 CB disable_init）', byKey['codeblocks.debug.disableInit']?.default === true, byKey['codeblocks.debug.disableInit']);
 check('saveHtmlLogFullCommandLine 默认 false（对齐 CB full_command_line）', byKey['codeblocks.build.saveHtmlLogFullCommandLine']?.default === false, byKey['codeblocks.build.saveHtmlLogFullCommandLine']);
@@ -50,6 +50,16 @@ check('cleanResponseFiles 默认 false（保护性增强；CB 不清理响应文
   byKey['codeblocks.build.cleanResponseFiles']?.type === 'boolean'
   && byKey['codeblocks.build.cleanResponseFiles']?.default === false,
   byKey['codeblocks.build.cleanResponseFiles']);
+check('build.compilerCache 枚举 none/ccache/sccache + 默认 none + machine-overridable',
+  JSON.stringify(byKey['codeblocks.build.compilerCache']?.enum) === JSON.stringify(['none', 'ccache', 'sccache'])
+  && byKey['codeblocks.build.compilerCache']?.default === 'none'
+  && byKey['codeblocks.build.compilerCache']?.scope === 'machine-overridable',
+  byKey['codeblocks.build.compilerCache']);
+check('build.compilerCachePath 默认空串（自动探测）+ machine-overridable',
+  byKey['codeblocks.build.compilerCachePath']?.type === 'string'
+  && byKey['codeblocks.build.compilerCachePath']?.default === ''
+  && byKey['codeblocks.build.compilerCachePath']?.scope === 'machine-overridable',
+  byKey['codeblocks.build.compilerCachePath']);
 check('buildLogAutoFocus 默认 errors + 四值枚举',
   JSON.stringify(byKey['codeblocks.ui.buildLogAutoFocus']?.enum) === JSON.stringify(['errors', 'errorsAndWarnings', 'always', 'never'])
   && byKey['codeblocks.ui.buildLogAutoFocus']?.default === 'errors', byKey['codeblocks.ui.buildLogAutoFocus']);
