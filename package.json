@@ -2,7 +2,7 @@
   "name": "codeblocks-vscode",
   "displayName": "Code::Blocks for VS Code",
   "description": "原生移植 Code::Blocks 核心功能到 VS Code：项目模型、构建引擎、编译器管理与调试引擎",
-  "version": "0.8.121-dev",
+  "version": "0.8.122-dev",
   "icon": "resources/icon.png",
   "publisher": "robinmaomao",
   "author": {
@@ -504,7 +504,7 @@
     ],
     "languages": [
       { "id": "ld", "aliases": ["GNU ld", "ld"], "extensions": [".ld", ".lcf"], "configuration": "./language-configurations/ld.json" },
-      { "id": "asm", "extensions": [".S", ".s"], "aliases": ["GNU Assembly (RISC-V)"] },
+      { "id": "asm", "extensions": [".S", ".s"], "aliases": ["GNU Assembly (RISC-V)"], "configuration": "./language-configurations/asm.json" },
       { "id": "xm", "aliases": ["xm"], "extensions": [".xm"], "configuration": "./language-configurations/xm.json" }
     ],
     "grammars": [
@@ -995,6 +995,138 @@
         "languages": [
           "c",
           "cpp"
+        ],
+        "configurationAttributes": {
+          "launch": {
+            "required": ["program"],
+            "properties": {
+              "program": {
+                "type": "string",
+                "description": "要调试的可执行文件路径（对齐 Code::Blocks 目标输出；Windows 无扩展名输出会自动回退 .exe）",
+                "default": "${workspaceFolder}/bin/Debug/app"
+              },
+              "cwd": {
+                "type": "string",
+                "description": "调试工作目录（对齐目标的运行工作目录）",
+                "default": "${workspaceFolder}"
+              },
+              "args": {
+                "type": "array",
+                "items": { "type": "string" },
+                "description": "传给程序的命令行参数（引号感知分词对齐 CB）",
+                "default": []
+              },
+              "environment": {
+                "type": "object",
+                "additionalProperties": { "type": "string" },
+                "description": "附加环境变量（与宿主环境合并）",
+                "default": {}
+              },
+              "gdbPath": {
+                "type": "string",
+                "description": "GDB 可执行文件路径（缺省：codeblocks.debug.gdbPath → masterPath/bin → PATH）",
+                "default": ""
+              },
+              "searchDirs": {
+                "type": "array",
+                "items": { "type": "string" },
+                "description": "额外调试器源搜索目录（GDB directory）",
+                "default": []
+              },
+              "remoteDebugging": {
+                "type": "object",
+                "description": "远程目标（对齐 Code::Blocks remote_debugging；通常由工程属性面板配置）",
+                "properties": {
+                  "target": { "type": "string", "description": "目标标题（空 = 项目级默认）" },
+                  "connType": { "type": "number", "enum": [0, 1, 2], "description": "连接类型：0=TCP 1=UDP 2=Serial" },
+                  "serialPort": { "type": "string", "description": "串口端口（Serial）" },
+                  "serialBaud": { "type": "string", "description": "串口波特率（Serial，默认 115200）" },
+                  "ip": { "type": "string", "description": "IP 地址（TCP/UDP）" },
+                  "ipPort": { "type": "string", "description": "IP 端口（TCP/UDP）" },
+                  "additionalCmds": { "type": "string", "description": "连接后 GDB 命令（多行）" },
+                  "additionalCmdsBefore": { "type": "string", "description": "连接前 GDB 命令（多行）" },
+                  "additionalShellCmdsAfter": { "type": "string", "description": "连接后 shell 命令（多行）" },
+                  "additionalShellCmdsBefore": { "type": "string", "description": "连接前 shell 命令（多行）" },
+                  "skipLDpath": { "type": "boolean", "description": "跳过 LD_LIBRARY_PATH（Windows 为 PATH）注入" },
+                  "extendedRemote": { "type": "boolean", "description": "使用 target extended-remote（默认 target remote）" }
+                }
+              }
+            }
+          },
+          "attach": {
+            "required": ["pid"],
+            "properties": {
+              "pid": {
+                "type": "number",
+                "description": "要附加的进程号（对齐 Code::Blocks Attach to process）"
+              },
+              "program": {
+                "type": "string",
+                "description": "可选符号文件（附加前加载，失败不阻断；可用 Send GDB Command 手动 add-symbol-file）",
+                "default": ""
+              },
+              "cwd": {
+                "type": "string",
+                "description": "调试工作目录",
+                "default": "${workspaceFolder}"
+              },
+              "gdbPath": {
+                "type": "string",
+                "description": "GDB 可执行文件路径（缺省：codeblocks.debug.gdbPath → masterPath/bin → PATH）",
+                "default": ""
+              },
+              "searchDirs": {
+                "type": "array",
+                "items": { "type": "string" },
+                "description": "额外调试器源搜索目录（GDB directory）",
+                "default": []
+              },
+              "environment": {
+                "type": "object",
+                "additionalProperties": { "type": "string" },
+                "description": "附加环境变量（与宿主环境合并）",
+                "default": {}
+              }
+            }
+          }
+        },
+        "initialConfigurations": [
+          {
+            "type": "codeblocks",
+            "request": "launch",
+            "name": "Debug (Code::Blocks)",
+            "program": "${workspaceFolder}/bin/Debug/app",
+            "cwd": "${workspaceFolder}",
+            "args": [],
+            "environment": {}
+          }
+        ],
+        "configurationSnippets": [
+          {
+            "label": "Code::Blocks: Debug (launch)",
+            "description": "用 GDB 启动调试（等价 F8 / Code::Blocks Debug）",
+            "body": {
+              "type": "codeblocks",
+              "request": "launch",
+              "name": "Debug (Code::Blocks)",
+              "program": "^\"${1:${workspaceFolder}/bin/Debug/app}\"",
+              "cwd": "^\"${2:${workspaceFolder}}\"",
+              "args": [],
+              "environment": {}
+            }
+          },
+          {
+            "label": "Code::Blocks: Attach to Process (attach)",
+            "description": "附加到运行中进程（等价 Code::Blocks Attach to Process…）",
+            "body": {
+              "type": "codeblocks",
+              "request": "attach",
+              "name": "Attach (Code::Blocks)",
+              "pid": "^\"${1:1234}\"",
+              "program": "^\"${2:}\"",
+              "cwd": "^\"${3:${workspaceFolder}}\""
+            }
+          }
         ]
       }
     ],

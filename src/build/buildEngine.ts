@@ -256,27 +256,33 @@ export class BuildEngine {
       targets = this.project.buildTargets;
     }
 
-    // 平台过滤（对齐 compilergcc.cpp:2749：不支持当前平台的目标不构建）
-    targets = targets.filter((t) => supportsCurrentPlatform(t.platforms));
-
-    // 无效编译器过滤（对齐 PreprocessJob:2759-2764 CompilerValid + PrintInvalidCompiler:1756-1786）：
-    // 编译器 ID 未注册或 masterPath 指向的编译器程序缺失 → 报错并跳过该目标
+    // 平台过滤 + 无效编译器过滤 —— 对齐 PreprocessJob:2745-2764 的单循环顺序：
+    // 先「不支持当前平台」告警跳过（:2749-2756，原文 "<工程> - <目标>" does not support the current platform. Skipping...），
+    // 再 CompilerValid + PrintInvalidCompiler（:2759-2764：编译器 ID 未注册或 masterPath 指向的编译器程序缺失 → 报错并跳过该目标）
     let invalidCompilerSkipped = 0;
-    targets = targets.filter((t) => {
+    let platformSkipped = 0;
+    const jobTargets: BuildTarget[] = [];
+    for (const t of targets) {
+      if (!supportsCurrentPlatform(t.platforms)) {
+        platformSkipped++;
+        this.output.warn(`"${this.project.title} - ${t.title}" does not support the current platform. Skipping...`);
+        continue;
+      }
       const id = t.compilerId || this.project.compilerId;
       const c = this.resolveCompiler ? this.resolveCompiler(id) : this.compiler;
       if (c === undefined || !isCompilerUsable(c)) {
         invalidCompilerSkipped++;
         this.reportInvalidCompiler(t, c, c ? c.name : (id || null));
-        return false;
+        continue;
       }
-      return true;
-    });
+      jobTargets.push(t);
+    }
+    targets = jobTargets;
 
     if (targets.length === 0) {
-      // 收尾行对齐 NotifyJobDone（compilergcc.cpp:4123-4140）：任务列表为空 → "Nothing to be done (all items are up-to-date)."
+      // 收尾行对齐 NotifyJobDone（compilergcc.cpp:4123-4140）：任务列表为空（平台/无效编译器跳过）→ "Nothing to be done (all items are up-to-date)."
       // 保护性差异（P3-B）：CB 日志到此为止（内部同样按失败返回）；扩展随后照常输出失败行/汇总，便于 VS Code 端明确失败原因
-      if (invalidCompilerSkipped > 0) {
+      if (invalidCompilerSkipped > 0 || platformSkipped > 0) {
         this.output.info('[Code::Blocks] Nothing to be done (all items are up-to-date).');
       }
       vscode.window.showWarningMessage('没有可构建的目标');
