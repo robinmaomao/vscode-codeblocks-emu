@@ -175,6 +175,7 @@ const backticksCache = new LruCache<string, string>(256);
  * 反引号展开 —— 对齐 cbExpandBackticks（globals.cpp:867-927）：
  * 逐对 `` `cmd` `` 执行 `cmd /c cmd`（Windows）并把输出（逐行 trim 后空格拼接）替换回原位置；
  * 结果按 cmd 全局缓存（m_Backticks）。onOutput 收到每条展开输出（对齐 SearchDirsFromBackticks 扫描源）。
+ * 执行超时 3s（Y2-A 保护性：扩展宿主为多扩展共享主线程；CB 无超时）。
  */
 export function expandBackticks(str: string, onOutput?: (bt: string) => void): string {
   if (!str.includes('`')) return str;
@@ -190,7 +191,9 @@ export function expandBackticks(str: string, onOutput?: (bt: string) => void): s
     let bt = backticksCache.get(cmd);
     if (bt === undefined) {
       try {
-        const r = spawnSync(cmd, { shell: true, timeout: 15000, maxBuffer: 1024 * 1024, encoding: 'utf8' });
+        // Y2-A：超时上限 15s→3s —— 宿主主线程阻塞会冻结全部扩展能力；挂起命令按失败（空串）处理并缓存。
+        // 保护性偏差：CB 无超时（挂起会永久卡住其 UI）；极慢但合法的命令可能被截断。
+        const r = spawnSync(cmd, { shell: true, timeout: 3000, maxBuffer: 1024 * 1024, encoding: 'utf8' });
         const text = (r.stdout ?? '').replace(/\r/g, '');
         bt = text.split('\n').map((l) => l.trim()).filter(Boolean).join(' ');
       } catch {
