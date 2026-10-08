@@ -24,10 +24,15 @@ import { BuildProfiler } from './buildProfiler';
 import { decodeText } from '../tools/encoding';
 import { isExecutableTargetType, resolveExecutablePath, executableCandidates } from './outputPath';
 import { applyResponseFile, compareFilesByWeight, linkRespBase } from './commandLine';
-import { normalizeCompilerCacheKind, resolveCompilerCachePathCached } from './compilerCache';
+import { clearCompilerCacheResolveCache, normalizeCompilerCacheKind, resolveCompilerCachePathCached } from './compilerCache';
 import { upperDrive, shortPathWin } from '../tools/pathCase';
 import { getWindowsSystemPath } from '../tools/windowsPath';
 import { LruCache } from '../tools/lru';
+
+/** R4：编译缓存缺失告警跨引擎去抖窗口（工作区构建逐项目建引擎，同一配置只提醒一次） */
+const COMPILER_CACHE_WARN_DEBOUNCE_MS = 10_000;
+let lastCompilerCacheWarnKey = '';
+let lastCompilerCacheWarnAt = 0;
 
 /** 结构化的诊断信息（供 Build Log 视图展示，文件为绝对路径） */
 export interface StructuredDiagnostic {
@@ -409,9 +414,10 @@ export class BuildEngine {
   }
 
   /**
-   * R4：编译缓存工具缺失告警（每个构建引擎实例一次；引擎按构建创建 → 即每轮构建一次）。
-   * 设置启用 ccache/sccache 但未解析到可执行文件时，命令生成静默回退原编译器；
-   * 这里在输出通道说明原因与出路（安装引导 / compilerCachePath 显式路径）。
+   * R4：编译缓存工具缺失告警（每引擎一次；跨引擎 10s 去抖——工作区构建逐项目建引擎）。
+   * 每次构建先清一次解析缓存再探测：工具在 VS Code 运行期间被安装/补齐时，
+   * **下一个构建**即可生效（无需重载窗口或运行「重新检测」）；未解析到时命令生成
+   * 静默回退原编译器，这里在输出通道说明原因与出路（安装引导 / compilerCachePath）。
    */
   private compilerCacheWarned = false;
   private warnCompilerCacheMissing(): void {
@@ -421,7 +427,15 @@ export class BuildEngine {
       const kind = normalizeCompilerCacheKind(cfg.get<string>('build.compilerCache', 'none'));
       if (kind === 'none') return;
       const explicit = cfg.get<string>('build.compilerCachePath', '') || '';
+      // 每构建重探（清会话缓存）：运行中安装工具 → 下一构建自动生效
+      clearCompilerCacheResolveCache();
       if (resolveCompilerCachePathCached(kind, explicit)) return;
+      // 跨引擎去抖：工作区构建 = 每项目一个引擎 → 同一配置窗口期内只告警一次
+      const now = Date.now();
+      const warnKey = `${kind}\u0000${explicit}`;
+      if (warnKey === lastCompilerCacheWarnKey && now - lastCompilerCacheWarnAt < COMPILER_CACHE_WARN_DEBOUNCE_MS) return;
+      lastCompilerCacheWarnKey = warnKey;
+      lastCompilerCacheWarnAt = now;
       this.compilerCacheWarned = true;
       this.output.warn(
         `[Code::Blocks] 编译缓存 ${kind} 已启用但未找到可执行文件` +
