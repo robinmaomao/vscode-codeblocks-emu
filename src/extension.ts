@@ -17,6 +17,7 @@ import { createProjectFromTemplate, PROJECT_TEMPLATES } from './project/newProje
 import { instantiateUserTemplate, listUserTemplates, saveAsUserTemplate } from './project/userTemplates';
 import { Compiler } from './compiler/compiler';
 import { queryCompilerVersionString } from './compiler/compilerVersion';
+import { CompilerRegistryDeps, findRegisteredCompilerId, resolveEffectiveCompilerId } from './compiler/compilerRegistry';
 import { BoundedMap, buildCompilerCacheKey } from './compiler/compilerCache';
 import { CompilerOptionsLoader } from './compiler/optionsLoader';
 import { CodeBlocksConfig } from './compiler/codeblocksConfig';
@@ -4163,31 +4164,29 @@ function buildCompilerInstance(
   return applyGlobalDirs(createGccCompiler(process.platform, masterPath));
 }
 
+/** compilerRegistry 纯模块的宿主依赖（X1：空 ID 缺省链与注册判定） */
+function compilerRegistryDeps(): CompilerRegistryDeps {
+  const cfg = vscode.workspace.getConfiguration('codeblocks');
+  return {
+    configuredId: () => cfg.get<string>('compilerId', 'gcc'),
+    isRegistered: (id) => !!codeBlocksConfig?.find(id),
+    hasResourceFile: (name) => !!compilerResourcesDir && fs.existsSync(path.join(compilerResourcesDir, name)),
+  };
+}
+
 /**
  * 构建用目标编译器解析器 —— 对齐 CompilerFactory::GetCompiler(target->GetCompilerID())：
  * 编译器 ID 未注册（无 options_<id>.xml、非用户自定义编译器、非当前配置编译器）时返回 undefined，
  * 由 BuildEngine 报「invalid compiler」并跳过该目标（对齐 PreprocessJob CompilerValid + PrintInvalidCompiler）。
  * UI 路径（状态栏/面板）仍用 getCompiler（未注册时回退 GCC 模板）。
+ *
+ * X1：空 ID（工程/目标均无 `<Option compiler>`）按 CB 加载器缺省处理（projectloader.cpp:396 字面 "gcc"）
+ * ——不再误判为无效编译器；'gcc' 未注册时回退设置 codeblocks.compilerId（见 compilerRegistry 纯模块）。
  */
 function resolveTargetCompiler(compilerId: string): Compiler | undefined {
-  if (!compilerId) return undefined;
-  const cfg = vscode.workspace.getConfiguration('codeblocks');
-  // 对齐 CompilerFactory::GetCompiler（compilerfactory.cpp:42-58）：大小写不敏感 + 去 '-' 旧 ID 格式二次匹配
-  const candidates: string[] = [];
-  for (const c of [compilerId, compilerId.toLowerCase(), compilerId.replace(/-/g, '')]) {
-    if (c && !candidates.includes(c)) candidates.push(c);
-  }
-  for (const c of candidates) {
-    if (c === cfg.get<string>('compilerId', 'gcc')) return getCompiler(c);
-    if (codeBlocksConfig?.find(c)) return getCompiler(c);
-    if (compilerResourcesDir) {
-      const lower = c.toLowerCase();
-      for (const name of [`options_${c}.xml`, `options_${lower}.xml`]) {
-        if (fs.existsSync(path.join(compilerResourcesDir, name))) return getCompiler(c);
-      }
-    }
-  }
-  return undefined;
+  const deps = compilerRegistryDeps();
+  const id = findRegisteredCompilerId(resolveEffectiveCompilerId(compilerId, deps), deps);
+  return id ? getCompiler(id) : undefined;
 }
 
 /** 编译器探测结果跨会话缓存（globalState；TTL 24h 或 masterPath 变化失效） */
