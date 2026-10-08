@@ -2,7 +2,7 @@
   "name": "codeblocks-vscode",
   "displayName": "Code::Blocks for VS Code",
   "description": "原生移植 Code::Blocks 核心功能到 VS Code：项目模型、构建引擎、编译器管理与调试引擎",
-  "version": "0.8.122-dev",
+  "version": "0.8.123-dev",
   "icon": "resources/icon.png",
   "publisher": "robinmaomao",
   "author": {
@@ -37,7 +37,7 @@
     "workspaceContains:**/*.cbp",
     "workspaceContains:**/*.workspace"
   ],
-  "main": "./dist/extension.js",
+  "main": "./bundle/extension.js",
   "contributes": {
     "commands": [
       {
@@ -503,14 +503,56 @@
       }
     ],
     "languages": [
-      { "id": "ld", "aliases": ["GNU ld", "ld"], "extensions": [".ld", ".lcf"], "configuration": "./language-configurations/ld.json" },
-      { "id": "asm", "extensions": [".S", ".s"], "aliases": ["GNU Assembly (RISC-V)"], "configuration": "./language-configurations/asm.json" },
-      { "id": "xm", "aliases": ["xm"], "extensions": [".xm"], "configuration": "./language-configurations/xm.json" }
+      {
+        "id": "ld",
+        "aliases": [
+          "GNU ld",
+          "ld"
+        ],
+        "extensions": [
+          ".ld",
+          ".lcf"
+        ],
+        "configuration": "./language-configurations/ld.json"
+      },
+      {
+        "id": "asm",
+        "extensions": [
+          ".S",
+          ".s"
+        ],
+        "aliases": [
+          "GNU Assembly (RISC-V)"
+        ],
+        "configuration": "./language-configurations/asm.json"
+      },
+      {
+        "id": "xm",
+        "aliases": [
+          "xm"
+        ],
+        "extensions": [
+          ".xm"
+        ],
+        "configuration": "./language-configurations/xm.json"
+      }
     ],
     "grammars": [
-      { "language": "ld", "scopeName": "source.ld", "path": "./syntaxes/ld.tmLanguage.json" },
-      { "language": "asm", "scopeName": "source.asm", "path": "./syntaxes/asm.tmLanguage.json" },
-      { "language": "xm", "scopeName": "source.xm", "path": "./syntaxes/xm.tmLanguage.json" }
+      {
+        "language": "ld",
+        "scopeName": "source.ld",
+        "path": "./syntaxes/ld.tmLanguage.json"
+      },
+      {
+        "language": "asm",
+        "scopeName": "source.asm",
+        "path": "./syntaxes/asm.tmLanguage.json"
+      },
+      {
+        "language": "xm",
+        "scopeName": "source.xm",
+        "path": "./syntaxes/xm.tmLanguage.json"
+      }
     ],
     "configuration": [
       {
@@ -534,13 +576,27 @@
             "default": {},
             "description": "编译器程序完整路径（交叉编译器如 RISC-V 由「探测编译器」自动写入，普通编译器留空）",
             "properties": {
-              "C": { "type": "string" },
-              "CPP": { "type": "string" },
-              "LD": { "type": "string" },
-              "LIB": { "type": "string" },
-              "WINDRES": { "type": "string" },
-              "MAKE": { "type": "string" },
-              "DBGconfig": { "type": "string" }
+              "C": {
+                "type": "string"
+              },
+              "CPP": {
+                "type": "string"
+              },
+              "LD": {
+                "type": "string"
+              },
+              "LIB": {
+                "type": "string"
+              },
+              "WINDRES": {
+                "type": "string"
+              },
+              "MAKE": {
+                "type": "string"
+              },
+              "DBGconfig": {
+                "type": "string"
+              }
             }
           }
         }
@@ -624,7 +680,10 @@
           },
           "codeblocks.build.responseFile": {
             "type": "string",
-            "enum": ["safe", "cb"],
+            "enum": [
+              "safe",
+              "cb"
+            ],
             "default": "safe",
             "description": "超长命令响应文件策略：safe=扩展保护性默认（阈值 8000、绝对路径引用、命名保留源扩展名 main.c.respFile）；cb=对齐 Code::Blocks（阈值 32767、命名 main.respFile、相对路径引用）"
           },
@@ -662,7 +721,9 @@
           },
           "codeblocks.debug.initCommands": {
             "type": "array",
-            "items": { "type": "string" },
+            "items": {
+              "type": "string"
+            },
             "default": [],
             "description": "调试会话启动后注入的 GDB 命令（按 CLI 逐条执行，如 set pagination off）；对齐 Code::Blocks Debugger settings 的初始化命令"
           },
@@ -689,7 +750,12 @@
           },
           "codeblocks.debug.disassemblyFlavor": {
             "type": "string",
-            "enum": ["default", "intel", "att", "custom"],
+            "enum": [
+              "default",
+              "intel",
+              "att",
+              "custom"
+            ],
             "default": "default",
             "description": "反汇编语法风格（GDB set disassembly-flavor）；default = 不设置（跟随 GDB 默认）；custom = 使用 instructionSet 的值"
           },
@@ -737,7 +803,10 @@
           },
           "codeblocks.clangd.buildLogDiagnostics": {
             "type": "string",
-            "enum": ["build", "clangd"],
+            "enum": [
+              "build",
+              "clangd"
+            ],
             "default": "build",
             "description": "检测到 clangd 时 Build Log 视图的诊断来源：build = 构建引擎完整诊断（默认，覆盖所有编译文件）；clangd = 使用 clangd 诊断（仅打开过的文件，可能不完整）。无论哪种，Problems 面板都由 clangd 产出"
           },
@@ -748,13 +817,19 @@
           },
           "codeblocks.clangd.forcedIncludes": {
             "type": "array",
-            "items": { "type": "string" },
-            "default": ["global.h"],
+            "items": {
+              "type": "string"
+            },
+            "default": [
+              "global.h"
+            ],
             "description": "clangd 分析头文件时强制预包含的基础头文件名（按 include 搜索目录查找，存在则加 -include）。默认 global.h（typedef/macro/sfr/clib 基础上下文），不要用 include.h 这类「包含所有头文件」的主头文件，否则会对被它包含的头文件造成递归包含、产生大量误报"
           },
           "codeblocks.clangd.suppressedWarnings": {
             "type": "array",
-            "items": { "type": "string" },
+            "items": {
+              "type": "string"
+            },
             "default": [
               "-Wunused-function",
               "redefinition_different_typedef"
@@ -789,7 +864,12 @@
           },
           "codeblocks.ui.buildLogAutoFocus": {
             "type": "string",
-            "enum": ["errors", "errorsAndWarnings", "always", "never"],
+            "enum": [
+              "errors",
+              "errorsAndWarnings",
+              "always",
+              "never"
+            ],
             "default": "errors",
             "description": "构建结束后自动聚焦 Build Log 面板的时机（对齐 Code::Blocks message_manager：默认仅错误时动作）：errors = 仅本次构建有错误（默认）；errorsAndWarnings = 有错误或警告；always = 总是（0.8.94 及以前的旧行为）；never = 从不（仍可从菜单/状态栏打开）"
           },
@@ -855,7 +935,10 @@
           },
           "codeblocks.editor.headerGuardStyle": {
             "type": "string",
-            "enum": ["ifndef", "pragma-once"],
+            "enum": [
+              "ifndef",
+              "pragma-once"
+            ],
             "default": "ifndef",
             "markdownDescription": "插入头文件保护的方式：`ifndef` = `#ifndef` / `#define` / `#endif` 包裹（默认）；`pragma-once` = 仅顶部 `#pragma once`"
           },
@@ -895,14 +978,44 @@
             "type": "array",
             "items": {
               "type": "object",
-              "required": ["name", "command"],
+              "required": [
+                "name",
+                "command"
+              ],
               "properties": {
-                "name": { "type": "string", "description": "工具名称（Tools 菜单与状态栏菜单中的显示名）" },
-                "command": { "type": "string", "description": "可执行文件路径或命令（支持别名宏与 Code::Blocks 宏）" },
-                "arguments": { "type": "string", "description": "参数字符串（引号感知分词；支持别名宏与 CB 宏）" },
-                "workingDirectory": { "type": "string", "description": "工作目录（缺省 = 活动工程目录；支持宏）" },
-                "env": { "type": "object", "additionalProperties": { "type": "string" }, "description": "附加环境变量" },
-                "output": { "type": "string", "enum": ["output", "terminal", "silent"], "default": "output", "description": "输出模式：output = 专用输出通道；terminal = 集成终端；silent = 无输出" }
+                "name": {
+                  "type": "string",
+                  "description": "工具名称（Tools 菜单与状态栏菜单中的显示名）"
+                },
+                "command": {
+                  "type": "string",
+                  "description": "可执行文件路径或命令（支持别名宏与 Code::Blocks 宏）"
+                },
+                "arguments": {
+                  "type": "string",
+                  "description": "参数字符串（引号感知分词；支持别名宏与 CB 宏）"
+                },
+                "workingDirectory": {
+                  "type": "string",
+                  "description": "工作目录（缺省 = 活动工程目录；支持宏）"
+                },
+                "env": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "description": "附加环境变量"
+                },
+                "output": {
+                  "type": "string",
+                  "enum": [
+                    "output",
+                    "terminal",
+                    "silent"
+                  ],
+                  "default": "output",
+                  "description": "输出模式：output = 专用输出通道；terminal = 集成终端；silent = 无输出"
+                }
               }
             },
             "default": [],
@@ -998,7 +1111,9 @@
         ],
         "configurationAttributes": {
           "launch": {
-            "required": ["program"],
+            "required": [
+              "program"
+            ],
             "properties": {
               "program": {
                 "type": "string",
@@ -1012,13 +1127,17 @@
               },
               "args": {
                 "type": "array",
-                "items": { "type": "string" },
+                "items": {
+                  "type": "string"
+                },
                 "description": "传给程序的命令行参数（引号感知分词对齐 CB）",
                 "default": []
               },
               "environment": {
                 "type": "object",
-                "additionalProperties": { "type": "string" },
+                "additionalProperties": {
+                  "type": "string"
+                },
                 "description": "附加环境变量（与宿主环境合并）",
                 "default": {}
               },
@@ -1029,7 +1148,9 @@
               },
               "searchDirs": {
                 "type": "array",
-                "items": { "type": "string" },
+                "items": {
+                  "type": "string"
+                },
                 "description": "额外调试器源搜索目录（GDB directory）",
                 "default": []
               },
@@ -1037,24 +1158,67 @@
                 "type": "object",
                 "description": "远程目标（对齐 Code::Blocks remote_debugging；通常由工程属性面板配置）",
                 "properties": {
-                  "target": { "type": "string", "description": "目标标题（空 = 项目级默认）" },
-                  "connType": { "type": "number", "enum": [0, 1, 2], "description": "连接类型：0=TCP 1=UDP 2=Serial" },
-                  "serialPort": { "type": "string", "description": "串口端口（Serial）" },
-                  "serialBaud": { "type": "string", "description": "串口波特率（Serial，默认 115200）" },
-                  "ip": { "type": "string", "description": "IP 地址（TCP/UDP）" },
-                  "ipPort": { "type": "string", "description": "IP 端口（TCP/UDP）" },
-                  "additionalCmds": { "type": "string", "description": "连接后 GDB 命令（多行）" },
-                  "additionalCmdsBefore": { "type": "string", "description": "连接前 GDB 命令（多行）" },
-                  "additionalShellCmdsAfter": { "type": "string", "description": "连接后 shell 命令（多行）" },
-                  "additionalShellCmdsBefore": { "type": "string", "description": "连接前 shell 命令（多行）" },
-                  "skipLDpath": { "type": "boolean", "description": "跳过 LD_LIBRARY_PATH（Windows 为 PATH）注入" },
-                  "extendedRemote": { "type": "boolean", "description": "使用 target extended-remote（默认 target remote）" }
+                  "target": {
+                    "type": "string",
+                    "description": "目标标题（空 = 项目级默认）"
+                  },
+                  "connType": {
+                    "type": "number",
+                    "enum": [
+                      0,
+                      1,
+                      2
+                    ],
+                    "description": "连接类型：0=TCP 1=UDP 2=Serial"
+                  },
+                  "serialPort": {
+                    "type": "string",
+                    "description": "串口端口（Serial）"
+                  },
+                  "serialBaud": {
+                    "type": "string",
+                    "description": "串口波特率（Serial，默认 115200）"
+                  },
+                  "ip": {
+                    "type": "string",
+                    "description": "IP 地址（TCP/UDP）"
+                  },
+                  "ipPort": {
+                    "type": "string",
+                    "description": "IP 端口（TCP/UDP）"
+                  },
+                  "additionalCmds": {
+                    "type": "string",
+                    "description": "连接后 GDB 命令（多行）"
+                  },
+                  "additionalCmdsBefore": {
+                    "type": "string",
+                    "description": "连接前 GDB 命令（多行）"
+                  },
+                  "additionalShellCmdsAfter": {
+                    "type": "string",
+                    "description": "连接后 shell 命令（多行）"
+                  },
+                  "additionalShellCmdsBefore": {
+                    "type": "string",
+                    "description": "连接前 shell 命令（多行）"
+                  },
+                  "skipLDpath": {
+                    "type": "boolean",
+                    "description": "跳过 LD_LIBRARY_PATH（Windows 为 PATH）注入"
+                  },
+                  "extendedRemote": {
+                    "type": "boolean",
+                    "description": "使用 target extended-remote（默认 target remote）"
+                  }
                 }
               }
             }
           },
           "attach": {
-            "required": ["pid"],
+            "required": [
+              "pid"
+            ],
             "properties": {
               "pid": {
                 "type": "number",
@@ -1077,13 +1241,17 @@
               },
               "searchDirs": {
                 "type": "array",
-                "items": { "type": "string" },
+                "items": {
+                  "type": "string"
+                },
                 "description": "额外调试器源搜索目录（GDB directory）",
                 "default": []
               },
               "environment": {
                 "type": "object",
-                "additionalProperties": { "type": "string" },
+                "additionalProperties": {
+                  "type": "string"
+                },
                 "description": "附加环境变量（与宿主环境合并）",
                 "default": {}
               }
@@ -1622,8 +1790,9 @@
   },
   "scripts": {
     "compile": "tsc -p ./",
+    "bundle": "esbuild src/extension.ts --bundle --platform=node --format=cjs --external:vscode --sourcemap --outfile=bundle/extension.js --log-level=warning",
     "watch": "tsc -watch -p ./",
-    "package": "vsce package",
+    "package": "npm run compile && npm run bundle && vsce package",
     "test": "node tests/run-all.js",
     "pretest": "npm run compile"
   },
@@ -1631,9 +1800,8 @@
     "@types/node": "^20.11.0",
     "@types/vscode": "^1.85.0",
     "@vscode/vsce": "^4.0.0",
+    "esbuild": "^0.28.2",
+    "fast-xml-parser": "^4.3.6",
     "typescript": "^5.4.0"
-  },
-  "dependencies": {
-    "fast-xml-parser": "^4.3.6"
   }
 }
