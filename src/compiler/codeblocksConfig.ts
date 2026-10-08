@@ -1,9 +1,9 @@
 /**
  * CodeBlocks 配置读取 —— 对应 compilerfactory.cpp RegisterUserCompilers
  *
- * 从 CodeBlocks 的 default.conf 读取「用户自定义编译器」配置（如 riscv32-v2），
- * 将其映射到实际的交叉编译器程序路径。这解决了 .cbp 里 compiler="riscv32-v2"
- * 这类用户编译器 ID 无法被扩展识别的问题。
+ * 从 CodeBlocks 的 default.conf 读取「用户自定义编译器」配置（如交叉编译工具链），
+ * 将其映射到实际的交叉编译器程序路径。这解决了 .cbp 里自定义编译器 ID（如 compiler="riscv32-elf"）
+ * 无法被扩展识别的问题。
  */
 import * as fs from 'fs';
 import * as path from 'path';
@@ -210,7 +210,7 @@ export class CodeBlocksConfig {
         raw: cc as Record<string, unknown>,
       };
       this.userCompilers.set(id, config);
-      // 同时注册连字符变体（riscv32-v2 与 riscv32_v2 互相映射）
+      // 同时注册连字符变体（连字符与下划线变体互相映射）
       this.userCompilers.set(id.replace(/_/g, '-'), config);
       this.userCompilers.set(id.replace(/-/g, '_'), config);
     }
@@ -270,7 +270,7 @@ export class CodeBlocksConfig {
     mergeSet(root?.global_uservars);
   }
 
-  /** 按 masterPath（安装目录）查找用户编译器，用于区分同名工具链的不同版本（如 RV32-V1 / RV32-V2） */
+  /** 按 masterPath（安装目录）查找用户编译器，用于区分同名工具链的不同版本（如同系列的多个版本目录） */
   findByMasterPath(masterPath: string): UserCompilerConfig | undefined {
     if (!masterPath) return undefined;
     const normalized = path.normalize(masterPath).toLowerCase();

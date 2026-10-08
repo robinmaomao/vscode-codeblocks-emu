@@ -1,7 +1,7 @@
 // 验证方案 A：ar 命令对含空格工具链路径加引号
 const { quoteIfNeeded } = require('../dist/compiler/commandGenerator');
 
-const lib = 'C:\\Program Files (x86)\\RV32-Toolchain\\RV32-V2\\bin\\riscv32-elf-ar.exe';
+const lib = 'C:\\Program Files (x86)\\riscv-toolchain\\bin\\riscv32-elf-ar.exe';
 const staticOut = 'bin\\Debug\\libfoo.a';
 const objects = ['obj\\Debug\\main.o', 'obj\\Debug\\util.o'];
 

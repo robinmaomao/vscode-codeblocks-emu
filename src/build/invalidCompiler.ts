@@ -48,7 +48,7 @@ export function triedCompilerPaths(c: Compiler): string[] {
 
 /**
  * 主消息（5 行、末尾换行留下空行）—— 结构对齐 PrintInvalidCompiler，文案为扩展适配。
- * 名称显示：已注册编译器 → 其名称；未注册 → 传入其 ID（如 "hifi5"，CB 原文此处为空名）；均以 "(…)" 附加，为空时省略。
+ * 名称显示：已注册编译器 → 其名称；未注册 → 传入其 ID（如 "my-compiler"，CB 原文此处为空名）；均以 "(…)" 附加，为空时省略。
  */
 export function renderInvalidCompilerMessage(targetFullTitle: string, compilerName: string | null): string {
   const name = compilerName ? ` (${compilerName})` : '';

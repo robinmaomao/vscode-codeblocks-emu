@@ -505,7 +505,7 @@
     "languages": [
       { "id": "ld", "aliases": ["GNU ld", "ld"], "extensions": [".ld", ".lcf"], "configuration": "./language-configurations/ld.json" },
       { "id": "asm", "extensions": [".S", ".s"], "aliases": ["GNU Assembly (RISC-V)"] },
-      { "id": "xm", "aliases": ["xmaker xm", "xm"], "extensions": [".xm"], "configuration": "./language-configurations/xm.json" }
+      { "id": "xm", "aliases": ["xm"], "extensions": [".xm"], "configuration": "./language-configurations/xm.json" }
     ],
     "grammars": [
       { "language": "ld", "scopeName": "source.ld", "path": "./syntaxes/ld.tmLanguage.json" },
@@ -707,7 +707,7 @@
             "type": "string",
             "scope": "machine-overridable",
             "default": "",
-            "description": "GDB 可执行文件路径（留空自动探测：masterPath/bin → PATH）。跨工具链（如 RV32）建议显式指定对应 gdb，避免架构不匹配"
+            "description": "GDB 可执行文件路径（留空自动探测：masterPath/bin → PATH）。跨架构工具链建议显式指定对应 gdb，避免架构不匹配"
           },
           "codeblocks.debug.trace": {
             "type": "boolean",

@@ -9,7 +9,7 @@
 
 /**
  * 组装编译器结果缓存键。
- * @param id 编译器 ID（如 gcc / riscv32-v2）
+ * @param id 编译器 ID（如 gcc / riscv32-elf）
  * @param masterPath codeblocks.masterPath 设置
  * @param programs codeblocks.compilerPrograms 设置（探测到的完整程序路径）
  */
