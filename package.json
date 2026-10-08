@@ -2,7 +2,7 @@
   "name": "codeblocks-vscode",
   "displayName": "Code::Blocks for VS Code",
   "description": "原生移植 Code::Blocks 核心功能到 VS Code：项目模型、构建引擎、编译器管理与调试引擎",
-  "version": "0.8.119",
+  "version": "0.8.120-dev",
   "icon": "resources/icon.png",
   "publisher": "robinmaomao",
   "author": {
@@ -559,7 +559,7 @@
             "default": 0,
             "minimum": 0,
             "maximum": 64,
-            "description": "并行编译任务数（0 = 自动，取 CPU 核数）"
+            "description": "并行编译任务数（0 = 自动：逻辑核数 × 2，最多 64）。实测 Windows 下编译单元存在大量非 CPU 停顿（gcc→cc1→as 进程链 + 杀软扫描），超额订阅可显著缩短全量构建（基准实测：4C/8T 机器 8→16 并发全量构建约快 35%）；每个编译进程链常驻几十至几百 MB，内存紧张或机器卡顿时可显式指定较小值（含 1 = 串行）"
           },
           "codeblocks.maxReportedErrors": {
             "type": "number",
@@ -586,6 +586,11 @@
             "type": "boolean",
             "default": false,
             "description": "详细构建输出：完整编译命令行（对齐 Code::Blocks 详细模式）、clean/rebuild 逐文件列表、增量跳过文件列表"
+          },
+          "codeblocks.build.profile": {
+            "type": "boolean",
+            "default": false,
+            "description": "构建性能探针：构建结束在 Code::Blocks 输出通道追加 [profile] 阶段计时块（环境准备/收集（增量判定·命令生成）/首进程延迟/编译/链接/宿主输出解析 + spawn 次数与输出量），供性能诊断与优化前后对比。等效环境变量 CB_BUILD_PROFILE=1（两者任一开启即生效；默认关闭零开销、无行为变化）"
           },
           "codeblocks.build.compileCommandsOnlyTargets": {
             "type": "boolean",

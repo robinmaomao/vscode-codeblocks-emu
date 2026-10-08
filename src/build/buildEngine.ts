@@ -19,6 +19,7 @@ import { runScriptCommands } from './scriptRunner';
 import { replaceCbMacros, cbBuiltinVars, envVarMap } from '../compiler/cbMacros';
 import { buildLogPrefs, msg } from './logLang';
 import { BuildCancelHandle } from './cancelToken';
+import { BuildProfiler } from './buildProfiler';
 import { decodeText } from '../tools/encoding';
 import { isExecutableTargetType, resolveExecutablePath, executableCandidates } from './outputPath';
 import { applyResponseFile, compareFilesByWeight, linkRespBase } from './commandLine';
@@ -104,6 +105,16 @@ export class BuildEngine {
   lastCommands: string[] = [];
   /** 本次构建的单文件编译耗时（并发 push，JS 单线程安全） */
   private compileTimings: { file: string; ms: number }[] = [];
+  /** M0 阶段计时探针（CB_BUILD_PROFILE=1 启用；构建结束渲染 [profile] 块） */
+  private prof: BuildProfiler | undefined;
+  /** 探针：本次构建起始时间（总计基准） */
+  private profBuildStartMs = 0;
+  /** 探针：当前目标键前缀（'<目标名>/'） */
+  private profPrefix = '';
+  /** 探针：当前目标起始时间（首编译 spawn 延迟基准） */
+  private profTargetStartMs = 0;
+  /** 探针：当前目标是否已记录首个 spawn */
+  private profFirstSpawnSeen = false;
 
   constructor(
     private project: Project,
@@ -113,6 +124,41 @@ export class BuildEngine {
   ) {
     // 使用编译器 XML 加载的正则；若为空则回退内置正则
     this.parser = new OutputParser(compiler.regexes.length ? compiler.regexes : undefined);
+  }
+
+  // ———— M0 阶段计时探针辅助（探针关闭时全部直通，零输出、无行为变化） ————
+
+  /** 带完整键的同步计时（探针关闭时直通） */
+  private profTime<T>(key: string, fn: () => T): T {
+    return this.prof ? this.prof.time(key, fn) : fn();
+  }
+
+  /** 带完整键的异步计时（探针关闭时直通） */
+  private profTimeAsync<T>(key: string, fn: () => Promise<T>): Promise<T> {
+    return this.prof ? this.prof.timeAsync(key, fn) : fn();
+  }
+
+  /** 累加一条时长（探针关闭时无操作） */
+  private profAdd(key: string, ms: number): void {
+    this.prof?.add(key, ms);
+  }
+
+  /** M0 探针：isUpToDate 计时包装（探针关闭时直通） */
+  private profIsUpToDate(file: ProjectFile, object: string, includeDirs: string[], depsCache: Map<string, number>): boolean {
+    if (!this.prof) return this.isUpToDate(file.absolutePath, object, includeDirs, depsCache);
+    const t0 = Date.now();
+    const r = this.isUpToDate(file.absolutePath, object, includeDirs, depsCache);
+    this.prof.add(`${this.profPrefix}增量判定`, Date.now() - t0);
+    return r;
+  }
+
+  /** M0 探针：渲染 [profile] 块到输出通道（构建收尾调用；仅探针启用时输出） */
+  private emitBuildProfile(): void {
+    const prof = this.prof;
+    if (!prof) return;
+    this.prof = undefined;
+    if (this.profBuildStartMs) prof.mark('总计', this.profBuildStartMs);
+    for (const line of prof.render()) this.output.info(`[Code::Blocks][profile] ${line}`);
   }
 
   /**
@@ -168,8 +214,14 @@ export class BuildEngine {
     clearBackticksCache();
     // 第六轮 F8：命令记录按每轮构建重置（HTML 日志 full_command_line）
     this.lastCommands = [];
+    // M0 阶段计时探针：设置 codeblocks.build.profile 或环境变量 CB_BUILD_PROFILE=1 启用（默认关闭时零开销）
+    this.profBuildStartMs = Date.now();
+    const profEnabled = BuildProfiler.enabled()
+      || vscode.workspace.getConfiguration('codeblocks').get<boolean>('build.profile', false) === true;
+    this.prof = profEnabled ? new BuildProfiler() : undefined;
 
     // 编译/链接子进程 PATH 注入：bin + masterPath + extra_paths + 系统 PATH（对齐 SetupEnvironment:795-830：ReplaceMacros 展开 + 去尾分隔符 + 去重）
+    const profEnvT0 = Date.now();
     const expandEnvPath = (p: string): string =>
       replaceCbMacros(p, {
         vars: envVarMap(this.project.envVars),
@@ -190,6 +242,7 @@ export class BuildEngine {
       return true;
     }).join(sep);
     this.buildEnv = { ...(process.env as NodeJS.ProcessEnv), PATH: merged };
+    this.prof?.mark('环境准备', profEnvT0);
 
     // 无目标标题：只构建纳入 All 的目标（对齐 GetCompileCommands(target=null) 的 includeInTargetAll 过滤）
     const titles = targetTitle ? (Array.isArray(targetTitle) ? targetTitle : [targetTitle]) : undefined;
@@ -222,6 +275,7 @@ export class BuildEngine {
 
     if (targets.length === 0) {
       vscode.window.showWarningMessage('没有可构建的目标');
+      this.emitBuildProfile();
       return false;
     }
 
@@ -233,21 +287,23 @@ export class BuildEngine {
       this.output.info('[Code::Blocks] 执行项目 pre-build 脚本...');
       const preCmds = this.project.commandsBeforeBuild.map((c) => this.expandScriptMacros(first, c));
       this.lastCommands.push(...preCmds);
-      const preOk = await runScriptCommands(
+      const preOk = await this.profTimeAsync('项目/pre-build', () => runScriptCommands(
         preCmds,
         this.project.basePath,
         this.targetMacroVars(first),
         (l) => this.output.info(l),
         this.compilerBinPath(),
         options.cancel,
-      );
+      ));
       if (options.cancel?.isCancelled()) {
         this.lastStats = { success: false, cancelled: true, compiledCount: 0, skippedCount: 0, failedCount: 0, linkSuccess: false, linkSkipped: true, hadCommands: false };
+        this.emitBuildProfile();
         return false;
       }
       if (!preOk) {
         this.output.error('[Code::Blocks] 项目 pre-build 脚本失败');
         this.lastStats = { success: false, compiledCount: 0, skippedCount: 0, failedCount: 0, linkSuccess: false, linkSkipped: true, hadCommands: false };
+        this.emitBuildProfile();
         return false;
       }
     }
@@ -300,14 +356,14 @@ export class BuildEngine {
       this.output.info('[Code::Blocks] 执行项目 post-build 脚本...');
       const postCmds = this.project.commandsAfterBuild.map((c) => this.expandScriptMacros(last, c));
       this.lastCommands.push(...postCmds);
-      const postOk = await runScriptCommands(
+      const postOk = await this.profTimeAsync('项目/post-build', () => runScriptCommands(
         postCmds,
         this.project.basePath,
         this.targetMacroVars(last),
         (l) => this.output.info(l),
         this.compilerBinPath(),
         options.cancel,
-      );
+      ));
       if (options.cancel?.isCancelled()) {
         cancelled = true;
       } else if (!postOk) {
@@ -317,6 +373,7 @@ export class BuildEngine {
     }
 
     this.lastStats = { success: ok, cancelled, compiledCount, skippedCount, failedCount, linkSuccess, linkSkipped, hadCommands: lastHadCommands, outputFilename };
+    this.emitBuildProfile();
     return ok;
   }
 
@@ -700,6 +757,10 @@ export class BuildEngine {
   private async buildTarget(target: BuildTarget, options: BuildOptions): Promise<BuildTargetStats> {
     // 每目标编译器（对齐 GetCompiler(target->GetCompilerID())；banner 已在 build() 切换，此处幂等）
     this.switchCompiler(target);
+    // M0 探针：目标级键前缀 + 首编译 spawn 延迟基准（目标处理起点）
+    this.profPrefix = `${target.title}/`;
+    this.profTargetStartMs = Date.now();
+    this.profFirstSpawnSeen = false;
     // 本次目标构建的耗时记录（提前 return 路径也要清空，避免汇总显示上次构建的 Top3）
     this.compileTimings = [];
     this.lastCompileTimings = [];
@@ -758,7 +819,7 @@ export class BuildEngine {
     if (preCommands.length) {
       this.output.info(`[Code::Blocks] 执行目标 pre-build 脚本 (${target.title})...`);
       this.lastCommands.push(...preCommands);
-      const preOk = await runScriptCommands(preCommands, this.project.basePath, macroVars, (l) => this.output.info(l), this.compilerBinPath(), options.cancel);
+      const preOk = await this.profTimeAsync(this.profPrefix + '目标 pre-build', () => runScriptCommands(preCommands, this.project.basePath, macroVars, (l) => this.output.info(l), this.compilerBinPath(), options.cancel));
       if (!preOk) {
         // 取消优先判定（被强杀的脚本进程返回失败，但语义是取消）
         if (options.cancel?.isCancelled()) {
@@ -824,6 +885,8 @@ export class BuildEngine {
     // CB else 分支条目（对齐 GetTargetCompileCommands:562-566）：源文件缺失时 IsObjectOutdated 返回 false 但
     // errorStr 非空 → WARNING 条目计入 ret → 同样强制链接（WARNING 文案由 isUpToDate 输出）。
     const missingSourceFiles: string[] = [];
+    // M0 探针：收集阶段（全循环 = 增量判定 + 命令生成 + 过滤）
+    const profCollectT0 = Date.now();
     for (const file of sortedFiles) {
       // 跳过不参与编译的文件（<Option compile="0"/>）
       if (file.compile === false) continue;
@@ -844,12 +907,14 @@ export class BuildEngine {
       }
 
       const isHeader = fileTypeOf(file.relativeFilename) === FileType.Header;
-      const made = this.makeCompileUnit(target, file, generator, hasCpp);
+      const made = this.prof
+        ? this.prof.time(`${this.profPrefix}命令生成`, () => this.makeCompileUnit(target, file, generator, hasCpp))
+        : this.makeCompileUnit(target, file, generator, hasCpp);
       if (made.reason === 'not-compilable' || made.reason === 'no-command') {
         // 对齐 CB：此类文件过期（IsObjectOutdated=true，对象缺失即过期 directcommands.cpp:1175）时仍产生条目 → 计入强制链接。
         // autoGeneratedBy 文件在 CB 主循环被跳过（directcommands.cpp:553），不产生条目。
         if (!file.autoGeneratedBy
-          && (options.rebuild || !this.isUpToDate(file.absolutePath, this.objectPathFor(target, file), includeDirs, depsCache))) {
+          && (options.rebuild || !this.profIsUpToDate(file, this.objectPathFor(target, file), includeDirs, depsCache))) {
           staleNoopFiles.push(file.relativeFilename);
         }
         if (made.reason === 'no-command' && !isHeader) {
@@ -865,7 +930,7 @@ export class BuildEngine {
 
       // 增量编译：源/头文件未变更且对象文件存在时跳过（rebuild 强制重编译）
       // （Code::Blocks 对自定义 buildCommand 文件同样执行 IsObjectOutdated 判断）
-      if (!options.rebuild && this.isUpToDate(file.absolutePath, object, includeDirs, depsCache)) {
+      if (!options.rebuild && this.profIsUpToDate(file, object, includeDirs, depsCache)) {
         skippedCount++;
         if (this.verboseOutput()) {
           this.output.info(`[Skipping] ${file.relativeFilename} (up to date)`);
@@ -879,10 +944,20 @@ export class BuildEngine {
       if (file.autoGeneratedBy) deferredUnits.push(unit);
       else units.push(unit);
     }
+    // M0 探针：收集阶段结束（增量判定 + 命令生成 + 过滤的合计）
+    this.profAdd(`${this.profPrefix}收集阶段`, Date.now() - profCollectT0);
+    if (this.prof) {
+      this.prof.count(`${this.profPrefix}收集统计(目标文件数)`, sortedFiles.length);
+      this.prof.count(`${this.profPrefix}收集统计(待编译)`, units.length + deferredUnits.length);
+      this.prof.count(`${this.profPrefix}收集统计(跳过)`, skippedCount);
+      this.prof.count(`${this.profPrefix}收集统计(过期noop)`, staleNoopFiles.length);
+    }
 
     // 创建所有对象文件的父目录（对应 CodeBlocks 的 CreateDirRecursively）
     // 否则 GCC 无法创建 Output\obj\plugin\xxx.o 等子目录下的对象文件
-    this.ensureObjectDirs([...units, ...deferredUnits]);
+    this.prof
+      ? this.prof.time(`${this.profPrefix}对象目录创建`, () => this.ensureObjectDirs([...units, ...deferredUnits]))
+      : this.ensureObjectDirs([...units, ...deferredUnits]);
 
     // 无需要编译的文件（且输出已存在）→ 目标已最新；但外部依赖更新仍需重链接（对齐 GetTargetLinkCommands：AreExternalDepsOutdated 先于 !force 返回）
     if (units.length === 0 && deferredUnits.length === 0) {
@@ -933,6 +1008,8 @@ export class BuildEngine {
       results.push(...(await this.runInParallel(deferredUnits, maxJobs, options, totalUnits)));
     }
     const compileSec = ((Date.now() - compileStartMs) / 1000).toFixed(1);
+    // M0 探针：编译墙钟（并行调度全程；含宿主输出解析，解析单独另行统计）
+    this.profAdd(`${this.profPrefix}编译墙钟`, Date.now() - compileStartMs);
     this.lastCompileTimings = [...this.compileTimings];
 
     // 取消检查点：被强杀的编译进程 close 返回失败，但语义是取消而非失败（failedCount 不计）
@@ -1054,6 +1131,8 @@ export class BuildEngine {
             const respBase = linkRespBase(this.project.basePath, target.objectOutput, target.title);
             const linkOk = await this.runCommand(linkCommand, this.project.basePath, options, respBase);
             const linkSec = ((Date.now() - linkStartMs) / 1000).toFixed(1);
+            // M0 探针：链接墙钟
+            this.profAdd(`${this.profPrefix}链接`, Date.now() - linkStartMs);
             if (!linkOk) {
               // 取消优先判定（被强杀的链接器返回失败，但语义是取消）
               if (options.cancel?.isCancelled()) {
@@ -1162,6 +1241,8 @@ export class BuildEngine {
             const respBase = linkRespBase(this.project.basePath, target.objectOutput, target.title);
             const ok = await this.runCommand(arCmd, this.project.basePath, options, respBase);
             const arSec = ((Date.now() - arStartMs) / 1000).toFixed(1);
+            // M0 探针：打包墙钟（ar）
+            this.profAdd(`${this.profPrefix}打包(ar)`, Date.now() - arStartMs);
             if (!ok) {
               // 取消优先判定（被强杀的 ar 返回失败，但语义是取消）
               if (options.cancel?.isCancelled()) {
@@ -1238,7 +1319,7 @@ export class BuildEngine {
     if (targetPost.length && (hasCommands || target.alwaysRunPostBuildSteps)) {
       this.output.info(`[Code::Blocks] 执行目标 post-build 脚本 (${target.title})...`);
       this.lastCommands.push(...targetPost);
-      const ok = await runScriptCommands(targetPost, this.project.basePath, macroVars, (l) => this.output.info(l), extraPath, options.cancel);
+      const ok = await this.profTimeAsync(`${this.profPrefix}目标 post-build`, () => runScriptCommands(targetPost, this.project.basePath, macroVars, (l) => this.output.info(l), extraPath, options.cancel));
       if (!ok) {
         if (options.cancel?.isCancelled()) return false;
         this.output.error(`[Code::Blocks] 目标 "${target.title}" post-build 脚本失败`);
@@ -2022,12 +2103,25 @@ export class BuildEngine {
     return path.join(this.project.basePath, depsOut, path.dirname(rel), name + '.depend');
   }
 
+  /**
+   * 并行任务数：显式设置为准；0 = 自动。
+   *
+   * 自动值 = min(逻辑核数 × 2, 64)（R1，M0 实测，2026-10-08，用户选 64 上限）：
+   * 编译单元墙钟远大于其 CPU 占用（gcc→cc1→as 进程链 + Windows 杀软扫描停顿），
+   * 按核数并行只能填满线程、大量停顿被浪费；2× 超额订阅把停顿重叠——
+   * boombox（487 文件/248 单元）全量构建：8 并发 ~70s → 16 并发 ~44s（-35%），
+   * 24 并发回退（~52s，开始争抢）。上限 64 与设置范围上限一致；
+   * 注意：每个编译进程链常驻几十至几百 MB（巨型 TU 的 cc1 可达 1–2GB），
+   * 高核数机器如遇内存紧张/卡顿，请显式指定较小值。
+   * （CB 对照：cbthreadpool.cpp:32-39 线程数 ≤0 → wxThread::GetCPUCount()；
+   * 本项为保护性性能增强，显式设置值仍优先、可一键回退。）
+   */
   private maxJobs(): number {
     const cfg = vscode.workspace.getConfiguration('codeblocks');
     const n = cfg.get<number>('parallelJobs', 0);
     if (n && n > 0) return n;
-    // 默认 CPU 数（对齐 CodeBlocks processCount 默认值，无上限）
-    return Math.max(1, os.cpus().length || 2);
+    const logical = Math.max(1, os.cpus().length || 2);
+    return Math.min(logical * 2, 64);
   }
 
   private async runInParallel(units: CompileUnit[], maxJobs: number, options: BuildOptions, totalCount: number): Promise<(boolean | undefined)[]> {
@@ -2046,9 +2140,15 @@ export class BuildEngine {
       const group = units.slice(groupStart, groupEnd);
       const pchIdx = group.map((u, i) => (u.isPch ? i : -1)).filter((i) => i >= 0);
       const normalIdx = group.map((u, i) => (!u.isPch ? i : -1)).filter((i) => i >= 0);
+      const profGroupT0 = this.prof ? Date.now() : 0;
       await this.runGroupSubset(group, pchIdx, groupStart, maxJobs, options, results, totalCount, stop);
       if (!stop.stopped) {
         await this.runGroupSubset(group, normalIdx, groupStart, maxJobs, options, results, totalCount, stop);
+      }
+      // M0 探针：权重组墙钟（评估组屏障/尾延迟占用）
+      if (this.prof) {
+        this.prof.add(`${this.profPrefix}权重组(w=${w}) 墙钟`, Date.now() - profGroupT0);
+        this.prof.count(`${this.profPrefix}权重组(w=${w}) 单元数`, groupEnd - groupStart);
       }
 
       groupStart = groupEnd;
@@ -2137,6 +2237,14 @@ export class BuildEngine {
       command = resp.command;
       // 第六轮 F8：记录实际执行命令（响应文件改写后，对齐 CB 在队列生成期改写后记录 cmd->command）
       this.lastCommands.push(command);
+      // M0 探针：首个 spawn 延迟（目标处理起点 → 第一个子进程实际派生；编译或链接，不含 pre/post 脚本）/ spawn 次数
+      if (this.prof) {
+        if (!this.profFirstSpawnSeen) {
+          this.profFirstSpawnSeen = true;
+          this.prof.add(`${this.profPrefix}首编译/链接 spawn 延迟`, Date.now() - this.profTargetStartMs);
+        }
+        this.prof.count(`${this.profPrefix}spawn 次数`);
+      }
       const proc = spawn(command, {
         cwd: upperDrive(cwd),
         shell: true,
@@ -2173,8 +2281,17 @@ export class BuildEngine {
 
       proc.on('close', (code) => {
         options.cancel?.unregister(proc);
+        // M0 探针：宿主输出解析耗时 + 输出字节量
+        const profParseT0 = this.prof ? Date.now() : 0;
         if (stdoutChunks.length) processLines(decodeText(Buffer.concat(stdoutChunks)));
         if (stderrChunks.length) processLines(decodeText(Buffer.concat(stderrChunks)));
+        if (this.prof) {
+          let bytes = 0;
+          for (const c of stdoutChunks) bytes += c.length;
+          for (const c of stderrChunks) bytes += c.length;
+          this.prof.count(`${this.profPrefix}输出字节`, bytes);
+          this.prof.add(`${this.profPrefix}宿主输出解析`, Date.now() - profParseT0);
+        }
         const success = code !== null && code >= 0 && code <= this.compiler.switches.statusSuccess;
         resolve(success);
       });

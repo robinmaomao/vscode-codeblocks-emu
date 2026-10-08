@@ -4,7 +4,7 @@
 
 直接在 VS Code 中打开 `.cbp` / `.workspace` 工程，即可获得与 Code::Blocks 对齐的构建、调试与工程浏览体验。
 
-> **作者**：Robinmaomao ｜ **版本**：0.8.119
+> **作者**：Robinmaomao ｜ **版本**：0.8.120-dev
 
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE.md)
 
@@ -82,7 +82,7 @@ npm run compile
 npm run package
 
 # 4. 安装
-code --install-extension codeblocks-vscode-0.8.119.vsix --force
+code --install-extension codeblocks-vscode-0.8.120-dev.vsix --force
 ```
 
 > Windows 下建议使用 `npm.cmd` / `npx.cmd`（PSReadLine 执行策略）。
@@ -129,12 +129,13 @@ code --extensionDevelopmentPath="." --disable-extensions --new-window
 |--------|--------|------|
 | `codeblocks.compilerId` | `gcc` | 默认编译器 ID（对应 `options_<id>.xml`） |
 | `codeblocks.masterPath` | `` | 编译器安装根目录（留空则从 PATH 探测） |
-| `codeblocks.parallelJobs` | `0` | 并行编译任务数（0 = 自动） |
+| `codeblocks.parallelJobs` | `0` | 并行编译任务数（0 = 自动：逻辑核数 × 2，最多 64） |
 | `codeblocks.saveBeforeBuild` | `true` | 构建前自动保存 |
 | `codeblocks.compilerPrograms` | `{}` | 编译器程序完整路径（交叉编译器由探测自动写入） |
 | `codeblocks.astyleOptions` | `["--style=allman", "--indent=spaces=4"]` | AStyle 格式化选项 |
 | `codeblocks.maxReportedErrors` | `50` | 单次构建最多收集的错误数（0 = 不限制） |
 | `codeblocks.build.verboseOutput` | `false` | 构建详细输出：完整编译命令行、Clean 逐文件删除列表、增量跳过列表（对齐 Code::Blocks 详细模式） |
+| `codeblocks.build.profile` | `false` | 构建性能探针：构建结束输出 `[profile]` 阶段计时块（与 `CB_BUILD_PROFILE=1` 等效） |
 | `codeblocks.build.skipIncludeDeps` | `false` | 增量编译跳过 `#include` 头文件依赖扫描（对齐 Code::Blocks /skip_include_deps 设置） |
 | `codeblocks.build.cleanResponseFiles` | `false` | Clean/Rebuild 时删除对象目录下响应文件（`*.respFile`，超长命令的 `@file` 临时输入）；默认关=对齐 CB 不清理，开启避免旧文件永久遗留 |
 | `codeblocks.clangd.enabled` | `true` | 是否启用 clangd 集成（自动生成 `compile_commands.json` 并更新 clangd 用户配置） |
@@ -142,7 +143,7 @@ code --extensionDevelopmentPath="." --disable-extensions --new-window
 | `codeblocks.clangd.forcedIncludes` | `["global.h"]` | clangd 分析头文件时强制预包含的基础头文件名（默认 `global.h`：typedef/macro/sfr/clib 上下文；勿用 `include.h` 这类全量主头文件，否则递归包含产生误报） |
 | `codeblocks.clangd.suppressedWarnings` | `["-Wunused-function", "redefinition_different_typedef"]` | 在 clangd 诊断中压制的诊断（`-W` 组名或诊断名）：默认压制嵌入式 SDK 跨界误报——静态函数编译期断言（`-Wunused-function`）与 SDK 头 vs 工具链系统头的 typedef 冲突（`__int32_t` 等）；移除对应项即恢复显示 |
 
-> 完整 53 项设置（7 个分区）见 [docs/使用说明.md](docs/使用说明.md) §13。
+> 完整 57 项设置（7 个分区）见 [docs/使用说明.md](docs/使用说明.md) §13。
 
 ## 架构
 
