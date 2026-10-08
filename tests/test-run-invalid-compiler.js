@@ -13,19 +13,19 @@ function check(name, cond, got, want) {
 
 // 1) renderInvalidCompilerMessage：无名称 → 单空格 + 扩展适配文案 + 末尾换行（结构对齐 CB）
 const expectedNull =
-  'Project/Target: "hifi5 - Debug":\n' +
+  'Project/Target: "my-compiler - Debug":\n' +
   "  The compiler's setup is invalid, so Code::Blocks for VS Code cannot find/run the compiler.\n" +
   '  Probably the toolchain path within the compiler settings is not setup correctly?!\n' +
   '  Do you have a compiler installed?\n' +
   'Check the "codeblocks.masterPath" / "codeblocks.compilerPrograms" settings, or run "Code::Blocks: Detect Compilers" to fix the compiler\'s setup.\n';
-const msgNull = m.renderInvalidCompilerMessage('hifi5 - Debug', null);
+const msgNull = m.renderInvalidCompilerMessage('my-compiler - Debug', null);
 check('null 名称：5 行 + 末尾换行（扩展适配文案）', msgNull === expectedNull, msgNull, expectedNull);
 
 // 2) 名称/ID 显示：已注册 → 名称；未注册 → ID
 const msgNamed = m.renderInvalidCompilerMessage('p - D', 'GNU GCC Compiler');
 check('已注册名称：(名称) 显示', msgNamed.includes('(GNU GCC Compiler) is invalid'), msgNamed, undefined);
-const msgId = m.renderInvalidCompilerMessage('p - D', 'hifi5');
-check('未注册 ID：(hifi5) 显示', msgId.includes('(hifi5) is invalid'), msgId, undefined);
+const msgId = m.renderInvalidCompilerMessage('p - D', 'my-compiler');
+check('未注册 ID：(my-compiler) 显示', msgId.includes('(my-compiler) is invalid'), msgId, undefined);
 
 // 3) triedCompilerPaths：bin → 根目录 → extra_paths 完整列出（保护性修正）
 const binP = path.join('Z:\\no-such-toolchain', 'bin', 'gcc.exe');

@@ -199,7 +199,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   compilerLoader = new CompilerOptionsLoader(resourcesDir);
   compilerResourcesDir = resourcesDir;
 
-  // 读取 CodeBlocks 用户自定义编译器配置（如 riscv32-v2）
+  // 读取 CodeBlocks 用户自定义编译器配置（如交叉编译器）
   codeBlocksConfig = new CodeBlocksConfig();
   codeBlocksConfig.load();
 
@@ -4108,7 +4108,7 @@ function buildCompilerInstance(
   // 编译器全局搜索目录 + 链接库（default.conf /compiler_sets/<id>，对齐 Compiler::LoadSettings）
   const applyGlobalDirs = (compiler: Compiler): Compiler => {
     const uc = codeBlocksConfig?.find(id);
-    if (uc?.name) compiler.name = uc.name; // 显示名对齐 CB（如 default.conf NAME=RISCV32-V3）
+    if (uc?.name) compiler.name = uc.name; // 显示名对齐 CB（取 default.conf 中用户编译器的 NAME）
     const sd = codeBlocksConfig?.searchDirs(id);
     if (sd) {
       compiler.includeDirs = sd.includeDirs;
@@ -4130,7 +4130,7 @@ function buildCompilerInstance(
     const compiler = compilerLoader.load(id);
     compiler.masterPath = masterPath;
 
-    // 优先：CodeBlocks 用户自定义编译器（如 riscv32-v2）——从 default.conf 解析程序路径
+    // 优先：CodeBlocks 用户自定义编译器（如交叉编译器）——从 default.conf 解析程序路径
     const userPrograms = codeBlocksConfig?.resolvePrograms(id);
     if (userPrograms) {
       compiler.programs = {
@@ -4513,16 +4513,16 @@ function currentCompilerName(): string {
   const id = cfg.get<string>('compilerId', 'gcc');
   const masterPath = cfg.get<string>('masterPath', '');
 
-  // 优先：按 ID 查找（default.conf 的 user_sets，如 riscv32 / riscv32_v2）
+  // 优先：按 ID 查找（default.conf 的 user_sets，连字符/下划线变体互相映射）
   let userCfg = codeBlocksConfig?.find(id);
-  // 探测到的 RISC-V 统一 id="riscv" 找不到时，按 masterPath 区分 V1/V2
+  // 探测到的 RISC-V 统一 id="riscv" 找不到时，按 masterPath 区分同系列不同版本
   if (!userCfg && masterPath) {
     userCfg = codeBlocksConfig?.findByMasterPath(masterPath);
   }
 
   if (userCfg) {
     // 用户自定义编译器：优先 NAME；若 NAME 缺少「-Vx」版本后缀，
-    // 从 masterPath 末尾目录名（如 RV32-V1 / RV32-V2）提取，以区分同系列不同版本
+    // 从 masterPath 末尾目录名（如工具链的版本子目录）提取，以区分同系列不同版本
     const name = userCfg.name || userCfg.id;
     const refPath = userCfg.masterPath || masterPath;
     if (refPath && !/-v\d/i.test(name)) {
@@ -4535,7 +4535,7 @@ function currentCompilerName(): string {
     return name;
   }
 
-  // 兜底：从 masterPath 提取版本（如 ...\RV32-V2 → RV32-V2）
+  // 兜底：从 masterPath 末段提取版本名（版本目录常含 rv32/riscv 或 -vN 形态）
   if (masterPath) {
     const ver = path.basename(masterPath).trim();
     if (/rv32|riscv/i.test(ver) || /v\d/i.test(ver)) {

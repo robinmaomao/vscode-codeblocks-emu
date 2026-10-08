@@ -429,7 +429,7 @@ export class BuildEngine {
 
         const custom = file.customBuildCommands?.[target.compilerId];
         const isCustom = custom !== undefined && custom.use;
-        // 自定义 buildCommand 文件（ram.ld/app.xm 等链接脚本/资源）不是 C/C++ 源文件，
+        // 自定义 buildCommand 文件（custom.ld/custom.xm 等链接脚本/资源）不是 C/C++ 源文件，
         // clangd 无法解析，compile_commands.json 里跳过（构建仍照常处理它们）。
         if (isCustom) continue;
         // 只收集 clangd 可索引的 C/C++ 源文件（.rc 资源脚本 clangd 无法解析）
@@ -576,7 +576,7 @@ export class BuildEngine {
     const ft = fileTypeOf(file.relativeFilename);
     const isHeader = ft === FileType.Header;
     const hasGenerated = (file.generatedFiles?.length ?? 0) > 0;
-    // 自定义命令文件（ram.ld/app.xm 等）或可编译类型（源文件/资源文件）才编译；
+    // 自定义命令文件（custom.ld/custom.xm 等）或可编译类型（源文件/资源文件）才编译；
     // 头文件在编译器 supportsPCH 时也编译为 .gch（对齐 GetCompileFileCommand 的 is_header && supportsPCH）；
     // 生成器文件（编译器工具 gen 属性声明生成文件）也编译（对齐 AddFile localCompile 的 !GenFilesHackMap.empty()）
     if (!isCustom && !isCompilableFileType(ft) && !(isHeader && this.compiler.switches.supportsPCH) && !hasGenerated) {
@@ -853,8 +853,8 @@ export class BuildEngine {
     // 1a. 链接对象集合（独立于编译，对应 GetTargetLinkCommands：link=true 且可链接类型。
     //     对齐 CodeBlocks GetProjectFilesSortedByWeight(target, false, true) 只过滤 !pf->link，
     //     link 默认值由文件类型决定（.c/.cpp 等可链接，.xm/.ld 等不可链接）——
-    //     因此带自定义 buildCommand 的 .c 文件（如 toolkit_effect.c）仍须参与链接，
-    //     而 ram.ld/app.xm 因扩展名非可链接类型被 isLinkableFileType 排除；
+    //     因此带自定义 buildCommand 的 .c 文件仍须参与链接，
+    //     而 custom.ld/custom.xm 因扩展名非可链接类型被 isLinkableFileType 排除；
     //     资源文件（.rc）单独到 resFiles（$link_resobjects），其余到 linkFiles（$link_objects））
     const linkFiles: ProjectFile[] = [];
     const resFiles: ProjectFile[] = [];
@@ -885,7 +885,7 @@ export class BuildEngine {
     // CB 条目计数强制（对齐 GetTargetCompileCommands:585「GetLinkCommands(target, ret.GetCount() != counter)」）：
     // 编译列表中「过期但无可执行命令」的文件（自定义空命令 / 工具未匹配）在 CB 中同样产生日志条目
     // （directcommands.cpp:350 Skipping 行 / :357 Compiling 行）→ 链接阶段被强制。
-    // 此类文件的对象永不产生（如 ram.ld → <对象目录>/ram.o），故每次构建都强制重链接/重新打包（与 CB 一致）。
+    // 此类文件的对象永不产生（如 custom.ld → <对象目录>/custom.o），故每次构建都强制重链接/重新打包（与 CB 一致）。
     const staleNoopFiles: string[] = [];
     // CB else 分支条目（对齐 GetTargetCompileCommands:562-566）：源文件缺失时 IsObjectOutdated 返回 false 但
     // errorStr 非空 → WARNING 条目计入 ret → 同样强制链接（WARNING 文案由 isUpToDate 输出）。
@@ -1054,7 +1054,7 @@ export class BuildEngine {
         this.output.info('[Code::Blocks] Linking stage skipped (build target has no object files to link)');
       } else {
         // 链接对象 = 所有参与链接的标准源文件对象（不论本次是否重编译）
-        // （ram.ld → ram.o 是链接脚本、app.xm → appxm.o 是资源，均不参与链接）
+        // （custom.ld → custom.o 是链接脚本、custom.xm → customxm.o 是资源，均不参与链接）
         // 逐对象加引号（对齐 pfDetails::Update:579-583 QuoteStringIfNeeded + GetTargetLinkCommands objectSeparator 拼接）
         const isOw = (target.compilerId || '').toLowerCase() === 'ow';
         const linkObjects = linkFiles.map((f) => quoteIfNeeded(this.linkObjectRelative(target, f)));
@@ -1090,19 +1090,19 @@ export class BuildEngine {
           this.output.info(`[Code::Blocks] ${msg(`链接输入 "${rel}" 有更新，重新链接`, `Re-linking because '${rel}' is newer`)}`);
         }
         // CB 条目计数强制（对齐 GetTargetCompileCommands:585）：过期但无可执行命令的编译文件在 CB 中
-        // 产生日志条目 → 每次构建都强制链接（对象永不产生，如 ram.ld 自定义空命令）
+        // 产生日志条目 → 每次构建都强制链接（对象永不产生，如 custom.ld 自定义空命令）
         if (staleNoopFiles.length) {
           forceLink = true;
           const names = staleNoopFiles.slice(0, 3).join('、') + (staleNoopFiles.length > 3 ? '…' : '');
           this.output.info(`[Code::Blocks] ${msg(`目标 "${target.title}" 含 ${staleNoopFiles.length} 个过期且无可执行命令的编译文件（${names}），强制链接（对齐 CB 条目计数）`, `Target "${target.title}" has ${staleNoopFiles.length} stale compile file(s) without an executable command (${names}); forcing link (CB entry-count parity)`)}`);
         }
         // CB 条目计数补全（同 :585）：编译阶段产生过任何条目即强制——真实自定义命令本身也是条目，
-        // 其对象永不产生（如 ram.ld 自定义命令），对象时间戳链路无法触发重链；普通工程零影响（对象已更新→本就强制）。
+        // 其对象永不产生（如 custom.ld 自定义命令），对象时间戳链路无法触发重链；普通工程零影响（对象已更新→本就强制）。
         if (totalUnits > 0) forceLink = true;
         // CB else 分支条目：源缺失的编译文件 → WARNING 条目计入强制（WARNING 已由 isUpToDate 输出）
         if (missingSourceFiles.length) forceLink = true;
         if (forceLink) {
-          // 创建输出目录（如 Output\bin），否则链接器无法写 app.rv32；失败则中止本目标（对齐 GetTargetLinkCommands 的目录错误提示，用日志替代阻塞弹窗）
+          // 创建输出目录（如 Output\bin），否则链接器无法写 app.elf；失败则中止本目标（对齐 GetTargetLinkCommands 的目录错误提示，用日志替代阻塞弹窗）
           if (!this.ensureDir(path.dirname(outputAbs))) {
             this.output.error(`[Code::Blocks] 无法创建输出目录，目标 "${target.title}" 中止`);
             return {
@@ -1357,7 +1357,7 @@ export class BuildEngine {
 
   /** 编译器 bin 目录（用于把交叉编译器工具加入脚本执行的 PATH） */
   private compilerBinPath(): string {
-    // 优先从完整程序路径推导（如 .../RV32-V2/bin/riscv32-elf-gcc.exe → .../RV32-V2/bin）
+    // 优先从完整程序路径推导（如 .../toolchain/bin/riscv32-elf-gcc.exe → .../toolchain/bin）
     const c = this.compiler.programs.C;
     if (c && (c.includes('/') || c.includes('\\'))) {
       return path.dirname(c);
@@ -1369,7 +1369,7 @@ export class BuildEngine {
     return '';
   }
 
-  /** 展开自定义编译命令（ram.ld/app.xm 等 <Option buildCommand>） */
+  /** 展开自定义编译命令（custom.ld/custom.xm 等 <Option buildCommand>） */
   private expandCustomCommand(
     cmd: string,
     generator: CommandGenerator,
@@ -1591,7 +1591,7 @@ export class BuildEngine {
 
   /**
    * 链接输入新鲜度检查（保护性增强，非 CodeBlocks 原生行为）：
-   * 工程内非编译文件（ram.ld 链接脚本、app.xm 资源、.icf/.def/.lds 等）不产生对象文件，
+   * 工程内非编译文件（custom.ld 链接脚本、custom.xm 资源、.icf/.def/.lds 等）不产生对象文件，
    * 改动后无法进入对象时间戳链路，此前仅 external_deps 能触发重链接。这里按扩展名白名单检查其 mtime：
    * 比输出新 → 返回该文件绝对路径（调用方强制重链接/重新打包），否则返回 null。
    * 输出不存在时不判定（既有逻辑必然重链接）。
@@ -2114,7 +2114,7 @@ export class BuildEngine {
    * 自动值 = min(逻辑核数 × 2, 64)（R1，M0 实测，2026-10-08，用户选 64 上限）：
    * 编译单元墙钟远大于其 CPU 占用（gcc→cc1→as 进程链 + Windows 杀软扫描停顿），
    * 按核数并行只能填满线程、大量停顿被浪费；2× 超额订阅把停顿重叠——
-   * boombox（487 文件/248 单元）全量构建：8 并发 ~70s → 16 并发 ~44s（-35%），
+   * 大型工程（487 文件/248 单元）全量构建：8 并发 ~70s → 16 并发 ~44s（-35%），
    * 24 并发回退（~52s，开始争抢）。上限 64 与设置范围上限一致；
    * 注意：每个编译进程链常驻几十至几百 MB（巨型 TU 的 cc1 可达 1–2GB），
    * 高核数机器如遇内存紧张/卡顿，请显式指定较小值。
