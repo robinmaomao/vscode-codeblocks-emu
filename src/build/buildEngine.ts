@@ -15,6 +15,7 @@ import { Compiler } from '../compiler/compiler';
 import { CommandGenerator, computeStaticOutput, quoteIfNeeded, clearBackticksCache } from '../compiler/commandGenerator';
 import { OutputParser } from './outputParser';
 import { CbOutput } from './cbChannel';
+import { isCompilerUsable, renderInvalidCompilerMessage, renderTriedCompilerPaths, triedCompilerPaths } from './invalidCompiler';
 import { runScriptCommands } from './scriptRunner';
 import { replaceCbMacros, cbBuiltinVars, envVarMap } from '../compiler/cbMacros';
 import { buildLogPrefs, msg } from './logLang';
@@ -174,17 +175,18 @@ export class BuildEngine {
     this.parser = new OutputParser(c.regexes.length ? c.regexes : undefined);
   }
 
-  /** 编译器是否可用 —— 对齐 Compiler::IsValid（compiler.cpp:191-231）：masterPath 设置时检查 C 程序存在性（bin/ 或根目录），未设置视为 PATH 查找 */
-  private isCompilerUsable(c: Compiler): boolean {
-    if (!c.programs.C) return false;
-    if (!c.masterPath) return true;
-    if (path.isAbsolute(c.programs.C)) return fs.existsSync(c.programs.C);
-    if (fs.existsSync(path.join(c.masterPath, 'bin', c.programs.C)) || fs.existsSync(path.join(c.masterPath, c.programs.C))) return true;
-    // 对齐 Compiler::IsValid（compiler.cpp:218-229）：extra paths 也参与程序搜索
-    for (const ep of c.extraPaths ?? []) {
-      if (ep && fs.existsSync(path.join(ep, c.programs.C))) return true;
+  /**
+   * 无效编译器报错 —— 结构对齐 CompilerGCC::PrintInvalidCompiler（compilergcc.cpp:1756-1786）：
+   * 主消息 + 已注册编译器的尝试路径 + finalMessage，三条独立错误条目（对齐 CB 三次 LogError）。
+   * 文案为扩展适配；消息渲染与可用性检查见纯模块 invalidCompiler.ts（构建与运行入口共用）。
+   */
+  private reportInvalidCompiler(target: BuildTarget, c: Compiler | undefined, displayName: string | null, finalMessage = 'Skipping...'): void {
+    this.output.error(renderInvalidCompilerMessage(`${this.project.title} - ${target.title}`, displayName));
+    if (c) {
+      const tried = renderTriedCompilerPaths(triedCompilerPaths(c));
+      if (tried) this.output.error(tried);
     }
-    return false;
+    this.output.error(finalMessage);
   }
 
   /** CommandsOnly 目标是否编译其文件（设置 codeblocks.build.compileCommandsOnlyTargets；默认 false 保持扩展原行为，true 对齐 CB 的空存根编译） */
@@ -257,23 +259,26 @@ export class BuildEngine {
     // 平台过滤（对齐 compilergcc.cpp:2749：不支持当前平台的目标不构建）
     targets = targets.filter((t) => supportsCurrentPlatform(t.platforms));
 
-    // 无效编译器过滤（对齐 PreprocessJob:2759-2764 CompilerValid + PrintInvalidCompiler）：
+    // 无效编译器过滤（对齐 PreprocessJob:2759-2764 CompilerValid + PrintInvalidCompiler:1756-1786）：
     // 编译器 ID 未注册或 masterPath 指向的编译器程序缺失 → 报错并跳过该目标
+    let invalidCompilerSkipped = 0;
     targets = targets.filter((t) => {
       const id = t.compilerId || this.project.compilerId;
       const c = this.resolveCompiler ? this.resolveCompiler(id) : this.compiler;
-      if (c === undefined || !this.isCompilerUsable(c)) {
-        this.output.error(
-          `Project/Target: "${this.project.title} - ${t.title}":\n` +
-          `  The compiler's setup (${id || 'unknown'}) is invalid, so Code::Blocks cannot find/run the compiler.\n` +
-          `  Skipping...`,
-        );
+      if (c === undefined || !isCompilerUsable(c)) {
+        invalidCompilerSkipped++;
+        this.reportInvalidCompiler(t, c, c ? c.name : (id || null));
         return false;
       }
       return true;
     });
 
     if (targets.length === 0) {
+      // 收尾行对齐 NotifyJobDone（compilergcc.cpp:4123-4140）：任务列表为空 → "Nothing to be done (all items are up-to-date)."
+      // 保护性差异（P3-B）：CB 日志到此为止（内部同样按失败返回）；扩展随后照常输出失败行/汇总，便于 VS Code 端明确失败原因
+      if (invalidCompilerSkipped > 0) {
+        this.output.info('[Code::Blocks] Nothing to be done (all items are up-to-date).');
+      }
       vscode.window.showWarningMessage('没有可构建的目标');
       this.emitBuildProfile();
       return false;

@@ -42,6 +42,7 @@ import { buildLogPrefs, msg, quietSuccess, resetBuildLogPrefsCache } from './bui
 import { decodeText } from './tools/encoding';
 import { clearBackticksCache, CommandGenerator } from './compiler/commandGenerator';
 import { OutputParser } from './build/outputParser';
+import { isCompilerUsable, renderInvalidCompilerMessage, renderTriedCompilerPaths, triedCompilerPaths } from './build/invalidCompiler';
 import { collectClangdEntries, writeClangdDatabase, CompileCommandEntry } from './build/compileCommands';
 import { detectClangd, queryCompilerSystemIncludes, queryCompilerTarget, updateClangdUserConfig, clangdUserConfigPath, clearClangdDetectionCache } from './tools/clangd';
 import { SymbolIndex, registerFallbackIntelliSense } from './tools/codeCompletion';
@@ -6342,6 +6343,23 @@ async function run(): Promise<void> {
     ?? await selectTarget();
   const target = project.buildTargets.find((t) => t.title === selectedTitle);
   if (!target) return;
+
+  // 运行前编译器校验（对齐 CompilerGCC::Run:1963-1986）：非 CommandsOnly / 非 "null" 编译器目标需 CompilerValid；
+  // 无效 → PrintInvalidCompiler(finalMessage="Run aborted...")（:1981）并中止，不启动程序（exe 存在性检查在更后，同 CB 顺序）
+  const runCompilerId = target.compilerId || project.compilerId;
+  if (target.targetType !== TargetType.CommandsOnly && runCompilerId !== 'null') {
+    const runCompiler = resolveTargetCompiler(runCompilerId);
+    if (runCompiler === undefined || !isCompilerUsable(runCompiler)) {
+      outputChannel.show(true); // 保护性：确保报错可见（CB 对无效编译器不弹面板/不打印 run banner）
+      outputChannel.error(renderInvalidCompilerMessage(`${project.title} - ${target.title}`, runCompiler ? runCompiler.name : (runCompilerId || null)));
+      if (runCompiler) {
+        const tried = renderTriedCompilerPaths(triedCompilerPaths(runCompiler));
+        if (tried) outputChannel.error(tried);
+      }
+      outputChannel.error('Run aborted...');
+      return;
+    }
+  }
 
   // 执行参数宏展开（对齐 GetExecutionParameters → GetFullCompilerVarsSet 全集：$(TARGET_OUTPUT_FILE) 等）
   const vars = { ...envVarMap(project.envVars, target.envVars), ...cbBuiltinVars(project.basePath, target.outputFilename, target.title, target.objectOutput, project.title, project.filename, getCompiler(target.compilerId)?.masterPath ?? '') };
