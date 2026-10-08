@@ -33,6 +33,19 @@ import { SymbolTreeProvider } from './ui/symbolTreeProvider';
 import { BuildSpinRenderState, nextBuildSpinRender } from './ui/buildStatusRender';
 import { createRunTerminal, setRunTerminalRegistry, createWorkspaceRunTerminalRegistry } from './ui/runTerminal';
 import { BuildEngine } from './build/buildEngine';
+import {
+  COMPILER_CACHE_INSTALL,
+  buildInstallGuideItems,
+  clearCompilerCacheResolveCache,
+  decideCompilerCachePrompt,
+  CompilerCacheDetection,
+  CompilerCacheKind,
+  CompilerCachePromptFlags,
+  CompilerCacheTool,
+  normalizeCompilerCacheKind,
+  parseToolVersion,
+  resolveCompilerCachePath,
+} from './build/compilerCache';
 import { createCbOutput, CbOutput } from './build/cbChannel';
 import { BuildCancelSource, BuildCancelHandle } from './build/cancelToken';
 import { expandMacros } from './build/scriptRunner';
@@ -188,6 +201,17 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     // G1：输出时间戳即时生效（刷新缓存值；普通通道逐行读取该变量，避免逐行 getConfiguration）
     if (e.affectsConfiguration('codeblocks.build.outputTimestamp')) {
       buildOutputTimestamp = vscode.workspace.getConfiguration('codeblocks').get<boolean>('build.outputTimestamp', false);
+    }
+  }));
+  // R4：编译缓存设置变化 → 清除解析缓存/检测缓存、重置提示标记并重新检测（免重载窗口）
+  context.subscriptions.push(vscode.workspace.onDidChangeConfiguration((e) => {
+    if (
+      e.affectsConfiguration('codeblocks.build.compilerCache')
+      || e.affectsConfiguration('codeblocks.build.compilerCachePath')
+    ) {
+      clearCompilerCacheResolveCache();
+      ccDetectionCache = undefined;
+      void resetCompilerCachePromptFlags().then(() => checkCompilerCachePrompt());
     }
   }));
   diagnosticCollection = vscode.languages.createDiagnosticCollection('codeblocks');
@@ -685,6 +709,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       } catch { /* 非关键 */ }
     })();
   }, 4000);
+
+  // R4：后台检测编译缓存工具（延迟启动，与编译器探测并行；未启用时也仅作一次性建议提示）
+  setTimeout(() => { void checkCompilerCachePrompt(); }, 4000);
 
   // 打开最近工程（E1）
   context.subscriptions.push(
@@ -1251,6 +1278,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       clearBuildOutput();
       vscode.window.setStatusBarMessage('已清除构建输出', 3000);
     }),
+  );
+
+  // R4：引导安装编译缓存工具（ccache/sccache）——仅引导（复制命令 / 终端执行 / 打开下载页），不静默安装
+  context.subscriptions.push(
+    vscode.commands.registerCommand('codeblocks.installCompilerCache', () => installCompilerCacheGuide()),
   );
 
   // 激活上一个/下一个工程（对齐 Project tree → Activate prior/next project，Alt-F5/Alt-F6）
@@ -4214,6 +4246,188 @@ function saveDetectCache(masterPath: string, list: DetectedCompiler[]): void {
   try {
     void extContext?.globalState.update(DETECT_CACHE_KEY, { masterPath, at: Date.now(), list });
   } catch { /* 非关键 */ }
+}
+
+// ---------------- R4：编译缓存（ccache / sccache）检测、提示与安装引导 ----------------
+
+/** 提示去重标记（globalState；修改两项编译缓存设置时会自动重置，可再次提示） */
+const CC_FLAG_MISSING = 'codeblocks.compilerCache.missingPrompted';
+const CC_FLAG_ENABLE = 'codeblocks.compilerCache.enablePrompted';
+const CC_FLAG_NOT_FOUND = 'codeblocks.compilerCache.notFoundPrompted';
+const CC_FLAG_DONT_ASK = 'codeblocks.compilerCache.dontAsk';
+
+function ccPromptFlags(): CompilerCachePromptFlags {
+  return {
+    notFoundShown: extContext?.globalState.get<boolean>(CC_FLAG_NOT_FOUND) === true,
+    enableShown: extContext?.globalState.get<boolean>(CC_FLAG_ENABLE) === true,
+    missingShown: extContext?.globalState.get<boolean>(CC_FLAG_MISSING) === true,
+    dontAsk: extContext?.globalState.get<boolean>(CC_FLAG_DONT_ASK) === true,
+  };
+}
+
+/** 设置变化时重置提示标记（「不再提示」一并复位：新状态可再次提示一次） */
+async function resetCompilerCachePromptFlags(): Promise<void> {
+  try {
+    await extContext?.globalState.update(CC_FLAG_ENABLE, false);
+    await extContext?.globalState.update(CC_FLAG_MISSING, false);
+    await extContext?.globalState.update(CC_FLAG_DONT_ASK, false);
+  } catch { /* 非关键 */ }
+}
+
+function ccCurrentConfig(): { kind: CompilerCacheKind; explicit: string } {
+  const cfg = vscode.workspace.getConfiguration('codeblocks');
+  return {
+    kind: normalizeCompilerCacheKind(cfg.get<string>('build.compilerCache', 'none')),
+    explicit: cfg.get<string>('build.compilerCachePath', '') || '',
+  };
+}
+
+function queryToolVersion(exePath: string): Promise<string | undefined> {
+  return new Promise((resolve) => {
+    try {
+      execFile(exePath, ['--version'], { timeout: 3000, windowsHide: true }, (err, stdout) => {
+        resolve(err ? undefined : parseToolVersion(String(stdout || '')));
+      });
+    } catch {
+      resolve(undefined);
+    }
+  });
+}
+
+let ccDetectionCache: CompilerCacheDetection | undefined;
+
+/** 检测 ccache/sccache（显式路径只对选中工具生效；结果会话缓存，force/设置变化/安装动作后重探） */
+async function detectCompilerCacheTools(force = false): Promise<CompilerCacheDetection> {
+  if (ccDetectionCache && !force) return ccDetectionCache;
+  const { kind, explicit } = ccCurrentConfig();
+  const det: CompilerCacheDetection = {};
+  for (const tool of ['ccache', 'sccache'] as const) {
+    const p = resolveCompilerCachePath(tool, kind === tool ? explicit : '');
+    if (!p) continue;
+    det[tool] = { path: p, version: await queryToolVersion(p) };
+  }
+  ccDetectionCache = det;
+  return det;
+}
+
+async function hasWinget(): Promise<boolean> {
+  if (process.platform !== 'win32') return false;
+  return new Promise((resolve) => {
+    try {
+      execFile('winget', ['--version'], { timeout: 3000, windowsHide: true }, (err) => resolve(!err));
+    } catch {
+      resolve(false);
+    }
+  });
+}
+
+/**
+ * R4 提示矩阵（一次性，落 globalState 标记；manual=true 绕过标记——用户显式重新检测）：
+ * 未启用未检测到 → 安装提示；未启用检测到 → 询问启用；已启用未找到 → 失效提示（构建仍静默回退）
+ */
+async function checkCompilerCachePrompt(manual = false): Promise<void> {
+  try {
+    const { kind, explicit } = ccCurrentConfig();
+    const det = await detectCompilerCacheTools(manual);
+    const action = decideCompilerCachePrompt(kind, det, ccPromptFlags(), manual);
+    if (action.kind === 'install-hint') {
+      await extContext?.globalState.update(CC_FLAG_NOT_FOUND, true);
+      const pick = await vscode.window.showInformationMessage(
+        '未检测到 ccache / sccache（编译缓存）。启用后可显著加速重复构建（切分支 / Clean 后重建受益最大）。',
+        '如何安装', '不再提示',
+      );
+      if (pick === '如何安装') await installCompilerCacheGuide();
+      else if (pick === '不再提示') await extContext?.globalState.update(CC_FLAG_DONT_ASK, true);
+      return;
+    }
+    if (action.kind === 'enable') {
+      await extContext?.globalState.update(CC_FLAG_ENABLE, true);
+      const labels = action.tools.map((t) => {
+        const v = det[t]?.version;
+        return `启用 ${t}${v ? `（v${v}）` : ''}`;
+      });
+      const pick = await vscode.window.showInformationMessage(
+        `检测到编译缓存工具 ${action.tools.join(' / ')}，是否启用？（仅标准编译命令前置缓存程序，链接/脚本/自定义命令不受影响）`,
+        ...labels,
+      );
+      const idx = labels.indexOf(pick ?? '');
+      if (idx >= 0) {
+        const tool = action.tools[idx];
+        const cfg = vscode.workspace.getConfiguration('codeblocks');
+        await cfg.update('build.compilerCache', tool, vscode.ConfigurationTarget.Global);
+        clearCompilerCacheResolveCache();
+        vscode.window.showInformationMessage(
+          `已启用编译缓存 ${tool}（${det[tool]?.path ?? ''}），后续标准编译命令将前置 ${tool}。`,
+        );
+      }
+      return;
+    }
+    if (action.kind === 'missing') {
+      await extContext?.globalState.update(CC_FLAG_MISSING, true);
+      const pick = await vscode.window.showWarningMessage(
+        `已启用编译缓存 ${action.tool}，但未找到可执行文件${explicit ? `（compilerCachePath = ${explicit} 无效）` : ''}。构建将回退原编译器。`,
+        '安装指引', '重新指定路径', '不再提示',
+      );
+      if (pick === '安装指引') await installCompilerCacheGuide();
+      else if (pick === '重新指定路径') {
+        await vscode.commands.executeCommand('workbench.action.openSettings', 'codeblocks.build.compilerCachePath');
+      } else if (pick === '不再提示') await extContext?.globalState.update(CC_FLAG_DONT_ASK, true);
+      return;
+    }
+  } catch { /* 非关键：检测失败不影响扩展功能 */ }
+}
+
+/** 引导安装（QuickPick → 复制命令 / 终端执行 / 打开下载页 / 重新检测；不静默安装） */
+async function installCompilerCacheGuide(): Promise<void> {
+  const pick = await vscode.window.showQuickPick(
+    [
+      { label: 'ccache', description: `${COMPILER_CACHE_INSTALL.ccache.license} · ccache.dev（GCC/Clang 通用，嵌入式工具链同样适用）` },
+      { label: 'sccache', description: `${COMPILER_CACHE_INSTALL.sccache.license} · Mozilla（本地磁盘缓存，另支持云端后端）` },
+    ],
+    { placeHolder: '选择要安装的编译缓存工具（扩展仅提供引导，不会静默安装）', ignoreFocusOut: true },
+  );
+  if (!pick) return;
+  const tool = pick.label as CompilerCacheTool;
+  const wingetAvailable = await hasWinget();
+  const items = buildInstallGuideItems(tool, wingetAvailable).map((it) => ({
+    label: it.label, description: it.description, action: it.action,
+  }));
+  const sel = await vscode.window.showQuickPick(items, {
+    placeHolder: `安装 ${tool}（winget 不可用时可用官方下载页手动安装）`,
+    ignoreFocusOut: true,
+  });
+  if (!sel) return;
+  const info = COMPILER_CACHE_INSTALL[tool];
+  if (sel.action === 'winget-copy') {
+    await vscode.env.clipboard.writeText(info.wingetCommand);
+    vscode.window.createTerminal('Compiler Cache Install').show();
+    vscode.window.showInformationMessage(`已复制安装命令，请在终端粘贴执行：${info.wingetCommand}`);
+  } else if (sel.action === 'winget-run') {
+    const confirm = await vscode.window.showWarningMessage(
+      `将在终端执行 winget 安装（可能弹出 UAC 提权提示）：${info.wingetCommand}`,
+      { modal: true }, '继续',
+    );
+    if (confirm !== '继续') return;
+    const term = vscode.window.createTerminal('Compiler Cache Install');
+    term.show();
+    term.sendText(info.wingetCommand);
+    vscode.window.showInformationMessage('已启动安装；完成后回到本命令选择「重新检测并启用」。');
+  } else if (sel.action === 'open-download') {
+    await vscode.env.openExternal(vscode.Uri.parse(info.downloadUrl));
+    vscode.window.showInformationMessage('已打开官方下载页；安装完成后请再次运行本命令并选择「重新检测并启用」。');
+  } else if (sel.action === 'redetect') {
+    clearCompilerCacheResolveCache();
+    ccDetectionCache = undefined;
+    await checkCompilerCachePrompt(true);
+    return;
+  }
+  // 安装动作收尾：附加一次「重新检测」（含 winget 安装完成后的启用路径）
+  const again = await vscode.window.showInformationMessage('安装完成后可立即重新检测并启用。', '重新检测');
+  if (again === '重新检测') {
+    clearCompilerCacheResolveCache();
+    ccDetectionCache = undefined;
+    await checkCompilerCachePrompt(true);
+  }
 }
 
 async function detectCompilers(): Promise<void> {
