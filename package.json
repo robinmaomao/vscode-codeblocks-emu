@@ -2,7 +2,7 @@
   "name": "codeblocks-vscode",
   "displayName": "Code::Blocks for VS Code",
   "description": "原生移植 Code::Blocks 核心功能到 VS Code：项目模型、构建引擎、编译器管理与调试引擎",
-  "version": "0.8.127",
+  "version": "0.8.128-dev",
   "icon": "resources/icon.png",
   "publisher": "robinmaomao",
   "author": {
@@ -975,6 +975,11 @@
             "minimum": 20,
             "maximum": 200,
             "description": "Tidy 注释（块注释整理）的换行宽度（列）"
+          },
+          "codeblocks.editor.asmHashComment": {
+            "type": "boolean",
+            "default": false,
+            "markdownDescription": "汇编文件（`.s` / `.S`）的注释标记：默认关闭使用 `//`（预处理的 `.S` 安全）；开启后 `Ctrl+/` 等注释操作改用 GAS 原生 `#`（原生 `.s` 直接汇编需开启——GAS 拒绝 `//`）。修改即时生效。"
           },
           "codeblocks.astyleOptions": {
             "type": "array",

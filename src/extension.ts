@@ -54,6 +54,7 @@ import { buildLogBaseName, renderHtmlBuildLog } from './build/htmlBuildLog';
 import { cbBuiltinVars, replaceCbMacros, globalVariables, envVarMap } from './compiler/cbMacros';
 import { buildLogPrefs, msg, quietSuccess, resetBuildLogPrefsCache } from './build/logLang';
 import { decodeText } from './tools/encoding';
+import { ASM_HASH_COMMENT_SETTING, ASM_LANGUAGE_ID, asmCommentsRule } from './tools/asmCommentConfig';
 import { clearBackticksCache, CommandGenerator } from './compiler/commandGenerator';
 import { OutputParser } from './build/outputParser';
 import { isCompilerUsable, renderInvalidCompilerMessage, renderTriedCompilerPaths, triedCompilerPaths } from './build/invalidCompiler';
@@ -156,6 +157,25 @@ let clangdGenTimer: NodeJS.Timeout | undefined;
 let clangdGenRunning = false;
 /** 活动工程切换后，若编译数据库实际变化则重启 clangd（刷新已打开文件） */
 let restartClangdAfterGeneration = false;
+/** 汇编注释动态覆盖的 Disposable（设置开启 `#` 时注册；释放后回退静态 `//`） */
+let asmCommentOverride: vscode.Disposable | undefined;
+
+/**
+ * 汇编注释模式：静态 `language-configurations/asm.json` 默认 `//`；
+ * 设置 codeblocks.editor.asmHashComment 开启时动态注册 GAS 原生 `#`（即时生效，无需重载）。
+ */
+function applyAsmCommentMode(): void {
+  const useHash = vscode.workspace.getConfiguration('codeblocks').get<boolean>(ASM_HASH_COMMENT_SETTING, false);
+  asmCommentOverride?.dispose();
+  asmCommentOverride = undefined;
+  if (useHash) {
+    // 动态注册优先级高于静态文件配置（VS Code：扩展注册 100 > 文件配置 50）；
+    // 仅覆盖 comments，brackets / autoClosingPairs 等仍沿用静态配置。
+    asmCommentOverride = vscode.languages.setLanguageConfiguration(ASM_LANGUAGE_ID, {
+      comments: asmCommentsRule(true),
+    });
+  }
+}
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
   extContext = context;
@@ -214,6 +234,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       void resetCompilerCachePromptFlags().then(() => checkCompilerCachePrompt());
     }
   }));
+  // 汇编注释模式（默认 `//`；设置开启后动态注册 GAS 原生 `#`；修改即时生效）
+  applyAsmCommentMode();
+  context.subscriptions.push(vscode.workspace.onDidChangeConfiguration((e) => {
+    if (e.affectsConfiguration('codeblocks.editor.asmHashComment')) applyAsmCommentMode();
+  }));
+  context.subscriptions.push({ dispose: () => asmCommentOverride?.dispose() });
   diagnosticCollection = vscode.languages.createDiagnosticCollection('codeblocks');
 
   // 安装/激活时自动写入 .ld/.xm 的 token 颜色规则（幂等，仅命中 source.ld/source.xm）
