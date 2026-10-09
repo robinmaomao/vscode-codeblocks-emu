@@ -7,11 +7,13 @@ const Module = require('module');
 const origLoad = Module._load;
 let spawnCalls = 0;
 let throwFor = null;
+let lastOpts = null;
 Module._load = function (request, parent, isMain) {
   if (request === 'child_process') {
     return {
-      spawnSync: (exe) => {
+      spawnSync: (exe, _args, opts) => {
         spawnCalls++;
+        lastOpts = opts;
         if (throwFor && exe === throwFor) throw new Error('spawn failed');
         return { stdout: 'gcc (fake) 1.2.3\nsecond line\n' };
       },
@@ -37,6 +39,8 @@ const fakeCompiler = { programs: { C: 'gcc-fake' }, masterPath: '' };
 let v = queryCompilerVersionString(fakeCompiler);
 check('首次查询返回 x.y.z', v === '1.2.3', v);
 check('首次查询 spawn 恰一次', spawnCalls === 1, spawnCalls);
+// Y2-A：宿主共享主线程——同步 `--version` 超时由 8s 下调至 3s（失败/超时 → undefined 并缓存负结果）
+check('Y2-A --version 超时上限 3000（下调自 8000）', lastOpts !== null && lastOpts.timeout === 3000, lastOpts && lastOpts.timeout);
 
 // 2. 同 key 重复查询 → 命中缓存（不再 spawn）
 v = queryCompilerVersionString(fakeCompiler);

@@ -16,12 +16,12 @@ const r1 = applyResponseFile(short);
 check('短命令不被改动', r1.command === short && r1.respFile === undefined);
 
 // 2. 构造超长链接命令（对象列表很长，含反斜杠路径）
-const linker = '"C:\\Program Files (x86)\\RV32-Toolchain\\RV32-V2\\bin\\riscv32-elf-gcc.exe"';
+const linker = '"C:\\Program Files (x86)\\riscv-toolchain\\bin\\riscv32-elf-gcc.exe"';
 const objs = [];
 for (let i = 0; i < 400; i++) {
   objs.push(`Output\\obj\\sys\\module_${i}.o`);
 }
-const long = `${linker} -march=rv32imac -o Output\\bin\\app.rv32 ${objs.join(' ')}`;
+const long = `${linker} -march=rv32imac -o Output\\bin\\app.elf ${objs.join(' ')}`;
 check('构造的命令超长', long.length > 8000);
 
 const r2 = applyResponseFile(long);

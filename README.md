@@ -4,7 +4,7 @@
 
 直接在 VS Code 中打开 `.cbp` / `.workspace` 工程，即可获得与 Code::Blocks 对齐的构建、调试与工程浏览体验。
 
-> **作者**：Robinmaomao ｜ **版本**：0.8.119
+> **作者**：Robinmaomao ｜ **版本**：0.8.127
 
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE.md)
 
@@ -28,7 +28,7 @@
 - ⌨️ **快捷键与冲突处理**：默认键位全部避开 VS Code 默认（新增 `Alt+G` Goto File / `Shift+F2` Project 视图 / `Alt+F1-F2` 错误导航 / `Ctrl+Shift+R` Replace in Files 等 CB 键位）；设置 `codeblocks.keybindings.cbStyle` 启用 **CB 保真键位**（F5 断点、Ctrl+R 替换 等 12 项，会覆盖 VS Code 默认，可随时关闭）；命令 `Check Keybinding Conflicts` 扫描内置默认 / 用户 keybindings.json / 其它扩展并生成冲突报告。
 - 🎛️ **逐项自定义快捷键**（方案 A）：设置 `codeblocks.keybindings.overrides`（30 项：构建/调试/错误导航/工程管理 + 外部别名 + CB 保真组）为唯一数据源，修改后**自动写入用户 keybindings.json**（自定义键 + 对默认键的移除规则；仅托管条目、注释保留、首次备份、回读校验回滚）；另提供**可视化设置面板**（`Code::Blocks: Keybinding Settings`：按键捕获录入、行内冲突/生效状态、检查冲突、方案导入导出）——可从命令面板、Menu → Settings → Keybindings… 或**扩展设置界面**（两项快捷键设置的描述内嵌一键链接）打开；另含向导/应用/重置命令。
 - 🖥️ **结构化输出通道**：输出面板采用日志通道（LogOutputChannel），每行带时间戳、按级别着色（错误红 / 警告黄）；构建过程输出单行完成式进度（`✓ [Compiled] 123-248 xxx.c (2.0s)`）、`[Skipping]` / `[Linking]` / `[Archiving]` 状态，构建结束输出 Emoji 汇总块（编译/跳过/失败统计 + 错误/警告数 + 耗时 + 最慢 Top3）。
-- 🎨 **专用语法高亮**：为链接脚本（`.ld` / `.lcf`）、GNU 汇编（`.S` / `.s`，RISC-V）、xmaker 配置脚本（`.xm`）提供专用 TextMate 语法高亮；安装时自动写入仅作用于这些文件的 token 颜色规则，不覆盖用户其他配色。
+- 🎨 **专用语法高亮**：为链接脚本（`.ld` / `.lcf`）、GNU 汇编（`.S` / `.s`，RISC-V）、`.xm` 配置脚本提供专用 TextMate 语法高亮；安装时自动写入仅作用于这些文件的 token 颜色规则，不覆盖用户其他配色。
 - 🚀 **对齐 Code::Blocks 细节**：
   - 增量编译（源文件 + `#include` 头文件依赖 mtime 比对）、`rebuild` 对齐 Code::Blocks（先 Clean 再 Build）
   - 文件类型判定对齐 Code::Blocks `FileTypeOf`：汇编源文件（`.S`/`.s`/`.asm`/`.ss`/`.s62`）正确编译并参与链接；链接脚本（`.ld`）等非源文件默认不编译不链接；`<Option buildCommand>` 自定义命令按 `use="1"` 语义识别
@@ -82,7 +82,7 @@ npm run compile
 npm run package
 
 # 4. 安装
-code --install-extension codeblocks-vscode-0.8.119.vsix --force
+code --install-extension codeblocks-vscode-0.8.127.vsix --force
 ```
 
 > Windows 下建议使用 `npm.cmd` / `npx.cmd`（PSReadLine 执行策略）。
@@ -129,20 +129,23 @@ code --extensionDevelopmentPath="." --disable-extensions --new-window
 |--------|--------|------|
 | `codeblocks.compilerId` | `gcc` | 默认编译器 ID（对应 `options_<id>.xml`） |
 | `codeblocks.masterPath` | `` | 编译器安装根目录（留空则从 PATH 探测） |
-| `codeblocks.parallelJobs` | `0` | 并行编译任务数（0 = 自动） |
+| `codeblocks.parallelJobs` | `0` | 并行编译任务数（0 = 自动：逻辑核数 × 2，最多 64） |
 | `codeblocks.saveBeforeBuild` | `true` | 构建前自动保存 |
 | `codeblocks.compilerPrograms` | `{}` | 编译器程序完整路径（交叉编译器由探测自动写入） |
 | `codeblocks.astyleOptions` | `["--style=allman", "--indent=spaces=4"]` | AStyle 格式化选项 |
 | `codeblocks.maxReportedErrors` | `50` | 单次构建最多收集的错误数（0 = 不限制） |
 | `codeblocks.build.verboseOutput` | `false` | 构建详细输出：完整编译命令行、Clean 逐文件删除列表、增量跳过列表（对齐 Code::Blocks 详细模式） |
+| `codeblocks.build.profile` | `false` | 构建性能探针：构建结束输出 `[profile]` 阶段计时块（与 `CB_BUILD_PROFILE=1` 等效） |
 | `codeblocks.build.skipIncludeDeps` | `false` | 增量编译跳过 `#include` 头文件依赖扫描（对齐 Code::Blocks /skip_include_deps 设置） |
+| `codeblocks.build.compilerCache` | `none` | 编译缓存（ccache/sccache，保护性增强，默认关）：启用后仅标准编译命令前置缓存程序（链接/资源/脚本不注入）；未找到工具时构建回退原编译器（不使构建失败）；命令「Install Compiler Cache (ccache/sccache)…」提供安装引导 |
+| `codeblocks.build.compilerCachePath` | `` | 编译缓存工具显式路径（留空 = 自动探测 PATH 与常见安装目录；显式路径无效等同未找到） |
 | `codeblocks.build.cleanResponseFiles` | `false` | Clean/Rebuild 时删除对象目录下响应文件（`*.respFile`，超长命令的 `@file` 临时输入）；默认关=对齐 CB 不清理，开启避免旧文件永久遗留 |
 | `codeblocks.clangd.enabled` | `true` | 是否启用 clangd 集成（自动生成 `compile_commands.json` 并更新 clangd 用户配置） |
 | `codeblocks.clangd.buildLogDiagnostics` | `build` | 检测到 clangd 时 Build Log 的诊断来源：`build` = 构建引擎完整诊断（默认）；`clangd` = clangd 诊断（仅打开过的文件） |
 | `codeblocks.clangd.forcedIncludes` | `["global.h"]` | clangd 分析头文件时强制预包含的基础头文件名（默认 `global.h`：typedef/macro/sfr/clib 上下文；勿用 `include.h` 这类全量主头文件，否则递归包含产生误报） |
 | `codeblocks.clangd.suppressedWarnings` | `["-Wunused-function", "redefinition_different_typedef"]` | 在 clangd 诊断中压制的诊断（`-W` 组名或诊断名）：默认压制嵌入式 SDK 跨界误报——静态函数编译期断言（`-Wunused-function`）与 SDK 头 vs 工具链系统头的 typedef 冲突（`__int32_t` 等）；移除对应项即恢复显示 |
 
-> 完整 53 项设置（7 个分区）见 [docs/使用说明.md](docs/使用说明.md) §13。
+> 完整 59 项设置（7 个分区）见 [docs/使用说明.md](docs/使用说明.md) §13。
 
 ## 架构
 
@@ -173,7 +176,7 @@ src/
 
 ## 交叉编译器（RISC-V 等）
 
-扩展会从 `%APPDATA%\CodeBlocks\default.conf` 读取 Code::Blocks 的「用户自定义编译器」（`/compiler/user_sets/<id>`），自动解析其 `C_COMPILER` / `LINKER` 等可执行程序路径。因此 `.cbp` 中使用 `compiler="riscv32-v2"` 这类自定义编译器 ID 的工程，无需额外配置即可直接构建。
+扩展会从 `%APPDATA%\CodeBlocks\default.conf` 读取 Code::Blocks 的「用户自定义编译器」（`/compiler/user_sets/<id>`），自动解析其 `C_COMPILER` / `LINKER` 等可执行程序路径。因此 `.cbp` 中使用 `compiler="riscv32-elf"` 这类自定义编译器 ID 的工程，无需额外配置即可直接构建。
 
 ## 许可证
 
