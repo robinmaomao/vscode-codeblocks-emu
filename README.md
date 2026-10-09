@@ -4,7 +4,7 @@
 
 直接在 VS Code 中打开 `.cbp` / `.workspace` 工程，即可获得与 Code::Blocks 对齐的构建、调试与工程浏览体验。
 
-> **作者**：Robinmaomao ｜ **版本**：0.8.127-dev
+> **作者**：Robinmaomao ｜ **版本**：0.8.127
 
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE.md)
 
@@ -82,7 +82,7 @@ npm run compile
 npm run package
 
 # 4. 安装
-code --install-extension codeblocks-vscode-0.8.127-dev.vsix --force
+code --install-extension codeblocks-vscode-0.8.127.vsix --force
 ```
 
 > Windows 下建议使用 `npm.cmd` / `npx.cmd`（PSReadLine 执行策略）。
