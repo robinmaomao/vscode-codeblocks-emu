@@ -4250,25 +4250,22 @@ function saveDetectCache(masterPath: string, list: DetectedCompiler[]): void {
 
 // ---------------- R4：编译缓存（ccache / sccache）检测、提示与安装引导 ----------------
 
-/** 提示去重标记（globalState；修改两项编译缓存设置时会自动重置，可再次提示） */
+/** 提示去抖标记（globalState；修改两项编译缓存设置时会自动重置） */
 const CC_FLAG_MISSING = 'codeblocks.compilerCache.missingPrompted';
-const CC_FLAG_ENABLE = 'codeblocks.compilerCache.enablePrompted';
 const CC_FLAG_NOT_FOUND = 'codeblocks.compilerCache.notFoundPrompted';
 const CC_FLAG_DONT_ASK = 'codeblocks.compilerCache.dontAsk';
 
 function ccPromptFlags(): CompilerCachePromptFlags {
   return {
     notFoundShown: extContext?.globalState.get<boolean>(CC_FLAG_NOT_FOUND) === true,
-    enableShown: extContext?.globalState.get<boolean>(CC_FLAG_ENABLE) === true,
     missingShown: extContext?.globalState.get<boolean>(CC_FLAG_MISSING) === true,
     dontAsk: extContext?.globalState.get<boolean>(CC_FLAG_DONT_ASK) === true,
   };
 }
 
-/** 设置变化时重置提示标记（「不再提示」一并复位：新状态可再次提示一次） */
+/** 设置变化时重置提示标记（「不再提示」一并复位：新状态可再次提示） */
 async function resetCompilerCachePromptFlags(): Promise<void> {
   try {
-    await extContext?.globalState.update(CC_FLAG_ENABLE, false);
     await extContext?.globalState.update(CC_FLAG_MISSING, false);
     await extContext?.globalState.update(CC_FLAG_DONT_ASK, false);
   } catch { /* 非关键 */ }
@@ -4322,13 +4319,21 @@ async function hasWinget(): Promise<boolean> {
 }
 
 /**
- * R4 提示矩阵（一次性，落 globalState 标记；manual=true 绕过标记——用户显式重新检测）：
+ * R4 提示矩阵（「启用询问」为每次激活弹出，其余一次性；manual=true 绕过标记——用户显式重新检测）：
  * 未启用未检测到 → 安装提示；未启用检测到 → 询问启用；已启用未找到 → 失效提示（构建仍静默回退）
  */
 async function checkCompilerCachePrompt(manual = false): Promise<void> {
   try {
     const { kind, explicit } = ccCurrentConfig();
     const det = await detectCompilerCacheTools(manual);
+    // 检测结果输出（版本号 + 路径）：激活 / 设置变化 / 重检后写入输出通道，便于核对生效状态
+    for (const t of ['ccache', 'sccache'] as const) {
+      const info = det[t];
+      if (!info) continue;
+      outputChannel?.info(
+        `[Code::Blocks] 编译缓存: 检测到 ${t} ${info.version ?? '(版本未知)'} → ${info.path}（${kind === t ? '已启用' : '未启用'}）`,
+      );
+    }
     const action = decideCompilerCachePrompt(kind, det, ccPromptFlags(), manual);
     if (action.kind === 'install-hint') {
       await extContext?.globalState.update(CC_FLAG_NOT_FOUND, true);
@@ -4341,15 +4346,22 @@ async function checkCompilerCachePrompt(manual = false): Promise<void> {
       return;
     }
     if (action.kind === 'enable') {
-      await extContext?.globalState.update(CC_FLAG_ENABLE, true);
       const labels = action.tools.map((t) => {
         const v = det[t]?.version;
         return `启用 ${t}${v ? `（v${v}）` : ''}`;
       });
+      const describe = (t: CompilerCacheTool): string => {
+        const v = det[t]?.version;
+        return v ? `${t} ${v}` : t;
+      };
       const pick = await vscode.window.showInformationMessage(
-        `检测到编译缓存工具 ${action.tools.join(' / ')}，是否启用？（仅标准编译命令前置缓存程序，链接/脚本/自定义命令不受影响）`,
-        ...labels,
+        `检测到编译缓存工具 ${action.tools.map(describe).join(' / ')}，是否启用？（仅标准编译命令前置缓存程序，链接/脚本/自定义命令不受影响）`,
+        ...labels, '不再提示',
       );
+      if (pick === '不再提示') {
+        await extContext?.globalState.update(CC_FLAG_DONT_ASK, true);
+        return;
+      }
       const idx = labels.indexOf(pick ?? '');
       if (idx >= 0) {
         const tool = action.tools[idx];

@@ -16,7 +16,7 @@ const ext = fs.readFileSync(path.resolve(__dirname, '../dist/extension.js'), 'ut
 const mod = fs.readFileSync(path.resolve(__dirname, '../dist/build/compilerCache.js'), 'utf-8');
 
 // ---- 1. package.json 贡献面 ----
-check('版本 0.8.126-dev', pkg.version === '0.8.126-dev', pkg.version);
+check('版本 0.8.127-dev', pkg.version === '0.8.127-dev', pkg.version);
 const cmd = (pkg.contributes.commands || []).find((c) => c.command === 'codeblocks.installCompilerCache');
 check('命令 codeblocks.installCompilerCache 已贡献', !!cmd && /Compiler Cache/.test(cmd.title || ''), cmd);
 const cfg = pkg.contributes.configuration;
@@ -35,12 +35,13 @@ const needles = [
   ['设置变化监听 compilerCache', /affectsConfiguration\('codeblocks\.build\.compilerCache'\)/],
   ['设置变化监听 compilerCachePath', /affectsConfiguration\('codeblocks\.build\.compilerCachePath'\)/],
   ['提示标记 missingPrompted', /codeblocks\.compilerCache\.missingPrompted/],
-  ['提示标记 enablePrompted', /codeblocks\.compilerCache\.enablePrompted/],
   ['提示标记 notFoundPrompted', /codeblocks\.compilerCache\.notFoundPrompted/],
   ['提示标记 dontAsk', /codeblocks\.compilerCache\.dontAsk/],
   ['解析缓存失效调用', /clearCompilerCacheResolveCache/],
   ['winget 可用性探测', /async function hasWinget/],
   ['启用提示按作用域写入（inspect）', /inspect\('build\.compilerCache'\)/],
+  ['检测结果输出（版本+路径）', /\[Code::Blocks\] 编译缓存: 检测到/],
+  ['启用询问含「不再提示」按钮', /\.\.\.labels, '不再提示'/],
 ];
 for (const [name, re] of needles) check('extension：' + name, re.test(ext), null);
 check('extension：安装提示按钮（如何安装/重新指定路径）', ext.includes('如何安装') && ext.includes('重新指定路径'), null);
