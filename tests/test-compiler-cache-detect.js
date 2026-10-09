@@ -93,7 +93,7 @@ clearCompilerCacheResolveCache();
 check('缓存：主动失效后重探 → 命中', resolveCompilerCachePathCached('ccache', '', 'win32', envA) === path.resolve(path.join(cacheDir, 'ccache.exe')), null);
 
 // ---- 5. 提示矩阵 ----
-const noFlags = { notFoundShown: false, enableShown: false, missingShown: false, dontAsk: false };
+const noFlags = { notFoundShown: false, missingShown: false, dontAsk: false };
 check('未启用+未检测到 → install-hint', decideCompilerCachePrompt('none', {}, noFlags).kind === 'install-hint', null);
 check('未启用+未检测到（已提示过）→ none', decideCompilerCachePrompt('none', {}, { ...noFlags, notFoundShown: true }).kind === 'none', null);
 check('未启用+未检测到（不再提示）→ none；manual 绕过', decideCompilerCachePrompt('none', {}, { ...noFlags, dontAsk: true }).kind === 'none'
@@ -103,7 +103,9 @@ const detBoth = { ...detOne, sccache: { path: 'C:\\y\\sccache.exe' } };
 const enableOne = decideCompilerCachePrompt('none', detOne, noFlags);
 check('未启用+检测到 ccache → enable[ccache]', enableOne.kind === 'enable' && JSON.stringify(enableOne.tools) === JSON.stringify(['ccache']), enableOne);
 check('未启用+检测到两者 → enable 顺序 ccache,sccache', JSON.stringify(decideCompilerCachePrompt('none', detBoth, noFlags).tools) === JSON.stringify(['ccache', 'sccache']), null);
-check('未启用+检测到（已提示过）→ none', decideCompilerCachePrompt('none', detOne, { ...noFlags, enableShown: true }).kind === 'none', null);
+check('未启用+检测到：每次激活都询问（重复判定仍 enable，无一次性去重）', decideCompilerCachePrompt('none', detOne, noFlags).kind === 'enable', null);
+check('未启用+检测到（不再提示）→ none；manual 绕过', decideCompilerCachePrompt('none', detOne, { ...noFlags, dontAsk: true }).kind === 'none'
+  && decideCompilerCachePrompt('none', detOne, { ...noFlags, dontAsk: true }, true).kind === 'enable', null);
 check('已启用+已找到 → none', decideCompilerCachePrompt('ccache', detOne, noFlags).kind === 'none', null);
 check('已启用+未找到 → missing[ccache]', (() => { const a = decideCompilerCachePrompt('ccache', {}, noFlags); return a.kind === 'missing' && a.tool === 'ccache'; })(), null);
 check('已启用 sccache+仅检测到 ccache → missing[sccache]', (() => { const a = decideCompilerCachePrompt('sccache', detOne, noFlags); return a.kind === 'missing' && a.tool === 'sccache'; })(), null);

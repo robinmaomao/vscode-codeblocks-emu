@@ -213,8 +213,6 @@ export type CompilerCacheDetection = Partial<Record<CompilerCacheTool, CompilerC
 export interface CompilerCachePromptFlags {
   /** 「未检测到任何工具」提示已展示 */
   notFoundShown: boolean;
-  /** 「检测到但未启用」提示已展示 */
-  enableShown: boolean;
   /** 「已启用但未找到」提示已展示（每次构建仍会在输出通道告警） */
   missingShown: boolean;
   /** 用户选择「不再提示」 */
@@ -228,9 +226,9 @@ export type CompilerCachePrompt =
   | { kind: 'missing'; tool: CompilerCacheTool };
 
 /**
- * 提示矩阵（对齐批准方案 R4-②）：
+ * 提示矩阵：
  *  - 未启用 + 未检测到：首次 → 安装提示（仅一次）
- *  - 未启用 + 检测到：首次 → 询问启用（仅一次）
+ *  - 未启用 + 检测到：**每次激活（打开工作区）→ 询问启用**（仅「不再提示」可停止；改设置自动重置）
  *  - 已启用 + 未找到：首次 → 失效提示 + 安装/路径指引（生成时静默回退）
  *  - 已启用 + 找到：无提示
  * manual=true（用户显式运行引导命令/重新检测）绕过全部标记与「不再提示」。
@@ -244,7 +242,8 @@ export function decideCompilerCachePrompt(
   const foundTools = COMPILER_CACHE_TOOLS.filter((t) => detection[t] !== undefined);
   if (enabled === 'none') {
     if (foundTools.length > 0) {
-      if (!manual && (flags.enableShown || flags.dontAsk)) return { kind: 'none' };
+      // 每次激活（打开工作区）都询问；仅「不再提示」可停止（修改设置自动重置）
+      if (!manual && flags.dontAsk) return { kind: 'none' };
       return { kind: 'enable', tools: foundTools };
     }
     if (!manual && (flags.notFoundShown || flags.dontAsk)) return { kind: 'none' };

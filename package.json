@@ -2,7 +2,7 @@
   "name": "codeblocks-vscode",
   "displayName": "Code::Blocks for VS Code",
   "description": "原生移植 Code::Blocks 核心功能到 VS Code：项目模型、构建引擎、编译器管理与调试引擎",
-  "version": "0.8.126-dev",
+  "version": "0.8.127-dev",
   "icon": "resources/icon.png",
   "publisher": "robinmaomao",
   "author": {
@@ -636,7 +636,7 @@
             ],
             "default": "none",
             "scope": "machine-overridable",
-            "markdownDescription": "编译缓存（保护性增强，默认关闭）：启用后仅**标准编译命令**前置 `ccache`/`sccache`（链接/打包/资源编译、pre/post 脚本与 `compile_commands.json` 不注入）。工具位置自动探测（PATH → WinGet Links / WinGet Packages / Scoop shims / cargo bin / Chocolatey / Program Files），亦可由 `#codeblocks.build.compilerCachePath#` 显式指定；**未找到工具时构建回退原编译器**并输出一次告警，不影响构建结果。安装指引：命令面板运行 [Code::Blocks: Install Compiler Cache](command:codeblocks.installCompilerCache)"
+            "markdownDescription": "编译缓存（保护性增强，默认关闭）：启用后仅**标准编译命令**前置 `ccache`/`sccache`（链接/打包/资源编译、pre/post 脚本与 `compile_commands.json` 不注入）。工具位置自动探测（PATH → WinGet Links / WinGet Packages / Scoop shims / cargo bin / Chocolatey / Program Files），亦可由 `#codeblocks.build.compilerCachePath#` 显式指定；**未找到工具时构建回退原编译器**并输出一次告警，不影响构建结果。检测到但未启用时**每次打开工作区询问一次**（可「不再提示」），检测结果（版本 + 路径）写入输出通道。安装指引：命令面板运行 [Code::Blocks: Install Compiler Cache](command:codeblocks.installCompilerCache)"
           },
           "codeblocks.build.compilerCachePath": {
             "type": "string",
