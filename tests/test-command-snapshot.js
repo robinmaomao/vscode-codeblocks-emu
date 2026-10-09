@@ -1,5 +1,5 @@
 // 命令快照（golden）回归：hello-cb.cbp 的 Debug/Release 编译/链接命令逐字节比对
-// 期望值 = CB 25.03 源码推导 + 实测定格（docs/第四轮编译链接对齐核查报告.md 附录 A）
+// 期望值 = CB 25.03 源码推导 + 实测定格（docs/archive/第四轮编译链接对齐核查报告.md 附录 A）
 // 任何宏顺序/分隔符/引号/空格数量回归立即暴露。
 const Module = require('module');
 const origLoad = Module._load;
