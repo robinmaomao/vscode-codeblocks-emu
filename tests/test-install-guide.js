@@ -16,7 +16,7 @@ const ext = fs.readFileSync(path.resolve(__dirname, '../dist/extension.js'), 'ut
 const mod = fs.readFileSync(path.resolve(__dirname, '../dist/build/compilerCache.js'), 'utf-8');
 
 // ---- 1. package.json 贡献面 ----
-check('版本 0.8.127', pkg.version === '0.8.127', pkg.version);
+check('版本 0.8.128-dev', pkg.version === '0.8.128-dev', pkg.version);
 const cmd = (pkg.contributes.commands || []).find((c) => c.command === 'codeblocks.installCompilerCache');
 check('命令 codeblocks.installCompilerCache 已贡献', !!cmd && /Compiler Cache/.test(cmd.title || ''), cmd);
 const cfg = pkg.contributes.configuration;
