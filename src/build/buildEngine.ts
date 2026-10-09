@@ -15,16 +15,24 @@ import { Compiler } from '../compiler/compiler';
 import { CommandGenerator, computeStaticOutput, quoteIfNeeded, clearBackticksCache } from '../compiler/commandGenerator';
 import { OutputParser } from './outputParser';
 import { CbOutput } from './cbChannel';
+import { isCompilerUsable, renderInvalidCompilerMessage, renderTriedCompilerPaths, triedCompilerPaths } from './invalidCompiler';
 import { runScriptCommands } from './scriptRunner';
 import { replaceCbMacros, cbBuiltinVars, envVarMap } from '../compiler/cbMacros';
 import { buildLogPrefs, msg } from './logLang';
 import { BuildCancelHandle } from './cancelToken';
+import { BuildProfiler } from './buildProfiler';
 import { decodeText } from '../tools/encoding';
 import { isExecutableTargetType, resolveExecutablePath, executableCandidates } from './outputPath';
 import { applyResponseFile, compareFilesByWeight, linkRespBase } from './commandLine';
+import { clearCompilerCacheResolveCache, normalizeCompilerCacheKind, resolveCompilerCachePathCached } from './compilerCache';
 import { upperDrive, shortPathWin } from '../tools/pathCase';
 import { getWindowsSystemPath } from '../tools/windowsPath';
 import { LruCache } from '../tools/lru';
+
+/** R4：编译缓存缺失告警跨引擎去抖窗口（工作区构建逐项目建引擎，同一配置只提醒一次） */
+const COMPILER_CACHE_WARN_DEBOUNCE_MS = 10_000;
+let lastCompilerCacheWarnKey = '';
+let lastCompilerCacheWarnAt = 0;
 
 /** 结构化的诊断信息（供 Build Log 视图展示，文件为绝对路径） */
 export interface StructuredDiagnostic {
@@ -104,6 +112,16 @@ export class BuildEngine {
   lastCommands: string[] = [];
   /** 本次构建的单文件编译耗时（并发 push，JS 单线程安全） */
   private compileTimings: { file: string; ms: number }[] = [];
+  /** M0 阶段计时探针（CB_BUILD_PROFILE=1 启用；构建结束渲染 [profile] 块） */
+  private prof: BuildProfiler | undefined;
+  /** 探针：本次构建起始时间（总计基准） */
+  private profBuildStartMs = 0;
+  /** 探针：当前目标键前缀（'<目标名>/'） */
+  private profPrefix = '';
+  /** 探针：当前目标起始时间（首编译 spawn 延迟基准） */
+  private profTargetStartMs = 0;
+  /** 探针：当前目标是否已记录首个 spawn */
+  private profFirstSpawnSeen = false;
 
   constructor(
     private project: Project,
@@ -113,6 +131,41 @@ export class BuildEngine {
   ) {
     // 使用编译器 XML 加载的正则；若为空则回退内置正则
     this.parser = new OutputParser(compiler.regexes.length ? compiler.regexes : undefined);
+  }
+
+  // ———— M0 阶段计时探针辅助（探针关闭时全部直通，零输出、无行为变化） ————
+
+  /** 带完整键的同步计时（探针关闭时直通） */
+  private profTime<T>(key: string, fn: () => T): T {
+    return this.prof ? this.prof.time(key, fn) : fn();
+  }
+
+  /** 带完整键的异步计时（探针关闭时直通） */
+  private profTimeAsync<T>(key: string, fn: () => Promise<T>): Promise<T> {
+    return this.prof ? this.prof.timeAsync(key, fn) : fn();
+  }
+
+  /** 累加一条时长（探针关闭时无操作） */
+  private profAdd(key: string, ms: number): void {
+    this.prof?.add(key, ms);
+  }
+
+  /** M0 探针：isUpToDate 计时包装（探针关闭时直通） */
+  private profIsUpToDate(file: ProjectFile, object: string, includeDirs: string[], depsCache: Map<string, number>): boolean {
+    if (!this.prof) return this.isUpToDate(file.absolutePath, object, includeDirs, depsCache);
+    const t0 = Date.now();
+    const r = this.isUpToDate(file.absolutePath, object, includeDirs, depsCache);
+    this.prof.add(`${this.profPrefix}增量判定`, Date.now() - t0);
+    return r;
+  }
+
+  /** M0 探针：渲染 [profile] 块到输出通道（构建收尾调用；仅探针启用时输出） */
+  private emitBuildProfile(): void {
+    const prof = this.prof;
+    if (!prof) return;
+    this.prof = undefined;
+    if (this.profBuildStartMs) prof.mark('总计', this.profBuildStartMs);
+    for (const line of prof.render()) this.output.info(`[Code::Blocks][profile] ${line}`);
   }
 
   /**
@@ -128,17 +181,18 @@ export class BuildEngine {
     this.parser = new OutputParser(c.regexes.length ? c.regexes : undefined);
   }
 
-  /** 编译器是否可用 —— 对齐 Compiler::IsValid（compiler.cpp:191-231）：masterPath 设置时检查 C 程序存在性（bin/ 或根目录），未设置视为 PATH 查找 */
-  private isCompilerUsable(c: Compiler): boolean {
-    if (!c.programs.C) return false;
-    if (!c.masterPath) return true;
-    if (path.isAbsolute(c.programs.C)) return fs.existsSync(c.programs.C);
-    if (fs.existsSync(path.join(c.masterPath, 'bin', c.programs.C)) || fs.existsSync(path.join(c.masterPath, c.programs.C))) return true;
-    // 对齐 Compiler::IsValid（compiler.cpp:218-229）：extra paths 也参与程序搜索
-    for (const ep of c.extraPaths ?? []) {
-      if (ep && fs.existsSync(path.join(ep, c.programs.C))) return true;
+  /**
+   * 无效编译器报错 —— 结构对齐 CompilerGCC::PrintInvalidCompiler（compilergcc.cpp:1756-1786）：
+   * 主消息 + 已注册编译器的尝试路径 + finalMessage，三条独立错误条目（对齐 CB 三次 LogError）。
+   * 文案为扩展适配；消息渲染与可用性检查见纯模块 invalidCompiler.ts（构建与运行入口共用）。
+   */
+  private reportInvalidCompiler(target: BuildTarget, c: Compiler | undefined, displayName: string | null, finalMessage = 'Skipping...'): void {
+    this.output.error(renderInvalidCompilerMessage(`${this.project.title} - ${target.title}`, displayName));
+    if (c) {
+      const tried = renderTriedCompilerPaths(triedCompilerPaths(c));
+      if (tried) this.output.error(tried);
     }
-    return false;
+    this.output.error(finalMessage);
   }
 
   /** CommandsOnly 目标是否编译其文件（设置 codeblocks.build.compileCommandsOnlyTargets；默认 false 保持扩展原行为，true 对齐 CB 的空存根编译） */
@@ -168,8 +222,16 @@ export class BuildEngine {
     clearBackticksCache();
     // 第六轮 F8：命令记录按每轮构建重置（HTML 日志 full_command_line）
     this.lastCommands = [];
+    // R4：编译缓存已启用但工具缺失 → 每轮构建告警一次（命令生成回退原编译器，构建行为不受影响）
+    this.warnCompilerCacheMissing();
+    // M0 阶段计时探针：设置 codeblocks.build.profile 或环境变量 CB_BUILD_PROFILE=1 启用（默认关闭时零开销）
+    this.profBuildStartMs = Date.now();
+    const profEnabled = BuildProfiler.enabled()
+      || vscode.workspace.getConfiguration('codeblocks').get<boolean>('build.profile', false) === true;
+    this.prof = profEnabled ? new BuildProfiler() : undefined;
 
     // 编译/链接子进程 PATH 注入：bin + masterPath + extra_paths + 系统 PATH（对齐 SetupEnvironment:795-830：ReplaceMacros 展开 + 去尾分隔符 + 去重）
+    const profEnvT0 = Date.now();
     const expandEnvPath = (p: string): string =>
       replaceCbMacros(p, {
         vars: envVarMap(this.project.envVars),
@@ -190,6 +252,7 @@ export class BuildEngine {
       return true;
     }).join(sep);
     this.buildEnv = { ...(process.env as NodeJS.ProcessEnv), PATH: merged };
+    this.prof?.mark('环境准备', profEnvT0);
 
     // 无目标标题：只构建纳入 All 的目标（对齐 GetCompileCommands(target=null) 的 includeInTargetAll 过滤）
     const titles = targetTitle ? (Array.isArray(targetTitle) ? targetTitle : [targetTitle]) : undefined;
@@ -201,27 +264,37 @@ export class BuildEngine {
       targets = this.project.buildTargets;
     }
 
-    // 平台过滤（对齐 compilergcc.cpp:2749：不支持当前平台的目标不构建）
-    targets = targets.filter((t) => supportsCurrentPlatform(t.platforms));
-
-    // 无效编译器过滤（对齐 PreprocessJob:2759-2764 CompilerValid + PrintInvalidCompiler）：
-    // 编译器 ID 未注册或 masterPath 指向的编译器程序缺失 → 报错并跳过该目标
-    targets = targets.filter((t) => {
+    // 平台过滤 + 无效编译器过滤 —— 对齐 PreprocessJob:2745-2764 的单循环顺序：
+    // 先「不支持当前平台」告警跳过（:2749-2756，原文 "<工程> - <目标>" does not support the current platform. Skipping...），
+    // 再 CompilerValid + PrintInvalidCompiler（:2759-2764：编译器 ID 未注册或 masterPath 指向的编译器程序缺失 → 报错并跳过该目标）
+    let invalidCompilerSkipped = 0;
+    let platformSkipped = 0;
+    const jobTargets: BuildTarget[] = [];
+    for (const t of targets) {
+      if (!supportsCurrentPlatform(t.platforms)) {
+        platformSkipped++;
+        this.output.warn(`"${this.project.title} - ${t.title}" does not support the current platform. Skipping...`);
+        continue;
+      }
       const id = t.compilerId || this.project.compilerId;
       const c = this.resolveCompiler ? this.resolveCompiler(id) : this.compiler;
-      if (c === undefined || !this.isCompilerUsable(c)) {
-        this.output.error(
-          `Project/Target: "${this.project.title} - ${t.title}":\n` +
-          `  The compiler's setup (${id || 'unknown'}) is invalid, so Code::Blocks cannot find/run the compiler.\n` +
-          `  Skipping...`,
-        );
-        return false;
+      if (c === undefined || !isCompilerUsable(c)) {
+        invalidCompilerSkipped++;
+        this.reportInvalidCompiler(t, c, c ? c.name : (id || null));
+        continue;
       }
-      return true;
-    });
+      jobTargets.push(t);
+    }
+    targets = jobTargets;
 
     if (targets.length === 0) {
+      // 收尾行对齐 NotifyJobDone（compilergcc.cpp:4123-4140）：任务列表为空（平台/无效编译器跳过）→ "Nothing to be done (all items are up-to-date)."
+      // 保护性差异（P3-B）：CB 日志到此为止（内部同样按失败返回）；扩展随后照常输出失败行/汇总，便于 VS Code 端明确失败原因
+      if (invalidCompilerSkipped > 0 || platformSkipped > 0) {
+        this.output.info('[Code::Blocks] Nothing to be done (all items are up-to-date).');
+      }
       vscode.window.showWarningMessage('没有可构建的目标');
+      this.emitBuildProfile();
       return false;
     }
 
@@ -233,21 +306,23 @@ export class BuildEngine {
       this.output.info('[Code::Blocks] 执行项目 pre-build 脚本...');
       const preCmds = this.project.commandsBeforeBuild.map((c) => this.expandScriptMacros(first, c));
       this.lastCommands.push(...preCmds);
-      const preOk = await runScriptCommands(
+      const preOk = await this.profTimeAsync('项目/pre-build', () => runScriptCommands(
         preCmds,
         this.project.basePath,
         this.targetMacroVars(first),
         (l) => this.output.info(l),
         this.compilerBinPath(),
         options.cancel,
-      );
+      ));
       if (options.cancel?.isCancelled()) {
         this.lastStats = { success: false, cancelled: true, compiledCount: 0, skippedCount: 0, failedCount: 0, linkSuccess: false, linkSkipped: true, hadCommands: false };
+        this.emitBuildProfile();
         return false;
       }
       if (!preOk) {
         this.output.error('[Code::Blocks] 项目 pre-build 脚本失败');
         this.lastStats = { success: false, compiledCount: 0, skippedCount: 0, failedCount: 0, linkSuccess: false, linkSkipped: true, hadCommands: false };
+        this.emitBuildProfile();
         return false;
       }
     }
@@ -300,14 +375,14 @@ export class BuildEngine {
       this.output.info('[Code::Blocks] 执行项目 post-build 脚本...');
       const postCmds = this.project.commandsAfterBuild.map((c) => this.expandScriptMacros(last, c));
       this.lastCommands.push(...postCmds);
-      const postOk = await runScriptCommands(
+      const postOk = await this.profTimeAsync('项目/post-build', () => runScriptCommands(
         postCmds,
         this.project.basePath,
         this.targetMacroVars(last),
         (l) => this.output.info(l),
         this.compilerBinPath(),
         options.cancel,
-      );
+      ));
       if (options.cancel?.isCancelled()) {
         cancelled = true;
       } else if (!postOk) {
@@ -317,6 +392,7 @@ export class BuildEngine {
     }
 
     this.lastStats = { success: ok, cancelled, compiledCount, skippedCount, failedCount, linkSuccess, linkSkipped, hadCommands: lastHadCommands, outputFilename };
+    this.emitBuildProfile();
     return ok;
   }
 
@@ -334,7 +410,41 @@ export class BuildEngine {
   /** 展开 pre/post 命令中的编译宏（$compiler/$options/$includes 等），对齐 GenerateCommandLine */
   private expandScriptMacros(target: BuildTarget, cmd: string): string {
     const generator = new CommandGenerator(this.project, this.compiler);
-    return generator.generateFromTemplate(cmd, { target, pf: null, file: '', object: '', flatObject: '', deps: '' });
+    return generator.generateFromTemplate(cmd, { target, pf: null, file: '', object: '', flatObject: '', deps: '', noCompilerCache: true });
+  }
+
+  /**
+   * R4：编译缓存工具缺失告警（每引擎一次；跨引擎 10s 去抖——工作区构建逐项目建引擎）。
+   * 每次构建先清一次解析缓存再探测：工具在 VS Code 运行期间被安装/补齐时，
+   * **下一个构建**即可生效（无需重载窗口或运行「重新检测」）；未解析到时命令生成
+   * 静默回退原编译器，这里在输出通道说明原因与出路（安装引导 / compilerCachePath）。
+   */
+  private compilerCacheWarned = false;
+  private warnCompilerCacheMissing(): void {
+    if (this.compilerCacheWarned) return;
+    try {
+      const cfg = vscode.workspace.getConfiguration('codeblocks');
+      const kind = normalizeCompilerCacheKind(cfg.get<string>('build.compilerCache', 'none'));
+      if (kind === 'none') return;
+      const explicit = cfg.get<string>('build.compilerCachePath', '') || '';
+      // 每构建重探（清会话缓存）：运行中安装工具 → 下一构建自动生效
+      clearCompilerCacheResolveCache();
+      if (resolveCompilerCachePathCached(kind, explicit)) return;
+      // 跨引擎去抖：工作区构建 = 每项目一个引擎 → 同一配置窗口期内只告警一次
+      const now = Date.now();
+      const warnKey = `${kind}\u0000${explicit}`;
+      if (warnKey === lastCompilerCacheWarnKey && now - lastCompilerCacheWarnAt < COMPILER_CACHE_WARN_DEBOUNCE_MS) return;
+      lastCompilerCacheWarnKey = warnKey;
+      lastCompilerCacheWarnAt = now;
+      this.compilerCacheWarned = true;
+      this.output.warn(
+        `[Code::Blocks] 编译缓存 ${kind} 已启用但未找到可执行文件` +
+        `${explicit ? `（codeblocks.build.compilerCachePath = ${explicit} 无效）` : '（PATH 与常见安装目录均未命中）'}` +
+        `——本次构建回退使用原编译器；可运行命令「Code::Blocks: Install Compiler Cache」获取安装指引，或为 compilerCachePath 设置正确的可执行文件路径。`,
+      );
+    } catch {
+      // 无 vscode 宿主（headless 单测）或读取失败：静默（构建不受影响）
+    }
   }
 
   /**
@@ -367,7 +477,7 @@ export class BuildEngine {
 
         const custom = file.customBuildCommands?.[target.compilerId];
         const isCustom = custom !== undefined && custom.use;
-        // 自定义 buildCommand 文件（ram.ld/app.xm 等链接脚本/资源）不是 C/C++ 源文件，
+        // 自定义 buildCommand 文件（custom.ld/custom.xm 等链接脚本/资源）不是 C/C++ 源文件，
         // clangd 无法解析，compile_commands.json 里跳过（构建仍照常处理它们）。
         if (isCustom) continue;
         // 只收集 clangd 可索引的 C/C++ 源文件（.rc 资源脚本 clangd 无法解析）
@@ -384,6 +494,8 @@ export class BuildEngine {
           deps: this.depsPathFor(target, file),
           hasCppFilesToLink: hasCpp,
           nativeSep: false,
+          // R4：clangd 编译数据库不注入编译缓存前缀（保证 clangd 语义与工程真实命令行匹配）
+          noCompilerCache: true,
         });
         if (command) {
           entries.push({ directory: this.project.basePath, command, file: file.absolutePath, objectRel, targetTitle: target.title });
@@ -497,6 +609,20 @@ export class BuildEngine {
   }
 
   /**
+   * 文件是否可能产生编译命令（对齐 GetCompileFileCommand 分类：自定义命令 / 可编译类型 / PCH 头文件 / 生成器文件）。
+   * A2：把「过期判定」提前到命令生成前（对齐 GetTargetCompileCommands:558「force || IsObjectOutdated → GetCompileFileCommand」）
+   * 时需先据此分类——非候选文件保持原有「条目计数」路径且不触发命令生成；makeCompileUnit 与本判定共用同一条件。
+   */
+  private isCompileCandidate(target: BuildTarget, file: ProjectFile): boolean {
+    const custom = file.customBuildCommands?.[target.compilerId];
+    if (custom !== undefined && custom.use) return true;
+    const ft = fileTypeOf(file.relativeFilename);
+    if (isCompilableFileType(ft)) return true;
+    if (ft === FileType.Header && this.compiler.switches.supportsPCH) return true;
+    return (file.generatedFiles?.length ?? 0) > 0;
+  }
+
+  /**
    * 构造单个文件的编译单元 —— 对齐 GetCompileFileCommand（directcommands.cpp:262）。
    * 整目标构建（1b 循环）与单文件编译（compileFile）复用本方法，保证两条路径产出的命令字节级一致。
    * - compile=false / compilerVar 为空由调用方先行过滤；
@@ -513,11 +639,11 @@ export class BuildEngine {
     const isCustom = custom !== undefined && custom.use;
     const ft = fileTypeOf(file.relativeFilename);
     const isHeader = ft === FileType.Header;
-    const hasGenerated = (file.generatedFiles?.length ?? 0) > 0;
-    // 自定义命令文件（ram.ld/app.xm 等）或可编译类型（源文件/资源文件）才编译；
+    // 自定义命令文件（custom.ld/custom.xm 等）或可编译类型（源文件/资源文件）才编译；
     // 头文件在编译器 supportsPCH 时也编译为 .gch（对齐 GetCompileFileCommand 的 is_header && supportsPCH）；
     // 生成器文件（编译器工具 gen 属性声明生成文件）也编译（对齐 AddFile localCompile 的 !GenFilesHackMap.empty()）
-    if (!isCustom && !isCompilableFileType(ft) && !(isHeader && this.compiler.switches.supportsPCH) && !hasGenerated) {
+    // A2：与 isCompileCandidate 同一条件（收集循环已提前分类；此处保留以维持单文件编译路径语义）。
+    if (!this.isCompileCandidate(target, file)) {
       return { reason: 'not-compilable' };
     }
 
@@ -700,6 +826,10 @@ export class BuildEngine {
   private async buildTarget(target: BuildTarget, options: BuildOptions): Promise<BuildTargetStats> {
     // 每目标编译器（对齐 GetCompiler(target->GetCompilerID())；banner 已在 build() 切换，此处幂等）
     this.switchCompiler(target);
+    // M0 探针：目标级键前缀 + 首编译 spawn 延迟基准（目标处理起点）
+    this.profPrefix = `${target.title}/`;
+    this.profTargetStartMs = Date.now();
+    this.profFirstSpawnSeen = false;
     // 本次目标构建的耗时记录（提前 return 路径也要清空，避免汇总显示上次构建的 Top3）
     this.compileTimings = [];
     this.lastCompileTimings = [];
@@ -709,7 +839,7 @@ export class BuildEngine {
     // 展开 pre/post 命令中的编译宏（$compiler/$options/$includes 等），对齐 Code::Blocks GenerateCommandLine
     // （directcommands.cpp GetPreBuildCommands：GenerateCommandLine(cmd, target, 0, "", ...)）
     const expandScriptMacros = (cmd: string): string =>
-      generator.generateFromTemplate(cmd, { target, pf: null, file: '', object: '', flatObject: '', deps: '' });
+      generator.generateFromTemplate(cmd, { target, pf: null, file: '', object: '', flatObject: '', deps: '', noCompilerCache: true });
 
     // 构建脚本（<Script file>）：Code::Blocks 用 Squirrel 脚本引擎，扩展暂不支持，明确警告跳过
     const buildScripts = [...this.project.buildScripts, ...target.buildScripts];
@@ -758,7 +888,7 @@ export class BuildEngine {
     if (preCommands.length) {
       this.output.info(`[Code::Blocks] 执行目标 pre-build 脚本 (${target.title})...`);
       this.lastCommands.push(...preCommands);
-      const preOk = await runScriptCommands(preCommands, this.project.basePath, macroVars, (l) => this.output.info(l), this.compilerBinPath(), options.cancel);
+      const preOk = await this.profTimeAsync(this.profPrefix + '目标 pre-build', () => runScriptCommands(preCommands, this.project.basePath, macroVars, (l) => this.output.info(l), this.compilerBinPath(), options.cancel));
       if (!preOk) {
         // 取消优先判定（被强杀的脚本进程返回失败，但语义是取消）
         if (options.cancel?.isCancelled()) {
@@ -787,8 +917,8 @@ export class BuildEngine {
     // 1a. 链接对象集合（独立于编译，对应 GetTargetLinkCommands：link=true 且可链接类型。
     //     对齐 CodeBlocks GetProjectFilesSortedByWeight(target, false, true) 只过滤 !pf->link，
     //     link 默认值由文件类型决定（.c/.cpp 等可链接，.xm/.ld 等不可链接）——
-    //     因此带自定义 buildCommand 的 .c 文件（如 toolkit_effect.c）仍须参与链接，
-    //     而 ram.ld/app.xm 因扩展名非可链接类型被 isLinkableFileType 排除；
+    //     因此带自定义 buildCommand 的 .c 文件仍须参与链接，
+    //     而 custom.ld/custom.xm 因扩展名非可链接类型被 isLinkableFileType 排除；
     //     资源文件（.rc）单独到 resFiles（$link_resobjects），其余到 linkFiles（$link_objects））
     const linkFiles: ProjectFile[] = [];
     const resFiles: ProjectFile[] = [];
@@ -819,11 +949,13 @@ export class BuildEngine {
     // CB 条目计数强制（对齐 GetTargetCompileCommands:585「GetLinkCommands(target, ret.GetCount() != counter)」）：
     // 编译列表中「过期但无可执行命令」的文件（自定义空命令 / 工具未匹配）在 CB 中同样产生日志条目
     // （directcommands.cpp:350 Skipping 行 / :357 Compiling 行）→ 链接阶段被强制。
-    // 此类文件的对象永不产生（如 ram.ld → <对象目录>/ram.o），故每次构建都强制重链接/重新打包（与 CB 一致）。
+    // 此类文件的对象永不产生（如 custom.ld → <对象目录>/custom.o），故每次构建都强制重链接/重新打包（与 CB 一致）。
     const staleNoopFiles: string[] = [];
     // CB else 分支条目（对齐 GetTargetCompileCommands:562-566）：源文件缺失时 IsObjectOutdated 返回 false 但
     // errorStr 非空 → WARNING 条目计入 ret → 同样强制链接（WARNING 文案由 isUpToDate 输出）。
     const missingSourceFiles: string[] = [];
+    // M0 探针：收集阶段（全循环 = 增量判定 + 命令生成 + 过滤）
+    const profCollectT0 = Date.now();
     for (const file of sortedFiles) {
       // 跳过不参与编译的文件（<Option compile="0"/>）
       if (file.compile === false) continue;
@@ -844,12 +976,42 @@ export class BuildEngine {
       }
 
       const isHeader = fileTypeOf(file.relativeFilename) === FileType.Header;
-      const made = this.makeCompileUnit(target, file, generator, hasCpp);
-      if (made.reason === 'not-compilable' || made.reason === 'no-command') {
-        // 对齐 CB：此类文件过期（IsObjectOutdated=true，对象缺失即过期 directcommands.cpp:1175）时仍产生条目 → 计入强制链接。
+
+      // A2：非编译候选文件（GetCompileFileCommand 分类以外的文件）不生成命令；
+      // 过期（对象永不产生）时按条目计数强制重链（对齐 directcommands.cpp:350 Skipping 条目语义）。
+      if (!this.isCompileCandidate(target, file)) {
         // autoGeneratedBy 文件在 CB 主循环被跳过（directcommands.cpp:553），不产生条目。
         if (!file.autoGeneratedBy
-          && (options.rebuild || !this.isUpToDate(file.absolutePath, this.objectPathFor(target, file), includeDirs, depsCache))) {
+          && (options.rebuild || !this.profIsUpToDate(file, this.objectPathFor(target, file), includeDirs, depsCache))) {
+          staleNoopFiles.push(file.relativeFilename);
+        }
+        continue;
+      }
+
+      // 绝对对象路径用于增量判断，相对对象路径用于命令行（避免含空格路径）
+      const object = this.objectPathFor(target, file);
+
+      // A2（对齐 GetTargetCompileCommands:558「force || IsObjectOutdated → GetCompileFileCommand」）：
+      // 先判过期，up-to-date 文件不再生成命令（原实现先生成后丢弃，纯浪费 ~0.25–0.31s/次）；
+      // （Code::Blocks 对自定义 buildCommand 文件同样执行 IsObjectOutdated 判断）
+      if (!options.rebuild && this.profIsUpToDate(file, object, includeDirs, depsCache)) {
+        skippedCount++;
+        if (this.verboseOutput()) {
+          this.output.info(`[Skipping] ${file.relativeFilename} (up to date)`);
+        } else {
+          this.output.debug(`[Skipping] ${file.relativeFilename} (up to date)`);
+        }
+        continue;
+      }
+
+      // 过期/强制：生成命令（对齐 GetCompileFileCommand）
+      const made = this.prof
+        ? this.prof.time(`${this.profPrefix}命令生成`, () => this.makeCompileUnit(target, file, generator, hasCpp))
+        : this.makeCompileUnit(target, file, generator, hasCpp);
+      if (made.reason === 'not-compilable' || made.reason === 'no-command') {
+        // 此处必为过期/强制（up-to-date 已在上方过滤）：仍产生条目 → 计入强制链接（对齐 IsObjectOutdated=true 语义）。
+        // no-command 的 debug 日志同样只在过期/强制分支出现（CB 不生成命令时亦不打印）。
+        if (!file.autoGeneratedBy) {
           staleNoopFiles.push(file.relativeFilename);
         }
         if (made.reason === 'no-command' && !isHeader) {
@@ -860,29 +1022,24 @@ export class BuildEngine {
       }
       const unit = made.unit!;
 
-      // 绝对对象路径用于增量判断，相对对象路径用于命令行（避免含空格路径）
-      const object = this.objectPathFor(target, file);
-
-      // 增量编译：源/头文件未变更且对象文件存在时跳过（rebuild 强制重编译）
-      // （Code::Blocks 对自定义 buildCommand 文件同样执行 IsObjectOutdated 判断）
-      if (!options.rebuild && this.isUpToDate(file.absolutePath, object, includeDirs, depsCache)) {
-        skippedCount++;
-        if (this.verboseOutput()) {
-          this.output.info(`[Skipping] ${file.relativeFilename} (up to date)`);
-        } else {
-          this.output.debug(`[Skipping] ${file.relativeFilename} (up to date)`);
-        }
-        continue;
-      }
-
       // 生成文件延后到所有常规编译之后（保证生成器已产出源文件）
       if (file.autoGeneratedBy) deferredUnits.push(unit);
       else units.push(unit);
     }
+    // M0 探针：收集阶段结束（增量判定 + 命令生成 + 过滤的合计）
+    this.profAdd(`${this.profPrefix}收集阶段`, Date.now() - profCollectT0);
+    if (this.prof) {
+      this.prof.count(`${this.profPrefix}收集统计(目标文件数)`, sortedFiles.length);
+      this.prof.count(`${this.profPrefix}收集统计(待编译)`, units.length + deferredUnits.length);
+      this.prof.count(`${this.profPrefix}收集统计(跳过)`, skippedCount);
+      this.prof.count(`${this.profPrefix}收集统计(过期noop)`, staleNoopFiles.length);
+    }
 
     // 创建所有对象文件的父目录（对应 CodeBlocks 的 CreateDirRecursively）
     // 否则 GCC 无法创建 Output\obj\plugin\xxx.o 等子目录下的对象文件
-    this.ensureObjectDirs([...units, ...deferredUnits]);
+    this.prof
+      ? this.prof.time(`${this.profPrefix}对象目录创建`, () => this.ensureObjectDirs([...units, ...deferredUnits]))
+      : this.ensureObjectDirs([...units, ...deferredUnits]);
 
     // 无需要编译的文件（且输出已存在）→ 目标已最新；但外部依赖更新仍需重链接（对齐 GetTargetLinkCommands：AreExternalDepsOutdated 先于 !force 返回）
     if (units.length === 0 && deferredUnits.length === 0) {
@@ -933,6 +1090,8 @@ export class BuildEngine {
       results.push(...(await this.runInParallel(deferredUnits, maxJobs, options, totalUnits)));
     }
     const compileSec = ((Date.now() - compileStartMs) / 1000).toFixed(1);
+    // M0 探针：编译墙钟（并行调度全程；含宿主输出解析，解析单独另行统计）
+    this.profAdd(`${this.profPrefix}编译墙钟`, Date.now() - compileStartMs);
     this.lastCompileTimings = [...this.compileTimings];
 
     // 取消检查点：被强杀的编译进程 close 返回失败，但语义是取消而非失败（failedCount 不计）
@@ -972,7 +1131,7 @@ export class BuildEngine {
         this.output.info('[Code::Blocks] Linking stage skipped (build target has no object files to link)');
       } else {
         // 链接对象 = 所有参与链接的标准源文件对象（不论本次是否重编译）
-        // （ram.ld → ram.o 是链接脚本、app.xm → appxm.o 是资源，均不参与链接）
+        // （custom.ld → custom.o 是链接脚本、custom.xm → customxm.o 是资源，均不参与链接）
         // 逐对象加引号（对齐 pfDetails::Update:579-583 QuoteStringIfNeeded + GetTargetLinkCommands objectSeparator 拼接）
         const isOw = (target.compilerId || '').toLowerCase() === 'ow';
         const linkObjects = linkFiles.map((f) => quoteIfNeeded(this.linkObjectRelative(target, f)));
@@ -1008,19 +1167,19 @@ export class BuildEngine {
           this.output.info(`[Code::Blocks] ${msg(`链接输入 "${rel}" 有更新，重新链接`, `Re-linking because '${rel}' is newer`)}`);
         }
         // CB 条目计数强制（对齐 GetTargetCompileCommands:585）：过期但无可执行命令的编译文件在 CB 中
-        // 产生日志条目 → 每次构建都强制链接（对象永不产生，如 ram.ld 自定义空命令）
+        // 产生日志条目 → 每次构建都强制链接（对象永不产生，如 custom.ld 自定义空命令）
         if (staleNoopFiles.length) {
           forceLink = true;
           const names = staleNoopFiles.slice(0, 3).join('、') + (staleNoopFiles.length > 3 ? '…' : '');
           this.output.info(`[Code::Blocks] ${msg(`目标 "${target.title}" 含 ${staleNoopFiles.length} 个过期且无可执行命令的编译文件（${names}），强制链接（对齐 CB 条目计数）`, `Target "${target.title}" has ${staleNoopFiles.length} stale compile file(s) without an executable command (${names}); forcing link (CB entry-count parity)`)}`);
         }
         // CB 条目计数补全（同 :585）：编译阶段产生过任何条目即强制——真实自定义命令本身也是条目，
-        // 其对象永不产生（如 ram.ld 自定义命令），对象时间戳链路无法触发重链；普通工程零影响（对象已更新→本就强制）。
+        // 其对象永不产生（如 custom.ld 自定义命令），对象时间戳链路无法触发重链；普通工程零影响（对象已更新→本就强制）。
         if (totalUnits > 0) forceLink = true;
         // CB else 分支条目：源缺失的编译文件 → WARNING 条目计入强制（WARNING 已由 isUpToDate 输出）
         if (missingSourceFiles.length) forceLink = true;
         if (forceLink) {
-          // 创建输出目录（如 Output\bin），否则链接器无法写 app.rv32；失败则中止本目标（对齐 GetTargetLinkCommands 的目录错误提示，用日志替代阻塞弹窗）
+          // 创建输出目录（如 Output\bin），否则链接器无法写 app.elf；失败则中止本目标（对齐 GetTargetLinkCommands 的目录错误提示，用日志替代阻塞弹窗）
           if (!this.ensureDir(path.dirname(outputAbs))) {
             this.output.error(`[Code::Blocks] 无法创建输出目录，目标 "${target.title}" 中止`);
             return {
@@ -1054,6 +1213,8 @@ export class BuildEngine {
             const respBase = linkRespBase(this.project.basePath, target.objectOutput, target.title);
             const linkOk = await this.runCommand(linkCommand, this.project.basePath, options, respBase);
             const linkSec = ((Date.now() - linkStartMs) / 1000).toFixed(1);
+            // M0 探针：链接墙钟
+            this.profAdd(`${this.profPrefix}链接`, Date.now() - linkStartMs);
             if (!linkOk) {
               // 取消优先判定（被强杀的链接器返回失败，但语义是取消）
               if (options.cancel?.isCancelled()) {
@@ -1162,6 +1323,8 @@ export class BuildEngine {
             const respBase = linkRespBase(this.project.basePath, target.objectOutput, target.title);
             const ok = await this.runCommand(arCmd, this.project.basePath, options, respBase);
             const arSec = ((Date.now() - arStartMs) / 1000).toFixed(1);
+            // M0 探针：打包墙钟（ar）
+            this.profAdd(`${this.profPrefix}打包(ar)`, Date.now() - arStartMs);
             if (!ok) {
               // 取消优先判定（被强杀的 ar 返回失败，但语义是取消）
               if (options.cancel?.isCancelled()) {
@@ -1238,7 +1401,7 @@ export class BuildEngine {
     if (targetPost.length && (hasCommands || target.alwaysRunPostBuildSteps)) {
       this.output.info(`[Code::Blocks] 执行目标 post-build 脚本 (${target.title})...`);
       this.lastCommands.push(...targetPost);
-      const ok = await runScriptCommands(targetPost, this.project.basePath, macroVars, (l) => this.output.info(l), extraPath, options.cancel);
+      const ok = await this.profTimeAsync(`${this.profPrefix}目标 post-build`, () => runScriptCommands(targetPost, this.project.basePath, macroVars, (l) => this.output.info(l), extraPath, options.cancel));
       if (!ok) {
         if (options.cancel?.isCancelled()) return false;
         this.output.error(`[Code::Blocks] 目标 "${target.title}" post-build 脚本失败`);
@@ -1271,7 +1434,7 @@ export class BuildEngine {
 
   /** 编译器 bin 目录（用于把交叉编译器工具加入脚本执行的 PATH） */
   private compilerBinPath(): string {
-    // 优先从完整程序路径推导（如 .../RV32-V2/bin/riscv32-elf-gcc.exe → .../RV32-V2/bin）
+    // 优先从完整程序路径推导（如 .../toolchain/bin/riscv32-elf-gcc.exe → .../toolchain/bin）
     const c = this.compiler.programs.C;
     if (c && (c.includes('/') || c.includes('\\'))) {
       return path.dirname(c);
@@ -1283,7 +1446,7 @@ export class BuildEngine {
     return '';
   }
 
-  /** 展开自定义编译命令（ram.ld/app.xm 等 <Option buildCommand>） */
+  /** 展开自定义编译命令（custom.ld/custom.xm 等 <Option buildCommand>） */
   private expandCustomCommand(
     cmd: string,
     generator: CommandGenerator,
@@ -1301,6 +1464,8 @@ export class BuildEngine {
       flatObject: this.objectPathRelativeFlat(target, file),
       deps: this.depsPathFor(target, file),
       hasCppFilesToLink: false,
+      // R4：自定义 buildCommand 不注入编译缓存前缀（命令内容由用户在工程内定义，保持逐字展开）
+      noCompilerCache: true,
     });
   }
 
@@ -1505,7 +1670,7 @@ export class BuildEngine {
 
   /**
    * 链接输入新鲜度检查（保护性增强，非 CodeBlocks 原生行为）：
-   * 工程内非编译文件（ram.ld 链接脚本、app.xm 资源、.icf/.def/.lds 等）不产生对象文件，
+   * 工程内非编译文件（custom.ld 链接脚本、custom.xm 资源、.icf/.def/.lds 等）不产生对象文件，
    * 改动后无法进入对象时间戳链路，此前仅 external_deps 能触发重链接。这里按扩展名白名单检查其 mtime：
    * 比输出新 → 返回该文件绝对路径（调用方强制重链接/重新打包），否则返回 null。
    * 输出不存在时不判定（既有逻辑必然重链接）。
@@ -2022,12 +2187,25 @@ export class BuildEngine {
     return path.join(this.project.basePath, depsOut, path.dirname(rel), name + '.depend');
   }
 
+  /**
+   * 并行任务数：显式设置为准；0 = 自动。
+   *
+   * 自动值 = min(逻辑核数 × 2, 64)（R1，M0 实测，2026-10-08，用户选 64 上限）：
+   * 编译单元墙钟远大于其 CPU 占用（gcc→cc1→as 进程链 + Windows 杀软扫描停顿），
+   * 按核数并行只能填满线程、大量停顿被浪费；2× 超额订阅把停顿重叠——
+   * 大型工程（487 文件/248 单元）全量构建：8 并发 ~70s → 16 并发 ~44s（-35%），
+   * 24 并发回退（~52s，开始争抢）。上限 64 与设置范围上限一致；
+   * 注意：每个编译进程链常驻几十至几百 MB（巨型 TU 的 cc1 可达 1–2GB），
+   * 高核数机器如遇内存紧张/卡顿，请显式指定较小值。
+   * （CB 对照：cbthreadpool.cpp:32-39 线程数 ≤0 → wxThread::GetCPUCount()；
+   * 本项为保护性性能增强，显式设置值仍优先、可一键回退。）
+   */
   private maxJobs(): number {
     const cfg = vscode.workspace.getConfiguration('codeblocks');
     const n = cfg.get<number>('parallelJobs', 0);
     if (n && n > 0) return n;
-    // 默认 CPU 数（对齐 CodeBlocks processCount 默认值，无上限）
-    return Math.max(1, os.cpus().length || 2);
+    const logical = Math.max(1, os.cpus().length || 2);
+    return Math.min(logical * 2, 64);
   }
 
   private async runInParallel(units: CompileUnit[], maxJobs: number, options: BuildOptions, totalCount: number): Promise<(boolean | undefined)[]> {
@@ -2046,9 +2224,15 @@ export class BuildEngine {
       const group = units.slice(groupStart, groupEnd);
       const pchIdx = group.map((u, i) => (u.isPch ? i : -1)).filter((i) => i >= 0);
       const normalIdx = group.map((u, i) => (!u.isPch ? i : -1)).filter((i) => i >= 0);
+      const profGroupT0 = this.prof ? Date.now() : 0;
       await this.runGroupSubset(group, pchIdx, groupStart, maxJobs, options, results, totalCount, stop);
       if (!stop.stopped) {
         await this.runGroupSubset(group, normalIdx, groupStart, maxJobs, options, results, totalCount, stop);
+      }
+      // M0 探针：权重组墙钟（评估组屏障/尾延迟占用）
+      if (this.prof) {
+        this.prof.add(`${this.profPrefix}权重组(w=${w}) 墙钟`, Date.now() - profGroupT0);
+        this.prof.count(`${this.profPrefix}权重组(w=${w}) 单元数`, groupEnd - groupStart);
       }
 
       groupStart = groupEnd;
@@ -2137,6 +2321,14 @@ export class BuildEngine {
       command = resp.command;
       // 第六轮 F8：记录实际执行命令（响应文件改写后，对齐 CB 在队列生成期改写后记录 cmd->command）
       this.lastCommands.push(command);
+      // M0 探针：首个 spawn 延迟（目标处理起点 → 第一个子进程实际派生；编译或链接，不含 pre/post 脚本）/ spawn 次数
+      if (this.prof) {
+        if (!this.profFirstSpawnSeen) {
+          this.profFirstSpawnSeen = true;
+          this.prof.add(`${this.profPrefix}首编译/链接 spawn 延迟`, Date.now() - this.profTargetStartMs);
+        }
+        this.prof.count(`${this.profPrefix}spawn 次数`);
+      }
       const proc = spawn(command, {
         cwd: upperDrive(cwd),
         shell: true,
@@ -2173,8 +2365,17 @@ export class BuildEngine {
 
       proc.on('close', (code) => {
         options.cancel?.unregister(proc);
+        // M0 探针：宿主输出解析耗时 + 输出字节量
+        const profParseT0 = this.prof ? Date.now() : 0;
         if (stdoutChunks.length) processLines(decodeText(Buffer.concat(stdoutChunks)));
         if (stderrChunks.length) processLines(decodeText(Buffer.concat(stderrChunks)));
+        if (this.prof) {
+          let bytes = 0;
+          for (const c of stdoutChunks) bytes += c.length;
+          for (const c of stderrChunks) bytes += c.length;
+          this.prof.count(`${this.profPrefix}输出字节`, bytes);
+          this.prof.add(`${this.profPrefix}宿主输出解析`, Date.now() - profParseT0);
+        }
         const success = code !== null && code >= 0 && code <= this.compiler.switches.statusSuccess;
         resolve(success);
       });

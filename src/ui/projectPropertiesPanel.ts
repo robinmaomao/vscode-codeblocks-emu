@@ -1136,7 +1136,7 @@ export class ProjectPropertiesPanel {
         '<input id="set-title" value="' + escAttr(projSettings.title) + '"></label>' +
         '<label><span class="field-name">默认编译器 ID</span>' +
         '<input id="set-compiler" value="' + escAttr(projSettings.compilerId) + '">' +
-        '<div class="hint">如 gcc、riscv32-v2；目标未指定编译器时使用该值</div></label>' +
+        '<div class="hint">如 gcc、clang；目标未指定编译器时使用该值</div></label>' +
         '<label><span class="field-name">虚拟文件夹</span>' +
         '<textarea id="set-vfolders">' + esc(projSettings.virtualFolders.join('\\n')) + '</textarea>' +
         '<div class="hint">每行一个虚拟文件夹名，如 Headers、Sources</div></label>' +

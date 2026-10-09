@@ -115,6 +115,11 @@ check('模板反引号展开', tpl.includes('hello') && !tpl.includes('echo'), t
   engine.cleanFile('Debug', 'loose.c');
   check('cleanFile 不删未归属文件对象', fs.existsSync(looseObj), looseObj, 'kept');
 
+  // Y2-A：反引号命令为宿主主线程同步执行（每轮构建）——超时由 15s 下调至 3s（失败=空串并从缓存）
+  const cmdGenSrc = fs.readFileSync(path.join(__dirname, '..', 'dist', 'compiler', 'commandGenerator.js'), 'utf-8');
+  check('Y2-A 反引号执行超时 = 3000（下调自 15000）', /timeout:\s*3000/.test(cmdGenSrc), undefined, 'timeout: 3000');
+  check('Y2-A 旧 15000 已移除', !/timeout:\s*15000/.test(cmdGenSrc), undefined, '无');
+
   fs.rmSync(dir, { recursive: true, force: true });
   console.log(`反引号全命令 + 单文件归属 + cleanFile: ${pass} pass, ${fail} fail`);
   process.exit(fail ? 1 : 0);

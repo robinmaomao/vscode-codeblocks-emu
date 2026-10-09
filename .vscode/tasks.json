@@ -7,6 +7,20 @@
       "group": "build",
       "problemMatcher": "$tsc",
       "label": "npm: compile"
+    },
+    {
+      "type": "npm",
+      "script": "bundle",
+      "group": "build",
+      "problemMatcher": [],
+      "label": "npm: bundle"
+    },
+    {
+      "label": "build-extension",
+      "dependsOn": ["npm: compile", "npm: bundle"],
+      "dependsOrder": "sequence",
+      "group": "build",
+      "problemMatcher": []
     }
   ]
 }

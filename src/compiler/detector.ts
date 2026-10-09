@@ -213,7 +213,7 @@ function detectRiscvInPath(): { prefix: string; gccPath: string }[] {
   return out;
 }
 
-/** 在常见安装目录递归扫描 RISC-V 工具链 bin（如 RV32-Toolchain / Espressif），返回所有命中 */
+/** 在常见安装目录递归扫描 RISC-V 工具链 bin（如 Espressif 等第三方工具链），返回所有命中 */
 function scanRiscvDirs(): { prefix: string; gccPath: string }[] {
   const win = process.platform === 'win32';
   const gccSuffix = win ? '-gcc.exe' : '-gcc';
@@ -224,7 +224,7 @@ function scanRiscvDirs(): { prefix: string; gccPath: string }[] {
   roots.push(pf86, pf);
   const results: { prefix: string; gccPath: string }[] = [];
   const seen = new Set<string>();
-  // 覆盖 RV32-Toolchain\RV32-V2\bin 这类结构
+  // 覆盖 <工具链目录>\<版本名>\bin 这类结构
   const depth = 4;
   const visited = new Set<string>();
   const scan = (dir: string, level: number): void => {

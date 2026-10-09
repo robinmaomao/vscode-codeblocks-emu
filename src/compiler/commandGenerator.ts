@@ -13,6 +13,7 @@ import { Compiler } from '../compiler/compiler';
 import { upperDrive, shortPathWin } from '../tools/pathCase';
 import { replaceCbMacros, cbBuiltinVars, envVarMap } from './cbMacros';
 import { strictQuoting } from '../build/logLang';
+import { normalizeCompilerCacheKind, resolveCompilerCachePathCached } from '../build/compilerCache';
 import {
   Project,
   BuildTarget,
@@ -150,6 +151,11 @@ export interface GenerateParams {
   hasCppFilesToLink?: boolean;
   /** false 时保持正斜杠（供 clangd compile_commands.json 使用，clangd 偏好正斜杠） */
   nativeSep?: boolean;
+  /**
+   * true 时不注入编译缓存前缀（clangd compile_commands.json、pre/post 脚本宏、
+   * 自定义 buildCommand 展开等非标准编译场景 —— 见 compilerCachePrefix）
+   */
+  noCompilerCache?: boolean;
 }
 
 /** 预生成的各目标命令行片段（对应 m_Output/m_CFlags 等缓存） */
@@ -175,6 +181,7 @@ const backticksCache = new LruCache<string, string>(256);
  * 反引号展开 —— 对齐 cbExpandBackticks（globals.cpp:867-927）：
  * 逐对 `` `cmd` `` 执行 `cmd /c cmd`（Windows）并把输出（逐行 trim 后空格拼接）替换回原位置；
  * 结果按 cmd 全局缓存（m_Backticks）。onOutput 收到每条展开输出（对齐 SearchDirsFromBackticks 扫描源）。
+ * 执行超时 3s（Y2-A 保护性：扩展宿主为多扩展共享主线程；CB 无超时）。
  */
 export function expandBackticks(str: string, onOutput?: (bt: string) => void): string {
   if (!str.includes('`')) return str;
@@ -190,7 +197,9 @@ export function expandBackticks(str: string, onOutput?: (bt: string) => void): s
     let bt = backticksCache.get(cmd);
     if (bt === undefined) {
       try {
-        const r = spawnSync(cmd, { shell: true, timeout: 15000, maxBuffer: 1024 * 1024, encoding: 'utf8' });
+        // Y2-A：超时上限 15s→3s —— 宿主主线程阻塞会冻结全部扩展能力；挂起命令按失败（空串）处理并缓存。
+        // 保护性偏差：CB 无超时（挂起会永久卡住其 UI）；极慢但合法的命令可能被截断。
+        const r = spawnSync(cmd, { shell: true, timeout: 3000, maxBuffer: 1024 * 1024, encoding: 'utf8' });
         const text = (r.stdout ?? '').replace(/\r/g, '');
         bt = text.split('\n').map((l) => l.trim()).filter(Boolean).join(' ');
       } catch {
@@ -729,6 +738,28 @@ export class CommandGenerator {
     return this.renderTemplate(template, params);
   }
 
+  /**
+   * 编译缓存前缀（R4 保护性增强）：ccache/sccache 启用且解析到工具时返回 `"<wrapper>" `（含尾随空格）。
+   * - 仅标准编译命令注入（noCompilerCache 排除 clangd/脚本/自定义命令场景）
+   * - 设置 none / 未解析到工具 → 空串（回退原编译器；构建开始由 buildEngine 输出一次告警）
+   * - 解析结果按 kind|显式路径|PATH 会话缓存；设置变化/安装动作由 extension 主动清缓存
+   */
+  private compilerCachePrefix(params: GenerateParams): string {
+    if (params.noCompilerCache) return '';
+    try {
+      // 惰性 require：headless 单测无 vscode 宿主时回退默认（与 asmUsesCompilerVar 同款）
+      const vs: typeof import('vscode') = require('vscode');
+      const cfg = vs.workspace.getConfiguration('codeblocks');
+      const kind = normalizeCompilerCacheKind(cfg.get<string>('build.compilerCache', 'none'));
+      if (kind === 'none') return '';
+      const explicit = cfg.get<string>('build.compilerCachePath', '') || '';
+      const resolved = resolveCompilerCachePathCached(kind, explicit);
+      return resolved ? quoteIfNeeded(this.fixSep(resolved)) + ' ' : '';
+    } catch {
+      return '';
+    }
+  }
+
   /** 核心：将命令模板展开为最终命令行 */
   private renderTemplate(template: string, params: GenerateParams): string {
     const cache = params.target ? this.cache.get(params.target.title) : undefined;
@@ -797,7 +828,8 @@ export class CommandGenerator {
     let macro = template;
 
     // 1. 编译器/链接器程序（含空格的路径需加引号，避免 shell 把 "C:\Program" 当命令）
-    macro = macro.replace(/\$compiler/g, quoteIfNeeded(this.fixSep(picked.comp)));
+    //    编译缓存前缀（ccache/sccache）在此拼接：$compiler 展开点即标准编译命令注入点
+    macro = macro.replace(/\$compiler/g, this.compilerCachePrefix(params) + quoteIfNeeded(this.fixSep(picked.comp)));
     macro = macro.replace(/\$linker/g, quoteIfNeeded(linkerProgram));
     macro = macro.replace(/\$lib_linker/g, quoteIfNeeded(prog.LIB));
     macro = macro.replace(/\$rescomp/g, quoteIfNeeded(prog.WINDRES));

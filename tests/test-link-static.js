@@ -13,10 +13,10 @@ const check = (name, cond) => {
 const compiler = {
   id: 'gcc', name: 'GNU GCC', masterPath: '',
   programs: {
-    C: 'C:\\Program Files (x86)\\RV32\\riscv32-elf-gcc.exe',
-    CPP: 'C:\\Program Files (x86)\\RV32\\riscv32-elf-g++.exe',
-    LD: 'C:\\Program Files (x86)\\RV32\\riscv32-elf-g++.exe',
-    LIB: 'C:\\Program Files (x86)\\RV32\\riscv32-elf-ar.exe',
+    C: 'C:\\Program Files (x86)\\riscv-toolchain\\riscv32-elf-gcc.exe',
+    CPP: 'C:\\Program Files (x86)\\riscv-toolchain\\riscv32-elf-g++.exe',
+    LD: 'C:\\Program Files (x86)\\riscv-toolchain\\riscv32-elf-g++.exe',
+    LIB: 'C:\\Program Files (x86)\\riscv-toolchain\\riscv32-elf-ar.exe',
     WINDRES: 'windres.exe', MAKE: 'make', DBGconfig: 'gdb_debugger:Default',
   },
   switches: getDefaultSwitches(),
@@ -71,13 +71,13 @@ console.log('--- 生成的 LinkStatic 命令 ---');
 console.log(JSON.stringify(cmd));
 
 check('命令生成成功', cmd.length > 0);
-check('$lib_linker 含空格路径已加引号', cmd.includes('"C:\\Program Files (x86)\\RV32\\riscv32-elf-ar.exe"'));
+check('$lib_linker 含空格路径已加引号', cmd.includes('"C:\\Program Files (x86)\\riscv-toolchain\\riscv32-elf-ar.exe"'));
 check('含多行（\\n 拆分）', cmd.includes('\n'));
 const lines = cmd.split('\n').map((s) => s.trim()).filter(Boolean);
 check('拆分为 2 条命令', lines.length === 2);
 check('第一行为 cmd /c if exist del', lines[0].startsWith('cmd /c if exist'));
 check('$TO_WINDOWS_PATH 已展开（无残留宏）', !cmd.includes('$TO_WINDOWS_PATH') && !cmd.includes('$static_output') && !cmd.includes('$link_objects'));
-check('第二行以 ar 路径开头', lines[1].startsWith('"C:\\Program Files (x86)\\RV32\\riscv32-elf-ar.exe"'));
+check('第二行以 ar 路径开头', lines[1].startsWith('"C:\\Program Files (x86)\\riscv-toolchain\\riscv32-elf-ar.exe"'));
 check('第二行含对象列表', lines[1].includes('obj\\Debug\\a.o obj\\Debug\\b.o'));
 
 // $TO_WINDOWS_PATH 把 $static_output（lib/libfoo.a）转成反斜杠（第一行 del 后）

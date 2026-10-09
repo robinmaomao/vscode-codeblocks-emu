@@ -5,7 +5,7 @@
  * 这里运行 `<C 程序> --version` 取首行 x.y.z。
  *
  * 审计修复（原实现在 extension.ts 内联）：原逻辑每个新建 Compiler 实例都会同步 spawn 一次
- *（构建期 getCompiler() 多次调用 → 多次 30–100ms 阻塞；异常环境最长 8s）。
+ *（构建期 getCompiler() 多次调用 → 多次 30–100ms 阻塞；异常环境超时上限 3s，Y2-A 下调自 8s）。
  * 现改用模块级缓存：key = exe 路径 + mtime（编译器升级/重建后自动失效，负结果同样缓存）。
  */
 import * as fs from 'fs';
@@ -43,7 +43,8 @@ export function queryCompilerVersionString(compiler: Compiler): string | undefin
 
   let version: string | undefined;
   try {
-    const out = spawnSync(exe, ['--version'], { encoding: 'utf8', timeout: 8000 }).stdout ?? '';
+    // Y2-A：超时 8s→3s（宿主共享主线程；超时/失败 → undefined 并缓存负结果）
+    const out = spawnSync(exe, ['--version'], { encoding: 'utf8', timeout: 3000 }).stdout ?? '';
     const first = out.split(/\r?\n/)[0] ?? '';
     const m = first.match(/\d+\.\d+\.\d+/);
     version = m ? m[0] : undefined;

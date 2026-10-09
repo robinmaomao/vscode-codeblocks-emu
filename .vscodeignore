@@ -6,7 +6,10 @@ release/**
 src/**
 tsconfig.json
 tests/**
-node_modules/.cache/**
+# Y1：入口改为 bundle/extension.js（esbuild 单文件）；dist 仅本地开发/测试用，node_modules 已内联
+bundle/**/*.map
+dist/**
+node_modules/**
 **/*.map
 *.zip
 .gitignore

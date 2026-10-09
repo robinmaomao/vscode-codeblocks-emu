@@ -17,6 +17,7 @@ import { createProjectFromTemplate, PROJECT_TEMPLATES } from './project/newProje
 import { instantiateUserTemplate, listUserTemplates, saveAsUserTemplate } from './project/userTemplates';
 import { Compiler } from './compiler/compiler';
 import { queryCompilerVersionString } from './compiler/compilerVersion';
+import { CompilerRegistryDeps, findRegisteredCompilerId, resolveEffectiveCompilerId } from './compiler/compilerRegistry';
 import { BoundedMap, buildCompilerCacheKey } from './compiler/compilerCache';
 import { CompilerOptionsLoader } from './compiler/optionsLoader';
 import { CodeBlocksConfig } from './compiler/codeblocksConfig';
@@ -32,6 +33,19 @@ import { SymbolTreeProvider } from './ui/symbolTreeProvider';
 import { BuildSpinRenderState, nextBuildSpinRender } from './ui/buildStatusRender';
 import { createRunTerminal, setRunTerminalRegistry, createWorkspaceRunTerminalRegistry } from './ui/runTerminal';
 import { BuildEngine } from './build/buildEngine';
+import {
+  COMPILER_CACHE_INSTALL,
+  buildInstallGuideItems,
+  clearCompilerCacheResolveCache,
+  decideCompilerCachePrompt,
+  CompilerCacheDetection,
+  CompilerCacheKind,
+  CompilerCachePromptFlags,
+  CompilerCacheTool,
+  normalizeCompilerCacheKind,
+  parseToolVersion,
+  resolveCompilerCachePath,
+} from './build/compilerCache';
 import { createCbOutput, CbOutput } from './build/cbChannel';
 import { BuildCancelSource, BuildCancelHandle } from './build/cancelToken';
 import { expandMacros } from './build/scriptRunner';
@@ -42,6 +56,7 @@ import { buildLogPrefs, msg, quietSuccess, resetBuildLogPrefsCache } from './bui
 import { decodeText } from './tools/encoding';
 import { clearBackticksCache, CommandGenerator } from './compiler/commandGenerator';
 import { OutputParser } from './build/outputParser';
+import { isCompilerUsable, renderInvalidCompilerMessage, renderTriedCompilerPaths, triedCompilerPaths } from './build/invalidCompiler';
 import { collectClangdEntries, writeClangdDatabase, CompileCommandEntry } from './build/compileCommands';
 import { detectClangd, queryCompilerSystemIncludes, queryCompilerTarget, updateClangdUserConfig, clangdUserConfigPath, clearClangdDetectionCache } from './tools/clangd';
 import { SymbolIndex, registerFallbackIntelliSense } from './tools/codeCompletion';
@@ -188,6 +203,17 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       buildOutputTimestamp = vscode.workspace.getConfiguration('codeblocks').get<boolean>('build.outputTimestamp', false);
     }
   }));
+  // R4：编译缓存设置变化 → 清除解析缓存/检测缓存、重置提示标记并重新检测（免重载窗口）
+  context.subscriptions.push(vscode.workspace.onDidChangeConfiguration((e) => {
+    if (
+      e.affectsConfiguration('codeblocks.build.compilerCache')
+      || e.affectsConfiguration('codeblocks.build.compilerCachePath')
+    ) {
+      clearCompilerCacheResolveCache();
+      ccDetectionCache = undefined;
+      void resetCompilerCachePromptFlags().then(() => checkCompilerCachePrompt());
+    }
+  }));
   diagnosticCollection = vscode.languages.createDiagnosticCollection('codeblocks');
 
   // 安装/激活时自动写入 .ld/.xm 的 token 颜色规则（幂等，仅命中 source.ld/source.xm）
@@ -198,7 +224,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   compilerLoader = new CompilerOptionsLoader(resourcesDir);
   compilerResourcesDir = resourcesDir;
 
-  // 读取 CodeBlocks 用户自定义编译器配置（如 riscv32-v2）
+  // 读取 CodeBlocks 用户自定义编译器配置（如交叉编译器）
   codeBlocksConfig = new CodeBlocksConfig();
   codeBlocksConfig.load();
 
@@ -683,6 +709,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       } catch { /* 非关键 */ }
     })();
   }, 4000);
+
+  // R4：后台检测编译缓存工具（延迟启动，与编译器探测并行；未启用时也仅作一次性建议提示）
+  setTimeout(() => { void checkCompilerCachePrompt(); }, 4000);
 
   // 打开最近工程（E1）
   context.subscriptions.push(
@@ -1249,6 +1278,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       clearBuildOutput();
       vscode.window.setStatusBarMessage('已清除构建输出', 3000);
     }),
+  );
+
+  // R4：引导安装编译缓存工具（ccache/sccache）——仅引导（复制命令 / 终端执行 / 打开下载页），不静默安装
+  context.subscriptions.push(
+    vscode.commands.registerCommand('codeblocks.installCompilerCache', () => installCompilerCacheGuide()),
   );
 
   // 激活上一个/下一个工程（对齐 Project tree → Activate prior/next project，Alt-F5/Alt-F6）
@@ -4107,7 +4141,7 @@ function buildCompilerInstance(
   // 编译器全局搜索目录 + 链接库（default.conf /compiler_sets/<id>，对齐 Compiler::LoadSettings）
   const applyGlobalDirs = (compiler: Compiler): Compiler => {
     const uc = codeBlocksConfig?.find(id);
-    if (uc?.name) compiler.name = uc.name; // 显示名对齐 CB（如 default.conf NAME=RISCV32-V3）
+    if (uc?.name) compiler.name = uc.name; // 显示名对齐 CB（取 default.conf 中用户编译器的 NAME）
     const sd = codeBlocksConfig?.searchDirs(id);
     if (sd) {
       compiler.includeDirs = sd.includeDirs;
@@ -4129,7 +4163,7 @@ function buildCompilerInstance(
     const compiler = compilerLoader.load(id);
     compiler.masterPath = masterPath;
 
-    // 优先：CodeBlocks 用户自定义编译器（如 riscv32-v2）——从 default.conf 解析程序路径
+    // 优先：CodeBlocks 用户自定义编译器（如交叉编译器）——从 default.conf 解析程序路径
     const userPrograms = codeBlocksConfig?.resolvePrograms(id);
     if (userPrograms) {
       compiler.programs = {
@@ -4162,31 +4196,29 @@ function buildCompilerInstance(
   return applyGlobalDirs(createGccCompiler(process.platform, masterPath));
 }
 
+/** compilerRegistry 纯模块的宿主依赖（X1：空 ID 缺省链与注册判定） */
+function compilerRegistryDeps(): CompilerRegistryDeps {
+  const cfg = vscode.workspace.getConfiguration('codeblocks');
+  return {
+    configuredId: () => cfg.get<string>('compilerId', 'gcc'),
+    isRegistered: (id) => !!codeBlocksConfig?.find(id),
+    hasResourceFile: (name) => !!compilerResourcesDir && fs.existsSync(path.join(compilerResourcesDir, name)),
+  };
+}
+
 /**
  * 构建用目标编译器解析器 —— 对齐 CompilerFactory::GetCompiler(target->GetCompilerID())：
  * 编译器 ID 未注册（无 options_<id>.xml、非用户自定义编译器、非当前配置编译器）时返回 undefined，
  * 由 BuildEngine 报「invalid compiler」并跳过该目标（对齐 PreprocessJob CompilerValid + PrintInvalidCompiler）。
  * UI 路径（状态栏/面板）仍用 getCompiler（未注册时回退 GCC 模板）。
+ *
+ * X1：空 ID（工程/目标均无 `<Option compiler>`）按 CB 加载器缺省处理（projectloader.cpp:396 字面 "gcc"）
+ * ——不再误判为无效编译器；'gcc' 未注册时回退设置 codeblocks.compilerId（见 compilerRegistry 纯模块）。
  */
 function resolveTargetCompiler(compilerId: string): Compiler | undefined {
-  if (!compilerId) return undefined;
-  const cfg = vscode.workspace.getConfiguration('codeblocks');
-  // 对齐 CompilerFactory::GetCompiler（compilerfactory.cpp:42-58）：大小写不敏感 + 去 '-' 旧 ID 格式二次匹配
-  const candidates: string[] = [];
-  for (const c of [compilerId, compilerId.toLowerCase(), compilerId.replace(/-/g, '')]) {
-    if (c && !candidates.includes(c)) candidates.push(c);
-  }
-  for (const c of candidates) {
-    if (c === cfg.get<string>('compilerId', 'gcc')) return getCompiler(c);
-    if (codeBlocksConfig?.find(c)) return getCompiler(c);
-    if (compilerResourcesDir) {
-      const lower = c.toLowerCase();
-      for (const name of [`options_${c}.xml`, `options_${lower}.xml`]) {
-        if (fs.existsSync(path.join(compilerResourcesDir, name))) return getCompiler(c);
-      }
-    }
-  }
-  return undefined;
+  const deps = compilerRegistryDeps();
+  const id = findRegisteredCompilerId(resolveEffectiveCompilerId(compilerId, deps), deps);
+  return id ? getCompiler(id) : undefined;
 }
 
 /** 编译器探测结果跨会话缓存（globalState；TTL 24h 或 masterPath 变化失效） */
@@ -4214,6 +4246,207 @@ function saveDetectCache(masterPath: string, list: DetectedCompiler[]): void {
   try {
     void extContext?.globalState.update(DETECT_CACHE_KEY, { masterPath, at: Date.now(), list });
   } catch { /* 非关键 */ }
+}
+
+// ---------------- R4：编译缓存（ccache / sccache）检测、提示与安装引导 ----------------
+
+/** 提示去抖标记（globalState；修改两项编译缓存设置时会自动重置） */
+const CC_FLAG_MISSING = 'codeblocks.compilerCache.missingPrompted';
+const CC_FLAG_NOT_FOUND = 'codeblocks.compilerCache.notFoundPrompted';
+const CC_FLAG_DONT_ASK = 'codeblocks.compilerCache.dontAsk';
+
+function ccPromptFlags(): CompilerCachePromptFlags {
+  return {
+    notFoundShown: extContext?.globalState.get<boolean>(CC_FLAG_NOT_FOUND) === true,
+    missingShown: extContext?.globalState.get<boolean>(CC_FLAG_MISSING) === true,
+    dontAsk: extContext?.globalState.get<boolean>(CC_FLAG_DONT_ASK) === true,
+  };
+}
+
+/** 设置变化时重置提示标记（「不再提示」一并复位：新状态可再次提示） */
+async function resetCompilerCachePromptFlags(): Promise<void> {
+  try {
+    await extContext?.globalState.update(CC_FLAG_MISSING, false);
+    await extContext?.globalState.update(CC_FLAG_DONT_ASK, false);
+  } catch { /* 非关键 */ }
+}
+
+function ccCurrentConfig(): { kind: CompilerCacheKind; explicit: string } {
+  const cfg = vscode.workspace.getConfiguration('codeblocks');
+  return {
+    kind: normalizeCompilerCacheKind(cfg.get<string>('build.compilerCache', 'none')),
+    explicit: cfg.get<string>('build.compilerCachePath', '') || '',
+  };
+}
+
+function queryToolVersion(exePath: string): Promise<string | undefined> {
+  return new Promise((resolve) => {
+    try {
+      execFile(exePath, ['--version'], { timeout: 3000, windowsHide: true }, (err, stdout) => {
+        resolve(err ? undefined : parseToolVersion(String(stdout || '')));
+      });
+    } catch {
+      resolve(undefined);
+    }
+  });
+}
+
+let ccDetectionCache: CompilerCacheDetection | undefined;
+
+/** 检测 ccache/sccache（显式路径只对选中工具生效；结果会话缓存，force/设置变化/安装动作后重探） */
+async function detectCompilerCacheTools(force = false): Promise<CompilerCacheDetection> {
+  if (ccDetectionCache && !force) return ccDetectionCache;
+  const { kind, explicit } = ccCurrentConfig();
+  const det: CompilerCacheDetection = {};
+  for (const tool of ['ccache', 'sccache'] as const) {
+    const p = resolveCompilerCachePath(tool, kind === tool ? explicit : '');
+    if (!p) continue;
+    det[tool] = { path: p, version: await queryToolVersion(p) };
+  }
+  ccDetectionCache = det;
+  return det;
+}
+
+async function hasWinget(): Promise<boolean> {
+  if (process.platform !== 'win32') return false;
+  return new Promise((resolve) => {
+    try {
+      execFile('winget', ['--version'], { timeout: 3000, windowsHide: true }, (err) => resolve(!err));
+    } catch {
+      resolve(false);
+    }
+  });
+}
+
+/**
+ * R4 提示矩阵（「启用询问」为每次激活弹出，其余一次性；manual=true 绕过标记——用户显式重新检测）：
+ * 未启用未检测到 → 安装提示；未启用检测到 → 询问启用；已启用未找到 → 失效提示（构建仍静默回退）
+ */
+async function checkCompilerCachePrompt(manual = false): Promise<void> {
+  try {
+    const { kind, explicit } = ccCurrentConfig();
+    const det = await detectCompilerCacheTools(manual);
+    // 检测结果输出（版本号 + 路径）：激活 / 设置变化 / 重检后写入输出通道，便于核对生效状态
+    for (const t of ['ccache', 'sccache'] as const) {
+      const info = det[t];
+      if (!info) continue;
+      outputChannel?.info(
+        `[Code::Blocks] 编译缓存: 检测到 ${t} ${info.version ?? '(版本未知)'} → ${info.path}（${kind === t ? '已启用' : '未启用'}）`,
+      );
+    }
+    const action = decideCompilerCachePrompt(kind, det, ccPromptFlags(), manual);
+    if (action.kind === 'install-hint') {
+      await extContext?.globalState.update(CC_FLAG_NOT_FOUND, true);
+      const pick = await vscode.window.showInformationMessage(
+        '未检测到 ccache / sccache（编译缓存）。启用后可显著加速重复构建（切分支 / Clean 后重建受益最大）。',
+        '如何安装', '不再提示',
+      );
+      if (pick === '如何安装') await installCompilerCacheGuide();
+      else if (pick === '不再提示') await extContext?.globalState.update(CC_FLAG_DONT_ASK, true);
+      return;
+    }
+    if (action.kind === 'enable') {
+      const labels = action.tools.map((t) => {
+        const v = det[t]?.version;
+        return `启用 ${t}${v ? `（v${v}）` : ''}`;
+      });
+      const describe = (t: CompilerCacheTool): string => {
+        const v = det[t]?.version;
+        return v ? `${t} ${v}` : t;
+      };
+      const pick = await vscode.window.showInformationMessage(
+        `检测到编译缓存工具 ${action.tools.map(describe).join(' / ')}，是否启用？（仅标准编译命令前置缓存程序，链接/脚本/自定义命令不受影响）`,
+        ...labels, '不再提示',
+      );
+      if (pick === '不再提示') {
+        await extContext?.globalState.update(CC_FLAG_DONT_ASK, true);
+        return;
+      }
+      const idx = labels.indexOf(pick ?? '');
+      if (idx >= 0) {
+        const tool = action.tools[idx];
+        const cfg = vscode.workspace.getConfiguration('codeblocks');
+        // 已有工作区/文件夹级覆盖时写到对应作用域（写 Global 会被覆盖 → 提示「已启用」但实际不生效）
+        const inspect = cfg.inspect<string>('build.compilerCache');
+        const target = inspect?.workspaceFolderValue !== undefined
+          ? vscode.ConfigurationTarget.WorkspaceFolder
+          : inspect?.workspaceValue !== undefined
+            ? vscode.ConfigurationTarget.Workspace
+            : vscode.ConfigurationTarget.Global;
+        await cfg.update('build.compilerCache', tool, target);
+        clearCompilerCacheResolveCache();
+        vscode.window.showInformationMessage(
+          `已启用编译缓存 ${tool}（${det[tool]?.path ?? ''}），后续标准编译命令将前置 ${tool}。`,
+        );
+      }
+      return;
+    }
+    if (action.kind === 'missing') {
+      await extContext?.globalState.update(CC_FLAG_MISSING, true);
+      const pick = await vscode.window.showWarningMessage(
+        `已启用编译缓存 ${action.tool}，但未找到可执行文件${explicit ? `（compilerCachePath = ${explicit} 无效）` : ''}。构建将回退原编译器。`,
+        '安装指引', '重新指定路径', '不再提示',
+      );
+      if (pick === '安装指引') await installCompilerCacheGuide();
+      else if (pick === '重新指定路径') {
+        await vscode.commands.executeCommand('workbench.action.openSettings', 'codeblocks.build.compilerCachePath');
+      } else if (pick === '不再提示') await extContext?.globalState.update(CC_FLAG_DONT_ASK, true);
+      return;
+    }
+  } catch { /* 非关键：检测失败不影响扩展功能 */ }
+}
+
+/** 引导安装（QuickPick → 复制命令 / 终端执行 / 打开下载页 / 重新检测；不静默安装） */
+async function installCompilerCacheGuide(): Promise<void> {
+  const pick = await vscode.window.showQuickPick(
+    [
+      { label: 'ccache', description: `${COMPILER_CACHE_INSTALL.ccache.license} · ccache.dev（GCC/Clang 通用，嵌入式工具链同样适用）` },
+      { label: 'sccache', description: `${COMPILER_CACHE_INSTALL.sccache.license} · Mozilla（本地磁盘缓存，另支持云端后端）` },
+    ],
+    { placeHolder: '选择要安装的编译缓存工具（扩展仅提供引导，不会静默安装）', ignoreFocusOut: true },
+  );
+  if (!pick) return;
+  const tool = pick.label as CompilerCacheTool;
+  const wingetAvailable = await hasWinget();
+  const items = buildInstallGuideItems(tool, wingetAvailable).map((it) => ({
+    label: it.label, description: it.description, action: it.action,
+  }));
+  const sel = await vscode.window.showQuickPick(items, {
+    placeHolder: `安装 ${tool}（winget 不可用时可用官方下载页手动安装）`,
+    ignoreFocusOut: true,
+  });
+  if (!sel) return;
+  const info = COMPILER_CACHE_INSTALL[tool];
+  if (sel.action === 'winget-copy') {
+    await vscode.env.clipboard.writeText(info.wingetCommand);
+    vscode.window.createTerminal('Compiler Cache Install').show();
+    vscode.window.showInformationMessage(`已复制安装命令，请在终端粘贴执行：${info.wingetCommand}`);
+  } else if (sel.action === 'winget-run') {
+    const confirm = await vscode.window.showWarningMessage(
+      `将在终端执行 winget 安装（可能弹出 UAC 提权提示）：${info.wingetCommand}`,
+      { modal: true }, '继续',
+    );
+    if (confirm !== '继续') return;
+    const term = vscode.window.createTerminal('Compiler Cache Install');
+    term.show();
+    term.sendText(info.wingetCommand);
+    vscode.window.showInformationMessage('已启动安装；完成后回到本命令选择「重新检测并启用」。');
+  } else if (sel.action === 'open-download') {
+    await vscode.env.openExternal(vscode.Uri.parse(info.downloadUrl));
+    vscode.window.showInformationMessage('已打开官方下载页；安装完成后请再次运行本命令并选择「重新检测并启用」。');
+  } else if (sel.action === 'redetect') {
+    clearCompilerCacheResolveCache();
+    ccDetectionCache = undefined;
+    await checkCompilerCachePrompt(true);
+    return;
+  }
+  // 安装动作收尾：附加一次「重新检测」（含 winget 安装完成后的启用路径）
+  const again = await vscode.window.showInformationMessage('安装完成后可立即重新检测并启用。', '重新检测');
+  if (again === '重新检测') {
+    clearCompilerCacheResolveCache();
+    ccDetectionCache = undefined;
+    await checkCompilerCachePrompt(true);
+  }
 }
 
 async function detectCompilers(): Promise<void> {
@@ -4512,16 +4745,16 @@ function currentCompilerName(): string {
   const id = cfg.get<string>('compilerId', 'gcc');
   const masterPath = cfg.get<string>('masterPath', '');
 
-  // 优先：按 ID 查找（default.conf 的 user_sets，如 riscv32 / riscv32_v2）
+  // 优先：按 ID 查找（default.conf 的 user_sets，连字符/下划线变体互相映射）
   let userCfg = codeBlocksConfig?.find(id);
-  // 探测到的 RISC-V 统一 id="riscv" 找不到时，按 masterPath 区分 V1/V2
+  // 探测到的 RISC-V 统一 id="riscv" 找不到时，按 masterPath 区分同系列不同版本
   if (!userCfg && masterPath) {
     userCfg = codeBlocksConfig?.findByMasterPath(masterPath);
   }
 
   if (userCfg) {
     // 用户自定义编译器：优先 NAME；若 NAME 缺少「-Vx」版本后缀，
-    // 从 masterPath 末尾目录名（如 RV32-V1 / RV32-V2）提取，以区分同系列不同版本
+    // 从 masterPath 末尾目录名（如工具链的版本子目录）提取，以区分同系列不同版本
     const name = userCfg.name || userCfg.id;
     const refPath = userCfg.masterPath || masterPath;
     if (refPath && !/-v\d/i.test(name)) {
@@ -4534,7 +4767,7 @@ function currentCompilerName(): string {
     return name;
   }
 
-  // 兜底：从 masterPath 提取版本（如 ...\RV32-V2 → RV32-V2）
+  // 兜底：从 masterPath 末段提取版本名（版本目录常含 rv32/riscv 或 -vN 形态）
   if (masterPath) {
     const ver = path.basename(masterPath).trim();
     if (/rv32|riscv/i.test(ver) || /v\d/i.test(ver)) {
@@ -6342,6 +6575,23 @@ async function run(): Promise<void> {
     ?? await selectTarget();
   const target = project.buildTargets.find((t) => t.title === selectedTitle);
   if (!target) return;
+
+  // 运行前编译器校验（对齐 CompilerGCC::Run:1963-1986）：非 CommandsOnly / 非 "null" 编译器目标需 CompilerValid；
+  // 无效 → PrintInvalidCompiler(finalMessage="Run aborted...")（:1981）并中止，不启动程序（exe 存在性检查在更后，同 CB 顺序）
+  const runCompilerId = target.compilerId || project.compilerId;
+  if (target.targetType !== TargetType.CommandsOnly && runCompilerId !== 'null') {
+    const runCompiler = resolveTargetCompiler(runCompilerId);
+    if (runCompiler === undefined || !isCompilerUsable(runCompiler)) {
+      outputChannel.show(true); // 保护性：确保报错可见（CB 对无效编译器不弹面板/不打印 run banner）
+      outputChannel.error(renderInvalidCompilerMessage(`${project.title} - ${target.title}`, runCompiler ? runCompiler.name : (runCompilerId || null)));
+      if (runCompiler) {
+        const tried = renderTriedCompilerPaths(triedCompilerPaths(runCompiler));
+        if (tried) outputChannel.error(tried);
+      }
+      outputChannel.error('Run aborted...');
+      return;
+    }
+  }
 
   // 执行参数宏展开（对齐 GetExecutionParameters → GetFullCompilerVarsSet 全集：$(TARGET_OUTPUT_FILE) 等）
   const vars = { ...envVarMap(project.envVars, target.envVars), ...cbBuiltinVars(project.basePath, target.outputFilename, target.title, target.objectOutput, project.title, project.filename, getCompiler(target.compilerId)?.masterPath ?? '') };
