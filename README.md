@@ -4,7 +4,7 @@
 
 直接在 VS Code 中打开 `.cbp` / `.workspace` 工程，即可获得与 Code::Blocks 对齐的构建、调试与工程浏览体验。
 
-> **作者**：Robinmaomao ｜ **版本**：0.8.127
+> **作者**：Robinmaomao ｜ **版本**：0.8.128-dev
 
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE.md)
 
@@ -46,7 +46,7 @@
 - 🗂️ **Code::Blocks 菜单（状态栏 `Menu`）**：File / Edit / View / Search / Project / Build / Debug / Tools / Settings 九大菜单——支持**子菜单下钻**、分隔线、**快捷键标注**；Build 菜单含 Compile Current File（Ctrl+Shift+F9）、Workspace 三连（Build / Rebuild / Clean Workspace）、Abort、Errors（上一/下一/清除全部）、Select Target、Export compile_commands.json；未打开工程时相关项标注提示；悬停就地展开常用命令链接。
 - ⌨️ **快捷键与冲突处理**：默认键位全部避开 VS Code 默认（`Alt+G` Goto File / `Shift+F2` Project 视图 / `Alt+F1-F2` 错误导航 / `Ctrl+Shift+R` Replace in Files 等 CB 键位）；设置 `codeblocks.keybindings.cbStyle` 启用 **CB 保真键位**（F5 断点、Ctrl+R 替换 等 12 项，会覆盖 VS Code 默认，可随时关闭）；命令 `Code::Blocks: Check Keybinding Conflicts` 扫描内置默认 / 用户 keybindings.json / 其它扩展并生成冲突报告。
 - 🎛️ **快捷键可配置**：设置 `codeblocks.keybindings.overrides`（30 项：构建/调试/错误导航/工程管理 + 外部别名 + CB 保真组）为唯一数据源，修改后**自动写入用户 keybindings.json**（自定义键 + 对默认键的移除规则；仅托管条目、注释保留、首次备份、回读校验回滚）；另提供**可视化设置面板**（`Code::Blocks: Keybinding Settings`：按键捕获录入、行内冲突/生效状态、检查冲突、方案导入导出）。
-- 🎨 **专用语法高亮**：为链接脚本（`.ld` / `.lcf`）、GNU 汇编（`.S` / `.s`，RISC-V）、`.xm` 配置脚本提供专用 TextMate 语法高亮；安装时自动写入仅作用于这些文件的 token 颜色规则，不覆盖用户其他配色。
+- 🎨 **专用语法高亮**：为链接脚本（`.ld` / `.lcf`）、GNU 汇编（`.S` / `.s`，RISC-V）、`.xm` 配置脚本提供专用 TextMate 语法高亮；安装时自动写入仅作用于这些文件的 token 颜色规则，不覆盖用户其他配色；汇编行注释默认 `//`（预处理的 `.S` 安全），可经设置 `codeblocks.editor.asmHashComment` 切回 GAS 原生 `#`（原生 `.s` 直接汇编建议开启）。
 
 ### 日志与输出
 
@@ -78,10 +78,10 @@
 
 ### 方式一：从 GitHub Releases 安装
 
-从 [Releases](https://github.com/robinmaomao/vscode-codeblocks-emu/releases) 下载最新 `codeblocks-vscode-0.8.127.vsix`：
+从 [Releases](https://github.com/robinmaomao/vscode-codeblocks-emu/releases) 下载最新 `codeblocks-vscode-0.8.128-dev.vsix`：
 
 ```powershell
-code --install-extension codeblocks-vscode-0.8.127.vsix --force
+code --install-extension codeblocks-vscode-0.8.128-dev.vsix --force
 ```
 
 ### 方式二：从源码构建
@@ -89,7 +89,7 @@ code --install-extension codeblocks-vscode-0.8.127.vsix --force
 ```powershell
 npm install
 npm run package
-code --install-extension codeblocks-vscode-0.8.127.vsix --force
+code --install-extension codeblocks-vscode-0.8.128-dev.vsix --force
 ```
 
 > `npm run package` = `tsc` 编译（`dist/`，本地测试用）+ esbuild 单文件打包（`bundle/extension.js`，发布入口）+ `vsce package`；Windows 下建议使用 `npm.cmd` / `npx.cmd`（PSReadLine 执行策略）。
@@ -153,7 +153,7 @@ code --extensionDevelopmentPath="." --disable-extensions --new-window
 | `codeblocks.clangd.forcedIncludes` | `["global.h"]` | clangd 分析头文件时强制预包含的基础头文件名（默认 `global.h`：typedef/macro/sfr/clib 上下文；勿用 `include.h` 这类全量主头文件，否则递归包含产生误报） |
 | `codeblocks.clangd.suppressedWarnings` | `["-Wunused-function", "redefinition_different_typedef"]` | 在 clangd 诊断中压制的诊断（`-W` 组名或诊断名）：默认压制嵌入式 SDK 跨界误报——静态函数编译期断言（`-Wunused-function`）与 SDK 头 vs 工具链系统头的 typedef 冲突（`__int32_t` 等）；移除对应项即恢复显示 |
 
-> 完整 59 项设置（7 个分区）见 [docs/使用说明.md](docs/使用说明.md) §13。
+> 完整 60 项设置（7 个分区）见 [docs/使用说明.md](docs/使用说明.md) §13。
 
 ## 架构
 
