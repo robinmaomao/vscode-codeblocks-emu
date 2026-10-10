@@ -65,6 +65,7 @@ import { GdbDebugAdapter } from './debug/gdbDebugAdapter';
 import { debugStateChanged, getActiveAdapter, setDebugTraceEnabled, setDebugTraceSink } from './debug/debugRegistry';
 import { parsePsList, parseTasklist, ProcessInfo } from './debug/miParse';
 import { resolveGdbPath } from './debug/gdbLocate';
+import { createDebugConfigurationProviders, DebugConfigProviderHost, DerivedLaunchConfig } from './debug/debugConfigProvider';
 import { RegistersTreeProvider } from './ui/registersTreeProvider';
 import { scanTodos } from './tools/todoScanner';
 import { Bookmark, toggleBookmark, nextBookmark, prevBookmark, locateBookmarkLineInDocument } from './tools/bookmarks';
@@ -260,6 +261,27 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       // 第五十一轮 E3：把 VS Code 会话 id 传给适配器（多会话时寄存器视图/调试命令跟随聚焦会话）
       createDebugAdapterDescriptor: (session) => new vscode.DebugAdapterInlineImplementation(new GdbDebugAdapter(session.id)),
     }),
+  );
+  // R5：F5 / launch.json 接入 —— Initial（F5 空配置按活动工程推导 + 创建 launch.json）与 Dynamic（动态配置列表）
+  const debugConfigHost: DebugConfigProviderHost = {
+    deriveLaunchConfig: () => deriveDebugLaunchConfig(),
+    fallbackLaunchConfig: () => ({
+      type: 'codeblocks',
+      request: 'launch',
+      name: 'Debug (Code::Blocks)',
+      program: '${workspaceFolder}/bin/Debug/app',
+      cwd: '${workspaceFolder}',
+      args: [],
+      environment: {},
+    }),
+    showError: (message) => { void vscode.window.showErrorMessage(message); },
+    log: (message) => outputChannel.info(`[Code::Blocks] ${message}`),
+    exists: (file) => fs.existsSync(file),
+  };
+  const debugConfigProviders = createDebugConfigurationProviders(debugConfigHost);
+  context.subscriptions.push(
+    vscode.debug.registerDebugConfigurationProvider('codeblocks', debugConfigProviders.initial, vscode.DebugConfigurationProviderTriggerKind.Initial),
+    vscode.debug.registerDebugConfigurationProvider('codeblocks', debugConfigProviders.dynamic, vscode.DebugConfigurationProviderTriggerKind.Dynamic),
   );
   // 第五十一轮 E3：聚焦会话切换 → 刷新注册表状态（寄存器视图即时跟随）
   context.subscriptions.push(vscode.debug.onDidChangeActiveDebugSession(() => debugStateChanged.fire()));
@@ -6673,8 +6695,34 @@ async function debug(): Promise<void> {
   const selectedTitle = getSelectedTarget(project)
     ?? project.buildTargets.find((t) => supportsCurrentPlatform(t.platforms))?.title
     ?? await selectTarget();
-  const target = project.buildTargets.find((t) => t.title === selectedTitle);
-  if (!target) return;
+
+  const derived = await deriveDebugLaunchConfig(selectedTitle);
+  if ('error' in derived) {
+    vscode.window.showErrorMessage(derived.error);
+    return;
+  }
+  const started = await vscode.debug.startDebugging(undefined, derived.config);
+  if (!started) {
+    vscode.window.showErrorMessage('调试启动失败');
+  }
+}
+
+/**
+ * 推导调试启动配置（R5）—— F8 / CB 菜单 Start、F5（无 launch.json）、创建 launch.json 三处共用：
+ * 活动或指定目标 → 输出可执行文件（库 / CommandsOnly 走宿主程序）→ GDB →
+ * 运行目录 / 参数 / 环境 / 源搜索目录 / 远程目标。
+ * 失败返回可直接展示的错误文案（调用方决定是否弹窗）。
+ */
+async function deriveDebugLaunchConfig(targetTitle?: string): Promise<DerivedLaunchConfig> {
+  const project = activeProject;
+  if (!project) return { error: '请先打开一个 Code::Blocks 项目 (.cbp)' };
+
+  const target = project.buildTargets.find((t) => t.title === targetTitle)
+    ?? project.buildTargets.find((t) => t.title === getSelectedTarget(project))
+    ?? project.buildTargets.find((t) => supportsCurrentPlatform(t.platforms));
+  if (!target) {
+    return { error: targetTitle ? `未找到构建目标「${targetTitle}」` : '工程中没有可用于当前平台的构建目标' };
+  }
 
   // 执行参数与环境变量（对齐 GetExecutionParameters + <Environment>）
   const vars = { ...envVarMap(project.envVars, target.envVars), ...cbBuiltinVars(project.basePath, target.outputFilename, target.title, target.objectOutput, project.title, project.filename, getCompiler(target.compilerId)?.masterPath ?? '') };
@@ -6686,22 +6734,15 @@ async function debug(): Promise<void> {
     const host = target.hostApplication
       ? replaceCbMacros(target.hostApplication, { vars, customVars: project.customVariables ?? {} })
       : '';
-    if (!host) {
-      vscode.window.showErrorMessage('You must select a host application to "run" a library...');
-      return;
-    }
-    if (!fs.existsSync(host)) {
-      vscode.window.showErrorMessage(`宿主程序不存在，请先构建（${host}）`);
-      return;
-    }
+    if (!host) return { error: 'You must select a host application to "run" a library...' };
+    if (!fs.existsSync(host)) return { error: `宿主程序不存在，请先构建（${host}）` };
     program = host;
   } else {
     // 输出文件名宏展开 + 真实可执行路径（Windows 无扩展名输出 → 链接器追加 .exe，需回退）
     const expandedOut = replaceCbMacros(target.outputFilename, { vars, customVars: project.customVariables ?? {}, basePath: project.basePath });
     const exePath = resolveExecutablePath(project.basePath, expandedOut, process.platform, isExecutableTargetType(target.targetType));
     if (!fs.existsSync(exePath)) {
-      vscode.window.showErrorMessage(`可执行文件不存在，请先构建（${path.relative(project.basePath, exePath)}）`);
-      return;
+      return { error: `可执行文件不存在，请先构建（${path.relative(project.basePath, exePath)}）` };
     }
     program = exePath;
   }
@@ -6709,8 +6750,7 @@ async function debug(): Promise<void> {
   // 定位 GDB（codeblocks.debug.gdbPath → masterPath/bin → PATH，第五十轮 D9）
   const gdb = await locateGdb();
   if (!gdb.path) {
-    vscode.window.showErrorMessage(`未找到 GDB 调试器（已尝试：${summarizeTried(gdb.tried)}）。可在设置 codeblocks.debug.gdbPath 指定完整路径`);
-    return;
+    return { error: `未找到 GDB 调试器（已尝试：${summarizeTried(gdb.tried)}）。可在设置 codeblocks.debug.gdbPath 指定完整路径` };
   }
   const argsStr = target.executionParameters ? expandMacros(target.executionParameters, vars) : '';
   const env: Record<string, string> = {};
@@ -6725,22 +6765,20 @@ async function debug(): Promise<void> {
   );
   const remoteDebugging = mergedRemote ? expandRemoteOptions(mergedRemote, vars, project) : undefined;
 
-  const started = await vscode.debug.startDebugging(undefined, {
-    type: 'codeblocks',
-    name: `Debug: ${target.title}`,
-    request: 'launch',
-    program,
-    cwd: runWorkingDir(project, target, vars),
-    gdbPath: gdb.path,
-    args: splitCommandLine(argsStr),
-    environment: env,
-    searchDirs,
-    remoteDebugging,
-  });
-
-  if (!started) {
-    vscode.window.showErrorMessage('调试启动失败');
-  }
+  return {
+    config: {
+      type: 'codeblocks',
+      name: `Debug: ${target.title}`,
+      request: 'launch',
+      program,
+      cwd: runWorkingDir(project, target, vars),
+      gdbPath: gdb.path,
+      args: splitCommandLine(argsStr),
+      environment: env,
+      searchDirs,
+      remoteDebugging,
+    },
+  };
 }
 
 /** 简单命令行分词（引号感知），供 DAP launch args 使用 */

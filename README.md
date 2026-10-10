@@ -62,7 +62,7 @@
 
 ### 调试（GDB）
 
-- 🐞 **自研内联 DAP 调试适配器**：直接驱动 `gdb -i=mi`——断点（条件/命中次数/日志）、单步（含指令级）、变量查看与修改（含深层成员）、调用栈、线程、表达式求值、反汇编视图、Memory 内存查看、Registers 寄存器视图、数据断点、异常断点、运行到光标、Set Next Statement、指令断点、附加进程、Detach、Add Symbol File、Send GDB Command（Debug Console `-` 前缀透传 MI）、多调试会话路由（聚焦会话优先）；另有针对 MinGW GDB 7.6.1–8.1 的多项兼容修复（程序输出转发、Step Out / 条件断点 / 寄存器读取等），详见 [docs/使用说明.md](docs/使用说明.md)。
+- 🐞 **自研内联 DAP 调试适配器**：直接驱动 `gdb -i=mi`——断点（条件/命中次数/日志）、单步（含指令级）、变量查看与修改（含深层成员）、调用栈、线程、表达式求值、反汇编视图、Memory 内存查看、Registers 寄存器视图、数据断点、异常断点、运行到光标、Set Next Statement、指令断点、附加进程、Detach、Add Symbol File、Send GDB Command（Debug Console `-` 前缀透传 MI）、多调试会话路由（聚焦会话优先）；另有针对 MinGW GDB 7.6.1–8.1 的多项兼容修复（程序输出转发、Step Out / 条件断点 / 寄存器读取等）；**F5 已接入**：无 `launch.json` 时按活动工程目标直接启动调试，`Select and Start Debugging` 中亦可见 `Code::Blocks GDB`。详见 [docs/使用说明.md](docs/使用说明.md)。
 
 ### IntelliSense 与符号
 

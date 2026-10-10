@@ -39,7 +39,11 @@
     "onLanguage:c",
     "onLanguage:cpp",
     "workspaceContains:**/*.cbp",
-    "workspaceContains:**/*.workspace"
+    "workspaceContains:**/*.workspace",
+    "onDebug",
+    "onDebugResolve:codeblocks",
+    "onDebugInitialConfigurations",
+    "onDebugDynamicConfigurations:codeblocks"
   ],
   "main": "./bundle/extension.js",
   "contributes": {
