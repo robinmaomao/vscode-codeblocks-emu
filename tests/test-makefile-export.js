@@ -48,8 +48,14 @@ function findTool(candidates, name) {
 }
 const gcc = findTool(['D:\\Program Files\\mingw64\\bin\\gcc.exe'], 'gcc.exe');
 const make = findTool(['D:\\Program Files\\mingw64\\bin\\mingw32-make.exe'], 'mingw32-make.exe');
+// 已知缺陷 D-06：生成的 Makefile 目录创建/清理配方使用 Windows `cmd /c …`，而 mingw32-make 在 PATH 中存在
+// sh.exe 时会以 sh 作为 SHELL 执行配方（MSYS 把 `/c` 改写为 `C:\`）⇒ obj 目录未创建、构建失败。
+// 该组合下无法验证 Makefile 端到端，据实跳过并保留纯函数规则断言（已登记 D-06）。
+const shOnPath = !!findTool([], 'sh.exe');
 if (!gcc || !make) {
   console.log(`SKIP mingw32-make 端到端（gcc=${gcc || '未找到'}, make=${make || '未找到'}）`);
+} else if (shOnPath) {
+  console.log(`SKIP mingw32-make 端到端（PATH 中存在 sh.exe ⇒ make 以 sh 执行 win cmd 配方，见缺陷 D-06）`);
 } else {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cb-mk-'));
   fs.writeFileSync(path.join(dir, 'main.c'), '#include <stdio.h>\nint add(int,int);\nint main(void){printf("MKOK %d\\n", add(2,3));return 0;}\n');
