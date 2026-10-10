@@ -35,8 +35,13 @@ function check(name, cond, got) {
   else { fail++; console.log('FAIL ' + name + '  got=' + JSON.stringify(got)); }
 }
 
-const srcAbs = path.join(process.cwd(), 'test-project', 'main.c'); // E: 卷
+const srcAbs = path.join(process.cwd(), 'test-project', 'main.c'); // 本地 E: 卷
 const srcVol = path.parse(srcAbs).root.replace(/[:\\/]/g, ''); // 'E'
+// 跨卷语义要求「工程在 C: 卷、源文件在其它卷」；CI runner 只有 C: 卷（仓库与临时目录同卷），据实跳过
+if (srcVol === 'C') {
+  console.log(`SKIP cross-volume-object：前置不满足（仓库位于 C: 卷，无法构造跨卷场景）src=${srcAbs}`);
+  process.exit(0);
+}
 check('前置：源文件在异卷（E:）', srcVol !== 'C', srcAbs);
 
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cb-l11-'));
@@ -70,12 +75,16 @@ const out = {
 const engine = new BuildEngine(p, c, out, (id) => (id === 'gcc' ? c : undefined));
 const t = engine.collectMakefileData('Debug')[0];
 
-const expectedRel = path.join('obj', 'Debug', srcVol, 'Work_Share', 'VSCode Workstation', 'codeblocks-power-by-vscode', 'test-project', 'main.o');
+// 期望相对路径：由**当前机器**的源文件路径推导（obj/<target>/<卷名>/<去卷路径>），不写死本机目录层级
+const srcRel = path.relative(path.parse(srcAbs).root, srcAbs); // Work_Share\...\test-project\main.c
+const expectedRel = path.join('obj', 'Debug', srcVol, path.dirname(srcRel), 'main.o');
 const expectedObjAbs = path.join(dir, expectedRel);
+// 引号规则：仅当路径含空白才加引号（与引擎一致）⇒ 无空格环境（如 CI runner）下同样可比
+const qrel = (p) => (/\s/.test(p) ? `"${p}"` : p);
 
 check('对象绝对路径在工程 obj 目录下（含卷名）', t.compile[0].object === expectedObjAbs, t.compile[0].object);
-check('编译命令 -o 为 obj\Debug\E\… 相对路径（含空格加引号）', t.compile[0].command.includes(`"${expectedRel}"`), t.compile[0].command);
-check('链接对象相对路径在命令中', !!t.link && t.link.command.includes(`"${expectedRel}"`), t.link && t.link.command);
+check(`编译命令 -o 为 obj\\Debug\\${srcVol}\\… 相对路径（含空格加引号）`, t.compile[0].command.includes(qrel(expectedRel)), t.compile[0].command);
+check('链接对象相对路径在命令中', !!t.link && t.link.command.includes(qrel(expectedRel)), t.link && t.link.command);
 check('链接对象绝对路径 = 工程 obj 目录下', !!t.link && t.link.objects.length === 1 && t.link.objects[0] === expectedObjAbs, t.link && t.link.objects);
 check('对象路径无盘符拼接缺陷（无内嵌绝对路径）', !t.compile[0].object.includes(path.join(dir, srcAbs)), t.compile[0].object);
 
