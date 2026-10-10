@@ -12,6 +12,34 @@
 
 > 📖 详细的功能介绍、使用说明与 **RISC-V 交叉编译完整示例**见 [docs/使用说明.md](docs/使用说明.md)；逐项对齐依据见 [docs/对齐对照.md](docs/对齐对照.md)。
 
+> **非官方声明**：本扩展是社区个人开发者基于公开资料对 Code::Blocks 功能的**独立重写与移植**，与 Code::Blocks 官方项目及其作者 / 团队**无任何隶属、合作或背书关系**，也不代表其立场；「Code::Blocks」名称与标识版权归其原作者所有，此处仅用于说明所对标的功能与兼容目标。问题反馈请提交到 [本仓库 Issues](https://github.com/robinmaomao/vscode-codeblocks-emu/issues)，**不要**提交给 Code::Blocks 官方。
+>
+> **Disclaimer (unofficial)**：This is an unofficial, community-developed re-implementation of Code::Blocks features for VS Code. It is **not affiliated with, endorsed by, or sponsored by** the Code::Blocks project or its authors. "Code::Blocks" is used solely to describe the feature set it is modelled after. Please report issues to [this repository](https://github.com/robinmaomao/vscode-codeblocks-emu/issues), **not** to the Code::Blocks team.
+
+## 截图
+
+> 以下截图均由本扩展在真实 VS Code 中运行录制（示例工程即仓库内的 [`test-project/`](test-project/)：3 个 `.cbp` + 1 个 `.workspace`）。
+
+### 打开工作区：自动检测并多选打开 `.cbp` / `.workspace`
+
+![自动检测并多选打开工作区内的工程](docs/images/detect-open-projects.png)
+
+### 工程树 · 项目管理 · 工程分析
+
+![工程树与工程分析](docs/images/project-tree.png)
+
+### 构建：状态栏菜单 → Build Workspace → 实时构建日志
+
+![构建流程巡览](docs/images/build-tour.gif)
+
+![构建日志与结果](docs/images/build-log.png)
+
+### Code::Blocks 菜单（状态栏 `Menu`：9 大顶级菜单 + 快捷键）
+
+![Code::Blocks 菜单](docs/images/cb-menu.png)
+
+![Build 子菜单](docs/images/cb-build-menu.png)
+
 ## 特性
 
 ### 工程与构建
@@ -76,7 +104,15 @@
 
 > 要求 VS Code **1.85.0+**；安装或更新后如功能未生效，请执行 **Reload Window**。
 
-### 方式一：从 GitHub Releases 安装
+### 方式一：从 VS Code Marketplace 安装（推荐）
+
+在 VS Code 扩展视图搜索 **Code::Blocks for VS Code**，或：
+
+```powershell
+code --install-extension robinmaomao.codeblocks-vscode
+```
+
+### 方式二：从 GitHub Releases 安装
 
 从 [Releases](https://github.com/robinmaomao/vscode-codeblocks-emu/releases) 下载最新 `codeblocks-vscode-0.8.128.vsix`：
 
@@ -84,7 +120,7 @@
 code --install-extension codeblocks-vscode-0.8.128.vsix --force
 ```
 
-### 方式二：从源码构建
+### 方式三：从源码构建
 
 ```powershell
 npm install
