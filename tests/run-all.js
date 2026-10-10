@@ -83,6 +83,11 @@ for (const layer of groups) {
     // 摘要行优先：含「数字 + pass/fail（或 PASS=/FAIL=）」的行；否则退回最后一条含关键字的行
     const summaryLines = lines.filter((l) => /(\d+\s*(pass|fail))|(PASS=\s*\d+.*FAIL=\s*\d+)/i.test(l));
     const last = ((summaryLines[summaryLines.length - 1] || lines[lines.length - 1]) || '').slice(0, 90);
+    // 失败时打印子进程输出尾部（CI 上可直接定位断言；成功时不刷屏）
+    if (code !== 0) {
+      console.log(`   ── ${path.relative(root, f)} 输出尾部（exit=${code}）──`);
+      for (const l of out.split(/\r?\n/).filter((x) => x.trim() !== '').slice(-25)) console.log('   │ ' + l.slice(0, 200));
+    }
     rows.push({ layer, f: path.relative(dir, f), code, last });
     console.log(`[${layer}] ${path.relative(dir, f).padEnd(40)} exit=${String(code).padStart(2)}  ${last}`);
   }
