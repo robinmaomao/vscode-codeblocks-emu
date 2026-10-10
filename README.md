@@ -128,7 +128,7 @@ npm run package
 code --install-extension codeblocks-vscode-0.8.128.vsix --force
 ```
 
-> `npm run package` = `tsc` 编译（`dist/`，本地测试用）+ esbuild 单文件打包（`bundle/extension.js`，发布入口）+ `vsce package`；Windows 下建议使用 `npm.cmd` / `npx.cmd`（PSReadLine 执行策略）。
+> `npm run package` = `vsce package`（打包前会自动执行 `vscode:prepublish` 钩子 = `tsc` 编译（`dist/`，本地测试用）+ esbuild 单文件打包（`bundle/extension.js`，发布入口））；直接运行 `npx vsce package` / `npx vsce publish` 同样会自动构建，不会打进过期或缺失的 `bundle/`；Windows 下建议使用 `npm.cmd` / `npx.cmd`（PSReadLine 执行策略）。
 
 ### 开发调试
 
