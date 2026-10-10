@@ -1835,14 +1835,31 @@
     "package": "vsce package",
     "vscode:prepublish": "npm run compile && npm run bundle",
     "test": "node tests/run-all.js",
-    "pretest": "npm run compile"
+    "pretest": "npm run compile",
+    "test:contract": "node tests/run-all.js --group contract",
+    "test:e2e": "node tests/run-all.js --group e2e",
+    "test:visual": "node tests/run-all.js --group visual",
+    "test:perf": "node tests/run-all.js --group perf",
+    "test:pack": "node tests/run-all.js --group pack",
+    "test:host": "node tests/run-all.js --group host",
+    "test:all": "node tests/run-all.js --group all",
+    "test:all:host": "node tests/run-all.js --group all --with-host",
+    "coverage:matrix": "node tests/contract/gen-coverage-matrix.js",
+    "visual:baseline": "node tests/visual/test-visual.js --update",
+    "perf:baseline": "node tests/perf/test-perf.js --update-baseline",
+    "perf:report": "node tests/perf/test-perf.js --report",
+    "pretest:visual": "npm run compile"
   },
   "devDependencies": {
     "@types/node": "^20.11.0",
     "@types/vscode": "^1.85.0",
+    "@vscode/test-electron": "^3.1.0",
     "@vscode/vsce": "^4.0.0",
     "esbuild": "^0.28.2",
     "fast-xml-parser": "^4.3.6",
+    "pixelmatch": "^8.0.0",
+    "playwright": "^1.64.0",
+    "pngjs": "^7.0.0",
     "typescript": "^5.4.0"
   }
 }
