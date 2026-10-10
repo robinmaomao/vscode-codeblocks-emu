@@ -1,5 +1,7 @@
 // Y1 回归：esbuild 单文件打包（main → bundle/extension.js；dist 与 node_modules 不再入包）。
-// 配置断言始终执行；产物断言在 bundle 已构建时执行（npm run bundle / npm run package 之后）。
+// 配置断言始终执行；产物断言在 bundle 已构建时执行（npm run bundle / npm run package / vsce package 之后）。
+// A3/A3b：构建入口改由 `vscode:prepublish` 钩子承担（vsce package/publish 前自动 compile+bundle），
+//         防止直接跑 `vsce publish` 时打进过期或缺失的 bundle/extension.js。
 const fs = require('fs');
 const path = require('path');
 const pkg = require('../package.json');
@@ -18,9 +20,15 @@ const bundleScript = pkg.scripts?.bundle || '';
 check('A2 bundle 脚本：esbuild + --bundle + --external:vscode + 输出 bundle/extension.js',
   bundleScript.includes('esbuild') && bundleScript.includes('--bundle') && bundleScript.includes('--external:vscode') && bundleScript.includes('--outfile=bundle/extension.js'),
   bundleScript, 'esbuild … --bundle … --external:vscode … --outfile=bundle/extension.js');
-check('A3 package 脚本按序 compile → bundle → vsce package',
-  /npm run compile && npm run bundle && vsce package/.test(pkg.scripts?.package || ''),
-  pkg.scripts?.package, 'npm run compile && npm run bundle && vsce package');
+check('A3 package 脚本直接调用 vsce package（构建交由 vscode:prepublish 钩子）',
+  /(^|\s)vsce package\s*$/.test((pkg.scripts?.package || '').trim()),
+  pkg.scripts?.package, 'vsce package');
+check('A3b vscode:prepublish 钩子按序 compile → bundle（vsce package/publish 前自动构建入口）',
+  (() => {
+    const s = pkg.scripts?.['vscode:prepublish'] || '';
+    return s.includes('npm run compile') && s.includes('npm run bundle') && s.indexOf('npm run compile') < s.indexOf('npm run bundle');
+  })(),
+  pkg.scripts?.['vscode:prepublish'], 'npm run compile && npm run bundle');
 check('A4 esbuild 为 devDependency，运行时无 dependencies（fast-xml-parser 已内联）',
   !!pkg.devDependencies?.esbuild && !pkg.dependencies, { esbuild: pkg.devDependencies?.esbuild, dependencies: pkg.dependencies }, { esbuild: '…', dependencies: undefined });
 

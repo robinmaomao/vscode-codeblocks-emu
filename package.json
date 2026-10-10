@@ -1832,7 +1832,8 @@
     "compile": "tsc -p ./",
     "bundle": "esbuild src/extension.ts --bundle --platform=node --format=cjs --external:vscode --sourcemap --outfile=bundle/extension.js --log-level=warning",
     "watch": "tsc -watch -p ./",
-    "package": "npm run compile && npm run bundle && vsce package",
+    "package": "vsce package",
+    "vscode:prepublish": "npm run compile && npm run bundle",
     "test": "node tests/run-all.js",
     "pretest": "npm run compile"
   },
