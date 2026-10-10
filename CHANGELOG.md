@@ -4,12 +4,13 @@
 
 ## 0.8.128 — 2026-10-09
 
-**汇编注释可配置 · 文档与 README 整理**（相对 0.8.127 的增量小版本，构建引擎与既有行为零变化）
+**汇编注释可配置 · F5 调试接入 · 文档与 README 整理**（相对 0.8.127 的增量小版本，构建引擎零变化）
 
+- **F5 接入调试**：新增 `DebugConfigurationProvider`（Initial + Dynamic 两组）——无 `launch.json` 时按 F5 直接以活动工程的活动目标启动调试（与 F8 同一套推导）；`program` 失效自动回退到活动目标输出；推导失败给出「请先构建」等明确提示而不再静默；`Select and Start Debugging` / 「More Code::Blocks GDB options...」中亦可见动态配置
 - 新增设置 `codeblocks.editor.asmHashComment`（默认 `false`）：开启后汇编行注释由默认 `//` 动态切回 GAS 原生 `#`，修改即时生效
 - `.s` / `.S` 行注释默认由 `#` 改为 `//`（预处理的 `.S` 安全；原生 `.s` 直接汇编请开启上述设置）
 - README 特性按主题重组、已知限制表与安装说明修正；《扩展残留问题核查分析报告》归档
-- 规模：命令 103 项、设置 60 项（7 分区 + 中英 nls）、视图 5 个；回归 `tests/run-all.js` 134 文件 FAIL=0
+- 规模：命令 103 项、设置 60 项（7 分区 + 中英 nls）、视图 5 个；回归 `tests/run-all.js` 135 文件 FAIL=0
 
 📄 详细发布说明：[`docs/release/0.8.128.md`](docs/release/0.8.128.md)
 
