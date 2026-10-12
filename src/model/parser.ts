@@ -41,6 +41,20 @@ interface XmlCacheEntry {
 const projectXmlCache = new LruCache<string, XmlCacheEntry>(128);
 const workspaceXmlCache = new LruCache<string, XmlCacheEntry>(128);
 
+/**
+ * 解析 XML 文本：截断/未闭合的输入会让 fast-xml-parser 抛内部 TypeError
+ * （`Cannot read properties of undefined (reading 'tagName')`），先做结构校验并给出可读的中文错误（D-14）。
+ */
+function parseXmlText(parser: XMLParser, raw: string): any {
+  const validity = XMLValidator.validate(raw);
+  if (validity !== true) {
+    const err = validity.err;
+    const at = err && err.line ? `，第 ${err.line} 行` : '';
+    throw new Error(`不是有效的 .cbp 文件：XML 结构错误（${(err && err.msg) || '未知'}${at}）`);
+  }
+  return parser.parse(raw);
+}
+
 function parseXmlCached(filename: string, parser: XMLParser, cache: LruCache<string, XmlCacheEntry>): any {
   // 盘符归一化（e:\ → E:\），让同一文件以不同大小写盘符访问时命中同一缓存条目
   const key = upperDrive(path.resolve(filename));
@@ -49,14 +63,14 @@ function parseXmlCached(filename: string, parser: XMLParser, cache: LruCache<str
     st = fs.statSync(key);
   } catch {
     // 保持原行为：文件不可读时让 readFileSync 抛出原始错误
-    return parser.parse(fs.readFileSync(key, 'utf-8'));
+    return parseXmlText(parser, fs.readFileSync(key, 'utf-8'));
   }
   const entry = cache.get(key);
   if (entry && entry.mtimeMs === st.mtimeMs && entry.size === st.size) {
     return entry.result;
   }
   const raw = fs.readFileSync(key, 'utf-8');
-  const result = parser.parse(raw);
+  const result = parseXmlText(parser, raw);
   cache.set(key, { mtimeMs: st.mtimeMs, size: st.size, result });
   return result;
 }
@@ -593,6 +607,11 @@ export class ProjectParser {
   /** 解析 pre/post build/clean 命令（DoExtraCommands + DoMakeCommands） */
   private parseExtraCommands(node: any, sink: { commandsBeforeBuild: string[]; commandsAfterBuild: string[]; alwaysRunPostBuildSteps?: boolean; makeCommands?: MakeCommandsMap }): void {
     if (!node) return;
+    // 同名节点重复出现时 fast-xml-parser 返回数组（D-19）：展开后逐个解析，避免命令被静默丢弃
+    if (Array.isArray(node)) {
+      for (const one of node) this.parseExtraCommands(one, sink);
+      return;
+    }
     // <ExtraCommands><Mode after="always"> → AlwaysRunPostBuildSteps
     let modes = node.Mode;
     if (modes !== undefined) {

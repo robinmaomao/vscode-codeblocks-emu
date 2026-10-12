@@ -269,6 +269,7 @@ export class BuildEngine {
     // 再 CompilerValid + PrintInvalidCompiler（:2759-2764：编译器 ID 未注册或 masterPath 指向的编译器程序缺失 → 报错并跳过该目标）
     let invalidCompilerSkipped = 0;
     let platformSkipped = 0;
+    let missingOutputSkipped = 0;
     const jobTargets: BuildTarget[] = [];
     for (const t of targets) {
       if (!supportsCurrentPlatform(t.platforms)) {
@@ -283,6 +284,13 @@ export class BuildEngine {
         this.reportInvalidCompiler(t, c, c ? c.name : (id || null));
         continue;
       }
+      // D-18：目标缺 <Output> ⇒ 链接命令会退化成 `gcc -o  obj\Debug\main.o`（对象文件被当输出文件名），
+      // 只靠编译器英文报错 `no input files` 兜底。CommandsOnly 目标不需要输出文件，其余类型提前拦截并给出可读错误。
+      if (t.targetType !== TargetType.CommandsOnly && !this.expandedOutputFilename(t)) {
+        missingOutputSkipped++;
+        this.output.error(`[Code::Blocks] 目标 "${t.title}" 未配置输出文件名（<Target output="…">），已跳过构建`);
+        continue;
+      }
       jobTargets.push(t);
     }
     targets = jobTargets;
@@ -290,7 +298,7 @@ export class BuildEngine {
     if (targets.length === 0) {
       // 收尾行对齐 NotifyJobDone（compilergcc.cpp:4123-4140）：任务列表为空（平台/无效编译器跳过）→ "Nothing to be done (all items are up-to-date)."
       // 保护性差异（P3-B）：CB 日志到此为止（内部同样按失败返回）；扩展随后照常输出失败行/汇总，便于 VS Code 端明确失败原因
-      if (invalidCompilerSkipped > 0 || platformSkipped > 0) {
+      if (invalidCompilerSkipped > 0 || platformSkipped > 0 || missingOutputSkipped > 0) {
         this.output.info('[Code::Blocks] Nothing to be done (all items are up-to-date).');
       }
       vscode.window.showWarningMessage('没有可构建的目标');
@@ -2151,13 +2159,14 @@ export class BuildEngine {
       dirs.add(objDir);
     }
     for (const dir of dirs) {
-      // 对象目录失败：debug 日志 + 继续（对齐 GetCompileFileCommand 的 DebugLog，让编译器报真实错误）
-      this.ensureDir(dir, 'debug');
+      // 对象目录失败：warn 级（用户可见）+ 继续（对齐 GetCompileFileCommand 的 DebugLog 语义：让编译器报真实错误）。
+      // 原为 debug 级 —— 普通输出通道丢弃 debug ⇒ 用户只看到编译器的英文报错，与「输出目录失败」路径体验不一致（D-17）
+      this.ensureDir(dir, 'warn');
     }
   }
 
-  /** 递归创建目录，返回是否成功（失败按级别记录：error = 构建中止点，debug = 对齐 CB DebugLog 继续执行） */
-  private ensureDir(dir: string, logLevel: 'debug' | 'error' = 'error'): boolean {
+  /** 递归创建目录，返回是否成功（失败按级别记录：error = 构建中止点，warn/debug = 对齐 CB DebugLog 继续执行） */
+  private ensureDir(dir: string, logLevel: 'debug' | 'warn' | 'error' = 'error'): boolean {
     if (!dir) return true;
     try {
       fs.mkdirSync(dir, { recursive: true });
@@ -2165,6 +2174,7 @@ export class BuildEngine {
     } catch (e) {
       const msg = `[Code::Blocks] 无法创建目录 ${dir}: ${(e as Error).message}`;
       if (logLevel === 'error') this.output.error(msg);
+      else if (logLevel === 'warn') this.output.warn(msg);
       else this.output.debug(msg);
       return false;
     }
