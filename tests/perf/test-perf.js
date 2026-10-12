@@ -5,22 +5,53 @@
 //   node tests/perf/test-perf.js --update-baseline  # 刷新 tests/perf/baseline.json（npm run perf:baseline）
 //   node tests/perf/test-perf.js --only parse       # 子串筛选
 //   node tests/perf/test-perf.js --skip-real        # 跳过需要真实 gcc 的基准
+//   node tests/perf/test-perf.js --trend            # 打印「相对上轮 / 近 N 轮」趋势表（不加时只打印告警）
+//   node tests/perf/test-perf.js --no-history       # 不读写 .cb-tools/perf-history.jsonl
+//   node tests/perf/test-perf.js --trend-window=5 --trend-threshold=0.25 --trend-min-abs=3
+//                                                   # 趋势窗口 / 恶化阈值 / 绝对增量下限
+//   node tests/perf/test-perf.js --history-file=<path>  # 覆盖历史文件位置（自测用）
 //
-// 产物：.cb-tools/perf/<时间戳>.json（原始结果）+ docs/性能基准.md（人类可读报告）
+// 产物：.cb-tools/perf/<时间戳>.json（原始结果）+ .cb-tools/perf-history.jsonl（趋势历史追加）
+//      + docs/性能基准.md（人类可读报告，含趋势小节；--report / --update-baseline 时才落盘）
+//
+// 门禁语义：退出码只由预算硬门禁（min > budget → fail，bench.js evaluate）决定；
+//          趋势漂移只输出告警（不改变退出码）。
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
 const root = path.resolve(__dirname, '..', '..');
 const { measure, evaluate, loadBaseline, saveBaseline, envInfo } = require('./bench');
+const trend = require('./trend');
 const { generateBigProject, copyVariants } = require('./fixtures');
 const { installVscodeMock } = require('../_harness/vscodeMock');
 
 const args = process.argv.slice(2);
 const update = args.includes('--update-baseline');
 const skipReal = args.includes('--skip-real');
+const trendFlag = args.includes('--trend');
+const noHistory = args.includes('--no-history');
 const onlyArg = args.find((a) => a.startsWith('--only=')) || (args.includes('--only') ? `--only=${args[args.indexOf('--only') + 1]}` : '');
 const only = onlyArg ? onlyArg.split('=')[1] : '';
+
+function argValue(name) {
+  const eq = args.find((a) => a.startsWith(`${name}=`));
+  if (eq) return eq.slice(name.length + 1);
+  const i = args.indexOf(name);
+  return i >= 0 && args[i + 1] && !args[i + 1].startsWith('--') ? args[i + 1] : '';
+}
+function positiveNumber(name, def) {
+  const raw = argValue(name);
+  if (!raw) return def;
+  const n = Number(raw);
+  return Number.isFinite(n) && n > 0 ? n : def;
+}
+const trendWindow = Math.floor(positiveNumber('--trend-window', trend.DEFAULT_WINDOW));
+const trendThreshold = positiveNumber('--trend-threshold', trend.DEFAULT_THRESHOLD);
+const trendMinAbsMs = positiveNumber('--trend-min-abs', trend.DEFAULT_MIN_ABS_MS);
+const historyArg = argValue('--history-file');
+const historyFile = historyArg ? path.resolve(root, historyArg) : path.join(root, '.cb-tools', 'perf-history.jsonl');
+const pkgVersion = (() => { try { return require(path.join(root, 'package.json')).version; } catch { return null; } })();
 
 const HAS_GCC = (() => {
   try {
@@ -337,6 +368,34 @@ async function main() {
   fs.mkdirSync(cbTools, { recursive: true });
   fs.writeFileSync(path.join(cbTools, `perf-${stamp}.json`), JSON.stringify({ env, results: results.map(({ result, verdict, ...r }) => ({ ...r, result, verdict })) }, null, 2), 'utf-8');
 
+  // ---- 趋势：历史落盘 + 漂移对比（仅告警，不改变退出码）----
+  const fp = trend.fingerprint(env);
+  let trendSummary = null;
+  console.log('');
+  if (noHistory) {
+    console.log('趋势: 已禁用（--no-history：不读写历史、不比较）');
+  } else {
+    const { records, malformed } = trend.loadHistory(historyFile);
+    trendSummary = trend.summarizeTrend(
+      records,
+      results.map((r) => ({ name: r.name, median: r.result.median, baselineMedian: baseline?.benches?.[r.name]?.median })),
+      { window: trendWindow, threshold: trendThreshold, minAbsMs: trendMinAbsMs, fingerprint: fp },
+    );
+    console.log(`趋势: 机器指纹 ${fp.id}（${fp.label}）`);
+    console.log(`趋势: ${trend.formatMeta(trendSummary)}${malformed ? `；历史坏行 ${malformed} 条已跳过` : ''}`);
+    if (trendFlag) {
+      console.log(`趋势表格（相对上轮 / 近 ${trendWindow} 轮）：`);
+      for (const line of trend.formatTrendTable(trendSummary)) console.log('  ' + line);
+    }
+    const alertLines = trend.formatAlerts(trendSummary);
+    if (alertLines.length) for (const line of alertLines) console.log(line);
+    else if (!trendSummary.meta.firstRun) console.log(`趋势: 无漂移告警（可比 ${trendSummary.rows.filter((r) => r.status !== 'no-history').length} 项）`);
+    const appended = trend.appendHistory(historyFile, trend.buildRecord({
+      env, fingerprint: fp, results, baseline, options: { only: only || null, skipReal, updateBaseline: update }, pkgVersion,
+    }));
+    console.log(`趋势历史: ${path.relative(root, historyFile)}（追加 1 条，累计 ${appended.total} 条${appended.dropped ? `，裁剪 ${appended.dropped} 条` : ''}）`);
+  }
+
   if (update) {
     const benchesOut = saveBaseline(results.filter((r) => !Number.isNaN(r.result.median)), env);
     console.log(`\n基线已更新: tests/perf/baseline.json（${Object.keys(benchesOut).length} 项，预算 = max(3×median, 下限)）`);
@@ -370,7 +429,32 @@ async function main() {
     lines.push(`| ${r.name} | ${r.result.median}ms | ${r.result.p95}ms | ${r.result.min}ms | ${r.verdict.budget ?? b?.budget ?? '—'}ms | ${r.verdict.baseline ?? b?.median ?? '—'}ms | ${icon} ${r.verdict.reason} |`);
   }
   lines.push('');
-  lines.push(`汇总：**${results.length - failCount - warnCount} 通过 / ${warnCount} 告警 / ${failCount} 失败**`);
+  if (trendSummary) {
+    lines.push(`## 趋势（相对上轮 / 最近 ${trendSummary.meta.window} 轮）`);
+    lines.push('');
+    lines.push('> 历史：`.cb-tools/perf-history.jsonl`（本机历史，gitignored；跨机历史不参与比较）');
+    lines.push(`> ${trend.formatMeta(trendSummary)}`);
+    lines.push('> 趋势告警**仅打印，不影响退出码**；硬门禁仍是 `min ≤ 预算`（[`bench.js`](../tests/perf/bench.js) evaluate）。');
+    lines.push('');
+    if (trendSummary.meta.firstRun || !trendSummary.rows.some((r) => r.status !== 'no-history')) {
+      lines.push('本机首次运行（无同机历史可比）：本次结果已写入历史，作为后续对比参照。');
+    } else {
+      lines.push(...trend.formatTrendTable(trendSummary));
+    }
+    const trendAlerts = trend.formatAlerts(trendSummary);
+    if (trendAlerts.length) {
+      lines.push('');
+      for (const a of trendAlerts) lines.push(`- ${a}`);
+    }
+    lines.push('');
+  } else {
+    lines.push('## 趋势');
+    lines.push('');
+    lines.push('> 本次运行以 `--no-history` 禁用历史记录与漂移对比（无趋势数据）。');
+    lines.push('');
+  }
+  const trendAlertCount = trendSummary ? trendSummary.alerts.length : 0;
+  lines.push(`汇总：**${results.length - failCount - warnCount} 通过 / ${warnCount} 告警 / ${failCount} 失败**${trendAlertCount ? `（另有趋势告警 ${trendAlertCount} 项，见上「趋势」小节，不影响判定与退出码）` : ''}`);
   lines.push('');
   const reportText = lines.join('\n');
   // 原始报告始终落临时目录；docs/性能基准.md 仅在显式刷新（--update-baseline / --report）时更新，
