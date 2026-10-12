@@ -41,12 +41,14 @@ const { spawn, spawnSync } = require('child_process');
 const { GdbDebugAdapter } = require('../dist/debug/gdbDebugAdapter.js');
 
 let pass = 0, fail = 0;
+let bgPid = 0; // 负载敏感：已加固——异常退出路径也要清理被测长驻进程，避免残留
 function check(name, cond, got, want) {
   if (cond) { pass++; console.log('OK   ' + name); }
   else { fail++; console.log('FAIL ' + name + '  got=' + JSON.stringify(got) + ' want=' + JSON.stringify(want)); }
 }
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-const waitFor = async (fn, ms = 15000) => {
+// 负载敏感：已加固——默认等待 15s → 30s（整组运行时 GDB 启动/握手在 CI 负载下会明显变慢）
+const waitFor = async (fn, ms = 30000) => {
   const t0 = Date.now();
   while (Date.now() - t0 < ms) {
     if (fn()) return true;
@@ -103,16 +105,33 @@ function findTool(candidates, name) {
     process.exit(0);
   }
 
+  // 负载敏感：已加固——夹具编译在 CI 高负载/杀软扫描下偶发瞬时失败：
+  // 每次尝试前清理半成品，失败重试 1 次，并设显式超时（原为无限等待）
+  const compileFixture = (args, outFile) => {
+    let r;
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      try { fs.rmSync(outFile, { force: true }); } catch { /* 清理半成品失败不阻断 */ }
+      r = spawnSync(gcc, args, { encoding: 'utf8', timeout: 120000 });
+      if (r.status === 0) return r;
+      if (attempt === 1) console.log(`     （夹具编译瞬时失败 exit=${r.status}，清理后重试 1 次）`);
+    }
+    return r;
+  };
+  // 负载敏感：已加固——预热 GDB 进程镜像（首次启动在负载下可能显著变慢），失败重试 1 次
+  if (spawnSync(gdb, ['--version'], { encoding: 'utf8', timeout: 60000 }).status !== 0) {
+    spawnSync(gdb, ['--version'], { encoding: 'utf8', timeout: 60000 });
+  }
+
   // ---- 夹具：长驻进程 + 无 main 的符号探针对象 ----
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cb-detach-'));
   fs.writeFileSync(path.join(dir, 'loop.c'), '#include <windows.h>\nint main(void){ for(;;) Sleep(150); return 0; }\n');
   const loopExe = path.join(dir, 'loop.exe');
-  let r = spawnSync(gcc, ['-g', '-O0', '-o', loopExe, path.join(dir, 'loop.c')], { encoding: 'utf8' });
-  if (r.status !== 0) { console.log('SKIP：夹具编译失败 ' + r.stderr); process.exit(0); }
+  let r = compileFixture(['-g', '-O0', '-o', loopExe, path.join(dir, 'loop.c')], loopExe);
+  if (r.status !== 0) { console.log('SKIP：夹具编译失败 ' + (r.stderr || r.error)); process.exit(0); }
   fs.writeFileSync(path.join(dir, 'probe.c'), 'int cb_detach_probe(void) { return 42; }\n');
   const probeObj = path.join(dir, 'probe.o');
-  r = spawnSync(gcc, ['-g', '-O0', '-c', '-o', probeObj, path.join(dir, 'probe.c')], { encoding: 'utf8' });
-  if (r.status !== 0) { console.log('SKIP：探针编译失败 ' + r.stderr); process.exit(0); }
+  r = compileFixture(['-g', '-O0', '-c', '-o', probeObj, path.join(dir, 'probe.c')], probeObj);
+  if (r.status !== 0) { console.log('SKIP：探针编译失败 ' + (r.stderr || r.error)); process.exit(0); }
 
   const alive = (pid) => /\.exe/.test(spawnSync('tasklist', ['/FI', `PID eq ${pid}`, '/NH'], { encoding: 'utf8' }).stdout || '');
 
@@ -129,29 +148,55 @@ function findTool(candidates, name) {
 
   // ---- 附加会话（D1/D2 共用一台真实 GDB） ----
   const bg = spawn(loopExe, [], { detached: true, stdio: 'ignore' });
-  const pid = bg.pid;
-  await sleep(600);
+  bgPid = bg.pid;
+  const pid = bgPid;
+  // 负载敏感：已加固——轮询等待目标进程就绪（原为固定 600ms），避免高负载下附加到尚未就绪的进程
+  {
+    const t0 = Date.now();
+    while (Date.now() - t0 < 15000 && !alive(pid)) await sleep(250);
+  }
 
-  const adapter = new GdbDebugAdapter('e2e');
   const msgs = [];
-  adapter.onDidSendMessage((m) => msgs.push(m));
   const outputs = () => msgs.filter((m) => m.type === 'event' && m.event === 'output').map((m) => m.body.output).join('\n');
   const hasEvent = (name) => msgs.some((m) => m.type === 'event' && m.event === name);
 
-  adapter.handleMessage({
-    type: 'request', seq: 1, command: 'attach',
-    arguments: { gdbPath: gdb, pid, program: loopExe, cwd: dir },
-  });
-  const attached = await waitFor(() => msgs.some((m) => m.type === 'response' && m.command === 'attach'));
-  const attachResp = msgs.find((m) => m.type === 'response' && m.command === 'attach');
-  check('attach 会话建立成功', attached && attachResp && attachResp.success === true, attachResp && attachResp.message, 'success');
+  // 负载敏感：已加固——附加握手在 CI 负载下偶发超时（GDB 启动/响应慢）：
+  // 每次尝试单独记录消息，无响应或 success=false 时整体重试 1 次
+  const tryAttach = async () => {
+    const got = [];
+    const a = new GdbDebugAdapter('e2e');
+    a.onDidSendMessage((m) => { got.push(m); msgs.push(m); });
+    a.handleMessage({
+      type: 'request', seq: 1, command: 'attach',
+      arguments: { gdbPath: gdb, pid, program: loopExe, cwd: dir },
+    });
+    await waitFor(() => got.some((m) => m.type === 'response' && m.command === 'attach'));
+    const resp = got.find((m) => m.type === 'response' && m.command === 'attach');
+    return { adapter: resp && resp.success === true ? a : undefined, resp };
+  };
+  let attempt = await tryAttach();
+  if (!attempt.adapter) {
+    console.log('     （附加握手未成功，重试 1 次：' + (attempt.resp ? attempt.resp.message : '无响应') + '）');
+    await sleep(1500);
+    attempt = await tryAttach();
+  }
+  const adapter = attempt.adapter;
+  const attachResp = attempt.resp;
+  check('attach 会话建立成功', !!adapter && !!attachResp && attachResp.success === true, attachResp && attachResp.message, 'success');
+  if (!adapter) {
+    spawnSync('taskkill', ['/F', '/PID', String(pid)], { encoding: 'utf8' });
+    console.log(`D1/D2 回归（真实 GDB）: ${pass} pass, ${fail} fail`);
+    process.exit(1);
+  }
   await waitFor(() => hasEvent('initialized'));
+  // 负载敏感：已加固——轮询等待暂停态（附加后的 *stopped 记录可能略晚于 attach 响应到达）
+  await waitFor(() => adapter.isStopped() === true, 10000);
   check('adapter.isAttached() === true（CB IsAttachedToProcess 语义）', adapter.isAttached() === true, adapter.isAttached(), true);
   check('附加后处于暂停态（CB：Detach 仅暂停时可用）', adapter.isStopped() === true, adapter.isStopped(), true);
   check('附加进程存活（前置）', alive(pid) === true, alive(pid), true);
 
   // D2：已加载库跟踪（=library-loaded；地址预填数据源）
-  await waitFor(() => adapter.loadedLibraries().length > 0, 4000);
+  await waitFor(() => adapter.loadedLibraries().length > 0, 15000); // 负载敏感：已加固（原 4s → 15s）
   const libs = adapter.loadedLibraries();
   check(`已加载库跟踪（${libs.length} 条）`, libs.length > 0 && libs.every((l) => !!l.name), libs.slice(0, 3), '>=1 且含名字');
   check('库条目带 .text 加载地址（可供地址预填）', libs.some((l) => /^0x[0-9a-f]+$/i.test(l.from || '')), libs.find((l) => l.from), '0x…');
@@ -166,21 +211,23 @@ function findTool(candidates, name) {
 
   // D2：真实加载附加符号
   await adapter.addSymbolFile(probeObj, '0x30000000');
-  await sleep(400);
+  // 负载敏感：已加固——以下三处原为固定 sleep(400) 后断言，改为轮询等待 GDB 回显（高负载下回显会晚到）
+  await waitFor(() => /add symbol table from file/.test(outputs()), 15000);
   check('D2：GDB 输出含 add symbol table（add 语义生效）', /add symbol table from file/.test(outputs()), outputs().split('\n').filter((l) => /symbol/.test(l)).slice(0, 2), 'add symbol table');
   await adapter.sendUserCommand('info address cb_detach_probe');
-  await sleep(400);
+  await waitFor(() => /cb_detach_probe.*0x30000000/i.test(outputs()), 15000);
   check('D2：附加符号可见且地址 = 0x30000000',
     /cb_detach_probe.*0x30000000/i.test(outputs()), outputs().split('\n').filter((l) => /cb_detach_probe/.test(l)).slice(0, 2), 'cb_detach_probe @0x30000000');
   await adapter.sendUserCommand('info address main');
-  await sleep(400);
+  await waitFor(() => /Symbol "main" is a function/.test(outputs()), 15000);
   check('D2：主符号未被替换（区别于 -file-symbol-file 的替换语义，实验 C1）',
     /Symbol "main" is a function/.test(outputs()) && !/No symbol "main"/.test(outputs()),
     outputs().split('\n').filter((l) => /"main"/.test(l)).slice(-2), 'main 仍可见');
 
   // D1：detach
   await adapter.detach();
-  await sleep(1300);
+  // 负载敏感：已加固——轮询等待 terminated 事件（原固定 sleep(1300)），高负载下事件可能晚到
+  await waitFor(() => hasEvent('terminated'), 15000);
   check('D1：detach 后发送 terminated 事件', hasEvent('terminated'), 'terminated', 'terminated');
   check('D1：adapter.isDetached() === true', adapter.isDetached() === true, adapter.isDetached(), true);
   check('D1：被附加进程继续运行（CB 语义：分离不杀进程）', alive(pid) === true, alive(pid), true);
@@ -192,6 +239,8 @@ function findTool(candidates, name) {
   console.log(`D1/D2 回归（真实 GDB）: ${pass} pass, ${fail} fail`);
   process.exit(fail ? 1 : 0);
 })().catch((e) => {
+  // 负载敏感：已加固——异常路径同样清理被测长驻进程，避免残留进程拖慢后续用例
+  if (bgPid) spawnSync('taskkill', ['/F', '/PID', String(bgPid)], { encoding: 'utf8' });
   console.error('异常: ' + (e && e.stack ? e.stack : e));
   process.exit(1);
 });

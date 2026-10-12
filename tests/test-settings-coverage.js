@@ -1,6 +1,10 @@
 // 设置项覆盖回归：16 个此前未被任何测试引用的设置键
-//  - 静态读点断言：键的字面量出现在「消费它的实现文件」且位置与预期一致（±容差，防漂移）
+//  - 静态读点断言：键的字面量出现在「消费它的实现文件」，且该行是一次真实的配置读取（.get(...)）
 //  - 行为断言：低风险项的运行时效果（树分组、工具栏上下文、自动头文件保护、工具解析、astyle 参数）
+//
+// 位置断言刻意不比对绝对行号：对无关代码的增删不应报错（历史：gdbDebugAdapter.ts 增行 44 行后
+// ±40 行容差误判，main CI 变红）。而「键被删/改名/挪到别的文件」由前两条断言拦截，
+// 「键退化为普通字符串、不再取值」由 .get(...) 断言拦截。
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -16,25 +20,25 @@ function check(name, cond, got, want) {
   else { fail++; failures.push(name); console.log(`FAIL ${name}  got=${JSON.stringify(got)}${want !== undefined ? ' want=' + JSON.stringify(want) : ''}`); }
 }
 
-// 键 → （源码读点用于定位断言，编译产物用于"已接线"断言，期望源码行号，说明）
+// 键 → （源码读点文件，编译产物，说明（含消费它的函数/入口，便于定位））
 // 注：键用完整名（含 codeblocks. 前缀）以便覆盖矩阵按贡献项 ID 统计；源码内多为分区相对写法，定位时去掉前缀。
 const SETTINGS = [
-  ['codeblocks.saveBeforeBuild', 'src/extension.ts', 'dist/extension.js', 2325, '构建/清理前 saveAll'],
-  ['codeblocks.build.profile', 'src/build/buildEngine.ts', 'dist/build/buildEngine.js', 230, '构建阶段计时探针开关'],
-  ['codeblocks.debug.initCommands', 'src/debug/gdbDebugAdapter.ts', 'dist/debug/gdbDebugAdapter.js', 480, '调试启动后注入的用户命令'],
-  ['codeblocks.debug.instructionSet', 'src/debug/gdbDebugAdapter.ts', 'dist/debug/gdbDebugAdapter.js', 481, '自定义反汇编指令集'],
-  ['codeblocks.debug.charset', 'src/debug/gdbDebugAdapter.ts', 'dist/debug/gdbDebugAdapter.js', 479, '目标字符集'],
-  ['codeblocks.debug.addOtherProjectDirs', 'src/extension.ts', 'dist/extension.js', 6804, '调试源目录补其它已打开工程'],
-  ['codeblocks.clangd.enabled', 'src/extension.ts', 'dist/extension.js', 3015, 'clangd 集成开关（关闭即早退）'],
-  ['codeblocks.clangd.buildLogDiagnostics', 'src/extension.ts', 'dist/extension.js', 5544, '构建日志诊断归属 clangd'],
-  ['codeblocks.clangd.restartOnActiveProjectSwitch', 'src/extension.ts', 'dist/extension.js', 3082, '切换活动工程时重启 clangd'],
-  ['codeblocks.clangd.forcedIncludes', 'src/extension.ts', 'dist/extension.js', 3100, '强制包含头文件'],
-  ['codeblocks.clangd.suppressHeaderDiagnostics', 'src/extension.ts', 'dist/extension.js', 3110, '头文件诊断压制'],
-  ['codeblocks.projectTree.categorize', 'src/extension.ts', 'dist/extension.js', 442, '工程树分组显示开关'],
-  ['codeblocks.ui.projectToolbar', 'src/extension.ts', 'dist/extension.js', 4872, '工程工具栏按钮可见性'],
-  ['codeblocks.editor.autoHeaderGuard', 'src/extension.ts', 'dist/extension.js', 5655, '新建头文件自动加保护宏'],
-  ['codeblocks.astyleOptions', 'src/tools/astyle.ts', 'dist/tools/astyle.js', 68, 'AStyle 参数'],
-  ['codeblocks.tools', 'src/extension.ts', 'dist/extension.js', 5613, '自定义工具表（菜单/执行）'],
+  ['codeblocks.saveBeforeBuild', 'src/extension.ts', 'dist/extension.js', '构建/清理前 saveAll（saveAllBeforeBuild）'],
+  ['codeblocks.build.profile', 'src/build/buildEngine.ts', 'dist/build/buildEngine.js', '构建阶段计时探针开关（BuildEngine.build）'],
+  ['codeblocks.debug.initCommands', 'src/debug/gdbDebugAdapter.ts', 'dist/debug/gdbDebugAdapter.js', '调试启动后注入的用户命令（applyDebugSettings）'],
+  ['codeblocks.debug.instructionSet', 'src/debug/gdbDebugAdapter.ts', 'dist/debug/gdbDebugAdapter.js', '自定义反汇编指令集（applyDebugSettings）'],
+  ['codeblocks.debug.charset', 'src/debug/gdbDebugAdapter.ts', 'dist/debug/gdbDebugAdapter.js', '目标字符集（applyDebugSettings）'],
+  ['codeblocks.debug.addOtherProjectDirs', 'src/extension.ts', 'dist/extension.js', '调试源目录补其它已打开工程（debugSearchDirs）'],
+  ['codeblocks.clangd.enabled', 'src/extension.ts', 'dist/extension.js', 'clangd 集成开关（关闭即早退，generateClangdForWorkspaceInternal）'],
+  ['codeblocks.clangd.buildLogDiagnostics', 'src/extension.ts', 'dist/extension.js', '构建日志诊断归属 clangd（buildLogUsesClangdDiagnostics）'],
+  ['codeblocks.clangd.restartOnActiveProjectSwitch', 'src/extension.ts', 'dist/extension.js', '切换活动工程时重启 clangd（generateClangdForWorkspaceInternal）'],
+  ['codeblocks.clangd.forcedIncludes', 'src/extension.ts', 'dist/extension.js', '强制包含头文件（generateClangdForWorkspaceInternal）'],
+  ['codeblocks.clangd.suppressHeaderDiagnostics', 'src/extension.ts', 'dist/extension.js', '头文件诊断压制（generateClangdForWorkspaceInternal）'],
+  ['codeblocks.projectTree.categorize', 'src/extension.ts', 'dist/extension.js', '工程树分组显示开关（activate 内注册视图处）'],
+  ['codeblocks.ui.projectToolbar', 'src/extension.ts', 'dist/extension.js', '工程工具栏按钮可见性（applyProjectToolbarContext）'],
+  ['codeblocks.editor.autoHeaderGuard', 'src/extension.ts', 'dist/extension.js', '新建头文件自动加保护宏（autoInsertHeaderGuards）'],
+  ['codeblocks.astyleOptions', 'src/tools/astyle.ts', 'dist/tools/astyle.js', 'AStyle 参数（formatActiveDocument）'],
+  ['codeblocks.tools', 'src/extension.ts', 'dist/extension.js', '自定义工具表（菜单/执行，getMenuDynamicData）'],
 ];
 
 // ---------- 静态读点 ----------
@@ -48,12 +52,14 @@ const lineOfKey = (rel, key) => {
   const needle = new RegExp(`['"\`]${bare.replace(/\./g, '\\.')}['"\`]`);
   return fileOf(rel).split(/\r?\n/).findIndex((l) => needle.test(l)) + 1;
 };
-for (const [key, srcRel, distRel, hint, note] of SETTINGS) {
+// 一行内是否是一次真实的配置取值调用（get / get<T>）
+const isConfigRead = (line) => /\.get\s*(<[^>]*>)?\s*\(/.test(line);
+for (const [key, srcRel, distRel, note] of SETTINGS) {
   const atSrc = lineOfKey(srcRel, key);
   check(`S ${key}：源码读点在 ${srcRel}（${note}）`, atSrc > 0, atSrc || '未找到', `出现在 ${srcRel}`);
   if (atSrc > 0) {
-    const drift = Math.abs(atSrc - hint);
-    check(`S ${key}：读点位置与预期一致（±40 行，实际偏差 ${drift}）`, drift <= 40, atSrc, hint);
+    const line = fileOf(srcRel).split(/\r?\n/)[atSrc - 1].trim();
+    check(`S ${key}：读点是一次配置取值（非仅字符串出现）`, isConfigRead(line), line, '.get(...) 调用');
   }
   check(`S ${key}：已接线到编译产物 ${distRel}`, lineOfKey(distRel, key) > 0, lineOfKey(distRel, key) || '未找到', distRel);
 }

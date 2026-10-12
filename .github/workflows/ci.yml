@@ -5,11 +5,18 @@ name: CI
 #   · 工具链门控：真实工程 E2E(L3) 需要 gcc/gdb/ar；runner 未提供时自动跳过（不误报失败）
 #   · 手动触发（workflow_dispatch）：视觉回归、性能基准、VS Code 宿主集成
 #     这三层依赖桌面会话/下载 VS Code/机器稳定性，作为可选门禁，默认不阻塞主流程。
+#   · 定时巡检（schedule，每周一次）：等价于手动触发跑上述可选三层（continue-on-error，
+#     失败只在 job summary 标注，不阻塞 PR；core/e2e 也会在定时运行中复跑，用于发现 runner 漂移）。
+# 缓存：npm（三个作业均启用 setup-node cache: npm，基于 package-lock.json）
+#       + .vscode-test（desktop 作业，@vscode/test-electron 下载的 VS Code 靶点，避免每次重下）
 on:
   push:
     branches: [main, master]
   pull_request:
   workflow_dispatch:
+  schedule:
+    # 每周一 03:00 UTC（北京时间 11:00）巡检视觉/性能/宿主三层
+    - cron: '0 3 * * 1'
 
 permissions:
   contents: read
@@ -54,8 +61,36 @@ jobs:
       - name: 打包与安装冒烟（L5）
         run: npm run test:pack
 
-      - name: 生成覆盖矩阵
-        run: npm run coverage:matrix
+      - name: 生成覆盖矩阵 + 汇总表写入 job summary（矩阵差异仅告警不失败）
+        shell: pwsh
+        run: |
+          npm run coverage:matrix
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+          $file = 'docs/测试覆盖矩阵.md'
+          $out = @('### 测试覆盖矩阵汇总（npm run coverage:matrix）', '')
+          $table = New-Object System.Collections.Generic.List[string]
+          if (Test-Path -LiteralPath $file) {
+            # 只取 `## 汇总` 章节下的连续表格行（表头 + 6 行数据）
+            $collect = $false
+            foreach ($l in (Get-Content -LiteralPath $file -Encoding utf8)) {
+              if (-not $collect) { if ($l -match '^##\s*汇总\s*$') { $collect = $true }; continue }
+              if ($l -match '^\|') { $table.Add($l); continue }
+              if ($table.Count -gt 0) { break }
+            }
+            $out += $table
+          } else {
+            $out += '（未找到 docs/测试覆盖矩阵.md）'
+          }
+          Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value $out -Encoding utf8
+
+          # 与仓库已提交版本比对：有差异时 ::warning::（仅告警，避免生成器漂移阻塞 PR）
+          git --no-pager diff --exit-code -- $file *> $null
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "::warning file=$file::覆盖矩阵与仓库提交版本不一致（生成器输出漂移，仅告警不判失败）"
+            Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value @('', '> ⚠️ 覆盖矩阵与仓库提交版本不一致（仅告警，不判失败）：', '', '```', (git --no-pager diff --stat -- $file), '```') -Encoding utf8
+          }
+          exit 0
 
       - name: 归档测试报告与覆盖矩阵
         uses: actions/upload-artifact@v4
@@ -115,10 +150,11 @@ jobs:
         if: steps.tools.outputs.have == 'true' && hashFiles('tests/e2e/test-e2e-debug.js') != ''
         run: node tests/e2e/test-e2e-debug.js
 
-  # ---------- 可选：桌面相关三层（仅手动触发，不阻塞主流程） ----------
+  # ---------- 可选：桌面相关三层（手动触发 + 每周定时巡检；不阻塞 PR） ----------
   desktop:
     name: L4/L2 视觉·性能·宿主（可选）
-    if: github.event_name == 'workflow_dispatch'
+    # push/PR 永不触发 ⇒ 不阻塞主流程；schedule 巡检与 workflow_dispatch 走同一作业
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -131,19 +167,46 @@ jobs:
       - name: 安装依赖
         run: npm ci
 
+      - name: 缓存 VS Code 靶点（@vscode/test-electron → .vscode-test）
+        uses: actions/cache@v4
+        with:
+          path: .vscode-test
+          key: vscode-test-${{ runner.os }}-${{ hashFiles('package.json') }}
+
       - name: 像素级视觉回归（系统 Edge + 基线 PNG）
+        id: visual
         continue-on-error: true
         run: npm run test:visual
 
       - name: 性能基准（硬预算门禁）
+        id: perf
         continue-on-error: true
         run: npm run test:perf
 
       - name: VS Code 宿主集成（自动下载 engines 最低版本 1.85.0）
+        id: host
         continue-on-error: true
         run: npm run test:host
         env:
           CB_HOST_TEST_TIMEOUT: '180000'
+
+      - name: 巡检小结（触发方式 + 三层结果 → job summary）
+        if: always()
+        shell: pwsh
+        run: |
+          $head = "### 桌面可选三层巡检（事件：${{ github.event_name }}）"
+          $rows = @(
+            '',
+            '| 作业 | 结果 |',
+            '|------|------|',
+            '| 视觉回归 test:visual | ${{ steps.visual.outcome }} |',
+            '| 性能基准 test:perf | ${{ steps.perf.outcome }} |',
+            '| 宿主集成 test:host | ${{ steps.host.outcome }} |',
+            '',
+            '> 三层均 continue-on-error：schedule 巡检失败只在本摘要标注，不阻塞 PR。'
+          )
+          Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value (@($head) + $rows) -Encoding utf8
+          exit 0
 
       - name: 归档差异图与报告
         if: always()

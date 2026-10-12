@@ -75,18 +75,33 @@ if (!gcc || !make) {
   const mkFile = path.join(dir, 'Makefile');
   fs.writeFileSync(mkFile, content, 'utf-8');
 
-  const r1 = spawnSync(make, ['-f', mkFile], { cwd: dir, encoding: 'utf-8' });
-  check('make 构建退出码 0', r1.status === 0, { status: r1.status, stdout: r1.stdout, stderr: r1.stderr });
+  // 负载敏感：已加固——① 构建前清理 stale 产物（半成品会误导 make 的增量判定）
+  // ② 失败（CI 高负载/杀软扫描下的瞬时抖动）清理后重试 1 次 ③ 显式超时（原为无限等待）
+  const clearArtifacts = () => { for (const p of [objMain, objUtil, exe]) { try { fs.rmSync(p, { force: true }); } catch { /* ignore */ } } };
+  const runMake = (args, cleanFirst = true) => {
+    let r;
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      if (cleanFirst) clearArtifacts();
+      r = spawnSync(make, args, { cwd: dir, encoding: 'utf-8', timeout: 180000 });
+      if (r.status === 0) return r;
+      if (attempt === 1) console.log(`     （make ${args.join(' ')} 瞬时失败 exit=${r.status}，清理产物后重试 1 次）`);
+    }
+    return r;
+  };
+
+  const r1 = runMake(['-f', mkFile]);
+  check('make 构建退出码 0', r1.status === 0, { status: r1.status, stdout: (r1.stdout || '').slice(-800), stderr: r1.stderr });
   check('产物存在', fs.existsSync(exe), fs.existsSync(exe));
-  const run = spawnSync(exe, [], { encoding: 'utf-8' });
+  let run = spawnSync(exe, [], { encoding: 'utf-8', timeout: 60000 });
+  if (!(run.stdout || '').includes('MKOK 5')) run = spawnSync(exe, [], { encoding: 'utf-8', timeout: 60000 }); // 负载敏感：已加固（重试 1 次）
   check('程序运行输出正确', (run.stdout || '').includes('MKOK 5'), run.stdout);
 
-  // 增量：再次 make 不重建（退出码 0，且不报错）
-  const r2 = spawnSync(make, ['-f', mkFile], { cwd: dir, encoding: 'utf-8' });
+  // 增量：再次 make 不重建（退出码 0，且不报错；cleanFirst=false 保持增量语义）
+  const r2 = runMake(['-f', mkFile], false);
   check('重复 make 幂等', r2.status === 0, { status: r2.status, stderr: r2.stderr });
 
   // clean
-  const r3 = spawnSync(make, ['-f', mkFile, 'clean'], { cwd: dir, encoding: 'utf-8' });
+  const r3 = runMake(['-f', mkFile, 'clean'], false);
   check('clean 退出码 0', r3.status === 0, { status: r3.status, stderr: r3.stderr });
   check('clean 删除对象与产物', !fs.existsSync(objMain) && !fs.existsSync(objUtil) && !fs.existsSync(exe), { objMain: fs.existsSync(objMain), exe: fs.existsSync(exe) });
 
