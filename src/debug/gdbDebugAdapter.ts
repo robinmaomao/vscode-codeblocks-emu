@@ -137,6 +137,10 @@ export class GdbDebugAdapter implements vscode.DebugAdapter {
    * -data-evaluate-expression 全部无回执至 30s 超时）⇒ 此类请求必须快速返回而非悬挂等待。
    */
   private targetRunning = false;
+  /** C-01：launch 的 stopOnEntry（DAP 标准参数）——运行前插入入口临时断点以实现首停 */
+  private stopOnEntry = false;
+  /** C-01：入口临时断点编号（`-break-insert -t main`；命中后映射为 DAP reason=entry） */
+  private entryBpNum: string | null = null;
   /** 当前 GDB 选中线程（-thread-select 维护；供多线程帧/变量与 stackTrace(threadId) 使用） */
   private currentThreadId = 0;
   private regNamesCache: string[] | null = null;
@@ -403,6 +407,9 @@ export class GdbDebugAdapter implements vscode.DebugAdapter {
     this.detached = false;
     this.loadedLibs = [];
     this.targetRunning = false;
+    // C-01：stopOnEntry（VS Code launch.json 标准参数，运行前在 main 插临时断点实现首停）
+    this.stopOnEntry = args.stopOnEntry === true;
+    this.entryBpNum = null;
     this.currentThreadId = 0;
     this.searchDirs = Array.isArray(args.searchDirs) ? (args.searchDirs as unknown[]).filter((d): d is string => typeof d === 'string' && !!d) : [];
     this.remote = (args.remoteDebugging as RemoteDebuggingOptions) ?? undefined;
@@ -454,6 +461,12 @@ export class GdbDebugAdapter implements vscode.DebugAdapter {
     this.detached = false;
     this.loadedLibs = [];
     this.targetRunning = false;
+    // C-01：DAP 的 stopOnEntry 仅定义于 launch 请求——附加目标已在运行，无「入口」首停语义
+    this.stopOnEntry = false;
+    this.entryBpNum = null;
+    if (args.stopOnEntry === true) {
+      this.sendOutput('console', '提示：附加会话不支持 stopOnEntry（目标进程已在运行，无入口首停语义）');
+    }
     this.currentThreadId = 0;
     this.searchDirs = Array.isArray(args.searchDirs) ? (args.searchDirs as unknown[]).filter((d): d is string => typeof d === 'string' && !!d) : [];
 
@@ -781,6 +794,7 @@ export class GdbDebugAdapter implements vscode.DebugAdapter {
   private async onConfigurationDone(req: DapRequest): Promise<void> {
     // 断点已设置：新起会话启动程序；附加会话目标已在运行（附加后处于停止态，等用户继续）
     if (this.session && !this.attached) {
+      await this.prepareStopOnEntry();
       try {
         // R4：远程目标已运行——用 continue 而非 run（对齐 gdb_driver.cpp:279-292 远程 Start 语义）
         await this.session.send(this.isRemoteDebugging ? '-exec-continue' : '-exec-run');
@@ -791,6 +805,46 @@ export class GdbDebugAdapter implements vscode.DebugAdapter {
       }
     }
     this.sendResponse(req, true, {});
+  }
+
+  /**
+   * C-01：stopOnEntry 实现 —— 运行前在入口函数插入一次性临时断点（`-break-insert -t main`），
+   * 其命中在 `*stopped` 处理中映射为 DAP `reason: "entry"`。
+   *
+   * 方案取舍（本机 MinGW GDB 8.1 实测；两方案对拍记录见交付说明）：
+   *  - 不能用「先 run 再中断到入口」：`-exec-interrupt` 在 Windows 原生 GDB 上既不下发 `*stopped`
+   *    又会让 GDB 失去回执（缺陷 D-07），`-gdb-set mi-async on` 无效；
+   *  - `-break-insert -t main` + `-exec-run` 实测得到 `*stopped,reason="breakpoint-hit",disp="del",
+   *    bkptno="1"`（停位 = main 首行；`disp="del"` 表示 GDB 命中后自动删除，无需清理），
+   *    断点编号来自本命令的 token 匹配响应，无竞态；
+   *  - 对照方案 `-interpreter-exec console "start"` 产生完全相同的停止记录（停位同为 main 首行），
+   *    但其断点编号只能从 `=breakpoint-created` 通知或 CLI 文本间接获得（且失败时错误无法与
+   *    `-exec-run` 回退路径统一）⇒ 弃用。
+   *  - 失败回退（不卡死、不伪造首停）：无符号表时 `-break-insert -t main` 直接报错
+   *    （本机实测 GDB 8.1："No symbol table is loaded"）；`pending` 分支为**防御性**实现
+   *    （其它 GDB 构建可能返回 `pending="main"` 而非报错；本机 8.1 未复现，纯剥离程序同样报错）。
+   *    两种情况均撤销断点、输出一行中文说明并照常运行（程序直接跑，无 entry 首停）。
+   */
+  private async prepareStopOnEntry(): Promise<void> {
+    // targetRunning 守卫：重复 configurationDone 时不再插断点（运行中插入会触发 D-07 同款无回执）
+    if (!this.stopOnEntry || !this.session || this.targetRunning) return;
+    if (this.isRemoteDebugging) {
+      this.sendOutput('console', '提示：远程调试目标在连接时已在运行，stopOnEntry 不适用，程序将直接继续');
+      return;
+    }
+    try {
+      const r = await this.session.sendExact('-break-insert -t main');
+      const bkpt = r.attrs['bkpt'] ?? '';
+      const gdbNum = this.extractField(bkpt, 'number');
+      if (!gdbNum || isPendingBreakpoint(bkpt)) {
+        if (gdbNum) { try { await this.session.sendExact(`-break-delete ${gdbNum}`); } catch { /* 已失效等 */ } }
+        this.sendOutput('console', '提示：未找到 main 函数（程序缺少调试符号或入口函数不是 main），stopOnEntry 无法生效，程序将直接运行');
+        return;
+      }
+      this.entryBpNum = gdbNum;
+    } catch (err) {
+      this.sendOutput('console', `提示：stopOnEntry 无法生效（入口断点设置失败：${(err as Error).message}），程序将直接运行`);
+    }
   }
 
   private async onThreads(req: DapRequest): Promise<void> {
@@ -1388,7 +1442,12 @@ export class GdbDebugAdapter implements vscode.DebugAdapter {
       // D-04：异常 catchpoint 命中在 MI 中同样上报 breakpoint-hit，需按 catchpoint 编号识别，
       // 否则 VS Code 只按普通断点呈现（reason=breakpoint），无法显示“已暂停在异常处”。
       const stopBpNum = rec.attrs['bkptno'];
-      if (stopBpNum && this.catchpointNums.includes(stopBpNum)) {
+      // C-01：入口临时断点命中 → DAP reason=entry（描述为入口语义，不携带「断点命中」误导）
+      if (stopBpNum && this.entryBpNum !== null && stopBpNum === this.entryBpNum) {
+        reason = 'entry';
+        description = '已暂停在程序入口（main，stopOnEntry）';
+        this.entryBpNum = null; // 临时断点已被 GDB 自动删除（disp=del），无需再跟踪
+      } else if (stopBpNum && this.catchpointNums.includes(stopBpNum)) {
         const filter = this.catchpointFilters.get(stopBpNum);
         const kind = filter === 'catch' ? '捕获' : '抛出';
         reason = 'exception';

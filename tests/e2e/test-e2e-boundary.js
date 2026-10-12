@@ -142,6 +142,61 @@ function mkProjDir(prefix, fileName, opts = {}) {
 }
 const exeOf = (dir, name) => path.join(dir, 'bin', 'Debug', `${name}.exe`);
 
+// ---------- S6 编译器程序路径作用域（D-20 回归） ----------
+// 旧行为：`codeblocks.compilerPrograms` 是全局的，用「探测编译器」选定交叉编译器后，
+// `<Option compiler="gcc">` 的工程也会被静默改用交叉工具链。修复后：程序路径按家族 id 作用域解析，
+// 旧扁平形态只对「它所属的全局 compilerId」生效。
+async function scenarioCompilerProgramsScope() {
+  const store = app.mock.configStore;
+  const prevPrograms = store['codeblocks.compilerPrograms'];
+  const prevCompilerId = store['codeblocks.compilerId'];
+  const bogus = path.join(os.tmpdir(), 'cb-e2e-no-such-family', 'avr-gcc.exe'); // 不存在的程序路径：被误用时构建必然失败
+  const probe = mkProjDir('cb-e2e-progscope-', 'progscope.cbp', { title: 'progscope' });
+  // 每次断言前清空 bin+obj：否则增量判定会跳过编译，只能用陈旧对象链接 ⇒ 无法真正验证「用了哪个编译器」
+  const wipe = () => { for (const d of ['bin', 'obj']) fs.rmSync(path.join(probe.dir, d), { recursive: true, force: true }); };
+  try {
+    await openInExt(probe.cbp);
+    await activateProject(probe.cbp);
+
+    // S6.1 新形态（按 id 分组）：别的家族的程序路径不得影响本工程
+    wipe();
+    store['codeblocks.compilerPrograms'] = { 'avr-gcc': { C: bogus, CPP: bogus } };
+    store['codeblocks.compilerId'] = 'gcc';
+    const s61 = await runBuild();
+    const text61 = logLines();
+    check('S6.1 程序路径按家族作用域：其它家族（avr-gcc）的路径不影响 gcc 工程构建（D-20 已修）',
+      s61 === 'resolved' && fs.existsSync(exeOf(probe.dir, 'progscope')) && !text61.includes('cb-e2e-no-such-family'),
+      `settle=${s61} exe=${fs.existsSync(exeOf(probe.dir, 'progscope'))} 误用=${text61.includes('cb-e2e-no-such-family')}`,
+      'resolved + exe 存在 + 日志无被误用的程序路径');
+
+    // S6.2 旧扁平形态：只对「写入时的全局 compilerId」生效（此处全局 id 是 avr-gcc ≠ 工程的 gcc ⇒ 不生效）
+    wipe();
+    store['codeblocks.compilerPrograms'] = { C: bogus, CPP: bogus };
+    store['codeblocks.compilerId'] = 'avr-gcc';
+    const s62 = await runBuild();
+    const text62 = logLines();
+    check('S6.2 旧扁平形态不再泄漏到别的家族（全局 compilerId=avr-gcc，工程声明 gcc）',
+      s62 === 'resolved' && fs.existsSync(exeOf(probe.dir, 'progscope')) && !text62.includes('cb-e2e-no-such-family'),
+      `settle=${s62} exe=${fs.existsSync(exeOf(probe.dir, 'progscope'))} 误用=${text62.includes('cb-e2e-no-such-family')}`,
+      'resolved + exe 存在 + 日志无被误用的程序路径');
+
+    // S6.3 兼容性正对照：旧扁平形态在「全局 compilerId === 工程家族」时仍然生效（否则会破坏既有用户配置）
+    wipe();
+    store['codeblocks.compilerId'] = 'gcc';
+    const s63 = await runBuild();
+    const text63 = logLines();
+    check('S6.3 兼容性正对照：扁平形态在所属家族上仍生效（编译失败 + 日志出现该程序路径）',
+      s63 === 'resolved' && !fs.existsSync(exeOf(probe.dir, 'progscope')) && text63.includes('cb-e2e-no-such-family'),
+      `settle=${s63} exe=${fs.existsSync(exeOf(probe.dir, 'progscope'))} 命中=${text63.includes('cb-e2e-no-such-family')}`,
+      'resolved + 无 exe + 日志命中该程序路径');
+  } finally {
+    if (prevPrograms === undefined) delete store['codeblocks.compilerPrograms'];
+    else store['codeblocks.compilerPrograms'] = prevPrograms;
+    if (prevCompilerId === undefined) delete store['codeblocks.compilerId'];
+    else store['codeblocks.compilerId'] = prevCompilerId;
+  }
+}
+
 // ---------- S1 畸形工程 ----------
 async function scenarioMalformed() {
   const { ProjectParser } = require('../../dist/model/parser.js');
@@ -618,6 +673,7 @@ async function main() {
     await scenarioLongPathAndUnc();
     await scenarioCancel();
     await scenarioReentrancy();
+    await scenarioCompilerProgramsScope();
     await settle(app.invoke('codeblocks.build.stop'), 10000);
   } finally {
     try { await app.deactivate(); } catch (e) { console.log('（deactivate 异常：' + (e && e.message) + '）'); }

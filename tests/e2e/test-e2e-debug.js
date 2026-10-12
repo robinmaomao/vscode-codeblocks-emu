@@ -5,7 +5,7 @@
 //       反汇编 / 内存读写 / 数据断点 / 指令断点 / 运行到光标（gotoTargets+goto）/
 //       Set Next Statement / 异常断点 / 用户命令透传 / 断线终止 /
 //       attach(+Detach 不杀进程) / 多线程帧切换（指定线程 ID 取帧与帧下变量）/ 运行中请求防护 /
-//       stopOnEntry 能力探测
+//       stopOnEntry 入口首停（reason=entry；含关闭对照与无符号回退）
 //
 // 用法：node tests/e2e/test-e2e-debug.js [--filter <子串>]
 const fs = require('fs');
@@ -102,6 +102,18 @@ int main(void) {
     // 长驻：便于 E2E 在同一会话内做多次断言（含函数调用求值）
     for (;;) { Sleep(50); if (g_counter < 0) break; }          /* MARK:KEEPALIVE */
     if (th) { CloseHandle(th); }
+    return 0;
+}
+`;
+
+// 入口首停专用探针（C-01）：短生命周期（跑完即退出）——首停后可断言 continue → exited/terminated
+const ENTRY_PROBE_C = `#include <stdio.h>
+
+int entry_guard = 1;
+
+int main(void) {
+    printf("entry-probe start\\n");                             /* MARK:ENTRY_BODY */
+    fflush(stdout);
     return 0;
 }
 `;
@@ -855,24 +867,91 @@ async function main() {
       }
     }
 
-    // ================= S10b stopOnEntry 语义（能力探测） =================
-    // DAP 标准参数 stopOnEntry：VS Code 在 launch.json 配置时下发。实测适配器未消费该参数
-    //（全仓库无引用）——程序直接运行，不发生首停。此处记录现状并登记为能力缺口（不伪造断言）。
+    // ================= S10b stopOnEntry 语义（C-01：正向验收） =================
+    // 修复前（能力缺口 SKIP）：适配器未消费 launch 的 stopOnEntry——程序直接运行，无入口首停。
+    // 修复后：运行前插入入口临时断点（-break-insert -t main），命中上报 DAP reason=entry，
+    //         停止位置 = 入口（main 首行）；无符号表/无 main 时回退为不首停 + 一行中文说明。
     {
-      const { adapter, client } = await launchSession(ctx, {
-        program: exePath, cwd: dir, sourcePath: srcPath, breakpoints: [], extra: { stopOnEntry: true },
-      });
-      await client.send('configurationDone', {});
-      const entryStop = await client.waitStop(6000);
-      if (entryStop) {
-        check('S10b stopOnEntry=true 触发首停（适配器已消费该参数）',
-          entryStop.body.reason === 'entry' || entryStop.body.reason === 'breakpoint', entryStop.body, "reason='entry'");
+      const entrySrc = path.join(dir, 'entry-probe.c');
+      fs.writeFileSync(entrySrc, ENTRY_PROBE_C, 'utf-8');
+      const entryBodyLine = lineOf(ENTRY_PROBE_C, 'ENTRY_BODY');
+      const entryExe = path.join(dir, 'entry-probe.exe');
+      const rcEntry = spawnSync(gcc, ['-g', '-O0', '-o', entryExe, entrySrc], { encoding: 'utf-8', windowsHide: true });
+      if (rcEntry.status !== 0) {
+        skipCheck('S10b stopOnEntry=true 入口首停', '入口探针编译失败: ' + String(rcEntry.stderr || '').split('\n')[0]);
       } else {
-        check('S10b stopOnEntry 未生效时程序确实在运行（未停止）', adapter.isStopped() === false && adapter.isActive(), { stopped: adapter.isStopped(), active: adapter.isActive() }, 'running');
-        skipCheck('S10b stopOnEntry=true 首停', '能力缺口：适配器未消费 launch 的 stopOnEntry（程序直接运行，无 entry 首停）');
+        // ---- 正例：stopOnEntry=true → 入口首停（reason=entry）→ continue 跑完 → terminated ----
+        const { adapter, client } = await launchSession(ctx, {
+          program: entryExe, cwd: dir, sourcePath: entrySrc, breakpoints: [], extra: { stopOnEntry: true },
+        });
+        const cfg = await client.send('configurationDone', {});
+        check('S10b configurationDone 成功（stopOnEntry 会话）', cfg.success, cfg.message, 'success');
+        const gotStop = await waitFor(() => client.events('stopped').length > 0, 15000);
+        const stopEv = client.lastStop();
+        check('S10b stopOnEntry=true 触发入口首停（收到 stopped 事件）', gotStop && !!stopEv, stopEv && stopEv.body, 'stopped');
+        check('S10b 首停 reason=entry', !!stopEv && stopEv.body.reason === 'entry', stopEv && stopEv.body, "reason='entry'");
+        check('S10b 首停描述为入口语义（无「断点命中」误导）',
+          !!stopEv && /入口/.test(String(stopEv.body.description || '')) && !/断点/.test(String(stopEv.body.description || '')),
+          stopEv && stopEv.body.description, '含「入口」且不含「断点」');
+        check('S10b 首停后为已停止态（isStopped=true）', adapter.isStopped() === true && adapter.isActive(),
+          { stopped: adapter.isStopped(), active: adapter.isActive() }, 'stopped');
+        const th = await client.send('threads', {});
+        check('S10b 首停后 threads 可用（线程缓存一致）', th.success && (th.body?.threads?.length ?? 0) >= 1,
+          th.body && th.body.threads, '≥1 线程');
+        const st = await client.send('stackTrace', { threadId: th.body?.threads?.[0]?.id, levels: 5 });
+        const f0 = st.body?.stackFrames?.[0];
+        check('S10b 首停位置在入口（首帧 main + 入口源文件 + 入口行附近）',
+          st.success && !!f0 && /main/.test(f0.name)
+          && String(f0.source?.path || '').replace(/\\/g, '/').toLowerCase().endsWith('/entry-probe.c')
+          && f0.line === entryBodyLine,
+          st.body && st.body.stackFrames.slice(0, 2).map((f) => `${f.name}@${f.line}`), `main@${entryBodyLine}`);
+        const cont = await client.send('continue', { threadId: th.body?.threads?.[0]?.id });
+        check('S10b 首停后 continue 成功下发', cont.success, cont.message, 'success');
+        const term = await waitFor(() => client.events('terminated').length > 0, 15000);
+        check('S10b continue 后程序跑完（收到 terminated）', term, client.events('terminated').length, '≥1');
+        check('S10b 结束后停止态清除（isStopped=false）', adapter.isStopped() === false, adapter.isStopped(), false);
+        await client.send('disconnect', {});
+        await waitFor(() => !adapter.isActive(), 8000);
+        check('S10b 会话正常收尾（disconnect 后适配器释放）', !adapter.isActive(), adapter.isActive(), false);
       }
-      await client.send('disconnect', {});
-      await waitFor(() => !adapter.isActive(), 8000);
+
+      // ---- 对照：stopOnEntry=false → 不首停（程序直接跑完，无 stopped 事件） ----
+      if (rcEntry.status === 0) {
+        const off = await launchSession(ctx, {
+          program: entryExe, cwd: dir, sourcePath: entrySrc, breakpoints: [], extra: { stopOnEntry: false },
+        });
+        await off.client.send('configurationDone', {});
+        const offDone = await waitFor(() => off.client.events('terminated').length > 0, 15000);
+        check('S10b 对照 stopOnEntry=false：不首停（0 个 stopped 事件）且程序直接跑完',
+          offDone && off.client.events('stopped').length === 0 && off.adapter.isStopped() === false,
+          { terminated: off.client.events('terminated').length, stoppedEvents: off.client.events('stopped').length, isStopped: off.adapter.isStopped() },
+          '0 stopped + terminated');
+        await off.client.send('disconnect', {});
+        await waitFor(() => !off.adapter.isActive(), 8000);
+      }
+
+      // ---- 边界：无符号表（-s 链接）→ 回退为不首停 + 一行中文说明（不卡死、不伪造首停） ----
+      const nosymExe = path.join(dir, 'entry-probe-nosym.exe');
+      const rcNosym = rcEntry.status === 0
+        ? spawnSync(gcc, ['-g', '-s', '-O0', '-o', nosymExe, entrySrc], { encoding: 'utf-8', windowsHide: true })
+        : { status: 1, stderr: '入口探针基础编译失败' };
+      if (rcNosym.status !== 0) {
+        skipCheck('S10b 无符号表回退（不首停 + 中文说明）', '入口探针 -s 编译失败: ' + String(rcNosym.stderr || '').split('\n')[0]);
+      } else {
+        const ns = await launchSession(ctx, {
+          program: nosymExe, cwd: dir, sourcePath: entrySrc, breakpoints: [], extra: { stopOnEntry: true },
+        });
+        await ns.client.send('configurationDone', {});
+        const nsDone = await waitFor(() => ns.client.events('terminated').length > 0, 15000);
+        check('S10b 无符号表回退：不首停（0 个 stopped 事件）且程序正常跑完',
+          nsDone && ns.client.events('stopped').length === 0,
+          { terminated: ns.client.events('terminated').length, stoppedEvents: ns.client.events('stopped').length }, '0 stopped + terminated');
+        const nsOut = ns.client.outputs();
+        check('S10b 无符号表回退：输出一行可读中文说明（含 stopOnEntry 与原因）',
+          /stopOnEntry/.test(nsOut) && /未找到 main|无法生效/.test(nsOut), String(nsOut).slice(0, 300), '中文说明');
+        await ns.client.send('disconnect', {});
+        await waitFor(() => !ns.adapter.isActive(), 8000);
+      }
     }
 
     // ================= S11 运行中请求快速返回（P3 防护验收） =================

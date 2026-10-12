@@ -9,7 +9,7 @@ import * as fs from 'fs';
 import * as crypto from 'crypto';
 import { spawn } from 'child_process';
 import { execFile } from 'child_process';
-import { isExecutableTargetType, resolveExecutablePath } from './build/outputPath';
+import { isExecutableTargetType, resolveExecutablePath, requiresExecutableExtensionForLaunch } from './build/outputPath';
 import { ProjectParser, WorkspaceParser } from './model/parser';
 import { Project, BuildTarget, ProjectFile, TargetType, CommandType, Workspace, OptionsRelation, OptionsRelationType, LinkerExecutableOption, supportsCurrentPlatform, PLATFORM_ALL } from './model/types';
 import { serializeProject } from './model/projectWriter';
@@ -19,6 +19,7 @@ import { Compiler } from './compiler/compiler';
 import { queryCompilerVersionString } from './compiler/compilerVersion';
 import { CompilerRegistryDeps, findRegisteredCompilerId, resolveEffectiveCompilerId } from './compiler/compilerRegistry';
 import { BoundedMap, buildCompilerCacheKey } from './compiler/compilerCache';
+import { resolveProgramsForCompiler, setProgramsForCompiler } from './compiler/compilerPrograms';
 import { CompilerOptionsLoader } from './compiler/optionsLoader';
 import { CodeBlocksConfig } from './compiler/codeblocksConfig';
 import { detectAllCompilersAsync, DetectedCompiler } from './compiler/detector';
@@ -1569,15 +1570,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     vscode.commands.registerCommand('codeblocks.keybindings.import', () => void importKeybindingScheme()),
   );
 
-  // 设置变更 → 自动应用（去抖 800ms）
+  // 设置变更 → 自动应用（去抖 800ms；D-12：定时器句柄提升到模块级，供「恢复默认」先取消未决应用）
   {
-    let applyTimer: ReturnType<typeof setTimeout> | undefined;
-    context.subscriptions.push({ dispose: () => { if (applyTimer) clearTimeout(applyTimer); } });
+    context.subscriptions.push({ dispose: () => cancelPendingKeybindingApply() });
     context.subscriptions.push(
       vscode.workspace.onDidChangeConfiguration((e) => {
         if (!e.affectsConfiguration('codeblocks.keybindings.overrides')) return;
-        if (applyTimer) clearTimeout(applyTimer);
-        applyTimer = setTimeout(() => { applyKeybindings({ silent: true }); KeybindingPanel.refreshIfOpen(); }, 800);
+        scheduleKeybindingApply(800);
       }),
     );
   }
@@ -2720,6 +2719,23 @@ async function setKeybindingOverride(id: string, key: string | undefined): Promi
   return applyKeybindings({ silent: true });
 }
 
+/**
+ * `keybindings.overrides` 变更的去抖应用（D-12：句柄在模块级，供「恢复默认」先取消未决应用，
+ * 避免窗口期内用旧设置把托管条目写回 keybindings.json）。
+ */
+let keybindingApplyTimer: ReturnType<typeof setTimeout> | undefined;
+function scheduleKeybindingApply(delayMs = 800): void {
+  cancelPendingKeybindingApply();
+  keybindingApplyTimer = setTimeout(() => {
+    keybindingApplyTimer = undefined;
+    applyKeybindings({ silent: true });
+    KeybindingPanel.refreshIfOpen();
+  }, delayMs);
+}
+function cancelPendingKeybindingApply(): void {
+  if (keybindingApplyTimer) { clearTimeout(keybindingApplyTimer); keybindingApplyTimer = undefined; }
+}
+
 /** 恢复默认：清理文件中托管条目 + 清空覆盖设置（命令与面板共用；confirm=true 时先模态确认） */
 async function performKeybindingsReset(opts: { confirm?: boolean } = {}): Promise<KeybindingApplyResult> {
   if (opts.confirm) {
@@ -2731,6 +2747,12 @@ async function performKeybindingsReset(opts: { confirm?: boolean } = {}): Promis
     if (pick !== '重置') return { ok: false, changed: false, added: 0, removed: 0, message: '已取消' };
   }
   let removed = 0;
+  // D-12：去抖窗口内的「旧设置」会把托管条目写回 keybindings.json（先清文件、后写设置的顺序 + 未取消的去抖定时器）。
+  // 这里先取消未决去抖，再按「写设置 → 清文件 → 立即应用」的固定顺序收敛，最后清掉 update 触发的去抖（上面已同步应用）。
+  cancelPendingKeybindingApply();
+  const cfg = vscode.workspace.getConfiguration('codeblocks');
+  try { await cfg.update('keybindings.overrides', {}, vscode.ConfigurationTarget.Global); } catch { /* 忽略 */ }
+  try { await cfg.update('keybindings.overrides', undefined, vscode.ConfigurationTarget.Workspace); } catch { /* 忽略 */ }
   try {
     const target = userKeybindingsPath();
     if (target && fs.existsSync(target)) {
@@ -2743,9 +2765,8 @@ async function performKeybindingsReset(opts: { confirm?: boolean } = {}): Promis
   } catch (err) {
     outputChannel.warn(`[Code::Blocks] 清理 keybindings.json 失败：${(err as Error).message}`);
   }
-  const cfg = vscode.workspace.getConfiguration('codeblocks');
-  try { await cfg.update('keybindings.overrides', {}, vscode.ConfigurationTarget.Global); } catch { /* 忽略 */ }
-  try { await cfg.update('keybindings.overrides', undefined, vscode.ConfigurationTarget.Workspace); } catch { /* 忽略 */ }
+  applyKeybindings({ silent: true });
+  cancelPendingKeybindingApply();
   return { ok: true, changed: removed > 0, added: 0, removed, message: `已恢复默认（清除 ${removed} 个托管条目）` };
 }
 
@@ -4185,12 +4206,14 @@ function getCompiler(compilerId?: string): Compiler {
   const cfg = vscode.workspace.getConfiguration('codeblocks');
   const id = compilerId ?? cfg.get<string>('compilerId', 'gcc');
   const masterPath = cfg.get<string>('masterPath', '');
-  // P6：缓存命中直接返回（不再重复读取/解析编译器 XML，含 extends 链）
-  const cacheKey = buildCompilerCacheKey(
+  // D-20：程序路径按「实际使用的家族」解析（旧扁平形态只属于写入时的全局 compilerId）
+  const programs = resolveProgramsForCompiler(
+    cfg.get<unknown>('compilerPrograms', {}),
     id,
-    masterPath,
-    cfg.get<Record<string, string>>('compilerPrograms', {}),
+    cfg.get<string>('compilerId', 'gcc'),
   );
+  // P6：缓存命中直接返回（不再重复读取/解析编译器 XML，含 extends 链）
+  const cacheKey = buildCompilerCacheKey(id, masterPath, programs);
   const cached = compilerResultCache.get(cacheKey);
   if (cached) return cached;
   const built = buildCompilerInstance(id, masterPath, cfg);
@@ -4246,8 +4269,14 @@ function buildCompilerInstance(
       return applyGlobalDirs(compiler);
     }
 
-    // 次优：探测到的完整程序路径（交叉编译器如 RISC-V）
-    const programs = cfg.get<Record<string, string>>('compilerPrograms', {});
+    // 次优：探测到的完整程序路径（交叉编译器如 RISC-V）——**只作用于本家族**：
+    // 旧扁平形态视为「写入时的全局 compilerId 的程序路径」，其它家族不受影响（D-20：否则选定交叉编译器后
+    // `<Option compiler="gcc">` 的工程会被静默改用交叉工具链构建）
+    const programs = resolveProgramsForCompiler(
+      cfg.get<unknown>('compilerPrograms', {}),
+      id,
+      cfg.get<string>('compilerId', 'gcc'),
+    );
     if (programs && programs.C) {
       compiler.programs = { ...compiler.programs, ...programs } as any;
     }
@@ -4582,16 +4611,20 @@ async function detectCompilers(): Promise<void> {
 
   const picked = chosen?.compiler;
   if (picked) {
+    // D-20：写入前先取当前全局 compilerId —— 旧扁平形态会被归入该 id（它正是被写入时的拥有者）
+    const prevCompilerId = cfg.get<string>('compilerId', 'gcc');
     await cfg.update('compilerId', picked.id, vscode.ConfigurationTarget.Global);
     if (picked.masterPath) {
       await cfg.update('masterPath', picked.masterPath, vscode.ConfigurationTarget.Global);
     }
-    // 交叉编译器：持久化完整程序路径；标准编译器：清空以回退到 PATH 查找
-    if (picked.programs) {
-      await cfg.update('compilerPrograms', picked.programs, vscode.ConfigurationTarget.Global);
-    } else {
-      await cfg.update('compilerPrograms', {}, vscode.ConfigurationTarget.Global);
-    }
+    // 交叉编译器：按 compiler id 分组持久化完整程序路径；标准编译器：删除该 id 的条目（回退到 PATH 查找）
+    const nextPrograms = setProgramsForCompiler(
+      cfg.get<unknown>('compilerPrograms', {}),
+      picked.id,
+      picked.programs,
+      prevCompilerId,
+    );
+    await cfg.update('compilerPrograms', nextPrograms, vscode.ConfigurationTarget.Global);
     vscode.window.showInformationMessage(`已选择编译器: ${picked.name}`);
     updateCompilerStatusBar();
   }
@@ -6721,6 +6754,11 @@ async function run(): Promise<void> {
     vscode.window.showErrorMessage(`可执行文件不存在，请先构建（${path.relative(project.basePath, exePath)}）`);
     return;
   }
+  // D-13：无扩展名的产物在 Windows 下无法被 cmd.exe/CreateProcess 启动（TCC 等「-o 不补扩展名」的工具链）
+  if (requiresExecutableExtensionForLaunch(exePath, process.platform)) {
+    vscode.window.showErrorMessage(`产物缺少可执行扩展名（${path.basename(exePath)}），Windows 无法直接启动；请在目标「输出文件名」中写明扩展名（如 .exe），或保留目标的「扩展名自动」选项`);
+    return;
+  }
 
   // UI 核查 N2（方案 C）：同名终端先弃后建，避免连续运行堆积同名标签
   const terminal = createRunTerminal(`Run: ${target.title}`, {
@@ -6790,6 +6828,10 @@ async function deriveDebugLaunchConfig(targetTitle?: string): Promise<DerivedLau
     const exePath = resolveExecutablePath(project.basePath, expandedOut, process.platform, isExecutableTargetType(target.targetType));
     if (!fs.existsSync(exePath)) {
       return { error: `可执行文件不存在，请先构建（${path.relative(project.basePath, exePath)}）` };
+    }
+    // D-13：无扩展名产物无法启动（与 Run 同一口径，给出可操作提示而不是让 GDB 报 not in executable format）
+    if (requiresExecutableExtensionForLaunch(exePath, process.platform)) {
+      return { error: `产物缺少可执行扩展名（${path.basename(exePath)}），Windows 无法启动调试；请在目标「输出文件名」中写明扩展名（如 .exe）` };
     }
     program = exePath;
   }
