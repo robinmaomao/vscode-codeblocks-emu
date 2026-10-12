@@ -1182,7 +1182,7 @@
               },
               "stopOnEntry": {
                 "type": "boolean",
-                "description": "启动后立即暂停在入口（临时断点 main），并上报 stopped(reason=entry)；无 main/无符号时回退为不暂停并给出说明",
+                "description": "启动后立即暂停在程序入口并上报 stopped(reason=entry)。按 main → WinMain → wWinMain 依次选取入口符号（GUI 程序的 CRT main 桩不误用），均不可用时回退到程序入口地址（可重定位镜像除外，入口地址停点无源码行）",
                 "default": false
               },
               "environment": {
