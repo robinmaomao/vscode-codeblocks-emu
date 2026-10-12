@@ -1,0 +1,156 @@
+name: CI
+
+# 分层测试的 CI 落点（与本地 `npm run test:*` 完全同源，命令一一对应）：
+#   · 必跑（每次 push/PR）：契约层(L0) + 无头回归(L1) + 打包安装冒烟(L5)
+#   · 工具链门控：真实工程 E2E(L3) 需要 gcc/gdb/ar；runner 未提供时自动跳过（不误报失败）
+#   · 手动触发（workflow_dispatch）：视觉回归、性能基准、VS Code 宿主集成
+#     这三层依赖桌面会话/下载 VS Code/机器稳定性，作为可选门禁，默认不阻塞主流程。
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  # ---------- 必跑：编译/打包/契约/无头/打包冒烟 ----------
+  core:
+    name: L0-L1-L5 契约与无头回归
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+
+      - name: 安装依赖
+        run: npm ci
+
+      - name: 编译（tsc）
+        run: npm run compile
+
+      - name: 打包（esbuild bundle）
+        run: npm run bundle
+
+      - name: 工具链自检（信息性）
+        shell: pwsh
+        continue-on-error: true
+        run: |
+          foreach ($t in @('node', 'npm', 'gcc', 'g++', 'gdb', 'ar', 'mingw32-make')) {
+            $c = Get-Command $t -ErrorAction SilentlyContinue
+            if ($c) { Write-Host "$t => $($c.Source)" } else { Write-Host "$t => (missing)" }
+          }
+
+      - name: 契约层（贡献点/命令交叉校验/资源/版本一致性）
+        run: npm run test:contract
+
+      - name: 无头回归（L1）
+        run: npm test
+
+      - name: 打包与安装冒烟（L5）
+        run: npm run test:pack
+
+      - name: 生成覆盖矩阵
+        run: npm run coverage:matrix
+
+      - name: 归档测试报告与覆盖矩阵
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-reports
+          path: |
+            .cbtest.txt
+            .cb-tools/report-*.json
+            docs/测试覆盖矩阵.md
+          if-no-files-found: ignore
+
+  # ---------- 门控：真实工程 E2E（需要 gcc/g++/gdb/ar） ----------
+  e2e:
+    name: L3 真实工程 E2E
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+
+      - name: 安装依赖
+        run: npm ci
+
+      - name: 准备 MinGW 到 PATH（若 runner 已自带）
+        shell: pwsh
+        run: |
+          foreach ($d in @('C:\mingw64\bin', 'C:\ProgramData\mingw64\mingw64\bin', 'C:\msys64\mingw64\bin', 'C:\ProgramData\chocolatey\bin')) {
+            if (Test-Path $d) { Write-Host "add $d"; Add-Content -Path $env:GITHUB_PATH -Value $d }
+          }
+
+      - name: 探测工具链
+        id: tools
+        shell: pwsh
+        run: |
+          $missing = @()
+          foreach ($t in @('gcc', 'g++', 'gdb', 'ar')) {
+            if (-not (Get-Command $t -ErrorAction SilentlyContinue)) { $missing += $t }
+          }
+          if ($missing.Count -eq 0) { "have=true" | Add-Content -Path $env:GITHUB_OUTPUT }
+          else {
+            "have=false" | Add-Content -Path $env:GITHUB_OUTPUT
+            Write-Warning ("缺少工具链：" + ($missing -join ', ') + ' → 跳过 L3（不判失败）')
+          }
+
+      - name: 编译
+        if: steps.tools.outputs.have == 'true'
+        run: npm run compile
+
+      - name: 真实工程 E2E（构建/依赖/诊断等场景）
+        if: steps.tools.outputs.have == 'true'
+        run: npm run test:e2e
+
+      - name: 真实 GDB 调试 E2E
+        if: steps.tools.outputs.have == 'true' && hashFiles('tests/e2e/test-e2e-debug.js') != ''
+        run: node tests/e2e/test-e2e-debug.js
+
+  # ---------- 可选：桌面相关三层（仅手动触发，不阻塞主流程） ----------
+  desktop:
+    name: L4/L2 视觉·性能·宿主（可选）
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+
+      - name: 安装依赖
+        run: npm ci
+
+      - name: 像素级视觉回归（系统 Edge + 基线 PNG）
+        continue-on-error: true
+        run: npm run test:visual
+
+      - name: 性能基准（硬预算门禁）
+        continue-on-error: true
+        run: npm run test:perf
+
+      - name: VS Code 宿主集成（自动下载 engines 最低版本 1.85.0）
+        continue-on-error: true
+        run: npm run test:host
+        env:
+          CB_HOST_TEST_TIMEOUT: '180000'
+
+      - name: 归档差异图与报告
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-reports
+          path: |
+            .cb-tools/visual-diff/**
+            docs/性能基准.md
+          if-no-files-found: ignore
