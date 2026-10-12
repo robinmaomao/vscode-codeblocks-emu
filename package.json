@@ -587,7 +587,7 @@
             "type": "object",
             "scope": "machine-overridable",
             "default": {},
-            "description": "编译器程序完整路径（交叉编译器如 RISC-V 由「探测编译器」自动写入，普通编译器留空）",
+            "description": "编译器程序完整路径。按编译器 id 分组（推荐）：{\"avr-gcc\":{\"C\":\"…\\\\avr-gcc.exe\"}}；旧扁平写法 {\"C\":\"…\"} 仅对其所属的全局 compilerId 生效（旧行为是全局生效、会把交叉编译器程序泄漏到别的家族，现已修正）。交叉编译器由「探测编译器」自动写入；普通编译器留空以回退 PATH 查找。",
             "properties": {
               "C": {
                 "type": "string"
@@ -608,6 +608,13 @@
                 "type": "string"
               },
               "DBGconfig": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": {
+              "type": "object",
+              "description": "编译器 id → 该家族的程序路径表",
+              "additionalProperties": {
                 "type": "string"
               }
             }
@@ -1172,6 +1179,11 @@
                 },
                 "description": "传给程序的命令行参数（引号感知分词对齐 CB）",
                 "default": []
+              },
+              "stopOnEntry": {
+                "type": "boolean",
+                "description": "启动后立即暂停在入口（临时断点 main），并上报 stopped(reason=entry)；无 main/无符号时回退为不暂停并给出说明",
+                "default": false
               },
               "environment": {
                 "type": "object",

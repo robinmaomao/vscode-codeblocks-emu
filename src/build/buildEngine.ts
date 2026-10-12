@@ -22,7 +22,7 @@ import { buildLogPrefs, msg } from './logLang';
 import { BuildCancelHandle } from './cancelToken';
 import { BuildProfiler } from './buildProfiler';
 import { decodeText } from '../tools/encoding';
-import { isExecutableTargetType, resolveExecutablePath, executableCandidates } from './outputPath';
+import { isExecutableTargetType, resolveExecutablePath, executableCandidates, withPlatformExtension } from './outputPath';
 import { applyResponseFile, compareFilesByWeight, linkRespBase } from './commandLine';
 import { clearCompilerCacheResolveCache, normalizeCompilerCacheKind, resolveCompilerCachePathCached } from './compilerCache';
 import { upperDrive, shortPathWin } from '../tools/pathCase';
@@ -1573,12 +1573,15 @@ export class BuildEngine {
     }
   }
 
-  /** 输出文件名宏展开（对齐 ReplaceMacros(target->GetOutputFilename(), target)） */
+  /** 输出文件名宏展开（对齐 ReplaceMacros(target->GetOutputFilename(), target)）
+   *  D-13：Windows 可执行类目标 + `extension_auto` 且输出无扩展名时补 `.exe` —— 让 TCC 等
+   *  「`-o` 不补扩展名」的工具链也产出可启动文件（否则 Run/Debug 会失败）。 */
   private expandedOutputFilename(target: BuildTarget): string {
-    return replaceCbMacros(target.outputFilename, {
+    const expanded = replaceCbMacros(target.outputFilename, {
       vars: this.targetMacroVars(target),
       customVars: this.project.customVariables ?? {},
     });
+    return withPlatformExtension(expanded, process.platform, isExecutableTargetType(target.targetType), target.extensionAuto !== false);
   }
 
   /** 文件 mtime（毫秒，失败返回 0，对齐 depsTimeStamp 语义） */

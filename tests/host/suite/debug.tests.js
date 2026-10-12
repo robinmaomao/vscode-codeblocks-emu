@@ -7,7 +7,9 @@
 //     之后只用事件与 `activeDebugSession` 观测（该命令的 promise 可能长期 pending，一律不 await）。
 //  2. **断点必须落在会话所属工作区文件夹内**：VS Code 只把该文件夹内的断点下发给适配器。故探针源码在工作区内
 //     现场生成并用 gcc 编译（顺带验证「源码 → 编译 → 调试」宿主全链路）。
-//  3. 适配器未消费 `stopOnEntry`，且探针为长驻循环 → 用「暂停 → 停止 → 下断点 → 继续 → 命中」验证断点闭环。
+// 3. 本用例**刻意**用 `stopOnEntry: false` 走「暂停 → 停止 → 下断点 → 继续 → 命中」的链路（验证断点闭环）；
+//    `stopOnEntry` 本身已实现（C-01：入口临时断点 + `stopped(reason=entry)`），正向断言在
+//    tests/e2e/test-e2e-debug.js 的 S10b（含关闭对照与无符号回退）。
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');

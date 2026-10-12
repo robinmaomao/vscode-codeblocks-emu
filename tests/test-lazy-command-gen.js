@@ -90,9 +90,11 @@ function makeEngine(p, c) {
 }
 
 // 准备：源（旧）→ 对象（中）→ 输出（新）＝全部 up-to-date
+// 注（D-13）：Windows 可执行类目标的输出按 `extension_auto` 补平台扩展名 ⇒ 期望产物是 `app.exe`
+//（MinGW gcc 自己会补 .exe、TCC 等不会，扩展显式补上以保证 Run/Debug 可启动）
 const src = path.join(dir, 'main.c');
 const objPath = path.join(dir, 'obj', 'Debug', 'main.o');
-const outPath = path.join(dir, 'bin', 'Debug', 'app');
+const outPath = path.join(dir, 'bin', 'Debug', 'app.exe');
 const now = Date.now();
 fs.writeFileSync(src, 'int main(void){return 0;}\n');
 fs.utimesSync(src, new Date(now - 60000), new Date(now - 60000));

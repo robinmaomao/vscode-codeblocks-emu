@@ -296,8 +296,9 @@ async function buildLinkAndCheckElf(desc) {
     skip('S8 SDCC', '未找到 sdcc');
   }
   if (tcc) {
-    // TCC 链接 `-o` 不补 `.exe`（与 MinGW 不同，实测产物为无扩展名文件，Windows 无法直接启动）→ 显式 `.exe` 输出
-    await buildAndRun('tc-tcc', tcc, { C: tcc, CPP: tcc, LD: tcc, LIB: ar }, 'probe: sum=5', [], [], 'tc-tcc.exe');
+    // D-13 修复后：TCC 的 `-o` 不补 `.exe`，但扩展按 `extension_auto`（平台默认扩展名）显式补 `.exe`
+    // ⇒ 用**无扩展名**输出也能产出可启动文件（修复前产物为无扩展名文件，Windows 无法启动）
+    await buildAndRun('tc-tcc', tcc, { C: tcc, CPP: tcc, LD: tcc, LIB: ar }, 'probe: sum=5');
   } else {
     skip('S8 TCC', '未找到 tcc（官方发布区见文末安装指引）');
   }

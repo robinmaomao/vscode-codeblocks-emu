@@ -13,6 +13,7 @@ import { Compiler } from '../compiler/compiler';
 import { upperDrive, shortPathWin } from '../tools/pathCase';
 import { replaceCbMacros, cbBuiltinVars, envVarMap } from './cbMacros';
 import { strictQuoting } from '../build/logLang';
+import { isExecutableTargetType, withPlatformExtension } from '../build/outputPath';
 import { normalizeCompilerCacheKind, resolveCompilerCachePathCached } from '../build/compilerCache';
 import {
   Project,
@@ -304,8 +305,16 @@ export class CommandGenerator {
 
   private setupOutputFilenames(target: BuildTarget): string {
     // 对齐 CodeBlocks SetupOutputFilenames（compilercommandgenerator.cpp:654-656 先 ReplaceMacros，Quote 后 FixPathSeparators）：
-    // 保留原生分隔符（forceFwdSlashes=true 时 \ → /，默认保持反斜杠）
-    return quoteIfNeeded(this.fixSep(this.expandCb(target.outputFilename, target)));
+    // 保留原生分隔符（forceFwdSlashes=true 时 \ → /，默认保持反斜杠）。
+    // D-13：Windows 可执行类目标 + extension_auto 且输出无扩展名时补 `.exe` —— MinGW gcc 会自己补，
+    // 但 TCC 等工具链不会 ⇒ 产物无扩展名导致 Run/Debug 无法启动（保护性差异，见 docs/遗留问题决策清单 D-13）。
+    const expanded = withPlatformExtension(
+      this.expandCb(target.outputFilename, target),
+      process.platform,
+      isExecutableTargetType(target.targetType),
+      target.extensionAuto !== false,
+    );
+    return quoteIfNeeded(this.fixSep(expanded));
   }
 
   private setupStaticOutput(target: BuildTarget): string {
