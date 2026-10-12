@@ -3,13 +3,15 @@
 // 覆盖：launch / 断点（普通·条件·命中次数·日志点）/ 单步（行级·步入·步出·指令级）/
 //       线程 / 调用栈 / 作用域与变量（含嵌套结构展开）/ 变量修改 / 表达式求值 /
 //       反汇编 / 内存读写 / 数据断点 / 指令断点 / 运行到光标（gotoTargets+goto）/
-//       Set Next Statement / 异常断点 / 用户命令透传 / 断线终止
+//       Set Next Statement / 异常断点 / 用户命令透传 / 断线终止 /
+//       attach(+Detach 不杀进程) / 多线程帧切换（指定线程 ID 取帧与帧下变量）/ 运行中请求防护 /
+//       stopOnEntry 能力探测
 //
 // 用法：node tests/e2e/test-e2e-debug.js [--filter <子串>]
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { spawnSync } = require('child_process');
+const { spawn, spawnSync } = require('child_process');
 const { installVscodeMock } = require('../_harness/vscodeMock');
 
 const args = process.argv.slice(2);
@@ -76,6 +78,11 @@ int compute(int n) {
 DWORD WINAPI worker(LPVOID p) {
     (void)p;
     for (int i = 0; i < 100000000; i++) { g_counter++; }
+    // 长驻：便于 attach/多线程场景在该线程断点命中（每次循环都执行本行）
+    for (int w = 0; w < 1000000000; w++) {
+        g_counter++;
+        Sleep(1);                                              /* MARK:WORKER_KEEPALIVE */
+    }
     return 0;
 }
 
@@ -219,6 +226,7 @@ async function main() {
     const LOOP = lineOf(PROBE_C, 'LOOP');
     const LOOP2 = lineOf(PROBE_C, 'LOOP2');
     const AFTER_LOOP = lineOf(PROBE_C, 'AFTER_LOOP');
+    const WORKER_KEEPALIVE = lineOf(PROBE_C, 'WORKER_KEEPALIVE');
     const ctx = { gdb };
 
     // ================= S1 launch + 普通断点 + 调用栈/作用域/变量 =================
@@ -712,6 +720,213 @@ async function main() {
       check('S8 terminate 请求成功', term.success, term.message);
       const ended = await waitFor(() => client.events('terminated').length > 0 || !adapter.isActive(), 10000);
       check('S8 session 终止（terminated 事件或会话失效）', ended, { terminated: client.events('terminated').length, active: adapter.isActive() });
+    }
+
+    // ================= S10 attach / detach + 多线程帧切换（真实外部进程，协议级） =================
+    // 与 tests/test-debug-detach-symbol.js（D1/D2 单元级）互补：此处只做 DAP 协议级断言
+    //（attach(processId) → 断点命中 → 多线程取帧/变量 → Detach 不杀进程）。
+    {
+      const probe = spawn(exePath, [], { cwd: dir, detached: true, stdio: 'ignore' });
+      const pid = probe.pid;
+      let killed = false;
+      const killProbe = () => {
+        if (killed) return;
+        killed = true;
+        try { spawnSync('taskkill', ['/F', '/PID', String(pid)], { encoding: 'utf-8', windowsHide: true }); } catch { /* ignore */ }
+      };
+      const alive = () => /probe\.exe/i.test(String(spawnSync('tasklist', ['/FI', `PID eq ${pid}`, '/NH'], { encoding: 'utf-8', windowsHide: true }).stdout || ''));
+      try {
+        await sleep(900); // 让探针进入常驻循环（主线程 keepalive + worker 线程循环）
+        check('S10 附加前目标进程存活', alive(), pid, 'alive');
+
+        const { GdbDebugAdapter } = require('../../dist/debug/gdbDebugAdapter.js');
+        const adapter = new GdbDebugAdapter('e2e-attach-' + Math.random().toString(36).slice(2, 8));
+        const client = makeClient(adapter);
+        await client.send('initialize', { adapterID: 'codeblocks', linesStartAt1: true, columnsStartAt1: true, pathFormat: 'path' });
+        const attachResp = await client.send('attach', { gdbPath: ctx.gdb, processId: pid, program: exePath, cwd: dir });
+        check('S10 attach(processId) 请求成功', attachResp.success === true, attachResp.message, 'success');
+        const initedA = await waitFor(() => client.events('initialized').length > 0, 30000);
+        check('S10 attach 后收到 initialized 事件', initedA, initedA, true);
+        check('S10 adapter.isAttached() 语义（对齐 CB IsAttachedToProcess）', adapter.isAttached() === true, adapter.isAttached(), true);
+        const stoppedSoon = await waitFor(() => adapter.isStopped(), 8000);
+        check('S10 附加后目标进入停止态（GDB attach 默认停住目标）', stoppedSoon, adapter.isStopped(), true);
+
+        const thA = await client.send('threads', {});
+        check('S10 attach 后 threads 可用（≥1 线程）', thA.success && (thA.body?.threads || []).length >= 1,
+          thA.body && thA.body.threads.map((t) => [t.id, t.name]), '≥1');
+
+        // worker 线程常驻循环断点（PROBE_C 的 MARK:WORKER_KEEPALIVE）
+        const bpA = await client.send('setBreakpoints', { source: { path: srcPath }, breakpoints: [{ line: WORKER_KEEPALIVE }] });
+        check('S10 附加会话可设置断点且 verified=true',
+          bpA.success && bpA.body?.breakpoints?.[0]?.verified === true, bpA.body && bpA.body.breakpoints, 'verified');
+
+        await client.send('continue', { threadId: thA.body?.threads?.[0]?.id ?? 1 });
+        const stopA = await client.waitStop(20000);
+        check('S10 附加会话断点命中（worker 常驻循环行）',
+          !!stopA && stopA.body.reason === 'breakpoint', stopA && stopA.body, 'breakpoint');
+
+        const workerThreadId = stopA ? stopA.body.threadId : 0;
+        const stW = await client.send('stackTrace', { threadId: workerThreadId, levels: 12 });
+        const stWFrames = stW.body?.stackFrames || [];
+        check('S10 命中线程的栈顶帧为 worker（指定线程 ID 取帧）',
+          stWFrames.length >= 1 && /worker/.test(String(stWFrames[0].name)),
+          stWFrames.slice(0, 3).map((f) => f.name), 'worker');
+
+        const thAll = await client.send('threads', {});
+        check('S10 目标含多个线程（≥2）', (thAll.body?.threads || []).length >= 2,
+          (thAll.body?.threads || []).map((t) => t.id), '≥2');
+
+        // 找出主线程：逐线程取帧，栈中含 main 的那个（多线程帧切换的定位手段）
+        let mainThreadId = 0;
+        for (const t of thAll.body?.threads || []) {
+          if (t.id === workerThreadId) continue;
+          const st = await client.send('stackTrace', { threadId: t.id, levels: 40 });
+          if ((st.body?.stackFrames || []).some((f) => /^main$/.test(String(f.name)))) { mainThreadId = t.id; break; }
+        }
+        check('S10 多线程中可定位主线程（stackTrace 指定其它线程 ID 取帧）', mainThreadId > 0, mainThreadId, '>0');
+
+        const stMain = await client.send('stackTrace', { threadId: mainThreadId, levels: 40 });
+        const stMainFrames = stMain.body?.stackFrames || [];
+        const mainFrame = stMainFrames.find((f) => /^main$/.test(String(f.name)));
+        check('S10 指定主线程 ID 后栈含 main（帧随线程切换，非 worker 栈）',
+          !!mainFrame && stMainFrames.length > 0 && !/worker/.test(String(stMainFrames[0].name)),
+          stMainFrames.slice(0, 3).map((f) => f.name), '含 main 且栈顶非 worker');
+
+        const stW2 = await client.send('stackTrace', { threadId: workerThreadId, levels: 12 });
+        const stW2Frames = stW2.body?.stackFrames || [];
+        check('S10 切回 worker 线程 ID 后栈顶恢复为 worker（-thread-select 双向有效）',
+          /worker/.test(String((stW2Frames[0] || {}).name)), stW2Frames.slice(0, 2).map((f) => f.name), 'worker');
+
+        // 指定帧下的 scopes/variables（切换帧的 variablesReference 语义）
+        if (mainFrame) {
+          const scMain = await client.send('scopes', { frameId: mainFrame.id });
+          const localsMain = (scMain.body?.scopes || []).find((s) => /本地/.test(s.name));
+          const vMain = await client.send('variables', { variablesReference: localsMain.variablesReference });
+          const namesMain = (vMain.body?.variables || []).map((v) => v.name);
+          check('S10 主线程帧下取到 main 的局部变量（local_a=10）',
+            vMain.success && (vMain.body?.variables || []).some((v) => v.name === 'local_a' && v.value === '10'),
+            (vMain.body?.variables || []).map((v) => [v.name, v.value]).slice(0, 8), 'local_a=10');
+          check('S10 主线程帧变量不含 worker 局部变量 w（线程/帧未串台）', !namesMain.includes('w'), namesMain, '无 w');
+        } else {
+          skipCheck('S10 主线程帧下变量取值', '未定位到 main 帧（前序断言已失败）');
+        }
+
+        if (stW2Frames.length) {
+          const scWorker = await client.send('scopes', { frameId: stW2Frames[0].id });
+          const localsWorker = (scWorker.body?.scopes || []).find((s) => /本地/.test(s.name));
+          const vWorker = await client.send('variables', { variablesReference: localsWorker.variablesReference });
+          const namesWorker = (vWorker.body?.variables || []).map((v) => v.name);
+          check('S10 worker 线程帧下取到 worker 的局部变量 w（帧切换回 worker 生效）',
+            vWorker.success && namesWorker.includes('w'), namesWorker, '含 w');
+          check('S10 worker 帧变量不含 local_a（两线程帧相互隔离）', !namesWorker.includes('local_a'), namesWorker, '无 local_a');
+        } else {
+          skipCheck('S10 worker 线程帧下变量取值', '未取得 worker 栈帧（前序断言已失败）');
+        }
+
+        // 表达式求值同样遵循 frameId（切换帧的求值上下文语义；当前选中线程为 worker）
+        if (mainFrame) {
+          const evMain = await client.send('evaluate', { expression: 'local_a', frameId: mainFrame.id, context: 'watch' });
+          check('S10 指定主线程帧求值 local_a = 10（evaluate 遵循 frameId 跨线程切帧）',
+            evMain.success && String(evMain.body?.result ?? '').trim() === '10',
+            { success: evMain.success, result: evMain.body && evMain.body.result, message: evMain.message }, '10');
+        } else {
+          skipCheck('S10 指定主线程帧求值', '未定位到 main 帧（前序断言已失败）');
+        }
+        if (stW2Frames.length) {
+          const evWorker = await client.send('evaluate', { expression: 'w', frameId: stW2Frames[0].id, context: 'watch' });
+          check('S10 切回 worker 帧求值 w 为数字（求值上下文随 frameId 切回 worker）',
+            evWorker.success && /^\d+$/.test(String(evWorker.body?.result ?? '').trim()),
+            { success: evWorker.success, result: evWorker.body && evWorker.body.result }, '数字');
+        } else {
+          skipCheck('S10 worker 帧求值', '未取得 worker 栈帧（前序断言已失败）');
+        }
+
+        // Detach（DAP 协议路径：附加会话 disconnect → -target-detach）：CB 语义「分离不杀进程」
+        const dcA = await client.send('disconnect', {});
+        check('S10 附加会话 disconnect 请求成功', dcA.success === true, dcA.message, 'success');
+        await waitFor(() => !adapter.isActive(), 8000);
+        check('S10 Detach 后会话结束（适配器释放）', !adapter.isActive(), adapter.isActive(), false);
+        check('S10 适配器报告已分离（isDetached）', adapter.isDetached() === true, adapter.isDetached(), true);
+        check('S10 Detach 后停止态清除（isStopped=false）', adapter.isStopped() === false, adapter.isStopped(), false);
+        await sleep(400);
+        check('S10 Detach 后目标进程仍存活（CB「分离不杀进程」语义）', alive(), alive(), true);
+      } finally {
+        killProbe();
+      }
+    }
+
+    // ================= S10b stopOnEntry 语义（能力探测） =================
+    // DAP 标准参数 stopOnEntry：VS Code 在 launch.json 配置时下发。实测适配器未消费该参数
+    //（全仓库无引用）——程序直接运行，不发生首停。此处记录现状并登记为能力缺口（不伪造断言）。
+    {
+      const { adapter, client } = await launchSession(ctx, {
+        program: exePath, cwd: dir, sourcePath: srcPath, breakpoints: [], extra: { stopOnEntry: true },
+      });
+      await client.send('configurationDone', {});
+      const entryStop = await client.waitStop(6000);
+      if (entryStop) {
+        check('S10b stopOnEntry=true 触发首停（适配器已消费该参数）',
+          entryStop.body.reason === 'entry' || entryStop.body.reason === 'breakpoint', entryStop.body, "reason='entry'");
+      } else {
+        check('S10b stopOnEntry 未生效时程序确实在运行（未停止）', adapter.isStopped() === false && adapter.isActive(), { stopped: adapter.isStopped(), active: adapter.isActive() }, 'running');
+        skipCheck('S10b stopOnEntry=true 首停', '能力缺口：适配器未消费 launch 的 stopOnEntry（程序直接运行，无 entry 首停）');
+      }
+      await client.send('disconnect', {});
+      await waitFor(() => !adapter.isActive(), 8000);
+    }
+
+    // ================= S11 运行中请求快速返回（P3 防护验收） =================
+    // 实测事实：本机 GDB 8.1 在程序运行时同步 MI 无任何回执（-thread-info/-break-insert/
+    // -data-evaluate-expression 全部阻塞）。修复前：每个请求 ~30s 后超时（差分实测 30014ms/30000ms/
+    // 30016ms/30005ms 全部 DAP 超时）；修复后：均 <5s 内返回缓存/占位或明确失败。
+    {
+      const { adapter, client } = await launchSession(ctx, {
+        program: exePath, cwd: dir, sourcePath: srcPath, breakpoints: [],
+      });
+      await client.send('configurationDone', {});
+      await sleep(800);
+      check('S11 程序处于运行中（未停止）', adapter.isStopped() === false && adapter.isActive(),
+        { stopped: adapter.isStopped(), active: adapter.isActive() }, 'running');
+
+      const t0 = Date.now();
+      const thRun = await client.send('threads', {});
+      const thMs = Date.now() - t0;
+      check('S11 运行中 threads 在 5s 内返回（不再等 30s MI 超时）', thRun.success && thMs < 5000,
+        { ms: thMs, success: thRun.success }, '<5000ms');
+      check('S11 运行中 threads 返回缓存线程列表 + 中文说明',
+        Array.isArray(thRun.body?.threads) && /正在运行/.test(String(thRun.message || '')),
+        { n: (thRun.body?.threads || []).length, message: thRun.message }, '缓存列表 + 说明');
+
+      const t1 = Date.now();
+      const evRun = await client.send('evaluate', { expression: 'g_counter', frameId: 0, context: 'watch' });
+      const evMs = Date.now() - t1;
+      check('S11 运行中 evaluate 快速失败并给出中文说明',
+        evRun.success === false && evMs < 5000 && /正在运行/.test(String(evRun.message || '')),
+        { ms: evMs, message: evRun.message }, '<5000ms 失败响应');
+
+      const t2 = Date.now();
+      const stRun = await client.send('stackTrace', { threadId: 1, levels: 2 });
+      const stMs = Date.now() - t2;
+      check('S11 运行中 stackTrace 快速失败（不悬挂）', stRun.success === false && stMs < 5000,
+        { ms: stMs, message: stRun.message }, '<5000ms');
+
+      const t3 = Date.now();
+      const bpRun = await client.send('setBreakpoints', { source: { path: srcPath }, breakpoints: [{ line: WORKER_KEEPALIVE }] });
+      const bpMs = Date.now() - t3;
+      check('S11 运行中 setBreakpoints 快速返回「未下发」占位（verified=false + 说明）',
+        bpRun.success && bpRun.body?.breakpoints?.[0]?.verified === false
+        && /正在运行/.test(String(bpRun.body?.breakpoints?.[0]?.message || '')) && bpMs < 5000,
+        { ms: bpMs, bp: bpRun.body && bpRun.body.breakpoints }, '<5000ms + verified=false');
+
+      const totalMs = Date.now() - t0;
+      check('S11 四个运行中请求合计 < 10s（修复前每个 ~30s 且全部超时）', totalMs < 10000, totalMs, '<10000ms');
+
+      const t4 = Date.now();
+      await client.send('disconnect', {});
+      const dcMs = Date.now() - t4;
+      await waitFor(() => !adapter.isActive(), 8000);
+      check('S11 运行中 disconnect 快速结束会话', dcMs < 5000 && !adapter.isActive(),
+        { ms: dcMs, active: adapter.isActive() }, '<5000ms 且会话结束');
     }
   } finally {
     cleanup();
