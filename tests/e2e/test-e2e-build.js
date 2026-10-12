@@ -158,7 +158,8 @@ async function scenarioSpacesAndAsm() {
 
 async function scenarioLongCommandAndScripts() {
   // S11 超长命令行 → 响应文件（.respFile）
-  const { generateBigProject } = require('../perf/fixtures');
+  // 灯具生成器下沉到 _harness：避免 E2E 依赖 perf 层（跨层依赖曾在 main 中间态导致 L3 失败）
+  const { generateBigProject } = require('../_harness/projectFixtures');
   const dir = H.mkTemp('cb-e2e-resp-');
   const big = generateBigProject(dir, { files: 220, dirs: 5, targets: ['Debug'], withSources: true, longNames: true });
   // 探针工程需要 main() 才能链接成功（生成器产出的是纯函数，无入口）；写入首个 .c
