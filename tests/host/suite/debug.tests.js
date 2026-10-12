@@ -194,7 +194,7 @@ suite('宿主集成 · 真实调试会话（工作台发起）', (t) => {
       assert.strictEqual(hit.frames[0].name, 'main', `栈顶应为 main，实际 ${hit.frames[0].name}`);
       assert.strictEqual(hit.frames[0].line, breakLine, `应停在断点行 ${breakLine}，实际 ${hit.frames[0].line}`);
 
-      // 4) 作用域与变量：宿主内完整链路（D-02/D-03 登记项在此口径下记录）
+      // 4) 作用域与变量：宿主内完整链路（局部变量取值；D-02/D-03 修复后的变量树行为见 e2e 调试矩阵 S1/S2b）
       const scopes = await withTimeout(session.customRequest('scopes', { frameId: hit.frames[0].id }), 15000, 'scopes');
       assert.ok(scopes && scopes.scopes && scopes.scopes.length >= 1, 'scopes 为空');
       step(`scopes=${scopes.scopes.map((s) => s.name).join(',')}`);
