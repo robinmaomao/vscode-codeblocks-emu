@@ -6,6 +6,8 @@
 const { runAll } = require('./framework');
 require('./extension.tests');
 require('./debug.tests');
+require('./webview.tests');
+require('./build.tests');
 
 exports.run = async (testsRoot, callback) => {
   try {
