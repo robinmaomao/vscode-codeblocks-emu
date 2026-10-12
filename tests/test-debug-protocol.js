@@ -5,7 +5,7 @@
 //  - 第五十轮修复 7：裸文本行（MinGW GDB 程序 stdout 无 MI 前缀）识别与会话转发
 const {
   parseDisassemble, selectWindow, parseQuotedList, parseRegisterValues, parseReadMemory,
-  hexToBase64, base64ToHex, parseCatchpointNumbers, parseTasklist, parsePsList, pointerMemoryReference,
+  hexToBase64, base64ToHex, parseCatchpointNumbers, parseCatchpoints, parseTasklist, parsePsList, pointerMemoryReference,
   parseStackFrameTuples, parseThreadTuples, mapStopReason, isExitReason, logpointExpressions,
   breakpointLocation, isPendingBreakpoint, isUnframedLine, truthyMiValue, parseInstructionReference,
 } = require('../dist/debug/miParse.js');
@@ -58,6 +58,15 @@ check('hex→base64→hex 往返', base64ToHex(hexToBase64(mem)) === mem, base64
 const bl = 'BreakpointTable={nr_rows="2",body=[bkpt={number="1",type="catchpoint",what="exception throw"},{bkpt={number="2",type="breakpoint",what="main"}]}';
 const catches = parseCatchpointNumbers(bl);
 check('catchpoint 编号识别（仅 catchpoint）', catches.length === 1 && catches[0] === '1', catches, ['1']);
+
+// D-04：老版 GDB（8.1）无 -catch-throw/-catch-catch MI 命令，只能 CLI `catch throw`，
+// 其条目在 -break-list 里是 type="breakpoint" + catch-type="throw"
+const blCli = 'BreakpointTable={nr_rows="2",body=[bkpt={number="1",type="breakpoint",disp="keep",addr="0x401638",what="exception throw",catch-type="throw",thread-groups=["i1"],times="0"},{bkpt={number="2",type="breakpoint",what="main"}]}';
+const catchesCli = parseCatchpoints(blCli);
+check('catchpoint 识别（CLI catch 的 catch-type 形态）',
+  catchesCli.length === 1 && catchesCli[0].number === '1' && catchesCli[0].catchType === 'throw',
+  catchesCli, [{ number: '1', catchType: 'throw' }]);
+check('catchpoint 编号识别（catch-type 形态，普通断点不计入）', parseCatchpointNumbers(blCli).join() === '1', parseCatchpointNumbers(blCli), ['1']);
 
 // ---- 7. 进程列表 ----
 const tl = '"notepad.exe","1234","Console","1","12,345 K"\r\n"my app.exe","4321","Console","1","80,000 K"\r\n';
