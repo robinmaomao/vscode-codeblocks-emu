@@ -10,7 +10,9 @@
  *
  * 限制（导出文件头注明）：头文件依赖未跟踪；生成器文件顺序依赖 make 的默认顺序；
  * 路径含空格的工程建议在无空格目录使用（Make 对目标名空格支持有限）。
- * win32 下目录创建/删除用 `cmd /c` 内联（cmd 与 sh 两种 make shell 下均可执行）。
+ * win32 下目录创建/删除用 `cmd /c` 内联，并**显式把 make 的 SHELL 固定为 cmd.exe**：
+ * mingw32-make 在 PATH 中找到 `sh.exe`（如 Git/MSYS 自带）时会改用 sh 执行配方，而 MSYS 会把 `cmd /c` 的
+ * `/c` 改写成 `C:\`，导致目录创建失败（缺陷 D-06，CI runner 已复现）。
  */
 import * as path from 'path';
 
@@ -66,6 +68,13 @@ export function generateMakefile(opts: MakefileExportOptions): string {
   L.push('# 用法: mingw32-make -f <本文件> [all | <目标输出> | clean]');
   L.push('# 说明: 命令为 Code::Blocks 展开后的字面量；头文件依赖未跟踪，强制全量重建请用 make -B。');
   L.push('');
+  if (win) {
+    // 显式固定 make 的 SHELL：否则 PATH 中一旦存在 sh.exe（Git/MSYS），make 会用 sh 执行 `cmd /c …` 配方，
+    // MSYS 把 `/c` 改写为 `C:\` ⇒ 目录创建/删除失效（缺陷 D-06）
+    L.push('# 固定 shell 为 cmd.exe：Windows 配方使用 `cmd /c`，若 make 改用 sh 会因 MSYS 路径改写而失效');
+    L.push('SHELL := cmd.exe');
+    L.push('');
+  }
   L.push('.PHONY: all clean');
   L.push('');
 
