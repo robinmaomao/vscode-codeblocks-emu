@@ -8,7 +8,7 @@ import * as vscode from 'vscode';
 import { GdbMiSession, MiResult, MiAsync } from './gdbMiSession';
 import {
   AsmInsn, base64ToHex, breakpointLocation, hexToBase64, isExitReason, isPendingBreakpoint,
-  logpointExpressions, mapStopReason, parseCatchpointNumbers, parseDisassemble, parseInstructionReference,
+  logpointExpressions, mapStopReason, parseCatchpoints, parseDisassemble, parseInstructionReference,
   parseQuotedList, parseReadMemory, parseRegisterValues, parseStackFrameTuples, parseThreadTuples,
   pointerMemoryReference, selectWindow, truthyMiValue,
 } from './miParse';
@@ -120,6 +120,8 @@ export class GdbDebugAdapter implements vscode.DebugAdapter {
   // 第四十九轮：数据断点 / 异常断点 / 附加 / 停驻状态 / 寄存器缓存
   private dataBreakpoints: { dataId: string; gdbNum?: string }[] = [];
   private catchpointNums: string[] = [];
+  // D-04：catchpoint 编号 → 过滤器（throw/catch），用于异常停止描述
+  private catchpointFilters = new Map<string, string>();
   private attached = false;
   private stoppedState = false;
   private regNamesCache: string[] | null = null;
@@ -128,6 +130,8 @@ export class GdbDebugAdapter implements vscode.DebugAdapter {
   private loadedLibs: { name: string; from?: string }[] = [];
   // 第五十轮：会话结束标记 / 日志断点消息表
   private ended = false;
+  /** D-05：适配器已销毁（销毁后屏蔽一切 DAP 消息） */
+  private disposed = false;
   private logpoints = new Map<string, string>();
   // 第五十轮修复 9：条件断点客户端求值表（本机 GDB 8.1 命中带条件断点会崩溃，不再下发 -break-condition）
   private bpConditions = new Map<string, string>();
@@ -182,8 +186,18 @@ export class GdbDebugAdapter implements vscode.DebugAdapter {
   }
 
   dispose(): void {
-    this.session?.dispose();
+    this.disposed = true;
+    // D-05：先摘除 GDB 回调，避免会话结束后的输出/退出事件继续推送 DAP 消息
+    if (this.session) {
+      this.session.onAsyncRecord = null;
+      this.session.onConsole = null;
+      this.session.onLog = null;
+      this.session.onTargetOutput = null;
+      this.session.onExit = null;
+      this.session.dispose();
+    }
     this.session = null;
+    this.emitter.dispose();
     // 第五十一轮 E3：注销本会话（多会话时不影响其它会话的注册）
     unregisterAdapter(this.sessionId, this);
   }
@@ -275,6 +289,8 @@ export class GdbDebugAdapter implements vscode.DebugAdapter {
 
   // ---- 响应/事件辅助 ----
   private sendResponse(req: DapRequest, success: boolean, body: any, message?: string): void {
+    // D-05：会话销毁后不再推送任何 DAP 消息（VS Code 已释放该会话）
+    if (this.disposed) return;
     debugTrace(`[DAP >>] resp ${req.command} ok=${success}${message ? ' msg=' + message : ''}`);
     this.emitter.fire({
       type: 'response',
@@ -288,6 +304,7 @@ export class GdbDebugAdapter implements vscode.DebugAdapter {
   }
 
   private sendEvent(event: string, body: any): void {
+    if (this.disposed) return; // D-05
     debugTrace(`[DAP >>] event ${event} ${truncate(JSON.stringify(body ?? {}))}`);
     this.emitter.fire({
       type: 'event',
@@ -369,8 +386,9 @@ export class GdbDebugAdapter implements vscode.DebugAdapter {
       // 会话就绪后再告知客户端可以下发配置（断点等，第五十轮 D10）
       this.sendEvent('initialized', {});
     } catch (err) {
-      this.dispose();
+      // D-05：先回失败响应再销毁（销毁后适配器不再推送消息）
       this.sendResponse(req, false, {}, `GDB 启动失败: ${(err as Error).message}`);
+      this.dispose();
     }
   }
 
@@ -412,8 +430,9 @@ export class GdbDebugAdapter implements vscode.DebugAdapter {
       this.sendResponse(req, true, {});
       this.sendEvent('initialized', {});
     } catch (err) {
-      this.dispose();
+      // D-05：先回失败响应再销毁（销毁后适配器不再推送消息）
       this.sendResponse(req, false, {}, `附加进程失败: ${(err as Error).message}`);
+      this.dispose();
     }
   }
 
@@ -1091,12 +1110,13 @@ export class GdbDebugAdapter implements vscode.DebugAdapter {
       try { await this.session.sendExact(`-break-delete ${n}`); } catch { /* */ }
     }
     this.catchpointNums = [];
+    this.catchpointFilters.clear();
     for (const f of filters) {
       if (f !== 'throw' && f !== 'catch') continue;
       try {
         const r = await this.session.sendExact(`-catch-${f}`);
         const n = this.extractField(r.attrs['bkpt'] ?? '', 'number');
-        if (n) this.catchpointNums.push(n);
+        if (n) { this.catchpointNums.push(n); this.catchpointFilters.set(n, f); }
       } catch {
         // 老版 GDB 无 -catch-*：回退 CLI catch（编号由 -break-list 回收）
         try { await this.session.sendExact(`-interpreter-exec console ${this.session.quote(`catch ${f}`)}`); } catch { /* best-effort */ }
@@ -1104,8 +1124,13 @@ export class GdbDebugAdapter implements vscode.DebugAdapter {
     }
     if (!this.catchpointNums.length) {
       try {
+        // 老版 GDB（8.1）无 -catch-* MI 命令：CLI `catch throw` 的条目在 -break-list 里是
+        // type="breakpoint" + catch-type="throw"，须按 catch-type 识别（D-04）
         const r = await this.session.sendExact('-break-list');
-        this.catchpointNums = parseCatchpointNumbers(r.attrs['BreakpointTable'] ?? '');
+        for (const c of parseCatchpoints(r.attrs['BreakpointTable'] ?? '')) {
+          this.catchpointNums.push(c.number);
+          if (c.catchType) this.catchpointFilters.set(c.number, c.catchType);
+        }
       } catch { /* 忽略 */ }
     }
     this.sendResponse(req, true, {});
@@ -1199,6 +1224,16 @@ export class GdbDebugAdapter implements vscode.DebugAdapter {
       this.stoppedState = true;
       // 停止原因按 DAP 枚举映射（第五十轮 D5）
       let reason = mapStopReason(rawReason, rec.attrs['signal-name']);
+      let description = rawReason;
+      // D-04：异常 catchpoint 命中在 MI 中同样上报 breakpoint-hit，需按 catchpoint 编号识别，
+      // 否则 VS Code 只按普通断点呈现（reason=breakpoint），无法显示“已暂停在异常处”。
+      const stopBpNum = rec.attrs['bkptno'];
+      if (stopBpNum && this.catchpointNums.includes(stopBpNum)) {
+        const filter = this.catchpointFilters.get(stopBpNum);
+        const kind = filter === 'catch' ? '捕获' : '抛出';
+        reason = 'exception';
+        description = `已暂停在异常处（${kind}异常，GDB catchpoint ${stopBpNum}）`;
+      }
       // Step Out（修复 8）：命中“调用者返回地址”临时断点 → 报告为 step；停在其它原因则回收未命中的临时断点
       if (this.stepOutBpNum !== null) {
         if (rec.attrs['bkptno'] === this.stepOutBpNum) {
@@ -1208,7 +1243,7 @@ export class GdbDebugAdapter implements vscode.DebugAdapter {
         }
         this.stepOutBpNum = null;
       }
-      this.sendEvent('stopped', { reason, threadId, allThreadsStopped: true, description: rawReason });
+      this.sendEvent('stopped', { reason, threadId, allThreadsStopped: true, description });
       debugStateChanged.fire();
       // 注：不再伪造 threads 响应（第五十轮修复 5：request_seq=0 的编造响应属协议违规；
       // VS Code 收到 stopped 后会自行请求 threads/stackTrace）

@@ -138,16 +138,25 @@ export function base64ToHex(b64: string): string {
   return Buffer.from(b64, 'base64').toString('hex');
 }
 
-/** 解析 -break-list 中的 catchpoint 编号（异常断点维护用） */
-export function parseCatchpointNumbers(breakListBody: string): string[] {
-  const out: string[] = [];
+/**
+ * 解析 -break-list 中的异常断点（catchpoint）。
+ * 注意两种形态：`-catch-throw/-catch-catch`（GDB ≥9）给出 type="catchpoint"；
+ * 老版 GDB 无该 MI 命令、只能走 CLI `catch throw`，其条目为 type="breakpoint" + catch-type="throw"（GDB 8.1 实测）。
+ */
+export function parseCatchpoints(breakListBody: string): { number: string; catchType?: string }[] {
+  const out: { number: string; catchType?: string }[] = [];
   for (const tu of splitMiTuples(breakListBody)) {
-    if (/type="catchpoint"/.test(tu)) {
-      const m = tu.match(/number="(\d+)"/);
-      if (m) out.push(m[1]);
-    }
+    const type = tu.match(/catch-type="([a-z]+)"/);
+    if (!/type="catchpoint"/.test(tu) && !type) continue;
+    const m = tu.match(/number="(\d+)"/);
+    if (m) out.push({ number: m[1], catchType: type?.[1] });
   }
   return out;
+}
+
+/** 解析 -break-list 中的 catchpoint 编号（异常断点维护用） */
+export function parseCatchpointNumbers(breakListBody: string): string[] {
+  return parseCatchpoints(breakListBody).map((c) => c.number);
 }
 
 /** 进程列表项 */
