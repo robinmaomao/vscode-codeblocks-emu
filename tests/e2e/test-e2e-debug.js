@@ -400,6 +400,12 @@ async function main() {
       check('S2 日志点表达式已求值（i 为数字）', logValued, client.outputs().split('\n').filter((l) => /logpoint/.test(l)).slice(0, 2), 'logpoint i=<数字>');
       await client.send('disconnect', {});
       await waitFor(() => !adapter.isActive(), 8000);
+      // D-05 回归：disconnect 之后适配器不得再推送任何 DAP 消息
+      // （修复前实测：GDB 退出触发 thread×3 / exited / terminated 共 5 条迟到事件）
+      client.clear();
+      await sleep(1500);
+      check('S2 disconnect 后无迟到 DAP 消息（D-05 修复）', client.msgs.length === 0,
+        client.msgs.map((m) => (m.type === 'event' ? 'event/' + m.event : m.type + '/' + m.command)), '0 条');
     }
 
     // ================= S2b 全局作用域内容（D-03） =================
@@ -592,12 +598,12 @@ async function main() {
         await client.send('configurationDone', {});
         const stop = await client.waitStop(30000);
         check('S6 抛出异常时中断（程序在 throw 处停止）', !!stop, stop && stop.body, 'stopped');
-        // 已知缺陷 D-04：异常 catchpoint 命中上报 reason='breakpoint'（应为 'exception'），且无异常描述；
-        // 功能上（停止位置）正确，但 VS Code 无法按异常中断呈现。
-        check('S6 [D-04] 异常命中被上报为 reason=breakpoint（当前行为，待修）',
-          !!stop && stop.body.reason === 'breakpoint', stop && { reason: stop.body.reason, description: stop.body.description }, "reason='exception'（期望）");
-        check('S6 [D-04] 缺少异常描述文本（description 为底层 breakpoint-hit）',
-          !!stop && /breakpoint-hit/.test(String(stop.body.description || '')), stop && stop.body.description, '异常类型/位置描述');
+        // D-04 修复：按 catchpoint 编号识别异常命中（GDB 8.1 无 -catch-* MI 命令，走 CLI catch 回退）
+        check('S6 异常命中上报 reason=exception（D-04 修复）',
+          !!stop && stop.body.reason === 'exception', stop && { reason: stop.body.reason, description: stop.body.description }, "reason='exception'");
+        check('S6 异常停止带异常描述（D-04 修复）',
+          !!stop && /异常/.test(String(stop.body.description || '')) && !/breakpoint-hit/.test(String(stop.body.description || '')),
+          stop && stop.body.description, '已暂停在异常处（抛出异常，GDB catchpoint N）');
         const thEx = await client.send('threads', {});
         const stEx = await client.send('stackTrace', { threadId: thEx.body.threads[0].id, levels: 4 });
         check('S6 停止位置位于抛出的函数内（thrower）',
