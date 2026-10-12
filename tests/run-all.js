@@ -11,6 +11,8 @@
 //   node tests/run-all.js --group host          # L2 VS Code 宿主集成（@vscode/test-electron）
 //   node tests/run-all.js --group all           # contract+unit+e2e+visual+perf+pack（host 需 --with-host）
 //   node tests/run-all.js [--filter <子串>] [--json <报告路径>]
+//     · --filter 按**脚本名**筛选；visual 层额外支持按「面 id」筛选（透传为 `--only=<子串>`，
+//       例：`--group visual --filter props`）。筛选未命中任何脚本时报错退出（避免静默全绿）。
 //
 // KNOWN_MANUAL：需 <cbp> 参数的辅助脚本（手工工具，非自动测试）——不参与自动回归，单独列出避免"永久 FAIL=1"掩盖真实失败
 const fs = require('fs');
@@ -68,15 +70,23 @@ function scriptsFor(layer) {
 }
 
 const rows = [];
+let matchedAny = false;
 for (const layer of groups) {
-  const files = scriptsFor(layer).filter((f) => !opts.filter || f.includes(opts.filter));
+  // 脚本名筛选；visual 层的 `--filter` 语义是「面 id」⇒ 不作脚本名过滤，交由脚本内 --only 判定
+  const byScript = scriptsFor(layer).filter((f) => !opts.filter || f.includes(opts.filter));
+  const files = byScript.length ? byScript : (opts.filter && layer === 'visual' ? scriptsFor(layer) : []);
   if (!files.length) {
-    rows.push({ layer, f: '(无脚本)', code: 0, last: `SKIP 未创建（${LAYERS[layer].note}）` });
-    console.log(`[${layer}] (无脚本) — SKIP 未创建（${LAYERS[layer].note}）`);
+    const why = opts.filter
+      ? `--filter=${opts.filter} 未命中任何脚本`
+      : `SKIP 未创建（${LAYERS[layer].note}）`;
+    rows.push({ layer, f: '(无脚本)', code: 0, last: why });
+    console.log(`[${layer}] (无脚本) — ${why}`);
     continue;
   }
+  matchedAny = true;
   for (const f of files) {
-    const r = spawnSync(process.execPath, [f], { encoding: 'utf8', timeout: 900000, cwd: root });
+    const childArgs = opts.filter && layer === 'visual' ? [f, `--only=${opts.filter}`] : [f];
+    const r = spawnSync(process.execPath, childArgs, { encoding: 'utf8', timeout: 900000, cwd: root });
     const out = `${r.stdout || ''}\n${r.stderr || ''}`.trim();
     const lines = out.split(/\r?\n/).filter((l) => /pass|fail|OK|错误|PASS|FAIL|EXIT|SKIP/.test(l));
     const code = r.status === null ? -1 : r.status;
@@ -114,4 +124,9 @@ fs.writeFileSync(jsonPath, JSON.stringify({
 
 console.log(`\n${header}\n${tail}`);
 console.log(`报告: ${path.relative(root, jsonPath)}`);
+if (opts.filter && !matchedAny) {
+  // 静默全绿是危险信号：筛选未命中任何脚本必须显式失败（历史上 `--group visual --filter props` 会 TOTAL=1/FAIL=0 假绿）
+  console.error(`错误：--filter=${opts.filter} 未命中任何脚本（unit/contract/e2e/perf/pack/host 按脚本名匹配，visual 按面 id 匹配）；请检查关键字或省略 --filter 跑整层`);
+  process.exit(2);
+}
 process.exit(failed.length ? 1 : 0);
