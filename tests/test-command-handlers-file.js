@@ -88,7 +88,7 @@ function writeFixture(dir) {
     reparsed().files.map((f) => f.relativeFilename).join(',') === 'main.c,util.c' && /已打开项目: demo/.test(out()),
     reparsed().files.map((f) => f.relativeFilename), ['main.c', 'util.c']);
 
-  // ---------- toggleCompile：写入 compile="0" → 再切回 compile="1" ----------
+  // ---------- toggleCompile：写入 compile="0" → 再启用时删除该选项（缺省即启用，D-09） ----------
   await app.invoke('codeblocks.toggleCompile', fileNode('main.c'));
   let xml = rawCbp();
   check('toggleCompile：Unit 写入 <Option compile="0" /> 且重解析后 compile=false',
@@ -96,22 +96,24 @@ function writeFixture(dir) {
     && reparsed().files.find((f) => f.relativeFilename === 'main.c').compile === false,
     { hasOption: /<Option compile="0" \/>/.test(xml), compile: reparsed().files.find((f) => f.relativeFilename === 'main.c').compile }, false);
   await app.invoke('codeblocks.toggleCompile', fileNode('main.c'));
-  check('toggleCompile：再切换写回 compile="1" 且 compile=true',
-    /<Option compile="1" \/>/.test(rawCbp())
+  check('toggleCompile：再启用时删除该选项（缺省即启用，compile=true）',
+    !/<Option compile=/.test(rawCbp())
     && reparsed().files.find((f) => f.relativeFilename === 'main.c').compile === true,
-    { hasOption: /<Option compile="1" \/>/.test(rawCbp()), compile: reparsed().files.find((f) => f.relativeFilename === 'main.c').compile }, true);
+    { hasOption: /<Option compile=/.test(rawCbp()), compile: reparsed().files.find((f) => f.relativeFilename === 'main.c').compile }, true);
+  check('toggleCompile：无其它子选项时收回自闭合写法（与 writer 序列化一致）',
+    /<Unit filename="main\.c" \/>/.test(rawCbp()), rawCbp().split('\n').filter((l) => /Unit filename="main\.c"/.test(l)), '<Unit filename="main.c" />');
 
-  // ---------- toggleLink：写入 link="0" → 再切回 link="1" ----------
+  // ---------- toggleLink：写入 link="0" → 再启用时删除该选项（D-09） ----------
   await app.invoke('codeblocks.toggleLink', fileNode('main.c'));
   check('toggleLink：Unit 写入 <Option link="0" /> 且重解析后 link=false',
     /<Option link="0" \/>/.test(rawCbp())
     && reparsed().files.find((f) => f.relativeFilename === 'main.c').link === false,
     { hasOption: /<Option link="0" \/>/.test(rawCbp()), link: reparsed().files.find((f) => f.relativeFilename === 'main.c').link }, false);
   await app.invoke('codeblocks.toggleLink', fileNode('main.c'));
-  check('toggleLink：再切换写回 link="1" 且 link=true',
-    /<Option link="1" \/>/.test(rawCbp())
+  check('toggleLink：再启用时删除该选项（缺省即启用，link=true）',
+    !/<Option link=/.test(rawCbp())
     && reparsed().files.find((f) => f.relativeFilename === 'main.c').link === true,
-    { hasOption: /<Option link="1" \/>/.test(rawCbp()), link: reparsed().files.find((f) => f.relativeFilename === 'main.c').link }, true);
+    { hasOption: /<Option link=/.test(rawCbp()), link: reparsed().files.find((f) => f.relativeFilename === 'main.c').link }, true);
 
   // ---------- editFileBuildCommand：输入命令 → 写回 .cbp；输入空 → 清除 ----------
   app.setInputBox('del "$file"');
@@ -136,9 +138,9 @@ function writeFixture(dir) {
     !fs.existsSync(objFile) && /Deleted: obj[\\/]Debug[\\/]main\.o/.test(out()),
     { exists: fs.existsSync(objFile), out: out().split('\n').slice(0, 2) }, 'Deleted: obj/Debug/main.o');
   await app.invoke('codeblocks.cleanFile', fileNode('main.c'));
-  check('cleanFile：无对象文件时幂等且无可见输出（仅 debug 级日志，普通输出通道会丢弃 → 用户零反馈，见汇报缺陷线索）',
-    !/Deleted:/.test(out()) && !/无对象文件可清理/.test(out()) && !fs.existsSync(objFile),
-    out().split('\n').slice(0, 2), '无删除行/无 debug 行');
+  check('cleanFile：无对象文件时给出用户可见反馈（D-08）',
+    !/Deleted:/.test(out()) && /无对象文件可清理/.test(out()) && !fs.existsSync(objFile),
+    out().split('\n').filter((l) => /无对象文件|Deleted:/.test(l)).slice(0, 2), '含「无对象文件可清理」');
 
   // ---------- openContainingFolder：资源管理器中定位文件 ----------
   await app.invoke('codeblocks.openContainingFolder', fileNode('main.c'));

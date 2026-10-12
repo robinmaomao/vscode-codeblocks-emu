@@ -3681,7 +3681,7 @@ function removeUnitFromCbp(cbpPath: string, relativeFilename: string): void {
 function setUnitOptionInCbp(cbpPath: string, relativeFilename: string, opt: 'compile' | 'link', enable: boolean): void {
   const raw = fs.readFileSync(cbpPath, 'utf-8');
   const escaped = relativeFilename.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const val = enable ? '1' : '0';
+  const optPat = `<Option ${opt}="[01]"\\s*/>`;
 
   // 定位该 <Unit> 节点（自闭合或成对）
   const selfCloseRe = new RegExp(`<Unit filename="${escaped}"\\s*/>`, 'g');
@@ -3690,25 +3690,32 @@ function setUnitOptionInCbp(cbpPath: string, relativeFilename: string, opt: 'com
   let m = pairedRe.exec(raw);
   if (m) {
     // 成对节点：更新或新增 <Option compile/link>
+    // D-09：启用＝删除该选项（CB 语义「缺省即启用」，与 writer「默认值不写」一致，避免下次整工程序列化把它丢掉）；
+    //       禁用＝写 "0"。
     const inner = m[1];
-    const optRe = new RegExp(`<Option ${opt}="[01]"\\s*/>`, 'g');
     let newInner: string;
-    if (optRe.test(inner)) {
-      newInner = inner.replace(new RegExp(`<Option ${opt}="[01]"\\s*/>`, 'g'), `<Option ${opt}="${val}" />`);
+    if (new RegExp(optPat).test(inner)) {
+      newInner = enable
+        ? inner.replace(new RegExp(`\\s*${optPat}`, 'g'), '')
+        : inner.replace(new RegExp(optPat, 'g'), `<Option ${opt}="0" />`);
     } else {
-      newInner = `\n\t\t\t<Option ${opt}="${val}" />${inner}`;
+      newInner = enable ? inner : `\n\t\t\t<Option ${opt}="0" />${inner}`;
     }
-    const newUnit = `<Unit filename="${relativeFilename}">${newInner}</Unit>`;
+    // 无其它子选项时收回自闭合写法（与 writer 的序列化形式一致）
+    const newUnit = newInner.trim()
+      ? `<Unit filename="${relativeFilename}">${newInner}</Unit>`
+      : `<Unit filename="${relativeFilename}" />`;
     const out = raw.replace(pairedRe, newUnit);
-    if (out === raw) throw new Error(`未在 .cbp 中找到文件 "${relativeFilename}"`);
-    fs.writeFileSync(cbpPath, out, 'utf-8');
+    if (out === raw && newInner !== inner) throw new Error(`未在 .cbp 中找到文件 "${relativeFilename}"`);
+    if (out !== raw) fs.writeFileSync(cbpPath, out, 'utf-8');
     return;
   }
 
-  // 自闭合节点：展开为成对节点
+  // 自闭合节点：启用＝已是缺省状态（无需改写）；禁用＝展开为成对节点写入 "0"
   selfCloseRe.lastIndex = 0;
   if (selfCloseRe.test(raw)) {
-    const newUnit = `<Unit filename="${relativeFilename}">\n\t\t\t<Option ${opt}="${val}" />\n\t\t</Unit>`;
+    if (enable) return;
+    const newUnit = `<Unit filename="${relativeFilename}">\n\t\t\t<Option ${opt}="0" />\n\t\t</Unit>`;
     const out = raw.replace(selfCloseRe, newUnit);
     fs.writeFileSync(cbpPath, out, 'utf-8');
     return;
