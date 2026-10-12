@@ -28,4 +28,5 @@
 - 提交/推送日志不写轮次编号；新增核查报告用主题命名；**实施完毕后归档到 `archive/`，待决项同步并入 [遗留问题决策清单.md](./遗留问题决策清单.md)**。
 - 新增发布说明：`release/0.8.xx-dev.md`；版本摘要同步到 `开发进度.md` 第九节一行链接。
 - 测试类文档维护时机：**视觉基线**在 UI/WebView 变更后刷新（`npm run visual:baseline`，随 PR 附基线 PNG）；**性能基准**在构建链路或依赖变化后刷新（`npm run perf:baseline`）并同步 [性能基准.md](./性能基准.md)（`npm run perf:report`）；**覆盖矩阵**在新增/调整用例后刷新（`npm run coverage:matrix`），并与 [测试报告-0.8.128.md](./测试报告-0.8.128.md) §2 台账保持一致。
+- **文档一致性巡检**：`tests/contract/test-doc-consistency.js`（随 `npm run test:contract` 自动跑）校验「文档里的命令/相对链接真实存在」「覆盖矩阵与性能基准的计数与产物一致」「版本标记与 `package.json` 一致」；改文档后可单独跑一次，`--self-test` 自检规则本身（真实文档内存篡改、不落盘）。
 - 代码约定（空 catch 需注释、无 `console.*`、无 `@ts-ignore`）由 `tests/test-code-conventions.js` 自动检查。
