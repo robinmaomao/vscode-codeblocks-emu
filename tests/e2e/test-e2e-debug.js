@@ -255,15 +255,17 @@ async function main() {
       const childNames = (children.body.variables || []).map((v) => v.name);
       check('S1 嵌套结构展开出 in/name/ratio', ['in', 'name', 'ratio'].every((n) => childNames.includes(n)), childNames);
       const childValues = Object.fromEntries((children.body.variables || []).map((v) => [v.name, v.value]));
-      // 已知缺陷 D-02：子成员值恒为空（-var-list-children 未带 --print-values），VS Code 变量树只显示成员名
-      check('S1 [D-02] 子成员 value 为空（当前行为，待修）', Object.values(childValues).every((v) => v === ''), childValues, '全部为空');
+      // D-02 修复：-var-list-children 带 print-values=1，子成员直接带值
+      check('S1 子成员 value 非空（D-02 修复）',
+        childValues.ratio === '2.5' && childValues.name === '[8]' && /^\{/.test(String(childValues.in)),
+        childValues, 'in={...}, name=[8], ratio=2.5');
       check('S1 子成员带类型信息（type 非空）', (children.body.variables || []).every((v) => !!v.type), (children.body.variables || []).map((v) => [v.name, v.type]));
 
       const inner = (children.body.variables || []).find((v) => v.name === 'in');
       const innerChildren = await client.send('variables', { variablesReference: inner.variablesReference });
       const innerNames = (innerChildren.body.variables || []).map((v) => v.name);
       check('S1 深层结构可继续展开出 a/b', innerNames.includes('a') && innerNames.includes('b'), innerNames);
-      // 值改由表达式求值获取（D-02 下唯一可用途径）
+      // 深层成员再经表达式求值获取（与变量树取值互为校验）
       const deepA = await client.send('evaluate', { expression: 'local_outer.in.a', frameId, context: 'watch' });
       const deepB = await client.send('evaluate', { expression: 'local_outer.in.b', frameId, context: 'watch' });
       check('S1 深层成员 in.a = 7（经表达式求值）', deepA.success && String(deepA.body.result).trim() === '7', deepA.body && deepA.body.result, '7');
@@ -400,7 +402,7 @@ async function main() {
       await waitFor(() => !adapter.isActive(), 8000);
     }
 
-    // ================= S2b 全局作用域内容（D-03 记录） =================
+    // ================= S2b 全局作用域内容（D-03） =================
     {
       const { adapter, client } = await launchSession(ctx, {
         program: exePath, cwd: dir, sourcePath: srcPath, breakpoints: [{ line: BP1 }],
@@ -413,16 +415,16 @@ async function main() {
       const globals = sc.body.scopes.find((s) => /全局/.test(s.name));
       const gvars = await client.send('variables', { variablesReference: globals.variablesReference });
       const gNames = (gvars.body.variables || []).map((v) => v.name);
-      // 已知缺陷 D-03：全局作用域实际返回的是当前帧局部变量（GDB -stack-list-variables 语义），
-      // 全局变量（g_counter/g_ratio/g_outer）在变量树中不可见。
+      // D-03 修复：全局作用域改为真实程序全局变量枚举（info variables，过滤工具链符号）
       const localsNames = (await client.send('variables', { variablesReference: sc.body.scopes.find((s) => /本地/.test(s.name)).variablesReference })).body.variables.map((v) => v.name);
-      // 已知缺陷 D-03：全局作用域（variablesReference=2000）实际走 -stack-list-variables（当前帧变量），
-      // 既不含全局变量，在部分 GDB 上还返回空 → 全局变量在变量树中不可见。
-      check('S2b [D-03] 全局作用域不含任何全局变量（当前行为，待修）',
-        !gNames.includes('g_counter') && !gNames.includes('g_ratio') && !gNames.includes('g_outer'),
-        { globals: gNames, locals: localsNames }, '不含全局名');
-      check('S2b [D-03] 全局作用域与局部作用域内容不一致（未实现全局枚举）',
+      check('S2b 全局作用域含程序全局变量（D-03 修复）',
+        ['g_counter', 'g_ratio', 'g_outer'].every((n) => gNames.includes(n)),
+        { globals: gNames, locals: localsNames }, 'g_counter/g_ratio/g_outer');
+      check('S2b 全局作用域与局部作用域内容不一致',
         JSON.stringify([...gNames].sort()) !== JSON.stringify([...localsNames].sort()), { globals: gNames, locals: localsNames }, '两者不同');
+      check('S2b 全局变量在变量树中带值（D-03 修复）',
+        (gvars.body.variables || []).every((v) => v.value !== ''),
+        (gvars.body.variables || []).map((v) => [v.name, v.value]), '每个都有 value');
       const evGlobal = await client.send('evaluate', { expression: 'g_counter', frameId: st.body.stackFrames[0].id, context: 'watch' });
       check('S2b 全局变量仍可经表达式求值访问（兜底途径）', evGlobal.success && /^\d+$/.test(String(evGlobal.body.result).trim()), evGlobal.body && evGlobal.body.result, '数字');
       await client.send('disconnect', {});
