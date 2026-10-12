@@ -73,6 +73,16 @@ async function main() {
 
   const profile = path.join(root, '.vscode-test', `host-profile-${process.pid}`);
   const userDataDir = path.join(profile, 'user-data');
+  // 预置用户设置（隔离 user-data-dir，安全）：
+  //  codeblocks.build.persistLog=true → 扩展「Code::Blocks」输出通道为 LogOutputChannel，内容实时落盘
+  //  （<user-data>/logs/<会话>/window<N>/exthost/robinmaomao.codeblocks-vscode/CodeBlocks.log）。
+  //  这是宿主内唯一可读的输出通道文本（vscode API 不暴露 OutputChannel 内容），
+  //  供 build.tests.js 断言「构建成功」行 / 链接产物路径行 / 编译器诊断行。
+  //  该设置必须**启动前**写入（输出通道在扩展激活时按此设置创建，运行中修改需重载窗口）。
+  fs.mkdirSync(path.join(userDataDir, 'User'), { recursive: true });
+  fs.writeFileSync(path.join(userDataDir, 'User', 'settings.json'), JSON.stringify({
+    'codeblocks.build.persistLog': true,
+  }, null, 2), 'utf-8');
   console.log(`host user-data：${userDataDir}`);
   const launchArgs = [
     workspace,
