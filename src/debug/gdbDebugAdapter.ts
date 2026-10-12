@@ -64,6 +64,13 @@ interface ChildVar {
 /** 本地变量作用域的 variablesReference 基址（+frameId，第五十轮 D8） */
 const LOCALS_REF_BASE = 100000;
 
+/**
+ * P3：DAP 帧 id 编码基数（frameId = threadId * FRAME_ID_BASE + level）。
+ * 多线程下不同线程的帧 level 会重复，帧 id 必须全局唯一才能让 scopes/variables
+ * 在「指定线程的指定帧」下取值（-thread-select + -stack-select-frame 双步定位）。
+ */
+const FRAME_ID_BASE = 1000000;
+
 /** D-03：全局作用域内联取值的变量数上限（超出者只显示名称/类型，避免逐条 -var-create 卡顿） */
 const GLOBALS_INLINE_VALUE_MAX = 60;
 
@@ -124,6 +131,14 @@ export class GdbDebugAdapter implements vscode.DebugAdapter {
   private catchpointFilters = new Map<string, string>();
   private attached = false;
   private stoppedState = false;
+  /**
+   * P3 运行中防护：目标正在运行（-exec-run/-exec-continue/-exec-step 等已成功下发且未收到 *stopped）。
+   * 本机 MinGW GDB 8.1 在运行时不响应**任何**同步 MI 命令（实测 -thread-info / -break-insert /
+   * -data-evaluate-expression 全部无回执至 30s 超时）⇒ 此类请求必须快速返回而非悬挂等待。
+   */
+  private targetRunning = false;
+  /** 当前 GDB 选中线程（-thread-select 维护；供多线程帧/变量与 stackTrace(threadId) 使用） */
+  private currentThreadId = 0;
   private regNamesCache: string[] | null = null;
   // 第五轮批次二 D1/D2：分离状态 + 已加载库缓存（=library-loaded；Add symbol file 地址预填数据源）
   private detached = false;
@@ -260,6 +275,7 @@ export class GdbDebugAdapter implements vscode.DebugAdapter {
     this.sendOutput('console', r.raw);
     this.detached = true;
     this.stoppedState = false;
+    this.targetRunning = false;
     if (!this.ended) {
       this.ended = true;
       this.sendEvent('terminated', {});
@@ -320,6 +336,30 @@ export class GdbDebugAdapter implements vscode.DebugAdapter {
     this.sendEvent('output', { category, output: output + '\n' });
   }
 
+  // ---- P3 运行中请求防护（GDB 8.1 运行时不响应同步 MI） ----
+
+  /** 运行中降级结果的统一中文说明（响应 message，便于用户与测试识别） */
+  private static readonly RUNNING_HINT =
+    '程序正在运行：GDB 不响应同步 MI 请求（本机 GDB 8.1 限制），已返回缓存/占位结果而非等待超时';
+
+  /**
+   * 请求在目标运行期间无法经 MI 完成时立即回失败响应（避免 DAP 请求悬挂 30s）。
+   * @returns true = 已响应（调用方应当 return）；false = 目标已停止，按原流程处理
+   */
+  private rejectWhileRunning(req: DapRequest, what: string): boolean {
+    if (!this.session || !this.targetRunning) return false;
+    this.sendResponse(req, false, {},
+      `${what}不可用：程序正在运行，GDB 不响应同步 MI 请求（本机 GDB 8.1 限制）；请先命中断点或暂停后再试`);
+    return true;
+  }
+
+  /** 切到指定线程（多线程帧/变量语义；已是当前线程则不产生 MI 往返） */
+  private async selectThread(threadId: number): Promise<void> {
+    if (!this.session || !threadId || threadId === this.currentThreadId) return;
+    await this.session.sendExact(`-thread-select ${threadId}`);
+    this.currentThreadId = threadId;
+  }
+
   // ---- DAP 处理器 ----
   private async onInitialize(req: DapRequest): Promise<void> {
     this.sendResponse(req, true, {
@@ -362,6 +402,8 @@ export class GdbDebugAdapter implements vscode.DebugAdapter {
     this.attached = false;
     this.detached = false;
     this.loadedLibs = [];
+    this.targetRunning = false;
+    this.currentThreadId = 0;
     this.searchDirs = Array.isArray(args.searchDirs) ? (args.searchDirs as unknown[]).filter((d): d is string => typeof d === 'string' && !!d) : [];
     this.remote = (args.remoteDebugging as RemoteDebuggingOptions) ?? undefined;
     this.isRemoteDebugging = false;
@@ -411,6 +453,8 @@ export class GdbDebugAdapter implements vscode.DebugAdapter {
     this.attached = true;
     this.detached = false;
     this.loadedLibs = [];
+    this.targetRunning = false;
+    this.currentThreadId = 0;
     this.searchDirs = Array.isArray(args.searchDirs) ? (args.searchDirs as unknown[]).filter((d): d is string => typeof d === 'string' && !!d) : [];
 
     this.openSession();
@@ -548,6 +592,18 @@ export class GdbDebugAdapter implements vscode.DebugAdapter {
       this.sendResponse(req, true, { breakpoints: requested.map((b) => ({ verified: false, line: b.line })) });
       return;
     }
+    // P3 运行中防护：运行时不响应 -break-insert（同步 MI 无回执）→ 立即返回「未解析」占位，
+    // 不改动断点表（保留旧断点编号以便后续删除），用户暂停后重设即可生效
+    if (this.targetRunning) {
+      this.sendResponse(req, true, {
+        breakpoints: requested.map((b) => ({
+          verified: false,
+          line: b.line,
+          message: '程序正在运行：断点未下发给 GDB（运行时不响应同步 MI 请求），请在暂停后重新设置',
+        })),
+      }, GdbDebugAdapter.RUNNING_HINT);
+      return;
+    }
 
     // 清除该文件的旧断点（按编号逐个删除；同步清理条件/日志表）
     const old = this.breakpoints.get(sourcePath) ?? [];
@@ -611,6 +667,16 @@ export class GdbDebugAdapter implements vscode.DebugAdapter {
       this.sendResponse(req, true, { breakpoints: requested.map(() => ({ verified: false })) });
       return;
     }
+    // P3 运行中防护：同 onSetBreakpoints（-break-insert 运行中无回执）
+    if (this.targetRunning) {
+      this.sendResponse(req, true, {
+        breakpoints: requested.map(() => ({
+          verified: false,
+          message: '程序正在运行：函数断点未下发给 GDB（运行时不响应同步 MI 请求），请在暂停后重新设置',
+        })),
+      });
+      return;
+    }
 
     // 清除旧函数断点（同步清理条件表）
     for (const list of this.functionBreakpoints.values()) {
@@ -654,6 +720,7 @@ export class GdbDebugAdapter implements vscode.DebugAdapter {
     const ref: number = args.variablesReference ?? 0;
     const name: string = args.name ?? '';
     const value: string = args.value ?? '';
+    if (this.rejectWhileRunning(req, '变量修改')) return;
     if (!this.session || !name) {
       this.sendResponse(req, false, {}, '未提供变量名');
       return;
@@ -717,6 +784,7 @@ export class GdbDebugAdapter implements vscode.DebugAdapter {
       try {
         // R4：远程目标已运行——用 continue 而非 run（对齐 gdb_driver.cpp:279-292 远程 Start 语义）
         await this.session.send(this.isRemoteDebugging ? '-exec-continue' : '-exec-run');
+        this.targetRunning = true; // P3：目标开始运行（此后同步 MI 请求走「快速返回」防护）
       } catch (err) {
         // 启动失败必须可见（如 GDB 与目标架构不匹配：not in executable format，第五十轮 D9）
         this.sendOutput('stderr', `无法启动程序: ${(err as Error).message}`);
@@ -727,8 +795,17 @@ export class GdbDebugAdapter implements vscode.DebugAdapter {
 
   private async onThreads(req: DapRequest): Promise<void> {
     if (!this.session) { this.sendResponse(req, true, { threads: [] }); return; }
+    // P3 运行中防护：运行时不响应 -thread-info（同步 MI 无回执）→ 立即返回缓存线程列表
+    if (this.targetRunning) {
+      this.sendResponse(req, true, {
+        threads: this.threads.map((t) => ({ id: t.id, name: t.name })),
+      }, GdbDebugAdapter.RUNNING_HINT);
+      return;
+    }
     try {
       const r = await this.session.send('-thread-info');
+      const cur = Number(r.attrs['current-thread-id'] ?? 0);
+      if (cur) this.currentThreadId = cur; // 与 GDB 实际选中线程对齐（-thread-select 前置条件）
       const threads = r.attrs['threads'] ?? '';
       // 第五十一轮 E2：逐 tuple 解析（旧惰性可选组正则的 name 永不捕获，与 D3 同款缺陷）
       this.threads = parseThreadTuples(threads).map((t) => ({ id: t.id, name: t.name ?? `线程 ${t.id}` }));
@@ -740,11 +817,15 @@ export class GdbDebugAdapter implements vscode.DebugAdapter {
 
   private async onStackTrace(req: DapRequest): Promise<void> {
     const args = (req as any).arguments;
+    const threadId = Number(args?.threadId ?? 0) || 0;
     if (!this.session) { this.sendResponse(req, true, { stackFrames: [] }); return; }
+    if (this.rejectWhileRunning(req, '调用栈读取')) return;
     try {
+      // 多线程：GDB 的 -stack-list-frames 作用于选中线程 → 请求的线程不同则先切换
+      await this.selectThread(threadId);
       const r = await this.session.send('-stack-list-frames');
       const frames = r.attrs['stack'] ?? '';
-      this.stackFrames = this.parseStackFrames(frames);
+      this.stackFrames = this.parseStackFrames(frames, threadId || this.currentThreadId);
     } catch { /* ignore */ }
     this.sendResponse(req, true, {
       stackFrames: this.stackFrames.map((f) => ({
@@ -774,6 +855,7 @@ export class GdbDebugAdapter implements vscode.DebugAdapter {
     const args = (req as any).arguments;
     const ref = args.variablesReference ?? 0;
     if (!this.session) { this.sendResponse(req, true, { variables: [] }); return; }
+    if (this.rejectWhileRunning(req, '变量读取')) return;
 
     let vars: DapVariable[] = [];
     try {
@@ -801,7 +883,7 @@ export class GdbDebugAdapter implements vscode.DebugAdapter {
   }
 
   private async onContinue(req: DapRequest): Promise<void> {
-    if (this.session) { try { await this.session.send('-exec-continue'); } catch { /* */ } }
+    if (this.session) { try { await this.session.send('-exec-continue'); this.targetRunning = true; } catch { /* */ } }
     this.sendResponse(req, true, {});
   }
 
@@ -809,7 +891,7 @@ export class GdbDebugAdapter implements vscode.DebugAdapter {
     // 指令级步进（granularity=instruction，对齐 CB Debug 单指令步进）
     const granularity = (req as any).arguments?.granularity;
     const use = granularity === 'instruction' && instrCmd ? instrCmd : cmd;
-    if (this.session) { try { await this.session.send(use); } catch { /* */ } }
+    if (this.session) { try { await this.session.send(use); this.targetRunning = true; } catch { /* */ } }
     this.sendResponse(req, true, {});
   }
 
@@ -822,6 +904,7 @@ export class GdbDebugAdapter implements vscode.DebugAdapter {
    */
   private async onStepOut(req: DapRequest): Promise<void> {
     if (!this.session) { this.sendResponse(req, true, {}); return; }
+    if (this.rejectWhileRunning(req, '步出')) return;
     try {
       const r = await this.session.sendExact('-stack-list-frames');
       const frames = parseStackFrameTuples(r.attrs['stack'] ?? '');
@@ -835,6 +918,7 @@ export class GdbDebugAdapter implements vscode.DebugAdapter {
       const ins = await this.session.sendExact(`-break-insert -t *${caller.addr}`);
       this.stepOutBpNum = ins.attrs['bkpt'] ? this.extractField(ins.attrs['bkpt'], 'number') ?? null : null;
       await this.session.send('-exec-continue');
+      this.targetRunning = true;
       this.sendResponse(req, true, {});
     } catch (err) {
       this.sendResponse(req, false, {}, `Step Out 失败: ${(err as Error).message}`);
@@ -870,7 +954,7 @@ export class GdbDebugAdapter implements vscode.DebugAdapter {
   /** DAP loadedSources：被调试进程已加载的源文件（-file-list-exec-source-files） */
   private async onLoadedSources(req: DapRequest): Promise<void> {
     const sources: { name: string; path: string; sourceReference: number }[] = [];
-    if (this.session) {
+    if (this.session && !this.targetRunning) {
       try {
         const r = await this.session.sendExact('-file-list-exec-source-files');
         for (const tu of this.splitMiTuples(r.attrs['files'] ?? '')) {
@@ -895,6 +979,12 @@ export class GdbDebugAdapter implements vscode.DebugAdapter {
         this.sendResponse(req, true, { result: r.raw, variablesReference: 0 });
         return;
       }
+      // P3 运行中防护：非 MI 透传的表达式求值运行时无回执 → 立即失败并说明
+      //（`-` 前缀的显式用户命令保持原样执行，见上）
+      if (this.rejectWhileRunning(req, '表达式求值')) return;
+      // 帧作用域：按 frameId 切换到「指定线程的指定帧」再求值（多线程/多帧下求值上下文与客户端一致；
+      // DAP 的 frameId 与本地作用域 variablesReference 同为「帧引用」，此处补基址后统一经 ensureFrame）
+      if (args.frameId) await this.ensureFrame(LOCALS_REF_BASE + Number(args.frameId));
       const r = await this.session.sendMi('-data-evaluate-expression', {}, [expr]);
       const value = r.attrs['value'] ?? '';
       this.sendResponse(req, true, { result: value, variablesReference: 0 });
@@ -947,6 +1037,7 @@ export class GdbDebugAdapter implements vscode.DebugAdapter {
   private async onDisassemble(req: DapRequest): Promise<void> {
     const args = (req as any).arguments ?? {};
     if (!this.session) { this.sendResponse(req, true, { instructions: [] }); return; }
+    if (this.rejectWhileRunning(req, '反汇编')) return;
     const want = Math.max(1, Number(args.instructionCount ?? 100));
     const byteOffset = Number(args.offset ?? 0) || 0;
     const instrOffset = Number(args.instructionOffset ?? 0) || 0;
@@ -987,6 +1078,7 @@ export class GdbDebugAdapter implements vscode.DebugAdapter {
   private async onReadMemory(req: DapRequest): Promise<void> {
     const args = (req as any).arguments ?? {};
     if (!this.session) { this.sendResponse(req, false, {}, '调试会话未启动'); return; }
+    if (this.rejectWhileRunning(req, '内存读取')) return;
     const base = await this.evalAddress(String(args.memoryReference ?? ''));
     if (base === null) { this.sendResponse(req, false, {}, '无效的内存引用'); return; }
     const addr = base + (Number(args.offset ?? 0) || 0);
@@ -1004,6 +1096,7 @@ export class GdbDebugAdapter implements vscode.DebugAdapter {
   private async onWriteMemory(req: DapRequest): Promise<void> {
     const args = (req as any).arguments ?? {};
     if (!this.session) { this.sendResponse(req, false, {}, '调试会话未启动'); return; }
+    if (this.rejectWhileRunning(req, '内存写入')) return;
     const base = await this.evalAddress(String(args.memoryReference ?? ''));
     if (base === null) { this.sendResponse(req, false, {}, '无效的内存引用'); return; }
     const addr = base + (Number(args.offset ?? 0) || 0);
@@ -1022,6 +1115,8 @@ export class GdbDebugAdapter implements vscode.DebugAdapter {
     const args = (req as any).arguments ?? {};
     const name = String(args.name ?? '');
     if (!this.session || !name) { this.sendResponse(req, true, { dataId: undefined }); return; }
+    // P3 运行中防护：二级变量树（-var-info-path-expression）运行中无回执 → 直接回「不可用」
+    if (this.targetRunning) { this.sendResponse(req, true, { dataId: undefined }, GdbDebugAdapter.RUNNING_HINT); return; }
     let expr = name;
     const ref = Number(args.variablesReference ?? 0);
     if (ref >= 10000) {
@@ -1049,6 +1144,7 @@ export class GdbDebugAdapter implements vscode.DebugAdapter {
       this.sendResponse(req, true, { breakpoints: requested.map(() => ({ verified: false })) });
       return;
     }
+    if (this.rejectWhileRunning(req, '数据断点设置')) return;
     for (const bp of this.dataBreakpoints) {
       if (bp.gdbNum) { try { await this.session.sendExact(`-break-delete ${bp.gdbNum}`); } catch { /* */ } }
     }
@@ -1085,6 +1181,7 @@ export class GdbDebugAdapter implements vscode.DebugAdapter {
     const args = (req as any).arguments ?? {};
     const requested: { instructionReference?: string; offset?: number; condition?: string; hitCondition?: string; logMessage?: string }[] = args.breakpoints ?? [];
     if (!this.session) { this.sendResponse(req, true, { breakpoints: requested.map(() => ({ verified: false })) }); return; }
+    if (this.rejectWhileRunning(req, '指令断点设置')) return;
 
     // 清旧（同步清理条件/日志表）
     for (const bp of this.instructionBreakpoints) {
@@ -1133,10 +1230,12 @@ export class GdbDebugAdapter implements vscode.DebugAdapter {
     const args = (req as any).arguments ?? {};
     const line = Number(args.targetId ?? 0);
     if (!this.session || !line) { this.sendResponse(req, false, {}, '无效的跳转目标'); return; }
+    if (this.rejectWhileRunning(req, '运行到光标')) return;
     const file = this.stackFrames[0]?.file;
     if (!file) { this.sendResponse(req, false, {}, '无法确定当前源文件'); return; }
     try {
       await this.session.sendExact(`-exec-until ${this.session.quote(`${file}:${line}`)}`);
+      this.targetRunning = true;
       this.sendResponse(req, true, {});
     } catch (err) {
       this.sendResponse(req, false, {}, `运行到光标失败: ${(err as Error).message}`);
@@ -1148,6 +1247,7 @@ export class GdbDebugAdapter implements vscode.DebugAdapter {
     const args = (req as any).arguments ?? {};
     const filters: string[] = args.filters ?? [];
     if (!this.session) { this.sendResponse(req, true, {}); return; }
+    if (this.rejectWhileRunning(req, '异常断点设置')) return;
     for (const n of this.catchpointNums) {
       try { await this.session.sendExact(`-break-delete ${n}`); } catch { /* */ }
     }
@@ -1182,7 +1282,15 @@ export class GdbDebugAdapter implements vscode.DebugAdapter {
     // 第五轮批次二 D1：附加会话先显式分离（实测即使不分离被附加进程也存活，显式化更稳；
     // 对齐 CB「附加模式停止前先 Detach」语义）
     if (this.attached && this.session && !this.detached) {
-      try { await this.session.sendExact('-target-detach'); this.detached = true; } catch { /* best-effort */ }
+      if (this.targetRunning) {
+        // P3：运行中 -target-detach 无回执（同步 MI 阻塞，旧行为：等待 30s 超时）→ 直接结束会话；
+        // GDB 被回收时被附加进程自行存活（实测），与显式 Detach 的「分离不杀进程」语义一致
+        this.detached = true;
+      } else {
+        try { await this.session.sendExact('-target-detach'); this.detached = true; } catch { /* best-effort */ }
+      }
+      this.stoppedState = false; // Detach 后不再有停止态（与 adapter.detach() 一致）
+      this.targetRunning = false;
     }
     this.sendResponse(req, true, {});
     this.dispose();
@@ -1198,10 +1306,16 @@ export class GdbDebugAdapter implements vscode.DebugAdapter {
     this.dispose();
   }
 
-  /** 切换到 variablesReference 编码的帧（本地变量作用域，第五十轮 D8） */
+  /** 切换到 variablesReference 编码的帧（本地变量作用域，第五十轮 D8；P3：先切线程再切帧） */
   private async ensureFrame(ref: number): Promise<void> {
     if (!this.session || ref < LOCALS_REF_BASE) return;
-    try { await this.session.sendExact(`-stack-select-frame ${ref - LOCALS_REF_BASE}`); } catch { /* 忽略 */ }
+    const fid = ref - LOCALS_REF_BASE;
+    const threadId = Math.floor(fid / FRAME_ID_BASE);
+    const level = fid % FRAME_ID_BASE;
+    try {
+      await this.selectThread(threadId);
+      await this.session.sendExact(`-stack-select-frame ${level}`);
+    } catch { /* 忽略 */ }
   }
 
   /** 日志断点输出：{expr} 逐个求值后写 Debug Console（DAP 语义：不停止，第五十轮 D4） */
@@ -1227,6 +1341,8 @@ export class GdbDebugAdapter implements vscode.DebugAdapter {
       // 程序退出（exited / exited-normally / exited-signalled）→ 结束会话（第五十轮 D2）
       if (isExitReason(rawReason)) {
         this.stoppedState = false;
+        this.targetRunning = false;
+        this.currentThreadId = 0;
         this.stepOutBpNum = null;
         if (!this.ended) {
           this.ended = true;
@@ -1264,6 +1380,8 @@ export class GdbDebugAdapter implements vscode.DebugAdapter {
         return;
       }
       this.stoppedState = true;
+      this.targetRunning = false;
+      this.currentThreadId = threadId; // GDB 停止后选中的线程 = 停止线程（-stack-select-frame 作用于它）
       // 停止原因按 DAP 枚举映射（第五十轮 D5）
       let reason = mapStopReason(rawReason, rec.attrs['signal-name']);
       let description = rawReason;
@@ -1291,6 +1409,7 @@ export class GdbDebugAdapter implements vscode.DebugAdapter {
       // VS Code 收到 stopped 后会自行请求 threads/stackTrace）
     } else if (rec.record === 'running') {
       this.stoppedState = false;
+      this.targetRunning = true;
       debugStateChanged.fire();
     } else if (rec.record === 'thread-created') {
       const id = Number(rec.attrs['id'] ?? 0);
@@ -1321,10 +1440,11 @@ export class GdbDebugAdapter implements vscode.DebugAdapter {
     return m ? m[1] : undefined;
   }
 
-  private parseStackFrames(s: string): { id: number; name: string; file?: string; line?: number; addr?: string }[] {
+  private parseStackFrames(s: string, threadId = 0): { id: number; name: string; file?: string; line?: number; addr?: string }[] {
     // 逐 tuple 解析（旧惰性可选分组正则会丢失 file/line，已实证；第五十轮 D3）
+    // P3：帧 id 编码「线程 + 帧层级」（多线程下 level 会重复，须全局唯一才能定位到帧）
     return parseStackFrameTuples(s).map((t) => ({
-      id: t.level,
+      id: threadId * FRAME_ID_BASE + t.level,
       name: t.func ?? '?',
       file: t.fullname || t.file,
       line: t.line,
