@@ -1060,7 +1060,15 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   // 打开项目
   context.subscriptions.push(
-    vscode.commands.registerCommand('codeblocks.openProject', async () => {
+    vscode.commands.registerCommand('codeblocks.openProject', async (arg?: vscode.Uri | string) => {
+      // D-11：带参直接打开（Find File 等流程以 executeCommand('codeblocks.openProject', uri) 调用），无参才弹文件对话框
+      if (arg) {
+        const target = typeof arg === 'string' ? arg : arg.fsPath;
+        if (target) {
+          await openProject(target);
+          return;
+        }
+      }
       const uris = await vscode.window.showOpenDialog({
         canSelectFiles: true,
         canSelectMany: true,
@@ -3022,7 +3030,10 @@ async function generateClangdForWorkspaceInternal(interactive: boolean): Promise
 
     const clangd = detectClangd();
     fallbackEnabled = !clangd; // 检测到 clangd 则禁用兜底补全，避免重复提示
-    clangdDiagnosticsEnabled = !!clangd; // 检测到 clangd 则构建引擎停止向 Problems 面板报错
+    // D-10：仅当 clangd **扩展**已安装时才让出 Problems 诊断——只有 clangd 二进制（例如仅装了 LLVM）而扩展
+    // 未安装/被禁用时，构建引擎必须继续写 Problems，否则编译警告/错误对用户完全不可见
+    // （实测：日志有 warning 而 Problems 0 条）。vscode.extensions.getExtension 对未安装/被禁用的扩展返回 undefined。
+    clangdDiagnosticsEnabled = !!clangd && !!vscode.extensions.getExtension('llvm-vs-code-extensions.vscode-clangd');
 
     if (!openProjects.length) return;
 
