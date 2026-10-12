@@ -64,6 +64,36 @@ interface ChildVar {
 /** 本地变量作用域的 variablesReference 基址（+frameId，第五十轮 D8） */
 const LOCALS_REF_BASE = 100000;
 
+/** D-03：全局作用域内联取值的变量数上限（超出者只显示名称/类型，避免逐条 -var-create 卡顿） */
+const GLOBALS_INLINE_VALUE_MAX = 60;
+
+/** D-03：解析 `info variables` 的 console 输出，丢弃工具链/运行库符号，最多返回 cap 项 */
+function parseInfoVariablesOutput(text: string, cap: number): { name: string; type: string }[] {
+  const out: { name: string; type: string }[] = [];
+  let skipFile = false;
+  for (const raw of text.split('\n')) {
+    const line = raw.trimEnd();
+    const file = line.match(/^File (.+):$/);
+    if (file) { skipFile = isToolchainSource(file[1]); continue; }
+    if (skipFile) continue;
+    // 变量行形如 "int g_counter;"（GDB 8.1 无行号前缀；部分版本为 "12:\tint x;"）
+    const m = line.match(/^(?:\d+:\s+)?(.+?)\s+([A-Za-z_][A-Za-z0-9_]*)\s*;$/);
+    if (!m) continue;
+    const name = m[2];
+    if (name.startsWith('__')) continue;
+    out.push({ name, type: m[1].trim() });
+    if (out.length >= cap) break;
+  }
+  return out;
+}
+
+/** 工具链/运行库源文件（其全局符号不属于被测程序） */
+function isToolchainSource(file: string): boolean {
+  const norm = file.replace(/\\/g, '/');
+  if (/(^|\/)(gcc|gcc-[0-9.]+|libexec|sysroot|mingw[^/]*|w64-mingw32|libstdc\+\+-v3|clang[^/]*|llvm[^/]*)(\/|$)/i.test(norm)) return true;
+  return /(^|\/)(crtstuff|crtbegin|crtend|libgcc|libgcc2|libmingwex|libmoldname|msvcrt|emutls|pseudo-reloc)[^/]*$/i.test(norm);
+}
+
 export class GdbDebugAdapter implements vscode.DebugAdapter {
   private session: GdbMiSession | null = null;
   private emitter = new vscode.EventEmitter<vscode.DebugProtocolMessage>();
@@ -84,6 +114,9 @@ export class GdbDebugAdapter implements vscode.DebugAdapter {
   private varRefCounter = 10000;                       // 生成 variablesReference
   private varNameToRef = new Map<string, number>();
   private varRefToName = new Map<number, string>();
+  // D-03：程序全局变量枚举缓存 + 内部命令 console 输出捕获
+  private globalVarsCache: { name: string; type: string }[] | null = null;
+  private consoleCapture: string[] | null = null;
   // 第四十九轮：数据断点 / 异常断点 / 附加 / 停驻状态 / 寄存器缓存
   private dataBreakpoints: { dataId: string; gdbNum?: string }[] = [];
   private catchpointNums: string[] = [];
@@ -388,7 +421,12 @@ export class GdbDebugAdapter implements vscode.DebugAdapter {
   private openSession(): void {
     this.session = new GdbMiSession(vscode.workspace.getConfiguration('codeblocks').get<number>('gdbTimeoutMs', 30000));
     this.session.onAsyncRecord = (rec) => this.handleAsync(rec);
-    this.session.onConsole = (t) => this.sendOutput('console', t);
+    this.globalVarsCache = null; // D-03：新会话重新枚举全局变量
+    this.session.onConsole = (t) => {
+      // D-03：捕获窗口内的 console 输出供适配器内部解析（如 info variables），不转发给客户端
+      if (this.consoleCapture) { this.consoleCapture.push(t); return; }
+      this.sendOutput('console', t);
+    };
     this.session.onLog = (t) => this.sendOutput('console', t);
     this.session.onTargetOutput = (t) => this.sendOutput('stdout', t);
     this.session.onExit = (code) => {
@@ -718,17 +756,19 @@ export class GdbDebugAdapter implements vscode.DebugAdapter {
       if (ref === 0) {
         // 顶层不可达（scopes 会提供引用），防御性返回空
         vars = [];
-      } else if (ref === 2000 || ref >= LOCALS_REF_BASE) {
-        // 本地变量（按帧）/ 全局变量：本地需先切帧（第五十轮 D8）
+      } else if (ref === 2000) {
+        // 全局变量：-stack-list-variables 仅作用当前帧，需另行枚举（D-03）
+        vars = await this.parseGlobalVariables();
+      } else if (ref >= LOCALS_REF_BASE) {
+        // 本地变量（按帧）：先切帧（第五十轮 D8）
         await this.ensureFrame(ref);
-        const printValues = ref >= LOCALS_REF_BASE ? '1' : '0';
-        const r = await this.session.sendMi('-stack-list-variables', {}, [printValues]);
-        vars = await this.parseVariables(r.attrs['variables'] ?? '', ref >= LOCALS_REF_BASE);
+        const r = await this.session.sendMi('-stack-list-variables', {}, ['1']);
+        vars = await this.parseVariables(r.attrs['variables'] ?? '', true);
       } else {
-        // 子节点：按 varobj 名列出 children
+        // 子节点：按 varobj 名列出 children（必须带 print-values=1，否则子成员 value 恒为空，D-02）
         const varName = this.varRefToName.get(ref);
         if (!varName) { this.sendResponse(req, true, { variables: [] }); return; }
-        const r = await this.session.sendPositional('-var-list-children', [varName]);
+        const r = await this.session.sendPositional('-var-list-children', ['1', varName]);
         vars = await this.parseChildren(r.attrs['children'] ?? '');
       }
     } catch { /* ignore */ }
@@ -1213,6 +1253,39 @@ export class GdbDebugAdapter implements vscode.DebugAdapter {
       line: t.line,
       addr: t.addr,
     }));
+  }
+
+  /**
+   * D-03：枚举程序全局变量。MI 无「按作用域列变量」命令（-stack-list-variables 只作用于当前帧），
+   * 故用 `info variables`（console 命令）取符号名与类型，输出经 consoleCapture 截获后解析。
+   */
+  private async collectGlobalVars(): Promise<{ name: string; type: string }[]> {
+    if (this.globalVarsCache) return this.globalVarsCache;
+    const out: { name: string; type: string }[] = [];
+    if (this.session) {
+      try {
+        this.consoleCapture = [];
+        await this.session.sendExact('-interpreter-exec console "info variables"');
+        out.push(...parseInfoVariablesOutput(this.consoleCapture.join(''), 200));
+      } catch { /* 枚举失败按无全局变量处理 */ } finally {
+        this.consoleCapture = null;
+      }
+    }
+    this.globalVarsCache = out;
+    return out;
+  }
+
+  /** D-03：全局作用域变量列表（前 N 个建 varobj 取值，其余仅名称/类型） */
+  private async parseGlobalVariables(): Promise<DapVariable[]> {
+    const all = await this.collectGlobalVars();
+    const out: DapVariable[] = [];
+    for (const g of all.slice(0, GLOBALS_INLINE_VALUE_MAX)) {
+      out.push(await this.buildVariable(g.name, g.name, '', true));
+    }
+    for (const g of all.slice(GLOBALS_INLINE_VALUE_MAX)) {
+      out.push({ name: g.name, value: '', type: g.type, variablesReference: 0 });
+    }
+    return out;
   }
 
   private async parseVariables(s: string, withValues: boolean): Promise<DapVariable[]> {
