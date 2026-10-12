@@ -167,6 +167,22 @@ function lineOf(source, mark) {
 }
 
 // ---------- DAP 客户端（直连适配器，捕获 onDidSendMessage） ----------
+// 环境差异诊断：用原始 GDB/MI 复跑「入口地址断点」序列，逐行打印 GDB 回执（跨环境定位用）
+function rawMiProbe(gdbPath, program, addr, waitMs = 8000) {
+  return new Promise((resolve) => {
+    const lines = [];
+    const proc = spawn(gdbPath, ['-q', '--interpreter=mi2'], { windowsHide: true });
+    const send = (cmd) => proc.stdin.write(cmd + '\n');
+    proc.stdout.on('data', (b) => { for (const l of String(b).split('\n')) if (l.trim()) lines.push(l.trim()); });
+    proc.stderr.on('data', (b) => { for (const l of String(b).split('\n')) if (l.trim()) lines.push('[stderr] ' + l.trim()); });
+    send(`-file-exec-and-symbols "${program.replace(/\\/g, '/')}"`);
+    setTimeout(() => send(`-break-insert -t *${addr}`), 800);
+    setTimeout(() => send('-exec-run'), 1600);
+    setTimeout(() => { try { proc.stdin.write('-gdb-exit\n'); } catch { /* ignore */ } }, waitMs);
+    setTimeout(() => { try { proc.kill(); } catch { /* ignore */ } resolve(lines); }, waitMs + 1500);
+  });
+}
+
 function makeClient(adapter) {
   const msgs = [];
   let seq = 1;
@@ -1032,21 +1048,16 @@ async function main() {
         const nsStop = ns.client.lastStop();
         const nsOut = ns.client.outputs();
         if (!nsGot) {
-          // 环境差异诊断（本机命中、CI runner 未命中）：用原始 gdb -batch 复跑同一序列，把逐行输出写入日志
-          const infoFiles = spawnSync(gdb, ['-q', '-batch', '-ex', `file ${nosymExe}`, '-ex', 'info files'], { encoding: 'utf-8', windowsHide: true });
-          const addr = String(infoFiles.stdout || '').match(/Entry point:\s*(0x[0-9a-fA-F]+)/)?.[1];
+          // 环境差异诊断（本机命中、CI runner 未命中）：用原始 GDB/MI 复跑同一序列，把逐行回执写入日志
           const ver = spawnSync(gdb, ['--version'], { encoding: 'utf-8', windowsHide: true });
           for (const line of String(ver.stdout || '').split('\n').slice(0, 2)) console.log(`   [diag] gdb: ${line}`);
-          for (const line of String(infoFiles.stdout || '').split('\n').filter((l) => /Entry point|file type/.test(l))) console.log(`   [diag] info files: ${line.trim()}`);
+          const addr = (String(nsOut).match(/程序入口 (0x[0-9a-fA-F]+)/) || [])[1];
           if (addr) {
-            const raw = spawnSync(gdb, ['-q', '-batch', '-ex', `file ${nosymExe}`, '-ex', `break *${addr}`,
-              '-ex', 'run', '-ex', 'info registers rip', '-ex', 'info program'], { encoding: 'utf-8', windowsHide: true });
-            for (const line of String(raw.stdout || '').split('\n').slice(0, 8)) console.log(`   [diag] raw gdb: ${line.trim()}`);
-            for (const line of String(raw.stderr || '').split('\n').filter(Boolean).slice(0, 4)) console.log(`   [diag] raw gdb(stderr): ${line.trim()}`);
+            for (const line of await rawMiProbe(gdb, nosymExe, addr)) console.log(`   [diag] mi: ${line}`);
           } else {
-            console.log('   [diag] raw gdb: info files 未给出 Entry point 行');
+            console.log('   [diag] 适配器未取得入口地址（输出无「程序入口 0x…」）');
           }
-          for (const line of String(nsOut).split('\n').filter((l) => /stopOnEntry|入口|无法/.test(l))) console.log(`   [diag] adapter: ${line.trim()}`);
+          for (const line of String(nsOut).split('\n').filter((l) => /stopOnEntry|入口|无法|启动/.test(l))) console.log(`   [diag] adapter: ${line.trim()}`);
         }
         check('S10b 无符号表：入口地址兜底触发首停（不再静默不首停）', nsGot && !!nsStop,
           { stopped: nsGot, body: nsStop && nsStop.body, terminated: ns.client.events('terminated').length }, 'stopped');
