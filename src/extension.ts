@@ -5058,6 +5058,20 @@ function reportBuildResult(success: boolean, cancelled: boolean, buildStartMs: n
   }
 }
 
+/**
+ * 构建互斥：必须在任何 `await` 之前**同步**置位（D-15）。
+ * 原实现在多个 `await`（停调试器 / Rebuild 确认 / 保存）之后才置位 `buildInProgress`，
+ * 同一 tick 内连续两次构建命令会双双通过检查 ⇒ 并发双跑（写同一 obj/exe，且 currentBuildCancel 被后者覆盖）。
+ */
+function claimBuildMutex(): boolean {
+  if (buildInProgress) {
+    vscode.window.showWarningMessage('已有构建正在进行，请等待完成或先停止');
+    return false;
+  }
+  buildInProgress = true;
+  return true;
+}
+
 /** 主 Build —— 对齐 CB OnBuild：仅活动项目；多工程且无活动项目时询问（AskForActiveProject:1080） */
 async function build(rebuild: boolean): Promise<boolean> {
   // 构建互斥：进行中时忽略新的构建命令（防止双开构建进程打架）
@@ -5087,11 +5101,18 @@ async function build(rebuild: boolean): Promise<boolean> {
 
 /** Build Workspace —— 对齐 CB OnBuildWorkspace：全部工程选中目标，依赖拓扑排序 */
 async function buildWorkspace(rebuild: boolean, clearLog = true): Promise<boolean> {
-  // 构建互斥：进行中时忽略新的构建命令（防止双开构建进程打架）
-  if (buildInProgress) {
-    vscode.window.showWarningMessage('已有构建正在进行，请等待完成或先停止');
-    return false;
+  // 构建互斥：进行中时忽略新的构建命令（防止双开构建进程打架）；置位必须先于任何 await（D-15）
+  if (!claimBuildMutex()) return false;
+  try {
+    return await buildWorkspaceLocked(rebuild, clearLog);
+  } finally {
+    buildInProgress = false;
+    currentBuildCancel = undefined;
   }
+}
+
+/** Build Workspace 主体（互斥已由 buildWorkspace 占有） */
+async function buildWorkspaceLocked(rebuild: boolean, clearLog: boolean): Promise<boolean> {
   if (openProjects.length === 0) {
     vscode.window.showWarningMessage('请先打开一个 Code::Blocks 项目 (.cbp)');
     return false;
@@ -5126,7 +5147,6 @@ async function buildWorkspace(rebuild: boolean, clearLog = true): Promise<boolea
   let done = 0;
   let allOk = true;
   let cancelled = false;
-  buildInProgress = true;
   try {
     await vscode.window.withProgress(
       { location: vscode.ProgressLocation.Notification, title: `Code::Blocks ${rebuild ? '重新构建' : '构建'}中...`, cancellable: true },
@@ -5181,9 +5201,6 @@ async function buildWorkspace(rebuild: boolean, clearLog = true): Promise<boolea
     } else {
       throw e;
     }
-  } finally {
-    buildInProgress = false;
-    currentBuildCancel = undefined;
   }
 
   const { errorCount, warningCount } = buildResultStats();
@@ -5198,12 +5215,18 @@ async function buildWorkspace(rebuild: boolean, clearLog = true): Promise<boolea
 
 /** 构建单个项目（右键菜单的 Build/Rebuild 与主 Build 命令使用，对齐 CB 单活动项目 Build） */
 async function buildSingleProject(filename: string, rebuild: boolean): Promise<boolean> {
-  // 构建互斥：进行中时忽略新的构建命令
-  if (buildInProgress) {
-    vscode.window.showWarningMessage('已有构建正在进行，请等待完成或先停止');
-    return false;
+  // 构建互斥：置位必须先于任何 await（D-15，防止同 tick 双发并发双跑）
+  if (!claimBuildMutex()) return false;
+  try {
+    return await buildSingleProjectLocked(filename, rebuild);
+  } finally {
+    buildInProgress = false;
+    currentBuildCancel = undefined;
   }
+}
 
+/** 构建单个项目主体（互斥已由 buildSingleProject 占有） */
+async function buildSingleProjectLocked(filename: string, rebuild: boolean): Promise<boolean> {
   // 对齐 DoBuild:2897：构建前须先停止调试会话
   if (!(await stopDebuggerIfRunning())) {
     return false;
@@ -5248,7 +5271,6 @@ async function buildSingleProject(filename: string, rebuild: boolean): Promise<b
 
   let ok = false;
   let cancelled = false;
-  buildInProgress = true;
   try {
     ok = await vscode.window.withProgress(
       { location: vscode.ProgressLocation.Notification, title: `Code::Blocks ${rebuild ? '重新构建' : '构建'}中...`, cancellable: true },
@@ -5260,6 +5282,9 @@ async function buildSingleProject(filename: string, rebuild: boolean): Promise<b
           progress.report({ message: project.title });
           return await buildOneProject(project, targetTitle, rebuild, cancelSource);
         } finally {
+          // D-16：「停止构建」命令走 cancelSource.cancel()，不会抛 CancellationError ⇒ 必须从取消源判定，
+          // 否则 cancelled 恒为 false，取消会被上报成「❌ 构建失败 · 0 错误 · 0 警告」（与通道里的「构建已取消」矛盾）
+          if (cancelSource.isCancelled()) cancelled = true;
           currentBuildCancel = undefined;
         }
       },
@@ -5271,9 +5296,6 @@ async function buildSingleProject(filename: string, rebuild: boolean): Promise<b
     } else {
       throw e;
     }
-  } finally {
-    buildInProgress = false;
-    currentBuildCancel = undefined;
   }
 
   const { errorCount, warningCount } = buildResultStats();
@@ -5287,11 +5309,18 @@ async function buildSingleProject(filename: string, rebuild: boolean): Promise<b
 
 /** 单文件编译（对齐 Code::Blocks Build file：CompileFile，只编译不链接） */
 async function buildSingleFile(project: Project, file: ProjectFile): Promise<void> {
-  // 构建互斥：进行中时忽略新的编译命令
-  if (buildInProgress) {
-    vscode.window.showWarningMessage('已有构建正在进行，请等待完成或先停止');
-    return;
+  // 构建互斥：置位必须先于任何 await（D-15）
+  if (!claimBuildMutex()) return;
+  try {
+    await buildSingleFileLocked(project, file);
+  } finally {
+    buildInProgress = false;
+    currentBuildCancel = undefined;
   }
+}
+
+/** 单文件编译主体（互斥已由 buildSingleFile 占有） */
+async function buildSingleFileLocked(project: Project, file: ProjectFile): Promise<void> {
   if (project.filename !== activeProject?.filename) {
     setActiveProject(project, { persist: true });
   }
@@ -5317,7 +5346,6 @@ async function buildSingleFile(project: Project, file: ProjectFile): Promise<voi
   const engine = new BuildEngine(project, compiler, outputChannel, (id) => resolveTargetCompiler(id));
   const cancelSource = new BuildCancelSource();
   currentBuildCancel = cancelSource;
-  buildInProgress = true;
   let ok = false;
   let cancelled = false;
   try {
@@ -5351,7 +5379,8 @@ async function buildSingleFile(project: Project, file: ProjectFile): Promise<voi
       throw e;
     }
   } finally {
-    buildInProgress = false;
+    // D-16：取消走 cancelSource.cancel()，不抛 CancellationError ⇒ 必须从取消源判定（否则取消被报成失败）
+    if (cancelSource.isCancelled()) cancelled = true;
     currentBuildCancel = undefined;
   }
 
