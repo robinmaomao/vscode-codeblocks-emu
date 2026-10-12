@@ -637,6 +637,67 @@ async function main() {
       await waitFor(() => !s2.adapter.isActive(), 8000);
     }
 
+    // ================= S9 能力请求：函数断点 / 模块 / 已加载源 / 暂停（能力探测） =================
+    {
+      const { adapter, client } = await launchSession(ctx, {
+        program: exePath, cwd: dir, sourcePath: srcPath, breakpoints: [],
+      });
+      // ① setFunctionBreakpoints：直接请求（不经 VS Code UI 路径）并验证真实命中 compute
+      const fb = await client.send('setFunctionBreakpoints', { breakpoints: [{ name: 'compute' }] });
+      check('S9 setFunctionBreakpoints 成功', fb.success, fb.message);
+      check('S9 函数断点 verified=true',
+        !!(fb.body.breakpoints && fb.body.breakpoints[0] && fb.body.breakpoints[0].verified),
+        fb.body && fb.body.breakpoints, 'verified');
+      await client.send('configurationDone', {});
+      const fstop = await client.waitStop(30000);
+      check('S9 函数断点命中（程序在 compute 处停止）', !!fstop, fstop && fstop.body, 'stopped');
+      const fth = await client.send('threads', {});
+      const fst = await client.send('stackTrace', { threadId: fth.body.threads[0].id, levels: 4 });
+      check('S9 命中栈顶为 compute（函数断点语义）',
+        /compute/.test(String((fst.body.stackFrames[0] || {}).name)),
+        fst.body.stackFrames.slice(0, 3).map((f) => f.name), 'compute');
+
+      // ② modules：调试目标 + 已加载库（=library-loaded 缓存，含 .text 加载地址）
+      const mods = await client.send('modules', {});
+      const modList = mods.body.modules || [];
+      check('S9 modules 含调试目标本体',
+        mods.success && modList.some((m) => /probe\.exe$/i.test(String(m.path || m.name))),
+        modList.slice(0, 3).map((m) => [m.name, m.baseAddress]), '含 probe.exe');
+      check('S9 modules 含已加载 DLL（library-loaded 缓存）',
+        modList.some((m) => /\.dll$/i.test(String(m.path || m.name))),
+        modList.filter((m) => /\.dll$/i.test(String(m.path))).slice(0, 3).map((m) => m.name), '≥1 个 dll');
+
+      // ③ loadedSources：已加载源文件（-file-list-exec-source-files）
+      const ls = await client.send('loadedSources', {});
+      const srcList = ls.body.sources || [];
+      check('S9 loadedSources 含探针源文件',
+        ls.success && srcList.some((s) => /probe\.c$/i.test(String(s.path || s.name))),
+        srcList.slice(0, 3).map((s) => s.path), '含 probe.c');
+
+      // ④ pause：能力探测——Windows 原生 GDB 无法中断运行中的进程（-exec-interrupt 会卡死 GDB，D-07）
+      await client.send('continue', { threadId: fth.body.threads[0].id });
+      await sleep(800);
+      const pauseResp = await client.send('pause', {});
+      const pstop = await client.waitStop(3000);
+      if (process.platform === 'win32') {
+        check('S9 pause 在 Windows 原生 GDB 下回「不支持」并说明原因',
+          pauseResp.success === false && /暂停/.test(String(pauseResp.message || '')), pauseResp.message, '不支持说明');
+        check('S9 pause 未产生 stopped（未下发会卡死 GDB 的 -exec-interrupt）', !pstop, pstop && pstop.body, 'null');
+      } else {
+        check('S9 pause 触发中断停止', pauseResp.success && !!pstop, pstop && pstop.body, 'stopped');
+      }
+      const alive = adapter.isActive();
+      check('S9 pause 之后会话仍处于活动态（未卡死会话）', alive, alive, true);
+      // 注：运行中（未停止）时 GDB 8.1 同步 MI 不回应任何 MI 命令（实测 -thread-info / -break-insert /
+      // -data-evaluate-expression 全部阻塞），故此处不再发 MI 请求，改为断言会话状态 + 优雅断开（复验 D-05）。
+      await client.send('disconnect', {});
+      await waitFor(() => !adapter.isActive(), 8000);
+      client.clear();
+      await sleep(1000);
+      check('S9 断开后无迟到 DAP 消息（D-05 复验）', client.msgs.length === 0,
+        client.msgs.map((m) => m.type + '/' + (m.event || m.command)), '0 条');
+    }
+
     // ================= S8 terminate =================
     {
       const { adapter, client } = await launchSession(ctx, {

@@ -178,6 +178,8 @@ export class GdbDebugAdapter implements vscode.DebugAdapter {
       case 'gotoTargets': this.onGotoTargets(msg); break;
       case 'goto': this.onGoto(msg); break;
       case 'setExceptionBreakpoints': this.onSetExceptionBreakpoints(msg); break;
+      case 'modules': this.onModules(msg); break;
+      case 'loadedSources': this.onLoadedSources(msg); break;
       case 'terminate': this.onTerminate(msg); break;
       case 'disconnect': this.onDisconnect(msg); break;
       default:
@@ -336,6 +338,9 @@ export class GdbDebugAdapter implements vscode.DebugAdapter {
       supportsSteppingGranularity: true,
       supportsHitConditionalBreakpoints: true,
       supportsLogPoints: true,
+      // 模块 / 已加载源文件视图（DAP：客户端仅在能力为 true 时才发对应请求）
+      supportsModulesRequest: true,
+      supportsLoadedSourcesRequest: true,
       exceptionBreakpointFilters: [
         { filter: 'throw', label: 'C++ 抛出异常（throw）', default: false },
         { filter: 'catch', label: 'C++ 捕获异常（catch）', default: false },
@@ -837,8 +842,45 @@ export class GdbDebugAdapter implements vscode.DebugAdapter {
   }
 
   private async onPause(req: DapRequest): Promise<void> {
-    if (this.session) this.session.sendAsync('-exec-interrupt');
+    if (!this.session) { this.sendResponse(req, true, {}); return; }
+    // D-07 能力探测：Windows 原生 GDB 无法中断运行中的被调试进程——实测 `-exec-interrupt` 既不产生
+    // *stopped，还会让 GDB 永久失去响应（进程存活但后续 MI 命令全部无回执）⇒ 该平台不下发，
+    // 直接回「不支持」并保持会话可用；远程目标与其它平台（中断有效）维持原行为。
+    if (process.platform === 'win32' && !this.isRemoteDebugging) {
+      this.sendResponse(req, false, {},
+        '当前调试目标不支持暂停：Windows 原生 GDB 无法中断运行中的进程（请使用断点或「停止」结束会话）');
+      return;
+    }
+    this.session.sendAsync('-exec-interrupt');
     this.sendResponse(req, true, {});
+  }
+
+  /** DAP modules：已加载模块（=library-loaded 缓存）+ 调试目标本体 */
+  private async onModules(req: DapRequest): Promise<void> {
+    const modules: { id: string; name: string; path: string; baseAddress?: string }[] = [];
+    if (this.program) modules.push({ id: 'main', name: this.program, path: this.program });
+    this.loadedLibs.forEach((l, i) => {
+      const m: { id: string; name: string; path: string; baseAddress?: string } = { id: `lib${i}`, name: l.name, path: l.name };
+      if (l.from && /^0x[0-9a-f]+$/i.test(l.from)) m.baseAddress = l.from; // ranges.from = .text 加载地址
+      modules.push(m);
+    });
+    this.sendResponse(req, true, { modules });
+  }
+
+  /** DAP loadedSources：被调试进程已加载的源文件（-file-list-exec-source-files） */
+  private async onLoadedSources(req: DapRequest): Promise<void> {
+    const sources: { name: string; path: string; sourceReference: number }[] = [];
+    if (this.session) {
+      try {
+        const r = await this.session.sendExact('-file-list-exec-source-files');
+        for (const tu of this.splitMiTuples(r.attrs['files'] ?? '')) {
+          const full = this.extractField(tu, 'fullname') || this.extractField(tu, 'file') || '';
+          if (!full) continue;
+          sources.push({ name: this.extractField(tu, 'file') || full, path: full, sourceReference: 0 });
+        }
+      } catch { /* 忽略：GDB 不支持该 MI 命令时返回空列表 */ }
+    }
+    this.sendResponse(req, true, { sources });
   }
 
   private async onEvaluate(req: DapRequest): Promise<void> {
