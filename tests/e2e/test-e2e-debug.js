@@ -167,22 +167,6 @@ function lineOf(source, mark) {
 }
 
 // ---------- DAP 客户端（直连适配器，捕获 onDidSendMessage） ----------
-// 环境差异诊断：用原始 GDB/MI 复跑「入口地址断点」序列，逐行打印 GDB 回执（跨环境定位用）
-function rawMiProbe(gdbPath, program, addr, waitMs = 8000) {
-  return new Promise((resolve) => {
-    const lines = [];
-    const proc = spawn(gdbPath, ['-q', '--interpreter=mi2'], { windowsHide: true });
-    const send = (cmd) => proc.stdin.write(cmd + '\n');
-    proc.stdout.on('data', (b) => { for (const l of String(b).split('\n')) if (l.trim()) lines.push(l.trim()); });
-    proc.stderr.on('data', (b) => { for (const l of String(b).split('\n')) if (l.trim()) lines.push('[stderr] ' + l.trim()); });
-    send(`-file-exec-and-symbols "${program.replace(/\\/g, '/')}"`);
-    setTimeout(() => send(`-break-insert -t *${addr}`), 800);
-    setTimeout(() => send('-exec-run'), 1600);
-    setTimeout(() => { try { proc.stdin.write('-gdb-exit\n'); } catch { /* ignore */ } }, waitMs);
-    setTimeout(() => { try { proc.kill(); } catch { /* ignore */ } resolve(lines); }, waitMs + 1500);
-  });
-}
-
 function makeClient(adapter) {
   const msgs = [];
   let seq = 1;
@@ -1031,8 +1015,14 @@ async function main() {
       }
 
       // ---- 兜底：无符号表（-s 链接）→ 程序入口地址首停（`info files` 的 Entry point） ----
-      // 修复前：三个符号候选全部报 "No symbol table is loaded" ⇒ 不首停；修复后：入口地址断点可用
-      //（`-break-insert -t *0x…`），DAP 侧仍上报 reason=entry，但该停点无源码信息（帧为 `??`）。
+      // 修复前：三个符号候选全部报 "No symbol table is loaded" ⇒ 不首停。
+      // 修复后分两种镜像（由 PE 头的 `DYNAMICBASE` 决定，测试按产物实际属性分支）：
+      //  ① 固定基址（如本机 binutils 2.30 默认）：`-break-insert -t *0x…` 可用 → 首停于入口地址
+      //     （仍上报 reason=entry，但该停点无源码信息：帧为 `??`）；
+      //  ② 可重定位基址（CI 的新 binutils 默认 `--dynamicbase`）：加载后地址 ≠ 文件内地址 ⇒
+      //     地址断点会在 `-exec-run` 时插入失败并**中止整个启动**（实测 GDB 17.1：
+      //     `Cannot insert breakpoint 1. Cannot access memory at address 0x1400013f0` →
+      //     `^error,msg="Command aborted."`）⇒ 适配器事先跳过该兜底，程序必须能正常跑完。
       const nosymExe = path.join(dir, 'entry-probe-nosym.exe');
       const rcNosym = rcEntry.status === 0
         ? spawnSync(gcc, ['-g', '-s', '-O0', '-o', nosymExe, entrySrc], { encoding: 'utf-8', windowsHide: true })
@@ -1040,47 +1030,52 @@ async function main() {
       if (rcNosym.status !== 0) {
         skipCheck('S10b 无符号表入口地址兜底', '入口探针 -s 编译失败: ' + String(rcNosym.stderr || '').split('\n')[0]);
       } else {
+        const { peDynamicBase } = require('../../dist/debug/peImage.js');
+        const relocatable = peDynamicBase(fs.readFileSync(nosymExe)) === true;
+        console.log(`   （无符号表探针：DYNAMICBASE=${relocatable ? 'on（可重定位）' : 'off（固定基址）'}，gdb=${String(spawnSync(gdb, ['--version'], { encoding: 'utf-8', windowsHide: true }).stdout || '').split('\n')[0].trim()}）`);
         const ns = await launchSession(ctx, {
           program: nosymExe, cwd: dir, sourcePath: entrySrc, breakpoints: [], extra: { stopOnEntry: true },
         });
-        await ns.client.send('configurationDone', {});
-        const nsGot = await waitFor(() => ns.client.events('stopped').length > 0, 15000);
+        const nsCfg = await ns.client.send('configurationDone', {});
+        const nsGot = await waitFor(() => ns.client.events('stopped').length > 0, relocatable ? 6000 : 15000);
         const nsStop = ns.client.lastStop();
         const nsOut = ns.client.outputs();
-        if (!nsGot) {
-          // 环境差异诊断（本机命中、CI runner 未命中）：用原始 GDB/MI 复跑同一序列，把逐行回执写入日志
-          const ver = spawnSync(gdb, ['--version'], { encoding: 'utf-8', windowsHide: true });
-          for (const line of String(ver.stdout || '').split('\n').slice(0, 2)) console.log(`   [diag] gdb: ${line}`);
-          const addr = (String(nsOut).match(/程序入口 (0x[0-9a-fA-F]+)/) || [])[1];
-          if (addr) {
-            for (const line of await rawMiProbe(gdb, nosymExe, addr)) console.log(`   [diag] mi: ${line}`);
-          } else {
-            console.log('   [diag] 适配器未取得入口地址（输出无「程序入口 0x…」）');
-          }
-          for (const line of String(nsOut).split('\n').filter((l) => /stopOnEntry|入口|无法|启动/.test(l))) console.log(`   [diag] adapter: ${line.trim()}`);
+        if (relocatable) {
+          check('S10b 可重定位镜像：不尝试入口地址断点（程序不被中止，configurationDone 正常返回）',
+            nsCfg.success && nsGot === false, { cfg: nsCfg.success, stopped: nsGot }, 'configDone + 0 stopped');
+          const nsDone = await waitFor(() => ns.client.events('terminated').length > 0, 15000);
+          check('S10b 可重定位镜像：程序正常跑完（修复前入口地址断点使 -exec-run 被中止）',
+            nsDone && ns.client.events('stopped').length === 0,
+            { terminated: ns.client.events('terminated').length, stoppedEvents: ns.client.events('stopped').length }, 'terminated + 0 stopped');
+          check('S10b 可重定位镜像：说明可读且指出原因（stopOnEntry 未生效 + 可重定位）',
+            /stopOnEntry/.test(nsOut) && /无法生效/.test(nsOut) && /可重定位/.test(nsOut), String(nsOut).slice(-300), '中文说明 + 原因');
+          check('S10b 可重定位镜像：无启动失败提示（不把「不首停」表现为「启动失败」）',
+            !/无法启动程序/.test(nsOut), String(nsOut).slice(-300), '无「无法启动程序」');
+        } else {
+          check('S10b 无符号表：入口地址兜底触发首停（不再静默不首停）', nsGot && !!nsStop,
+            { stopped: nsGot, body: nsStop && nsStop.body, terminated: ns.client.events('terminated').length, outputTail: String(nsOut).slice(-300) },
+            'stopped');
+          check('S10b 无符号表：首停 reason=entry', !!nsStop && nsStop.body.reason === 'entry', nsStop && nsStop.body, "reason='entry'");
+          check('S10b 无符号表：描述标注入口地址（0x…）',
+            !!nsStop && /0x[0-9a-fA-F]+/.test(String(nsStop.body.description || ''))
+            && /入口/.test(String(nsStop.body.description || '')),
+            nsStop && nsStop.body.description, '含「入口」+ 0x…');
+          const nsTh = await ns.client.send('threads', {});
+          const nsSt = await ns.client.send('stackTrace', { threadId: nsTh.body?.threads?.[0]?.id, levels: 2 });
+          const nsF0 = nsSt.body?.stackFrames?.[0];
+          check('S10b 无符号表：首帧无源码信息（入口地址停点语义，不伪造源码行）',
+            nsSt.success && !!nsF0 && !nsF0.source,
+            nsSt.body && (nsSt.body.stackFrames || []).slice(0, 1).map((f) => ({ name: f.name, src: f.source })),
+            '首帧无 source');
+          check('S10b 无符号表：输出一行可读中文说明（含 stopOnEntry 与入口地址）',
+            /stopOnEntry/.test(nsOut) && /程序入口/.test(nsOut) && /0x[0-9a-fA-F]+/.test(nsOut), String(nsOut).slice(-300), '中文说明 + 地址');
+          const nsCont = await ns.client.send('continue', { threadId: nsTh.body?.threads?.[0]?.id });
+          const nsTerm = await waitFor(() => ns.client.events('terminated').length > 0, 15000);
+          check('S10b 无符号表：continue 后程序正常跑完（收到 terminated）',
+            nsCont.success && nsTerm, { cont: nsCont.success, terminated: ns.client.events('terminated').length }, 'success + terminated');
         }
-        check('S10b 无符号表：入口地址兜底触发首停（不再静默不首停）', nsGot && !!nsStop,
-          { stopped: nsGot, body: nsStop && nsStop.body, terminated: ns.client.events('terminated').length }, 'stopped');
-        check('S10b 无符号表：首停 reason=entry', !!nsStop && nsStop.body.reason === 'entry', nsStop && nsStop.body, "reason='entry'");
-        check('S10b 无符号表：描述标注入口地址（0x…）',
-          !!nsStop && /0x[0-9a-fA-F]+/.test(String(nsStop.body.description || ''))
-          && /入口/.test(String(nsStop.body.description || '')),
-          nsStop && nsStop.body.description, '含「入口」+ 0x…');
-        const nsTh = await ns.client.send('threads', {});
-        const nsSt = await ns.client.send('stackTrace', { threadId: nsTh.body?.threads?.[0]?.id, levels: 2 });
-        const nsF0 = nsSt.body?.stackFrames?.[0];
-        check('S10b 无符号表：首帧无源码信息（入口地址停点语义，不伪造源码行）',
-          nsSt.success && !!nsF0 && !nsF0.source,
-          nsSt.body && (nsSt.body.stackFrames || []).slice(0, 1).map((f) => ({ name: f.name, src: f.source })),
-          '首帧无 source');
-        check('S10b 无符号表：输出一行可读中文说明（含 stopOnEntry 与入口地址）',
-          /stopOnEntry/.test(nsOut) && /程序入口/.test(nsOut) && /0x[0-9a-fA-F]+/.test(nsOut), String(nsOut).slice(-400), '中文说明 + 地址');
-        const nsCont = await ns.client.send('continue', { threadId: nsTh.body?.threads?.[0]?.id });
-        const nsTerm = await waitFor(() => ns.client.events('terminated').length > 0, 15000);
-        check('S10b 无符号表：continue 后程序正常跑完（收到 terminated）',
-          nsCont.success && nsTerm, { cont: nsCont.success, terminated: ns.client.events('terminated').length }, 'success + terminated');
         await ns.client.send('disconnect', {});
-        await waitFor(() => !ns.adapter.isActive(), 8000);
+        check('S10b 无符号表：会话正常收尾（disconnect 后适配器释放）', await waitFor(() => !ns.adapter.isActive(), 8000) && !ns.adapter.isActive(), ns.adapter.isActive(), false);
       }
     }
 

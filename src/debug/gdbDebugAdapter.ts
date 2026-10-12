@@ -15,6 +15,7 @@ import {
 import { debugStateChanged, debugTrace, registerAdapter, unregisterAdapter } from './debugRegistry';
 import { RemoteDebuggingOptions } from '../model/projectDebuggerExtensions';
 import { buildRemoteDebugCommands, buildSourceDirCommands, splitCommandLineArgs } from './remoteDebugging';
+import { peDynamicBaseFromFile } from './peImage';
 
 /** 截断超长跟踪文本 */
 function truncate(s: string, n = 300): string {
@@ -804,16 +805,44 @@ export class GdbDebugAdapter implements vscode.DebugAdapter {
     // 断点已设置：新起会话启动程序；附加会话目标已在运行（附加后处于停止态，等用户继续）
     if (this.session && !this.attached) {
       await this.prepareStopOnEntry();
-      try {
-        // R4：远程目标已运行——用 continue 而非 run（对齐 gdb_driver.cpp:279-292 远程 Start 语义）
-        await this.session.send(this.isRemoteDebugging ? '-exec-continue' : '-exec-run');
-        this.targetRunning = true; // P3：目标开始运行（此后同步 MI 请求走「快速返回」防护）
-      } catch (err) {
+      const err = await this.startTarget();
+      if (err) {
         // 启动失败必须可见（如 GDB 与目标架构不匹配：not in executable format，第五十轮 D9）
-        this.sendOutput('stderr', `无法启动程序: ${(err as Error).message}`);
+        this.sendOutput('stderr', `无法启动程序: ${err}`);
       }
     }
     this.sendResponse(req, true, {});
+  }
+
+  /**
+   * 启动目标（`-exec-run` / 远程 `-exec-continue`）；返回错误消息（undefined = 已下发）。
+   *
+   * C-01 兜底：入口临时断点可能让启动被 GDB 中止（如可重定位镜像下地址断点插入失败：
+   * `Cannot insert breakpoint … Cannot access memory at address …` → `Command aborted.`）——
+   * stopOnEntry 失效可以接受，但**绝不能让程序起不来**，故撤掉入口断点后重试一次。
+   */
+  private async startTarget(): Promise<string | undefined> {
+    const cmd = this.isRemoteDebugging ? '-exec-continue' : '-exec-run';
+    try {
+      await this.session!.send(cmd);
+      this.targetRunning = true;
+      return undefined;
+    } catch (err) {
+      const msg = (err as Error).message;
+      if (!this.entryBpNum) return msg;
+      const num = this.entryBpNum;
+      this.entryBpNum = null;
+      this.entryStopLabel = '';
+      try { await this.session!.sendExact(`-break-delete ${num}`); } catch { /* 已失效等 */ }
+      try {
+        await this.session!.send(cmd);
+        this.targetRunning = true;
+        this.sendOutput('console', `提示：stopOnEntry 未能生效（${msg}），已撤销入口断点并重新启动程序`);
+        return undefined;
+      } catch (err2) {
+        return (err2 as Error).message;
+      }
+    }
   }
 
   /**
@@ -867,28 +896,43 @@ export class GdbDebugAdapter implements vscode.DebugAdapter {
     }
 
     // 2) 程序入口地址兜底（DAP 的「入口」语义；无源码行）
-    let detail = '未取到程序入口地址（GDB 的 info files 无 Entry point 行）';
-    const entryAddr = await this.programEntryAddress();
-    if (entryAddr) {
-      detail = `程序入口地址 ${entryAddr} 的断点未生效`;
-      try {
-        const r = await this.session.sendExact(`-break-insert -t *${entryAddr}`);
-        const bkpt = r.attrs['bkpt'] ?? '';
-        const gdbNum = this.extractField(bkpt, 'number');
-        if (gdbNum && !isPendingBreakpoint(bkpt)) {
-          this.entryBpNum = gdbNum;
-          this.entryStopLabel = entryAddr;
-          this.sendOutput('console', `提示：未找到用户入口符号（main/WinMain/wWinMain），stopOnEntry 改为停在程序入口 ${entryAddr}（该位置无源码信息）`);
-          return;
+    //    前提：镜像加载后地址 = 文件内地址。PE 置了 `DYNAMICBASE`（ASLR）时加载器可能重定位映像，
+    //    此时「首选基址 + 入口 RVA」在运行前不可知：断点插入会在 `-exec-run` 时失败
+    //    （CI 实测 GDB 17.1 + 新版 binutils 默认 `--dynamicbase`：`Cannot access memory at address
+    //    0x1400013f0` → `^error,msg="Command aborted."`），程序根本起不来 ⇒ 事先跳过并说明原因。
+    //    非 PE（如 Linux ELF）不受影响：GDB 默认禁用 ASLR（`set disable-randomization on`）。
+    let detail: string;
+    if (this.programRelocatable() === true) {
+      detail = '程序为可重定位镜像（PE DYNAMICBASE，加载后基址可能变化），入口地址在加载前不可知；带调试符号编译即可用 stopOnEntry';
+    } else {
+      detail = '未取到程序入口地址（GDB 的 info files 无 Entry point 行）';
+      const entryAddr = await this.programEntryAddress();
+      if (entryAddr) {
+        detail = `程序入口地址 ${entryAddr} 的断点未生效`;
+        try {
+          const r = await this.session.sendExact(`-break-insert -t *${entryAddr}`);
+          const bkpt = r.attrs['bkpt'] ?? '';
+          const gdbNum = this.extractField(bkpt, 'number');
+          if (gdbNum && !isPendingBreakpoint(bkpt)) {
+            this.entryBpNum = gdbNum;
+            this.entryStopLabel = entryAddr;
+            this.sendOutput('console', `提示：未找到用户入口符号（main/WinMain/wWinMain），stopOnEntry 改为停在程序入口 ${entryAddr}（该位置无源码信息）`);
+            return;
+          }
+          if (gdbNum) { try { await this.session.sendExact(`-break-delete ${gdbNum}`); } catch { /* 已失效等 */ } }
+        } catch (err) {
+          detail = `程序入口地址 ${entryAddr} 的断点设置失败：${(err as Error).message}`;
         }
-        if (gdbNum) { try { await this.session.sendExact(`-break-delete ${gdbNum}`); } catch { /* 已失效等 */ } }
-      } catch (err) {
-        detail = `程序入口地址 ${entryAddr} 的断点设置失败：${(err as Error).message}`;
       }
     }
 
-    // 3) 失败回退：明确说明（带具体原因，便于用户判断是符号缺失还是地址断点不被支持），程序照常运行
+    // 3) 失败回退：明确说明（带具体原因，便于用户判断是符号缺失还是地址不可用），程序照常运行
     this.sendOutput('console', `提示：stopOnEntry 无法生效（${detail}），程序将直接运行`);
+  }
+
+  /** 程序是否为「可重定位基址」的 PE 镜像（`DYNAMICBASE`；非 PE/不可读 → false，按固定地址处理） */
+  private programRelocatable(): boolean {
+    return this.program ? peDynamicBaseFromFile(this.program) === true : false;
   }
 
   /** bkpt 元组是否带源码位置（`file`/`line`）——CRT 桩符号（如 GUI 程序的 main）没有，判为不可用作入口断点 */
