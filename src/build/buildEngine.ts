@@ -797,10 +797,11 @@ export class BuildEngine {
       if (this.removeFileIfExists(objAbs)) {
         this.output.info(`[Code::Blocks] Deleted: ${objectRel}`);
       } else {
-        this.output.debug(`[Code::Blocks] 无对象文件可清理: ${fileRel}`);
+        // D-08：必须用户可见（此前为 debug 级，普通输出通道会丢弃；上层还会先 clear() → 面板空白且零反馈）
+        this.output.info(`[Code::Blocks] 无对象文件可清理: ${fileRel}`);
       }
     } else {
-      this.output.debug(`[Code::Blocks] 无对象文件可清理: ${fileRel}`);
+      this.output.info(`[Code::Blocks] 无对象文件可清理: ${fileRel}`);
     }
   }
 
