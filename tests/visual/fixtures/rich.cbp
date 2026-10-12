@@ -1,0 +1,184 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes" ?>
+<CodeBlocks_project_file>
+	<FileVersion major="1" minor="6" />
+	<Project>
+		<Option title="rich-demo" />
+		<Option compiler="gcc" />
+		<Option pch_mode="2" />
+		<Option extended_obj_names="1" />
+		<Option virtualFolders="src;src/graphics;asm;legacy;resources" />
+		<Option show_notes="1">
+			<notes><![CDATA[rich-demo 视觉回归/端到端探针工程
+
+- 覆盖 5 个构建目标（可执行 / 静态库 / 动态库 / 命令模式）
+- 覆盖虚拟目标、虚拟文件夹、文件权重、文件开关、自定义构建命令
+- 覆盖项目与目标两级脚本 / 环境变量 / 搜索目录 / 备注 / 调试器扩展]]></notes>
+		</Option>
+		<Build>
+			<Target title="Debug">
+				<Option type="1" />
+				<Option compiler="gcc" />
+				<Option output="bin/Debug/rich-demo" />
+				<Option object_output="obj/Debug/" />
+				<Option deps_output=".deps/Debug/" />
+				<Option parameters="--verbose --input &quot;data/input.txt&quot;" />
+				<Option working_dir="data" />
+				<Option external_deps="libs/extra.dll;libs/extra.lib" />
+				<Option additional_output="bin/Debug/rich-demo.map" />
+				<Option projectCompilerOptionsRelation="2" />
+				<Option projectLinkerOptionsRelation="1" />
+				<Option projectIncludeDirsRelation="3" />
+				<Option projectLibDirsRelation="4" />
+				<Option projectResDirsRelation="0" />
+				<Compiler>
+					<Add option="-g" />
+					<Add option="-Wall" />
+					<Add option="-Wextra" />
+					<Add directory="vendor/include" />
+				</Compiler>
+				<Linker>
+					<LinkerExe value="Linker" />
+					<Add option="-Wl,--gc-sections" />
+					<Add library="m" />
+					<Add directory="libs/Debug" />
+				</Linker>
+				<IncludeDirs>
+					<Add directory="include" />
+				</IncludeDirs>
+				<LibDirs>
+					<Add directory="libs/Debug" />
+				</LibDirs>
+				<ResourceCompiler>
+					<Add option="--include-dir=res" />
+				</ResourceCompiler>
+				<Script file="scripts/pre_target.bat" />
+				<ExtraCommands>
+					<Add before="echo [target] pre-build" />
+					<Add after="echo [target] post-build" />
+					<Mode after="always" />
+				</ExtraCommands>
+				<Environment>
+					<Variable name="TARGET_DATA_DIR" value="data/Debug" />
+				</Environment>
+			</Target>
+			<Target title="Release">
+				<Option type="1" />
+				<Option compiler="gcc" />
+				<Option output="bin/Release/rich-demo" />
+				<Option object_output="obj/Release/" />
+				<Option parameters="--quiet" />
+				<Compiler>
+					<Add option="-O2" />
+					<Add option="-Wall" />
+				</Compiler>
+				<Linker>
+					<Add option="-s" />
+				</Linker>
+			</Target>
+			<Target title="libstatic">
+				<Option type="2" />
+				<Option compiler="gcc" />
+				<Option output="lib/rich-static" />
+				<Option object_output="obj/static/" />
+				<Option createStaticLib="1" />
+				<Option prefix_auto="1" />
+				<Option extension_auto="1" />
+			</Target>
+			<Target title="libshared">
+				<Option type="3" />
+				<Option compiler="gcc" />
+				<Option output="bin/shared/rich-core" />
+				<Option object_output="obj/shared/" />
+				<Option imp_lib="lib/rich-core.lib" />
+				<Option def_file="src/rich.def" />
+				<Option createDefFile="1" />
+				<Option use_console_runner="0" />
+			</Target>
+			<Target title="vendor-commands">
+				<Option type="4" />
+				<Option compiler="gcc" />
+				<Option platforms="Windows;Unix" />
+				<ExtraCommands>
+					<Add before="python tools/gen.py" />
+					<Add after="python tools/pack.py" />
+				</ExtraCommands>
+			</Target>
+			<Script file="scripts/pre_build.bat" />
+			<Environment>
+				<Variable name="RICH_PATH" value="data;data/sub" />
+			</Environment>
+		</Build>
+		<VirtualTargets>
+			<Add alias="All" targets="Debug;Release;libstatic;libshared" />
+			<Add alias="Smoke" targets="Debug;vendor-commands" />
+		</VirtualTargets>
+		<Compiler>
+			<Add option="-pipe" />
+			<Add directory="include" />
+		</Compiler>
+		<Linker>
+			<Add option="-static-libgcc" />
+			<Add library="m" />
+		</Linker>
+		<IncludeDirs>
+			<Add directory="include" />
+			<Add directory="vendor/include" />
+		</IncludeDirs>
+		<LibDirs>
+			<Add directory="libs" />
+		</LibDirs>
+		<ExtraCommands>
+			<Add before="echo [project] pre-build" />
+			<Add after="echo [project] post-build" />
+		</ExtraCommands>
+		<Unit filename="src/main.c">
+			<Option compile="1" />
+			<Option link="1" />
+			<Option weight="90" />
+			<Option virtualFolder="src" />
+		</Unit>
+		<Unit filename="src/util.c">
+			<Option weight="80" />
+			<Option virtualFolder="src" />
+		</Unit>
+		<Unit filename="src/render.cpp">
+			<Option target="Debug;Release" />
+			<Option compilerVar="CPP" />
+			<Option virtualFolder="src/graphics" />
+		</Unit>
+		<Unit filename="src/legacy.c">
+			<Option compile="0" />
+			<Option link="0" />
+			<Option virtualFolder="legacy" />
+		</Unit>
+		<Unit filename="src/startup.S">
+			<Option virtualFolder="asm" />
+		</Unit>
+		<Unit filename="include/util.h">
+			<Option virtualFolder="src" />
+		</Unit>
+		<Unit filename="linker/app.ld">
+			<Option weight="10" />
+		</Unit>
+		<Unit filename="data/input.txt">
+			<Option compiler="a2x" buildCommand="a2x --format=pdf $file" use="1" />
+			<Option virtualFolder="resources" />
+		</Unit>
+		<Extensions>
+			<codeblocks_project_custom_variables>
+				<BUILD_ROOT value="build/rich" />
+				<SDK_DIR value="D:/sdk/current" />
+			</codeblocks_project_custom_variables>
+			<debugger>
+				<search_path add="D:/toolchains/src" />
+				<search_path add="vendor/src" />
+				<remote_debugging target="">
+					<options conn_type="0" serial_port="" serial_baud="115200" ip_address="192.168.1.50" ip_port="2345" additional_cmds="set pagination off" additional_cmds_before="" skip_ld_path="0" extended_remote="0" additional_shell_cmds_after="" additional_shell_cmds_before="" />
+				</remote_debugging>
+				<remote_debugging target="Debug">
+					<options conn_type="0" serial_port="" serial_baud="115200" ip_address="127.0.0.1" ip_port="3333" additional_cmds="" additional_cmds_before="monitor reset halt" skip_ld_path="1" extended_remote="1" additional_shell_cmds_after="" additional_shell_cmds_before="" />
+				</remote_debugging>
+			</debugger>
+		</Extensions>
+	</Project>
+</CodeBlocks_project_file>
