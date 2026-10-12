@@ -20,11 +20,18 @@ export function getDefaultRegexes(): RegExStruct[] {
   const COL = ':';
   return [
     { desc: 'Fatal error', lt: 'error', msg: [1], filename: 0, line: 0, regex: `FATAL:${BLANK}*(.*)` },
-    { desc: 'Preprocessor error', lt: 'error', msg: [3], filename: 1, line: 2, regex: `${FILE}${COL}([0-9]+)${COL}[0-9]+${COL}${BLANK}(.*)` },
+    // D-01：关键字特异条目（warning/note，带列号）必须先于「列号格式 catch-all」匹配，
+    // 否则 `file:line:col: warning: ...` 会被归类为 error（回退表用于无 options_<id>.xml 的编译器）
     { desc: 'Compiler warning', lt: 'warning', msg: [3], filename: 1, line: 2, regex: `${FILE}${COL}([0-9]+)${COL}[0-9]+${COL}${BLANK}([Ww]arning:${BLANK}.*)` },
+    { desc: 'Compiler note', lt: 'info', msg: [3], filename: 1, line: 2, regex: `${FILE}${COL}([0-9]+)${COL}[0-9]+${COL}${BLANK}([Nn]ote:${BLANK}.*)` },
+    { desc: 'Preprocessor error', lt: 'error', msg: [3], filename: 1, line: 2, regex: `${FILE}${COL}([0-9]+)${COL}[0-9]+${COL}${BLANK}(.*)` },
     { desc: 'Compiler error', lt: 'error', msg: [3], filename: 1, line: 2, regex: `${FILE}${COL}([0-9]+)${COL}[0-9]+${COL}${BLANK}(.*)` },
     { desc: 'Undefined reference', lt: 'error', msg: [3], filename: 1, line: 2, regex: `"?${PATHCHARS}+\\.o"?:${FILE}:([0-9]+):${BLANK}(undefined reference.*)` },
     { desc: 'Linker error', lt: 'error', msg: [3], filename: 1, line: 2, regex: `${FILE}${COL}([0-9]+)${COL}[0-9]+${COL}${BLANK}(.*)` },
+    // D-01：无列号格式（`file:line: warning: ...`，部分交叉编译器/旧版 GCC），同样按关键字先匹配
+    { desc: 'Compiler warning (no column)', lt: 'warning', msg: [3], filename: 1, line: 2, regex: `${FILE}${COL}([0-9]+)${COL}${BLANK}([Ww]arning:${BLANK}.*)` },
+    { desc: 'Compiler note (no column)', lt: 'info', msg: [3], filename: 1, line: 2, regex: `${FILE}${COL}([0-9]+)${COL}${BLANK}([Nn]ote:${BLANK}.*)` },
+    { desc: 'Compiler error (no column)', lt: 'error', msg: [3], filename: 1, line: 2, regex: `${FILE}${COL}([0-9]+)${COL}${BLANK}([Ee]rror:${BLANK}.*)` },
     { desc: 'Linker error (lib not found)', lt: 'error', msg: [2], filename: 1, line: 0, regex: `.*(ld.*):${BLANK}(cannot find.*)` },
     { desc: 'Linker error (cannot open output file)', lt: 'error', msg: [2, 3], filename: 1, line: 0, regex: `.*(ld.*):${BLANK}(cannot open output file.*):${BLANK}(.*)` },
     { desc: 'Linker error (unrecognized option)', lt: 'error', msg: [2], filename: 1, line: 0, regex: `.*(ld.*):${BLANK}(unrecognized option.*)` },
