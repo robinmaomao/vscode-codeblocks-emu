@@ -1,0 +1,16 @@
+{
+  "schema": "cb-visual-fingerprint/1",
+  "fingerprint": {
+    "os": "win32-x64",
+    "channel": "msedge",
+    "browserMajor": "121",
+    "browserVersion": "121.0.2277.83",
+    "scale": 1,
+    "font": "332e298f",
+    "id": "win32-x64_msedge-121_dsf1",
+    "label": "win32-x64 / msedge 121 / dsf=1 / font=332e298f"
+  },
+  "capturedAt": "2026-10-12T07:26:53.617Z",
+  "note": "入库基线由本机渲染生成（--update）；跨机运行会降级为容差判定并提示",
+  "surfaces": 1
+}
