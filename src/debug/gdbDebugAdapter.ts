@@ -71,6 +71,13 @@ const LOCALS_REF_BASE = 100000;
  */
 const FRAME_ID_BASE = 1000000;
 
+/**
+ * C-01：stopOnEntry 的用户入口符号候选（按序尝试）。
+ * Windows GUI 程序（`-mwindows`）的 `main` 是 MinGW CRT 桩符号（无源码行、永不命中），
+ * 其真实入口是 `WinMain`；W 版 Unicode 入口为 `wWinMain`。
+ */
+const ENTRY_SYMBOL_CANDIDATES = ['main', 'WinMain', 'wWinMain'] as const;
+
 /** D-03：全局作用域内联取值的变量数上限（超出者只显示名称/类型，避免逐条 -var-create 卡顿） */
 const GLOBALS_INLINE_VALUE_MAX = 60;
 
@@ -139,8 +146,10 @@ export class GdbDebugAdapter implements vscode.DebugAdapter {
   private targetRunning = false;
   /** C-01：launch 的 stopOnEntry（DAP 标准参数）——运行前插入入口临时断点以实现首停 */
   private stopOnEntry = false;
-  /** C-01：入口临时断点编号（`-break-insert -t main`；命中后映射为 DAP reason=entry） */
+  /** C-01：入口临时断点编号（符号或入口地址；命中后映射为 DAP reason=entry） */
   private entryBpNum: string | null = null;
+  /** C-01：入口断点的落点说明（符号名或入口地址），用于 `*stopped` 描述 */
+  private entryStopLabel = '';
   /** 当前 GDB 选中线程（-thread-select 维护；供多线程帧/变量与 stackTrace(threadId) 使用） */
   private currentThreadId = 0;
   private regNamesCache: string[] | null = null;
@@ -808,22 +817,27 @@ export class GdbDebugAdapter implements vscode.DebugAdapter {
   }
 
   /**
-   * C-01：stopOnEntry 实现 —— 运行前在入口函数插入一次性临时断点（`-break-insert -t main`），
-   * 其命中在 `*stopped` 处理中映射为 DAP `reason: "entry"`。
+   * C-01：stopOnEntry 实现 —— 运行前插入口一次性临时断点，其命中在 `*stopped` 处理中映射为 DAP `reason: "entry"`。
    *
-   * 方案取舍（本机 MinGW GDB 8.1 实测；两方案对拍记录见交付说明）：
+   * 入口选取顺序（每一步都有实测依据，见下）：
+   *  1. **用户入口符号候选** `main` → `WinMain` → `wWinMain`：只接受**带 `file`/`line`** 的解析结果。
+   *     必要性（本轮补齐）：`-mwindows` GUI 程序的 `main` 是 MinGW CRT 提供的桩符号
+   *     （`nm` 见 `T main`；`-break-insert -t main` 返回 `at="<main+9>"` 且**无 func/file/line**
+   *     ⇒ `info address main` = "in a file compiled without debugging"），该断点**永不命中**
+   *     （GUI 启动路径 `WinMainCRTStartup` 直接调 `WinMain`），旧实现却因「有编号、非 pending」而
+   *     当成可用入口 ⇒ 静默失效。此类结果一律删除并试下一个候选。
+   *  2. **程序入口地址兜底** `-break-insert -t *<Entry point>`（入口地址取自 `info files` 的
+   *     `Entry point: 0x…`）：覆盖「无用户入口符号」（如 `strip -s` 后无符号表 ⇒ 三个候选全部报
+   *     "No symbol table is loaded"）与「入口不是 main/WinMain」的情况。此停点**无源码行**（DAP 语义
+   *     就是「入口」），命中同样映射为 `reason=entry`。
+   *  3. 以上都不可用 → 撤断点 + 一行中文说明，程序照常运行（不卡死、不伪造首停）。
+   *
+   * 方案取舍（本机 MinGW GDB 8.1 实测）：
    *  - 不能用「先 run 再中断到入口」：`-exec-interrupt` 在 Windows 原生 GDB 上既不下发 `*stopped`
    *    又会让 GDB 失去回执（缺陷 D-07），`-gdb-set mi-async on` 无效；
-   *  - `-break-insert -t main` + `-exec-run` 实测得到 `*stopped,reason="breakpoint-hit",disp="del",
-   *    bkptno="1"`（停位 = main 首行；`disp="del"` 表示 GDB 命中后自动删除，无需清理），
-   *    断点编号来自本命令的 token 匹配响应，无竞态；
-   *  - 对照方案 `-interpreter-exec console "start"` 产生完全相同的停止记录（停位同为 main 首行），
-   *    但其断点编号只能从 `=breakpoint-created` 通知或 CLI 文本间接获得（且失败时错误无法与
-   *    `-exec-run` 回退路径统一）⇒ 弃用。
-   *  - 失败回退（不卡死、不伪造首停）：无符号表时 `-break-insert -t main` 直接报错
-   *    （本机实测 GDB 8.1："No symbol table is loaded"）；`pending` 分支为**防御性**实现
-   *    （其它 GDB 构建可能返回 `pending="main"` 而非报错；本机 8.1 未复现，纯剥离程序同样报错）。
-   *    两种情况均撤销断点、输出一行中文说明并照常运行（程序直接跑，无 entry 首停）。
+   *  - 对照方案 `-interpreter-exec console "start"` 虽同样停在 `main` 首行，但返回 `^running`、
+   *    断点编号只能从 `=breakpoint-created` / CLI 文本间接获得，且无法与失败回退统一 ⇒ 弃用；
+   *  - 临时断点编号来自本命令的 token 匹配响应，无竞态；`disp="del"` 表示命中后 GDB 自动删除。
    */
   private async prepareStopOnEntry(): Promise<void> {
     // targetRunning 守卫：重复 configurationDone 时不再插断点（运行中插入会触发 D-07 同款无回执）
@@ -832,18 +846,68 @@ export class GdbDebugAdapter implements vscode.DebugAdapter {
       this.sendOutput('console', '提示：远程调试目标在连接时已在运行，stopOnEntry 不适用，程序将直接继续');
       return;
     }
-    try {
-      const r = await this.session.sendExact('-break-insert -t main');
-      const bkpt = r.attrs['bkpt'] ?? '';
+
+    // 1) 用户入口符号候选（只接受带源码位置的解析结果）
+    for (const name of ENTRY_SYMBOL_CANDIDATES) {
+      let bkpt: string;
+      try {
+        const r = await this.session.sendExact(`-break-insert -t ${name}`);
+        bkpt = r.attrs['bkpt'] ?? '';
+      } catch {
+        continue; // 无该符号（如 "No symbol table is loaded."）→ 试下一个
+      }
       const gdbNum = this.extractField(bkpt, 'number');
-      if (!gdbNum || isPendingBreakpoint(bkpt)) {
+      if (!gdbNum || isPendingBreakpoint(bkpt) || !this.hasSourceLocation(bkpt)) {
         if (gdbNum) { try { await this.session.sendExact(`-break-delete ${gdbNum}`); } catch { /* 已失效等 */ } }
-        this.sendOutput('console', '提示：未找到 main 函数（程序缺少调试符号或入口函数不是 main），stopOnEntry 无法生效，程序将直接运行');
-        return;
+        continue;
       }
       this.entryBpNum = gdbNum;
-    } catch (err) {
-      this.sendOutput('console', `提示：stopOnEntry 无法生效（入口断点设置失败：${(err as Error).message}），程序将直接运行`);
+      this.entryStopLabel = name;
+      return;
+    }
+
+    // 2) 程序入口地址兜底（DAP 的「入口」语义；无源码行）
+    const entryAddr = await this.programEntryAddress();
+    if (entryAddr) {
+      try {
+        const r = await this.session.sendExact(`-break-insert -t *${entryAddr}`);
+        const bkpt = r.attrs['bkpt'] ?? '';
+        const gdbNum = this.extractField(bkpt, 'number');
+        if (gdbNum && !isPendingBreakpoint(bkpt)) {
+          this.entryBpNum = gdbNum;
+          this.entryStopLabel = entryAddr;
+          this.sendOutput('console', `提示：未找到用户入口符号（main/WinMain/wWinMain），stopOnEntry 改为停在程序入口 ${entryAddr}（该位置无源码信息）`);
+          return;
+        }
+        if (gdbNum) { try { await this.session.sendExact(`-break-delete ${gdbNum}`); } catch { /* 已失效等 */ } }
+      } catch { /* 落到失败说明 */ }
+    }
+
+    // 3) 失败回退：明确说明，程序照常运行
+    this.sendOutput('console', '提示：stopOnEntry 无法生效（入口符号与程序入口地址均不可用），程序将直接运行');
+  }
+
+  /** bkpt 元组是否带源码位置（`file`/`line`）——CRT 桩符号（如 GUI 程序的 main）没有，判为不可用作入口断点 */
+  private hasSourceLocation(bkptStr: string): boolean {
+    return !!this.extractField(bkptStr, 'file') || !!this.extractField(bkptStr, 'line');
+  }
+
+  /**
+   * 程序入口地址（`info files` 的 `Entry point: 0x…`；PE/ELF 均可，取不到返回 undefined）。
+   * `info files` 是 CLI 命令，结果只走 `~"…"` 流记录 ⇒ 用 `consoleCapture` 拦截（同 D-03 的 info variables）。
+   */
+  private async programEntryAddress(): Promise<string | undefined> {
+    const prev = this.consoleCapture;
+    const buf: string[] = [];
+    this.consoleCapture = buf;
+    try {
+      await this.session!.sendExact('-interpreter-exec console "info files"');
+      const m = buf.join('').match(/Entry point:\s*(0x[0-9a-fA-F]+)/);
+      return m ? m[1] : undefined;
+    } catch {
+      return undefined;
+    } finally {
+      this.consoleCapture = prev;
     }
   }
 
@@ -1445,7 +1509,9 @@ export class GdbDebugAdapter implements vscode.DebugAdapter {
       // C-01：入口临时断点命中 → DAP reason=entry（描述为入口语义，不携带「断点命中」误导）
       if (stopBpNum && this.entryBpNum !== null && stopBpNum === this.entryBpNum) {
         reason = 'entry';
-        description = '已暂停在程序入口（main，stopOnEntry）';
+        description = this.entryStopLabel
+          ? `已暂停在程序入口（${this.entryStopLabel}，stopOnEntry）`
+          : '已暂停在程序入口（stopOnEntry）';
         this.entryBpNum = null; // 临时断点已被 GDB 自动删除（disp=del），无需再跟踪
       } else if (stopBpNum && this.catchpointNums.includes(stopBpNum)) {
         const filter = this.catchpointFilters.get(stopBpNum);

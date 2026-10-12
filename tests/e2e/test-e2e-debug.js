@@ -5,7 +5,7 @@
 //       反汇编 / 内存读写 / 数据断点 / 指令断点 / 运行到光标（gotoTargets+goto）/
 //       Set Next Statement / 异常断点 / 用户命令透传 / 断线终止 /
 //       attach(+Detach 不杀进程) / 多线程帧切换（指定线程 ID 取帧与帧下变量）/ 运行中请求防护 /
-//       stopOnEntry 入口首停（reason=entry；含关闭对照与无符号回退）
+//       stopOnEntry 入口首停（reason=entry；含关闭对照、GUI 入口符号候选与入口地址兜底）
 //
 // 用法：node tests/e2e/test-e2e-debug.js [--filter <子串>]
 const fs = require('fs');
@@ -114,6 +114,31 @@ int entry_guard = 1;
 int main(void) {
     printf("entry-probe start\\n");                             /* MARK:ENTRY_BODY */
     fflush(stdout);
+    return 0;
+}
+`;
+
+// C-01：GUI 探针（仅 WinMain，无 main）——`-mwindows` 下 MinGW CRT 自带 `main` 桩（无 file/line、
+// 永不命中），必须回退到 WinMain 才能真正首停。
+const GUI_ENTRY_PROBE_C = `#include <windows.h>
+
+int gui_guard = 1;
+
+int WINAPI WinMain(HINSTANCE h, HINSTANCE p, LPSTR cmd, int show) {
+    (void)h; (void)p; (void)cmd; (void)show;
+    OutputDebugStringA("gui-probe start");                      /* MARK:GUI_ENTRY_BODY */
+    return 0;
+}
+`;
+
+// C-01：Unicode GUI 探针（仅 wWinMain；用 -municode -mwindows 编译）——入口符号候选的第三档。
+const WGUI_ENTRY_PROBE_C = `#include <windows.h>
+
+int wgui_guard = 1;
+
+int WINAPI wWinMain(HINSTANCE h, HINSTANCE p, LPWSTR cmd, int show) {
+    (void)h; (void)p; (void)cmd; (void)show;
+    OutputDebugStringW(L"wgui-probe start");                    /* MARK:WGUI_ENTRY_BODY */
     return 0;
 }
 `;
@@ -869,8 +894,12 @@ async function main() {
 
     // ================= S10b stopOnEntry 语义（C-01：正向验收） =================
     // 修复前（能力缺口 SKIP）：适配器未消费 launch 的 stopOnEntry——程序直接运行，无入口首停。
-    // 修复后：运行前插入入口临时断点（-break-insert -t main），命中上报 DAP reason=entry，
-    //         停止位置 = 入口（main 首行）；无符号表/无 main 时回退为不首停 + 一行中文说明。
+    // 修复后：运行前插入口一次性临时断点，命中上报 DAP reason=entry：
+    //   ① 用户入口符号候选 main → WinMain → wWinMain（只接受带 file/line 的解析结果——
+    //      `-mwindows` GUI 程序的 `main` 是 CRT 桩符号，无源码行且永不命中，必须剔除）；
+    //   ② 兜底「程序入口地址」（`info files` 的 Entry point，覆盖 strip 后无符号表的情形，
+    //      该停点无源码行，正是 DAP「入口」语义）；
+    //   ③ 两者都不可用才回退为「不首停 + 一行中文说明」（PE/ELF 可执行文件上不可达，防御性分支）。
     {
       const entrySrc = path.join(dir, 'entry-probe.c');
       fs.writeFileSync(entrySrc, ENTRY_PROBE_C, 'utf-8');
@@ -893,6 +922,8 @@ async function main() {
         check('S10b 首停描述为入口语义（无「断点命中」误导）',
           !!stopEv && /入口/.test(String(stopEv.body.description || '')) && !/断点/.test(String(stopEv.body.description || '')),
           stopEv && stopEv.body.description, '含「入口」且不含「断点」');
+        check('S10b 首停描述标注实际入口符号（main，候选第一档）',
+          !!stopEv && /main/.test(String(stopEv.body.description || '')), stopEv && stopEv.body.description, '含「main」');
         check('S10b 首停后为已停止态（isStopped=true）', adapter.isStopped() === true && adapter.isActive(),
           { stopped: adapter.isStopped(), active: adapter.isActive() }, 'stopped');
         const th = await client.send('threads', {});
@@ -930,25 +961,94 @@ async function main() {
         await waitFor(() => !off.adapter.isActive(), 8000);
       }
 
-      // ---- 边界：无符号表（-s 链接）→ 回退为不首停 + 一行中文说明（不卡死、不伪造首停） ----
+      // ---- GUI 入口符号候选：`-mwindows`（仅 WinMain）/ `-municode -mwindows`（仅 wWinMain） ----
+      // 差分实测（修复前，本机 MinGW GDB 8.1）：`-break-insert -t main` 对 CRT 的 `main` 桩返回
+      // `at="<main+9>"` 且无 func/file/line（`info address main` = "in a file compiled without
+      // debugging"），断点永不命中 ⇒ 6s 内无 `*stopped`，程序静默跑完（无首停、无提示）。
+      const guiCases = [
+        {
+          tag: 'WinMain', src: GUI_ENTRY_PROBE_C, bodyMark: 'GUI_ENTRY_BODY', srcName: 'gui-entry-probe.c',
+          exeName: 'gui-entry-probe.exe', flags: ['-mwindows'], entrySymbol: 'WinMain',
+        },
+        {
+          tag: 'wWinMain', src: WGUI_ENTRY_PROBE_C, bodyMark: 'WGUI_ENTRY_BODY', srcName: 'wgui-entry-probe.c',
+          exeName: 'wgui-entry-probe.exe', flags: ['-municode', '-mwindows'], entrySymbol: 'wWinMain',
+        },
+      ];
+      for (const gc of guiCases) {
+        const gSrc = path.join(dir, gc.srcName);
+        fs.writeFileSync(gSrc, gc.src, 'utf-8');
+        const gBodyLine = lineOf(gc.src, gc.bodyMark);
+        const gExe = path.join(dir, gc.exeName);
+        const rcGui = spawnSync(gcc, ['-g', '-O0', ...gc.flags, '-o', gExe, gSrc], { encoding: 'utf-8', windowsHide: true });
+        if (rcGui.status !== 0) {
+          skipCheck(`S10b GUI 入口候选（${gc.tag}）首停`, `${gc.flags.join(' ')} 编译失败: ` + String(rcGui.stderr || '').split('\n')[0]);
+          continue;
+        }
+        const { adapter: gAdapter, client: gClient } = await launchSession(ctx, {
+          program: gExe, cwd: dir, sourcePath: gSrc, breakpoints: [], extra: { stopOnEntry: true },
+        });
+        await gClient.send('configurationDone', {});
+        const gGot = await waitFor(() => gClient.events('stopped').length > 0, 15000);
+        const gStop = gClient.lastStop();
+        check(`S10b GUI(${gc.tag}) 入口候选：stopOnEntry=true 首停（含 CRT 的 main 桩时不得误判）`,
+          gGot && !!gStop, gStop && gStop.body, 'stopped');
+        check(`S10b GUI(${gc.tag}) 首停 reason=entry`, !!gStop && gStop.body.reason === 'entry', gStop && gStop.body, "reason='entry'");
+        check(`S10b GUI(${gc.tag}) 首停描述标注实际入口符号（${gc.entrySymbol}）`,
+          !!gStop && String(gStop.body.description || '').includes(gc.entrySymbol)
+          && !new RegExp(`（main，`).test(String(gStop.body.description || '')),
+          gStop && gStop.body.description, `含「${gc.entrySymbol}」且非 main 桩`);
+        const gTh = await gClient.send('threads', {});
+        const gSt = await gClient.send('stackTrace', { threadId: gTh.body?.threads?.[0]?.id, levels: 3 });
+        const gF0 = gSt.body?.stackFrames?.[0];
+        check(`S10b GUI(${gc.tag}) 首停停在用户源码入口行（${gc.srcName}:${gBodyLine}）`,
+          gSt.success && !!gF0 && gF0.name === gc.entrySymbol
+          && String(gF0.source?.path || '').replace(/\\/g, '/').toLowerCase().endsWith('/' + gc.srcName)
+          && gF0.line === gBodyLine,
+          gSt.body && gSt.body.stackFrames.slice(0, 3).map((f) => `${f.name}@${f.line}`), `${gc.entrySymbol}@${gBodyLine}`);
+        const gCont = await gClient.send('continue', { threadId: gTh.body?.threads?.[0]?.id });
+        const gTerm = await waitFor(() => gClient.events('terminated').length > 0, 15000);
+        check(`S10b GUI(${gc.tag}) continue 后程序跑完（收到 terminated）`,
+          gCont.success && gTerm, { cont: gCont.success, terminated: gClient.events('terminated').length }, 'success + terminated');
+        await gClient.send('disconnect', {});
+        await waitFor(() => !gAdapter.isActive(), 8000);
+      }
+
+      // ---- 兜底：无符号表（-s 链接）→ 程序入口地址首停（`info files` 的 Entry point） ----
+      // 修复前：三个符号候选全部报 "No symbol table is loaded" ⇒ 不首停；修复后：入口地址断点可用
+      //（`-break-insert -t *0x…`），DAP 侧仍上报 reason=entry，但该停点无源码信息（帧为 `??`）。
       const nosymExe = path.join(dir, 'entry-probe-nosym.exe');
       const rcNosym = rcEntry.status === 0
         ? spawnSync(gcc, ['-g', '-s', '-O0', '-o', nosymExe, entrySrc], { encoding: 'utf-8', windowsHide: true })
         : { status: 1, stderr: '入口探针基础编译失败' };
       if (rcNosym.status !== 0) {
-        skipCheck('S10b 无符号表回退（不首停 + 中文说明）', '入口探针 -s 编译失败: ' + String(rcNosym.stderr || '').split('\n')[0]);
+        skipCheck('S10b 无符号表入口地址兜底', '入口探针 -s 编译失败: ' + String(rcNosym.stderr || '').split('\n')[0]);
       } else {
         const ns = await launchSession(ctx, {
           program: nosymExe, cwd: dir, sourcePath: entrySrc, breakpoints: [], extra: { stopOnEntry: true },
         });
         await ns.client.send('configurationDone', {});
-        const nsDone = await waitFor(() => ns.client.events('terminated').length > 0, 15000);
-        check('S10b 无符号表回退：不首停（0 个 stopped 事件）且程序正常跑完',
-          nsDone && ns.client.events('stopped').length === 0,
-          { terminated: ns.client.events('terminated').length, stoppedEvents: ns.client.events('stopped').length }, '0 stopped + terminated');
+        const nsGot = await waitFor(() => ns.client.events('stopped').length > 0, 15000);
+        const nsStop = ns.client.lastStop();
+        check('S10b 无符号表：入口地址兜底触发首停（不再静默不首停）', nsGot && !!nsStop, nsStop && nsStop.body, 'stopped');
+        check('S10b 无符号表：首停 reason=entry', !!nsStop && nsStop.body.reason === 'entry', nsStop && nsStop.body, "reason='entry'");
+        check('S10b 无符号表：描述标注入口地址（0x…）',
+          !!nsStop && /0x[0-9a-fA-F]+/.test(String(nsStop.body.description || ''))
+          && /入口/.test(String(nsStop.body.description || '')),
+          nsStop && nsStop.body.description, '含「入口」+ 0x…');
+        const nsTh = await ns.client.send('threads', {});
+        const nsSt = await ns.client.send('stackTrace', { threadId: nsTh.body?.threads?.[0]?.id, levels: 2 });
+        const nsF0 = nsSt.body?.stackFrames?.[0];
+        check('S10b 无符号表：首帧无源码信息（入口地址停点语义，不伪造源码行）',
+          nsSt.success && !!nsF0 && !nsF0.source, nsSt.body && nsSt.body.stackFrames.slice(0, 1).map((f) => ({ name: f.name, src: f.source })),
+          '首帧无 source');
         const nsOut = ns.client.outputs();
-        check('S10b 无符号表回退：输出一行可读中文说明（含 stopOnEntry 与原因）',
-          /stopOnEntry/.test(nsOut) && /未找到 main|无法生效/.test(nsOut), String(nsOut).slice(0, 300), '中文说明');
+        check('S10b 无符号表：输出一行可读中文说明（含 stopOnEntry 与入口地址）',
+          /stopOnEntry/.test(nsOut) && /程序入口/.test(nsOut) && /0x[0-9a-fA-F]+/.test(nsOut), String(nsOut).slice(0, 400), '中文说明 + 地址');
+        const nsCont = await ns.client.send('continue', { threadId: nsTh.body?.threads?.[0]?.id });
+        const nsTerm = await waitFor(() => ns.client.events('terminated').length > 0, 15000);
+        check('S10b 无符号表：continue 后程序正常跑完（收到 terminated）',
+          nsCont.success && nsTerm, { cont: nsCont.success, terminated: ns.client.events('terminated').length }, 'success + terminated');
         await ns.client.send('disconnect', {});
         await waitFor(() => !ns.adapter.isActive(), 8000);
       }
