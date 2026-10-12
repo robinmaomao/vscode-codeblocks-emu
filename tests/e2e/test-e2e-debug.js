@@ -1030,7 +1030,10 @@ async function main() {
         await ns.client.send('configurationDone', {});
         const nsGot = await waitFor(() => ns.client.events('stopped').length > 0, 15000);
         const nsStop = ns.client.lastStop();
-        check('S10b 无符号表：入口地址兜底触发首停（不再静默不首停）', nsGot && !!nsStop, nsStop && nsStop.body, 'stopped');
+        const nsOut = ns.client.outputs();
+        check('S10b 无符号表：入口地址兜底触发首停（不再静默不首停）', nsGot && !!nsStop,
+          { stopped: nsGot, body: nsStop && nsStop.body, terminated: ns.client.events('terminated').length, outputTail: String(nsOut).slice(-400) },
+          'stopped');
         check('S10b 无符号表：首停 reason=entry', !!nsStop && nsStop.body.reason === 'entry', nsStop && nsStop.body, "reason='entry'");
         check('S10b 无符号表：描述标注入口地址（0x…）',
           !!nsStop && /0x[0-9a-fA-F]+/.test(String(nsStop.body.description || ''))
@@ -1040,11 +1043,11 @@ async function main() {
         const nsSt = await ns.client.send('stackTrace', { threadId: nsTh.body?.threads?.[0]?.id, levels: 2 });
         const nsF0 = nsSt.body?.stackFrames?.[0];
         check('S10b 无符号表：首帧无源码信息（入口地址停点语义，不伪造源码行）',
-          nsSt.success && !!nsF0 && !nsF0.source, nsSt.body && nsSt.body.stackFrames.slice(0, 1).map((f) => ({ name: f.name, src: f.source })),
+          nsSt.success && !!nsF0 && !nsF0.source,
+          nsSt.body && (nsSt.body.stackFrames || []).slice(0, 1).map((f) => ({ name: f.name, src: f.source })),
           '首帧无 source');
-        const nsOut = ns.client.outputs();
         check('S10b 无符号表：输出一行可读中文说明（含 stopOnEntry 与入口地址）',
-          /stopOnEntry/.test(nsOut) && /程序入口/.test(nsOut) && /0x[0-9a-fA-F]+/.test(nsOut), String(nsOut).slice(0, 400), '中文说明 + 地址');
+          /stopOnEntry/.test(nsOut) && /程序入口/.test(nsOut) && /0x[0-9a-fA-F]+/.test(nsOut), String(nsOut).slice(-400), '中文说明 + 地址');
         const nsCont = await ns.client.send('continue', { threadId: nsTh.body?.threads?.[0]?.id });
         const nsTerm = await waitFor(() => ns.client.events('terminated').length > 0, 15000);
         check('S10b 无符号表：continue 后程序正常跑完（收到 terminated）',

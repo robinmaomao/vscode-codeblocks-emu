@@ -867,8 +867,10 @@ export class GdbDebugAdapter implements vscode.DebugAdapter {
     }
 
     // 2) 程序入口地址兜底（DAP 的「入口」语义；无源码行）
+    let detail = '未取到程序入口地址（GDB 的 info files 无 Entry point 行）';
     const entryAddr = await this.programEntryAddress();
     if (entryAddr) {
+      detail = `程序入口地址 ${entryAddr} 的断点未生效`;
       try {
         const r = await this.session.sendExact(`-break-insert -t *${entryAddr}`);
         const bkpt = r.attrs['bkpt'] ?? '';
@@ -880,11 +882,13 @@ export class GdbDebugAdapter implements vscode.DebugAdapter {
           return;
         }
         if (gdbNum) { try { await this.session.sendExact(`-break-delete ${gdbNum}`); } catch { /* 已失效等 */ } }
-      } catch { /* 落到失败说明 */ }
+      } catch (err) {
+        detail = `程序入口地址 ${entryAddr} 的断点设置失败：${(err as Error).message}`;
+      }
     }
 
-    // 3) 失败回退：明确说明，程序照常运行
-    this.sendOutput('console', '提示：stopOnEntry 无法生效（入口符号与程序入口地址均不可用），程序将直接运行');
+    // 3) 失败回退：明确说明（带具体原因，便于用户判断是符号缺失还是地址断点不被支持），程序照常运行
+    this.sendOutput('console', `提示：stopOnEntry 无法生效（${detail}），程序将直接运行`);
   }
 
   /** bkpt 元组是否带源码位置（`file`/`line`）——CRT 桩符号（如 GUI 程序的 main）没有，判为不可用作入口断点 */
