@@ -15,13 +15,14 @@
 //     （LogOutputChannel 落盘；构建开始时通道 clear() → 文件内容即本次构建输出）。
 //  4. 产物：<proj>/bin/Debug/*.exe 存在 + mtime 不早于构建开始 + 真实运行一次验证行为。
 //  5. Problems 诊断：`codeblocks.clangd.enabled=false` 时由构建引擎写入（source='Code::Blocks'）。
-//     背景：本机存在 clangd 二进制（clangd 扩展的下载目录），扩展会判定「clangd 接管诊断」
-//     （src/extension.ts 的 clangdDiagnosticsEnabled）并把 Problems 交给 clangd；隔离 profile 中没有 clangd 扩展，
-//     故用例显式关闭 clangd 集成以获得确定性的「构建引擎 → Problems」链路（用例结束恢复默认）。
+//     背景：本机存在 clangd 二进制（clangd 扩展的下载目录）而隔离 profile 未装 clangd 扩展；D-10（PR #16）后
+//     让出条件为「二进制存在 && clangd 扩展已安装」（src/extension.ts 的 clangdDiagnosticsEnabled），
+//     本环境应回退为构建引擎写 Problems —— 末条用例按默认设置做判定断言（修复前为让出 → 0 条）。
 //  6. HTML 构建日志：开启产品自有设置 codeblocks.build.saveHtmlLog（对齐 CB save_html_build_log）→
 //     <proj>/<base>_build_log.html（起止时间 + 诊断表），作为输出通道之外的第二条磁盘取证路径。
 const assert = require('assert');
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 const { spawnSync } = require('child_process');
 const vscode = require('vscode');
@@ -69,6 +70,56 @@ const warnLine = WARN_C_SOURCE.split('\n').findIndex((l) => l.includes('cb_host_
 function skipNoGcc(ctx, what) {
   console.log(`SKIP ${what}：PATH 未找到 gcc（无工具链环境跳过真实构建，不判失败）`);
   ctx.skip();
+}
+
+/** 递归查找文件名（限深 5，对齐扩展 tools/clangd.ts 的 findClangdUnder） */
+function findFileUnder(dir, name, depth = 0) {
+  if (depth > 5) return undefined;
+  let entries;
+  try {
+    entries = fs.readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return undefined;
+  }
+  for (const e of entries) {
+    const p = path.join(dir, e.name);
+    if (e.isDirectory()) {
+      const found = findFileUnder(p, name, depth + 1);
+      if (found) return found;
+    } else if (e.name === name) {
+      return p;
+    }
+  }
+  return undefined;
+}
+
+/** 复刻扩展 tools/clangd.ts 的 clangd 二进制检测顺序（clangd.path 设置 → PATH → 常见目录），用于判定 D-10 用例前置条件 */
+function detectClangdBinary() {
+  try {
+    const configured = vscode.workspace.getConfiguration('clangd').get('path', '');
+    if (configured) {
+      const expanded = String(configured).trim().replace(/\$\{userHome\}/gi, os.homedir());
+      if (expanded && fs.existsSync(expanded)) return expanded;
+    }
+  } catch { /* 配置读取失败时回退 PATH / 常见目录 */ }
+  const onPath = U.findTool('clangd');
+  if (onPath) return onPath;
+  if (process.platform === 'win32') {
+    const exe = 'clangd.exe';
+    const cands = [];
+    if (process.env['ProgramFiles']) cands.push(path.join(process.env['ProgramFiles'], 'LLVM', 'bin', exe));
+    if (process.env['LOCALAPPDATA']) cands.push(path.join(process.env['LOCALAPPDATA'], 'Programs', 'LLVM', 'bin', exe));
+    if (process.env['APPDATA']) {
+      // clangd 扩展自行下载目录（仅装了 LLVM/clangd 二进制、未装扩展的用户场景）
+      const found = findFileUnder(
+        path.join(process.env['APPDATA'], 'Code', 'User', 'globalStorage', 'llvm-vs-code-extensions.vscode-clangd', 'install'),
+        exe,
+      );
+      if (found) cands.push(found);
+    }
+    return cands.find((p) => fs.existsSync(p));
+  }
+  return ['/usr/bin/clangd', '/usr/local/bin/clangd', '/opt/homebrew/bin/clangd'].find((p) => fs.existsSync(p));
 }
 
 suite('宿主集成 · 真实构建与诊断（gcc 工具链）', (t) => {
@@ -209,37 +260,73 @@ suite('宿主集成 · 真实构建与诊断（gcc 工具链）', (t) => {
     }
   });
 
-  t.test('线索取证（仅记录，不判失败）：检测到 clangd 二进制 → 构建引擎停止写 Problems', async (ctx) => {
-    // 现象取证：恢复 clangd.enabled 默认(true) 后重新构建警告工程：
-    //  - 输出日志仍有编译警告行（onLine 与 clangd 无关）；
-    //  - Problems 中 source=Code::Blocks 的诊断被清空且不再写入（clangdDiagnosticsEnabled=true）。
-    // 若此时环境里没有 clangd 扩展（隔离 profile 即如此），Problems 面板将完全没有构建诊断 —— 线索已在汇报中说明。
-    if (!gcc) skipNoGcc(ctx, 'clangd 诊断归属取证');
+  t.test('D-10 判定：clangd 二进制存在但扩展未安装 → 构建引擎仍写 Problems（source=Code::Blocks 警告 ≥1）', async (ctx) => {
+    // D-10（PR #16）修复语义：仅当 clangd **扩展**确实安装时才让出 Problems
+    // （src/extension.ts: clangdDiagnosticsEnabled = 检测到二进制 && 扩展存在）；
+    // 只有 clangd 二进制（如仅装 LLVM / 扩展下载目录残留）而扩展未安装/被禁用时，构建引擎必须继续写 Problems。
+    // 本用例即修复后的**判定断言**：-Wall 警告工程强制重编译 → getDiagnostics 中 probe.c 应有 ≥1 条
+    // source='Code::Blocks' 的 warning（修复前该计数恒为 0 —— 二进制存在即让出）。
+    // 前置不满足时 SKIP 并写明原因（不伪造断言）：
+    //  - clangd 扩展已安装 → 让出 Problems 属预期行为，本环境无法验证回退路径；
+    //  - 未检测到 clangd 二进制 → 修复前后行为无差别，断言无判别力。
+    if (!gcc) skipNoGcc(ctx, 'D-10 clangd 诊断归属');
     const ws = U.workspaceDir();
     if (!ws) {
-      console.log('SKIP clangd 诊断归属取证：无工作区文件夹');
+      console.log('SKIP D-10 clangd 诊断归属：无工作区文件夹');
       ctx.skip();
     }
     const projDir = path.join(ws, 'cb-host-warn');
     const cbp = path.join(projDir, 'cb-host-warn.cbp');
-    if (!fs.existsSync(cbp)) {
-      console.log('SKIP clangd 诊断归属取证：警告工程不存在（需先运行上一用例）');
+    const srcPath = path.join(projDir, 'probe.c');
+    const objPath = path.join(projDir, 'obj', 'Debug', 'probe.o');
+    if (!fs.existsSync(cbp) || !fs.existsSync(srcPath)) {
+      console.log('SKIP D-10 clangd 诊断归属：警告工程不存在（需先运行上一用例）');
+      ctx.skip();
+    }
+    if (vscode.extensions.getExtension('llvm-vs-code-extensions.vscode-clangd')) {
+      console.log('SKIP D-10 clangd 诊断归属：clangd 扩展已安装（让出 Problems 属预期行为，无法验证 D-10 回退路径）');
+      ctx.skip();
+    }
+    const clangdBin = detectClangdBinary();
+    if (!clangdBin) {
+      console.log('SKIP D-10 clangd 诊断归属：未检测到 clangd 二进制（修复前后行为一致，断言无判别力）');
       ctx.skip();
     }
 
-    await U.setConfig('clangd.enabled', undefined); // 恢复默认
+    await U.setConfig('clangd.enabled', undefined); // 恢复默认(true)：让二进制检测按默认设置参与让出判定
+    await U.setConfig('build.saveHtmlLog', undefined);
     try {
+      // 让 clangd 判定按默认设置重算一轮（观测：输出日志「检测到 clangd: <path>」；该行同时证明判定确已按默认设置执行）
+      const off = U.logOffset();
       await vscode.commands.executeCommand('codeblocks.generateCompileCommands');
-      await U.delay(800);
+      let detected = await U.waitForLogLine(/检测到 clangd: /, off, 15000);
+      if (!detected) {
+        // 上一轮生成可能仍在运行（clangdGenRunning 丢弃本次）→ 稍候重试一次
+        await U.delay(1200);
+        const off2 = U.logOffset();
+        await vscode.commands.executeCommand('codeblocks.generateCompileCommands');
+        detected = await U.waitForLogLine(/检测到 clangd: /, off2, 15000);
+      }
+      if (!detected) {
+        console.log('SKIP D-10 clangd 诊断归属：本轮未观察到「检测到 clangd:」日志（让出判定未按默认设置重算）');
+        ctx.skip();
+      }
+      // 上一用例刚构建过 → 目标 up-to-date（Nothing to be done，不产生新诊断）；删除对象文件强制重编译本次探针
+      fs.rmSync(objPath, { force: true });
       await vscode.commands.executeCommand('codeblocks.setActiveProject', cbp);
-      await U.withTimeout(vscode.commands.executeCommand('codeblocks.build'), 170000, 'codeblocks.build（取证）');
-      await U.delay(1500);
+      await U.withTimeout(vscode.commands.executeCommand('codeblocks.build'), 170000, 'codeblocks.build（D-10 判定）');
 
-      const cbDiags = U.diagnosticsForFile(path.join(projDir, 'probe.c')).filter((d) => d.source === 'Code::Blocks');
-      const log = U.readExtensionLog();
-      const clangdExt = vscode.extensions.getExtension('llvm-vs-code-extensions.vscode-clangd');
-      console.log(`     · 观测：clangd 扩展已安装=${!!clangdExt}；Problems 中 source=Code::Blocks 诊断=${cbDiags.length} 条；输出日志含警告行=${/unused variable/.test(log)}`);
-      console.log('     · 说明：clangd 二进制被检测到即停止写 Problems（clangdDiagnosticsEnabled），clangd 扩展缺失时 Problems 无诊断 → 见汇报「产品缺陷线索」');
+      const cbWarn = await U.waitFor(() => {
+        const hit = U.diagnosticsForFile(srcPath).filter(
+          (d) => d.source === 'Code::Blocks' && d.severity === vscode.DiagnosticSeverity.Warning,
+        );
+        return hit.length ? hit : undefined;
+      }, 15000);
+      const logHasWarn = /unused variable/.test(U.readExtensionLog());
+      console.log(`     · 观测：clangd 二进制=${clangdBin}；clangd 扩展已安装=false；Problems 中 source=Code::Blocks 警告诊断=${cbWarn ? cbWarn.length : 0} 条；输出日志含警告行=${logHasWarn}`);
+      assert.ok(cbWarn, `D-10 回退失效：构建后 probe.c 无 source=Code::Blocks 警告诊断（当前诊断=${JSON.stringify(U.diagnosticsForFile(srcPath).map((d) => ({ source: d.source, severity: d.severity, message: d.message })))}）`);
+      assert.ok(cbWarn.some((d) => d.message.includes('unused variable') && d.range.start.line === warnLine - 1),
+        `警告诊断未指向 probe.c:${warnLine} unused variable：${JSON.stringify(cbWarn.map((d) => ({ line: d.range.start.line, message: d.message })))}`);
     } finally {
       await U.setConfig('clangd.enabled', undefined);
       await U.setConfig('build.saveHtmlLog', undefined);

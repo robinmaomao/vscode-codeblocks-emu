@@ -5,6 +5,7 @@ const os = require('os');
 const path = require('path');
 const vscode = require('vscode');
 const { suite } = require('./framework');
+const U = require('./hostUtil');
 
 const EXT_ID = 'robinmaomao.codeblocks-vscode';
 // suite 运行时被复制到临时目录，仓库根与隔离 user-data 由启动器通过 extensionTestsEnv 注入
@@ -165,14 +166,22 @@ suite('宿主集成 · keybindings 托管写入（隔离 user-data-dir）', (t) 
 
   t.test('重置：清除文件中的托管条目并清空覆盖设置', async (ctx) => {
     if (!userDataDir) ctx.skip();
+    // 时序加固（原断言存在时序风险，已加固）：扩展对 codeblocks.keybindings.overrides 的变更注册了 800ms
+    // 去抖「自动应用」（src/extension.ts onDidChangeConfiguration → applyKeybindings），回调按**触发时刻的
+    // 设置**重写 keybindings.json；reset 内部又是「先同步清文件 → 再异步写设置」，该窗口内回调可能用旧设置
+    // 把托管条目写回（曾偶发 1 次「重置后仍残留托管条目」）。观测改为「等待去抖窗口 + 轮询断言」，不再读单次快照。
     const cfg = vscode.workspace.getConfiguration('codeblocks');
     await cfg.update('keybindings.overrides', { run: 'ctrl+alt+f10' }, vscode.ConfigurationTarget.Global);
     await vscode.commands.executeCommand('codeblocks.keybindings.apply');
-    assert.ok(readFileEntries().some((e) => e.command === 'codeblocks.run'), '前置写入失败');
+    const applied = await U.waitFor(() => (readFileEntries().some((e) => e.command === 'codeblocks.run') ? true : undefined), 5000);
+    assert.ok(applied, '前置写入失败（已轮询 5s：keybindings.json 中未出现 codeblocks.run 条目）');
 
     await vscode.commands.executeCommand('codeblocks.keybindings.reset');
+    // 先等去抖窗口结束（>800ms；reset 自身写设置会重排去抖，其回调按空设置清理 → 收敛到干净态），再轮询断言
+    await delay(1000);
+    await U.waitFor(() => (readFileEntries().every((e) => !String(e.command).includes('codeblocks.')) ? true : undefined), 5000);
     const managed = readFileEntries().filter((e) => String(e.command).includes('codeblocks.'));
-    assert.deepStrictEqual(managed, [], `重置后仍残留托管条目：${JSON.stringify(managed)}`);
+    assert.deepStrictEqual(managed, [], `重置后仍残留托管条目（已等去抖窗口 1000ms + 轮询 5s）：${JSON.stringify(managed)}`);
     const after = overrides();
     assert.ok(after === undefined || Object.keys(after).length === 0, `覆盖设置未清空：${JSON.stringify(after)}`);
   });
