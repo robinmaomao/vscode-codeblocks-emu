@@ -30,3 +30,29 @@ export function resolveExecutablePath(basePath: string, expandedOutput: string, 
   const candidates = executableCandidates(basePath, expandedOutput, platform, isExeType);
   return candidates.find((c) => fs.existsSync(c)) ?? candidates[0];
 }
+
+/**
+ * Windows 可执行类目标的「平台默认扩展名」补全（对齐 Code::Blocks 目标属性 `extension_auto` / `tgfpPlatformDefault`）。
+ *
+ * 必要性（D-13）：MinGW gcc 会自己把 `-o prog` 追加成 `prog.exe`，但 TCC 等工具链**不会** ⇒ 产物是无扩展名文件，
+ * 而 Windows 下 `cmd.exe` / `CreateProcess` 都要求可执行扩展名 ⇒ Run/Debug 无法启动。
+ * 这里在「win32 + 可执行类目标 + extension_auto 开启 + 输出无扩展名」时显式补 `.exe`，
+ * 使任意工具链的产物都是可直接启动的文件（已有扩展名如 `.elf`/`.hex` 一律不动）。
+ */
+export function withPlatformExtension(
+  expandedOutput: string,
+  platform: string = process.platform,
+  isExeType = true,
+  extensionAuto = true,
+): string {
+  if (platform !== 'win32' || !isExeType || !extensionAuto) return expandedOutput;
+  const out = expandedOutput ?? '';
+  if (!out.trim()) return expandedOutput;
+  if (path.extname(out)) return expandedOutput;
+  return out + '.exe';
+}
+
+/** Windows 下「产物无扩展名 ⇒ 无法启动」的判定（供 Run/Debug 给出可读提示；D-13） */
+export function requiresExecutableExtensionForLaunch(resolvedPath: string, platform: string = process.platform): boolean {
+  return platform === 'win32' && resolvedPath.trim() !== '' && path.extname(resolvedPath) === '';
+}

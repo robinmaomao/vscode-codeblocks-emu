@@ -15,9 +15,9 @@
 //  3. <repo>/.cb-tools/toolchains/**/bin —— 本机解包位置（docs/测试方案.md §5.0，gitignored）。
 //  探测不到 → SKIP，并打印「未安装 + 安装位置 + 方案 §5.0 指引」（CI runner 上通常缺失，不判失败）。
 //
-// 产品侧「非原生工具链」接线：交叉工具链的完整程序路径由设置 `codeblocks.compilerPrograms` 提供
-// （产品语义见 package.json 该设置描述：「交叉编译器如 RISC-V 由『探测编译器』自动写入」；
-//  扩展侧消费点 src/extension.ts buildCompilerInstance：programs.C 存在时覆盖编译器程序）。
+// 产品侧「非原生工具链」接线：交叉工具链的完整程序路径由设置 `codeblocks.compilerPrograms` 提供，
+// **按编译器 id 作用域**（D-20：「探测编译器」写入 `{ "<id>": { C, CPP, … } }`；旧扁平形态只对写入时的全局
+//  compilerId 生效，避免交叉工具链程序路径泄漏到别的家族）。
 //  本用例把探测到的绝对路径写入该设置（宿主内不可交互驱动 QuickPick「探测编译器」，用设置的等价态），
 //  结束后恢复原值。AVR 用随包注册家族 `avr-gcc`（resources/compilers/options_avr-gcc.xml）；
 //  RISC-V 无随包 options_riscv*.xml 家族，沿用 E2E S9 的等价做法（`gcc` 家族 + 程序路径覆盖）。
@@ -215,8 +215,9 @@ suite('宿主集成 · 跨工具链构建（非原生工具链：AVR / RISC-V GC
     assert.ok(!fs.existsSync(elfPath), `前置失败：产物已存在，无法证明本次构建产出（${elfPath}）`);
 
     // 交叉工具链程序路径写入产品设置（等价「探测编译器」对交叉工具链的持久化；宿主内不可交互驱动 QuickPick）
+    // D-20：设置按编译器 id 作用域（`{ "<id>": { C, … } }`），避免交叉工具链程序路径泄漏到别的家族
     const prevPrograms = vscode.workspace.getConfiguration('codeblocks').get('compilerPrograms', {});
-    await U.setConfig('compilerPrograms', tc.programs);
+    await U.setConfig('compilerPrograms', { [tc.compilerId]: tc.programs });
     try {
       // 1) 打开工程（观测：输出通道落盘日志「已打开项目: <title>」；openProject 弹系统对话框，宿主内不可自动驾驶，
       //    改用 openRecentProject <abs path> —— 与 build.tests.js 同法）
