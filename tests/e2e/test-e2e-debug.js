@@ -1031,9 +1031,25 @@ async function main() {
         const nsGot = await waitFor(() => ns.client.events('stopped').length > 0, 15000);
         const nsStop = ns.client.lastStop();
         const nsOut = ns.client.outputs();
+        if (!nsGot) {
+          // 环境差异诊断（本机命中、CI runner 未命中）：用原始 gdb -batch 复跑同一序列，把逐行输出写入日志
+          const infoFiles = spawnSync(gdb, ['-q', '-batch', '-ex', `file ${nosymExe}`, '-ex', 'info files'], { encoding: 'utf-8', windowsHide: true });
+          const addr = String(infoFiles.stdout || '').match(/Entry point:\s*(0x[0-9a-fA-F]+)/)?.[1];
+          const ver = spawnSync(gdb, ['--version'], { encoding: 'utf-8', windowsHide: true });
+          for (const line of String(ver.stdout || '').split('\n').slice(0, 2)) console.log(`   [diag] gdb: ${line}`);
+          for (const line of String(infoFiles.stdout || '').split('\n').filter((l) => /Entry point|file type/.test(l))) console.log(`   [diag] info files: ${line.trim()}`);
+          if (addr) {
+            const raw = spawnSync(gdb, ['-q', '-batch', '-ex', `file ${nosymExe}`, '-ex', `break *${addr}`,
+              '-ex', 'run', '-ex', 'info registers rip', '-ex', 'info program'], { encoding: 'utf-8', windowsHide: true });
+            for (const line of String(raw.stdout || '').split('\n').slice(0, 8)) console.log(`   [diag] raw gdb: ${line.trim()}`);
+            for (const line of String(raw.stderr || '').split('\n').filter(Boolean).slice(0, 4)) console.log(`   [diag] raw gdb(stderr): ${line.trim()}`);
+          } else {
+            console.log('   [diag] raw gdb: info files 未给出 Entry point 行');
+          }
+          for (const line of String(nsOut).split('\n').filter((l) => /stopOnEntry|入口|无法/.test(l))) console.log(`   [diag] adapter: ${line.trim()}`);
+        }
         check('S10b 无符号表：入口地址兜底触发首停（不再静默不首停）', nsGot && !!nsStop,
-          { stopped: nsGot, body: nsStop && nsStop.body, terminated: ns.client.events('terminated').length, outputTail: String(nsOut).slice(-400) },
-          'stopped');
+          { stopped: nsGot, body: nsStop && nsStop.body, terminated: ns.client.events('terminated').length }, 'stopped');
         check('S10b 无符号表：首停 reason=entry', !!nsStop && nsStop.body.reason === 'entry', nsStop && nsStop.body, "reason='entry'");
         check('S10b 无符号表：描述标注入口地址（0x…）',
           !!nsStop && /0x[0-9a-fA-F]+/.test(String(nsStop.body.description || ''))
