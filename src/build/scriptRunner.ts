@@ -70,6 +70,10 @@ export const SCRIPT_TIMEOUT_MAX_MS = 3_600_000;
 /** 超时杀树后收割孤儿进程的轮数/间隔（毫秒）：覆盖脚本被杀后继续 spawn 的后台进程 */
 export const SCRIPT_REAP_ROUNDS = 6;
 export const SCRIPT_REAP_INTERVAL_MS = 800;
+/** 命令本体退出后，管道「安静」多久即可立即收尾（毫秒）——宽限 = 上限，不再是固定等待时长 */
+export const SCRIPT_EXIT_QUIET_MS = 250;
+/** 安静期检查间隔（毫秒）——决定提前收尾的精度（最大额外延迟约等于该值） */
+export const SCRIPT_EXIT_QUIET_POLL_MS = 25;
 /** 命令启动后延迟采集进程树 PID 的时间（ms）：等 shell/中间 cmd 建好，又能覆盖整个命令生命周期 */
 export const SCRIPT_TREE_SNAPSHOT_DELAY_MS = 150;
 /** 命令运行期间的进程树采集次数与间隔（ms）：wmic 枚举约 0.4s，采 4 次即可覆盖 10s+ 的命令 */
@@ -174,8 +178,11 @@ export function runScriptCommand(
     const timeout = scriptCommandTimeoutMs();
     let settled = false;
     let graceTimer: NodeJS.Timeout | undefined;
+    let quietTimer: NodeJS.Timeout | undefined;
     let timeoutTimer: NodeJS.Timeout | undefined;
     let timedOut = false;
+    /** 最近一次收到输出的时刻（用于「管道安静期」判定） */
+    let lastDataAt = Date.now();
     // 逐行解码状态：待解码字节 + 粘性编码（首个非空数据块探测一次，避免短行误判）
     let pending: Buffer[] = [];
     let decoder: InstanceType<typeof TextDecoder> | undefined;
@@ -228,6 +235,10 @@ export function runScriptCommand(
         clearTimeout(graceTimer);
         graceTimer = undefined;
       }
+      if (quietTimer) {
+        clearInterval(quietTimer);
+        quietTimer = undefined;
+      }
       if (timeoutTimer) {
         clearTimeout(timeoutTimer);
         timeoutTimer = undefined;
@@ -238,10 +249,12 @@ export function runScriptCommand(
       resolve({ success, output, trailingBackground, timedOut });
     };
     proc.stdout?.on('data', (d: Buffer) => {
+      lastDataAt = Date.now();
       pending.push(d);
       flushLines(false);
     });
     proc.stderr?.on('data', (d: Buffer) => {
+      lastDataAt = Date.now();
       pending.push(d);
       flushLines(false);
     });
@@ -249,11 +262,21 @@ export function runScriptCommand(
       // 命令本体结束（对齐 CodeBlocks wxExecute 同步等待语义）。
       // 不再等 close：close 会等所有 stdio 管道关闭，脚本启动的后台进程一旦继承管道，
       // post-build 会被拖到它们退出为止（实测 start /b 场景白等 5.1s）。
-      // 宽限仅用于排空管道尾部缓冲输出：期间 close 到达即收尾；宽限到期仍无 close
-      // ⇒ 后台进程仍持有输出（标记 trailingBackground，构建继续）。
+      // 宽限是**上限**（不再是固定等待）：期间 close 到达即收尾；管道安静 SCRIPT_EXIT_QUIET_MS 即收尾
+      // （尾部输出保障不变——输出是流式读取的，安静期只用于确认没有在途数据）；
+      // 宽限到期仍无 close/安静 ⇒ 后台进程仍持有输出（标记 trailingBackground，构建继续）。
       const ok = code === 0;
       if (grace > 0) {
         graceTimer = setTimeout(() => finish(ok, true), grace);
+        // 安静期检查：命令本体退出后，若一段时间内没有新的输出就提前收尾。
+        // 若此时管道其实已关闭（close 事件尚未派发），按「无后台进程」收尾，避免误报说明行。
+        quietTimer = setInterval(() => {
+          if (Date.now() - lastDataAt < SCRIPT_EXIT_QUIET_MS) return;
+          const pipesClosed = (proc.stdout === null || proc.stdout.closed)
+            && (proc.stderr === null || proc.stderr.closed);
+          finish(ok, !pipesClosed);
+        }, SCRIPT_EXIT_QUIET_POLL_MS);
+        quietTimer.unref?.();
       } else {
         // 宽限 0：命令本体结束即继续，不做后台进程观察（严格等同 CodeBlocks：不检测、不提示）
         finish(ok, false);

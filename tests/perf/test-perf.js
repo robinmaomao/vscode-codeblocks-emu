@@ -311,8 +311,9 @@ async function buildBenches() {
     });
 
     // B11 post-build 后台进程不阻塞：命令本体（cmd.exe）秒退，后台孙进程仍持有 stdout/stderr。
-    // 修复前按 close 事件判定 ⇒ 等到后台进程退出（实测 5.1s）；修复后按 exit + 宽限（默认 1.5s）收口。
-    // 预算按最优一次判定：宽限 1.5s + 小工程增量构建（对象已存在）≈2s；修复前 ≈5.1s+ 直接超预算。
+    // 修复前按 close 事件判定 ⇒ 等到后台进程退出（实测 5.1s）；其后按 exit + 宽限（默认 1.5s）收口（≈1.9s）；
+    // FIX-3 起宽限是**上限**，管道安静 SCRIPT_EXIT_QUIET_MS（250ms）即收尾 ⇒ ≈本体 + 250ms。
+    // 预算按最优一次判定：安静期 0.25s + 小工程编译链接 ≈0.6s；固定等满宽限的旧行为 ≈1.9s 会触发漂移告警，5.1s 直接超预算。
     const bgScript = 'process.chdir(require(\'os\').tmpdir());setTimeout(function(){},8000)';
     const bgCmd = process.platform === 'win32'
       ? `start "" /b node -e "${bgScript}"`
@@ -355,11 +356,11 @@ async function buildBenches() {
     });
 
     add({
-      name: 'B11 post-build 后台进程不阻塞（start /b 场景，宽限 1.5s）',
-      note: '预算人工下调至 3500ms（默认 max(3×median) 过松）：覆盖「后台进程拖住 post-build」回归（修复前实测 ≈5.1s）',
+      name: 'B11 post-build 后台进程不阻塞（start /b 场景，宽限 1.5s 为上限 + 安静期）',
+      note: '预算人工下调至 2000ms（默认 max(3×median) 过松）：覆盖「后台进程拖住 post-build」回归（修复前按 close 判定 ≈5.1s → 硬失败；固定等满 1.5s 宽限 ≈1.9s → 漂移告警）。安静期修复后 ≈ 编译链接 0.3~0.9s + 安静期 0.25s',
       iterations: 3,
       warmup: 1,
-      minBudget: 3000,
+      minBudget: 2500,
       run: async () => {
         const { engine, project } = mkBgEngine();
         // 每轮清目标：保证真的编译/链接（否则 up-to-date 构建按门控跳过 post-build，测不到该场景）
