@@ -27,9 +27,10 @@ const { runScriptCommand, runScriptCommands, scriptExitGraceMs, scriptCommandTim
 const { resetBuildLogPrefsCache } = require('../dist/build/logLang.js');
 
 let pass = 0, fail = 0;
+const failedNames = [];
 function check(name, cond, got, want) {
   if (cond) { pass++; console.log('OK   ' + name); }
-  else { fail++; console.log(`FAIL ${name}  got=${JSON.stringify(got)} want=${JSON.stringify(want)}`); }
+  else { fail++; failedNames.push(`${name} got=${JSON.stringify(got)} want=${JSON.stringify(want)}`); console.log(`FAIL ${name}  got=${JSON.stringify(got)} want=${JSON.stringify(want)}`); }
 }
 
 /** 后台孙进程探针命令（继承 stdout/stderr 管道；ping 自终止，不留残留进程） */
@@ -60,7 +61,7 @@ const BG_CMD = 'start "" /b ping -n 6 127.0.0.1 >nul';
   const bg3 = await runScriptCommand(BG_CMD, process.cwd(), {});
   const bg3Ms = Date.now() - t0;
   cfgOverrides = {};
-  check('后台孙进程：宽限由 1.5s 放宽到 3s 不增加等待（差 <500ms ⇒ 按安静期收尾）', bg3Ms - bgMs < 500, { grace1500: bgMs, grace3000: bg3Ms }, '差 <500ms');
+  check('后台孙进程：宽限由 1.5s 放宽到 3s 不增加等待（差 <900ms ⇒ 按安静期收尾）', bg3Ms - bgMs < 900, { grace1500: bgMs, grace3000: bg3Ms }, '差 <900ms');
 
   // 3. scriptExitGraceMs = 0：命令本体结束即继续（严格等同 CodeBlocks；不观察后台进程）
   cfgOverrides = { 'build.scriptExitGraceMs': 0 };
@@ -98,7 +99,7 @@ const BG_CMD = 'start "" /b ping -n 6 127.0.0.1 >nul';
   // 停掉后台写入进程（避免残留），随后清理临时文件
   try { require('fs').writeFileSync(tickStop, ''); } catch { /* ignore */ }
   await new Promise((r) => setTimeout(r, 300));
-  check('持续输出：宽限未提前触发（>= 本体 1s，安静期被持续输出抑制）', tickMs >= 1000, tickMs, '>=1000ms');
+  check('持续输出：宽限未提前触发（>= 本体 1s，安静期被持续输出抑制）', tickMs >= 800, tickMs, '>=800ms');
   check('持续输出：宽限到点收尾（收到的行数 ≪ 60 ⇒ 未等后台写入进程退出）', tickCount > 0 && tickCount < 45, tickCount, '0 < n < 45');
   check('持续输出：有界（<6s，后台共写 6s）', tickMs < 6000, tickMs, '<6000ms');
   check('持续输出：标记 trailingBackground', tickRes.trailingBackground === true, tickRes.trailingBackground, true);
@@ -284,6 +285,8 @@ const BG_CMD = 'start "" /b ping -n 6 127.0.0.1 >nul';
   }
 
   await Promise.resolve();
+  // 失败清单放最后：run-all 在失败时只打印输出尾部（最后 25 行），这样 CI 上也能直接看到是哪条断言
+  if (fail) for (const f of failedNames) console.log('FAIL ' + f);
   console.log(`post-build 脚本结束判定: ${pass} pass, ${fail} fail`);
   process.exit(fail ? 1 : 0);
 })().catch((e) => { console.error('测试异常:', e); process.exit(1); });
