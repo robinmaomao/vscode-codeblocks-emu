@@ -61,6 +61,7 @@ import { clearBackticksCache, CommandGenerator } from './compiler/commandGenerat
 import { OutputParser } from './build/outputParser';
 import { isCompilerUsable, renderInvalidCompilerMessage, renderTriedCompilerPaths, triedCompilerPaths } from './build/invalidCompiler';
 import { collectClangdEntries, writeClangdDatabase, CompileCommandEntry } from './build/compileCommands';
+import { DiagnosticPublisher } from './build/diagnosticPublisher';
 import { detectClangd, queryCompilerSystemIncludes, queryCompilerTarget, updateClangdUserConfig, clangdUserConfigPath, clearClangdDetectionCache } from './tools/clangd';
 import { SymbolIndex, registerFallbackIntelliSense } from './tools/codeCompletion';
 import { GdbDebugAdapter } from './debug/gdbDebugAdapter';
@@ -1322,6 +1323,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   const clearBuildOutput = () => {
     outputChannel.clear();
     buildLogTreeProvider?.setSummary(undefined);
+    // 构建进行中：尚未发布的诊断同样丢弃（否则清除后会被构建收尾「复活」一批旧诊断）
+    buildDiagnosticPublisher?.clearPending();
     diagnosticCollection.clear();
   };
 
@@ -5109,6 +5112,40 @@ function claimBuildMutex(): boolean {
   return true;
 }
 
+/**
+ * Problems 面板诊断发布器（构建作用域生命期：起于构建开始，止于构建结束含取消/异常）。
+ *
+ * 为什么需要它：原实现「每条诊断一次 `diagnosticCollection.set`」——`set` 会把整个数组
+ * 拷贝并跨进程提交给渲染进程，N 条诊断 = O(N²) 拷贝 + N 次 IPC。
+ * 实测（4000 条 / 20 文件）：set 调用 4000 次、累计提交 40.2 万个元素；按文件归集后 20 次、4000 个元素。
+ */
+let buildDiagnosticPublisher: DiagnosticPublisher<vscode.Uri, vscode.Diagnostic> | undefined;
+
+/** 构建开始：创建发布器（节流 200ms） */
+function beginBuildDiagnostics(): void {
+  endBuildDiagnostics();
+  buildDiagnosticPublisher = new DiagnosticPublisher<vscode.Uri, vscode.Diagnostic>(
+    diagnosticCollection,
+    (uri) => uri.toString(),
+  );
+}
+
+/** 构建结束（成功/失败/取消/异常）：最终发布一次并释放定时器 */
+function endBuildDiagnostics(): void {
+  buildDiagnosticPublisher?.finish();
+  buildDiagnosticPublisher = undefined;
+}
+
+/** 归集一条构建诊断（由发布器节流发布；无发布器时回退为立即发布，保证行为不丢） */
+function publishBuildDiagnostic(uri: vscode.Uri, diag: vscode.Diagnostic): void {
+  if (!buildDiagnosticPublisher) {
+    const diags = diagnosticCollection.get(uri) ?? [];
+    diagnosticCollection.set(uri, [...diags, diag]);
+    return;
+  }
+  buildDiagnosticPublisher.add(uri, diag);
+}
+
 /** 主 Build —— 对齐 CB OnBuild：仅活动项目；多工程且无活动项目时询问（AskForActiveProject:1080） */
 async function build(rebuild: boolean): Promise<boolean> {
   // 构建互斥：进行中时忽略新的构建命令（防止双开构建进程打架）
@@ -5175,6 +5212,9 @@ async function buildWorkspaceLocked(rebuild: boolean, clearLog: boolean): Promis
   outputChannel.show(true);
   outputChannel.info(`[Code::Blocks] ${msg(`开始构建 ${rebuild ? '(重新构建)' : ''}...（共 ${openProjects.length} 个项目）`, `Starting build${rebuild ? ' (rebuild)' : ''}... (${openProjects.length} project(s))`)}`);
 
+  // Problems 诊断发布器：整个工作区构建（多项目、含取消/异常）期间归集 + 节流发布
+  beginBuildDiagnostics();
+
   const buildStartMs = Date.now();
   currentBuildProjects.length = 0;
   currentBuildErrorCount = 0;
@@ -5238,6 +5278,9 @@ async function buildWorkspaceLocked(rebuild: boolean, clearLog: boolean): Promis
     } else {
       throw e;
     }
+  } finally {
+    // 构建结束（成功/失败/取消/异常）：Problems 诊断最终发布一次并释放节流定时器
+    endBuildDiagnostics();
   }
 
   const { errorCount, warningCount } = buildResultStats();
@@ -5301,6 +5344,9 @@ async function buildSingleProjectLocked(filename: string, rebuild: boolean): Pro
   outputChannel.show(true);
   outputChannel.info(`[Code::Blocks] ${msg(`开始构建 ${rebuild ? '(重新构建)' : ''}...（单项目）`, `Starting build${rebuild ? ' (rebuild)' : ''}... (single project)`)}`);
 
+  // Problems 诊断发布器：整个构建（含取消/异常）期间归集 + 节流发布，结束统一收尾
+  beginBuildDiagnostics();
+
   const buildStartMs = Date.now();
   currentBuildProjects.length = 0;
   currentBuildErrorCount = 0;
@@ -5333,6 +5379,9 @@ async function buildSingleProjectLocked(filename: string, rebuild: boolean): Pro
     } else {
       throw e;
     }
+  } finally {
+    // 构建结束（成功/失败/取消/异常）：Problems 诊断最终发布一次并释放节流定时器
+    endBuildDiagnostics();
   }
 
   const { errorCount, warningCount } = buildResultStats();
@@ -5380,6 +5429,8 @@ async function buildSingleFileLocked(project: Project, file: ProjectFile): Promi
   // 输出清理核查 C：单文件编译开头清空输出（与整目标构建一致）
   outputChannel.clear();
   outputChannel.show(true);
+  // Problems 诊断发布器：单文件编译期间归集 + 节流发布，结束统一收尾
+  beginBuildDiagnostics();
   const engine = new BuildEngine(project, compiler, outputChannel, (id) => resolveTargetCompiler(id));
   const cancelSource = new BuildCancelSource();
   currentBuildCancel = cancelSource;
@@ -5401,9 +5452,7 @@ async function buildSingleFileLocked(project: Project, file: ProjectFile): Promi
           onDiagnostic: (diag, fileUri) => {
             // clangd 接管诊断时，Problems 面板由 clangd 产出（对齐整目标构建）
             if (clangdDiagnosticsEnabled) return;
-            const uri = fileUri ?? vscode.Uri.file(project.basePath);
-            const diags = diagnosticCollection.get(uri) ?? [];
-            diagnosticCollection.set(uri, [...diags, diag]);
+            publishBuildDiagnostic(fileUri ?? vscode.Uri.file(project.basePath), diag);
           },
         });
       },
@@ -5419,6 +5468,8 @@ async function buildSingleFileLocked(project: Project, file: ProjectFile): Promi
     // D-16：取消走 cancelSource.cancel()，不抛 CancellationError ⇒ 必须从取消源判定（否则取消被报成失败）
     if (cancelSource.isCancelled()) cancelled = true;
     currentBuildCancel = undefined;
+    // 单文件编译结束（成功/失败/取消/异常）：Problems 诊断最终发布一次并释放节流定时器
+    endBuildDiagnostics();
   }
 
   if (cancelled) {
@@ -5518,9 +5569,8 @@ async function buildOneProject(project: Project, targetTitle: string, rebuild: b
       // clangd 接管诊断时，Problems 面板由 clangd 产出，构建引擎不再写入（避免重复）
       if (clangdDiagnosticsEnabled) return;
       // 按具体文件 URI 分组挂到 Problems 面板；无文件则回退到项目根
-      const uri = fileUri ?? vscode.Uri.file(project.basePath);
-      const diags = diagnosticCollection.get(uri) ?? [];
-      diagnosticCollection.set(uri, [...diags, diag]);
+      // 性能：归集 + 节流发布（每文件一次 set），避免每条诊断一次跨进程提交（见 DiagnosticPublisher）
+      publishBuildDiagnostic(fileUri ?? vscode.Uri.file(project.basePath), diag);
     },
     onStructuredDiagnostic: (d) => {
       // Build Log 使用 clangd 诊断时，不再收集构建引擎的结构化诊断

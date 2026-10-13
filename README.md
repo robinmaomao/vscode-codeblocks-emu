@@ -173,7 +173,7 @@ code --extensionDevelopmentPath="." --disable-extensions --new-window
 |--------|--------|------|
 | `codeblocks.compilerId` | `gcc` | 默认编译器 ID（对应 `options_<id>.xml`） |
 | `codeblocks.masterPath` | `` | 编译器安装根目录（留空则从 PATH 探测） |
-| `codeblocks.parallelJobs` | `0` | 并行编译任务数（0 = 自动：逻辑核数 × 2，最多 64） |
+| `codeblocks.parallelJobs` | `0` | 并行编译任务数（0 = 自动：逻辑核数 × 2，最多 32） |
 | `codeblocks.saveBeforeBuild` | `true` | 构建前自动保存 |
 | `codeblocks.compilerPrograms` | `{}` | 编译器程序完整路径（交叉编译器由探测自动写入） |
 | `codeblocks.astyleOptions` | `["--style=allman", "--indent=spaces=4"]` | AStyle 格式化选项 |
@@ -184,7 +184,7 @@ code --extensionDevelopmentPath="." --disable-extensions --new-window
 | `codeblocks.build.compilerCache` | `none` | 编译缓存（ccache/sccache，保护性增强，默认关）：启用后仅标准编译命令前置缓存程序（链接/资源/脚本不注入）；未找到工具时构建回退原编译器（不使构建失败）；命令「Install Compiler Cache (ccache/sccache)…」提供安装引导 |
 | `codeblocks.build.compilerCachePath` | `` | 编译缓存工具显式路径（留空 = 自动探测 PATH 与常见安装目录；显式路径无效等同未找到） |
 | `codeblocks.build.cleanResponseFiles` | `false` | Clean/Rebuild 时删除对象目录下响应文件（`*.respFile`，超长命令的 `@file` 临时输入）；默认关=对齐 CB 不清理，开启避免旧文件永久遗留 |
-| `codeblocks.build.scriptExitGraceMs` | `1500` | pre/post-build 脚本结束宽限（毫秒，0–60000）：命令本体退出后最多再等这段时间排空管道尾部输出，期间管道关闭即继续。Code::Blocks 只等命令本体 → 设 `0` 完全对齐（脚本内后台程序 `start`/守护进程不再拖慢 post-build）；需等后台程序结束时请用前台命令或 `start /wait` |
+| `codeblocks.build.scriptExitGraceMs` | `1500` | pre/post-build 脚本结束**宽限上限**（毫秒，0–60000）：命令本体退出后**管道安静约 250ms 即继续**，最多不超过本值；期间管道关闭立即继续。Code::Blocks 只等命令本体 → 设 `0` 完全对齐（脚本内后台程序 `start`/守护进程不再拖慢 post-build）；需等后台程序结束时请用前台命令或 `start /wait` |
 | `codeblocks.build.scriptCommandTimeoutMs` | `0` | 单条 pre/post-build 脚本命令超时（毫秒，0 = 不超时，与 Code::Blocks 无限等待一致；上限 3600000）：超时强杀命令整棵进程树并记构建失败，适用于脚本内网络盘（SMB）重连、上传服务（.NET 默认 100s 超时）等阻塞场景；脚本运行期间每 5s 输出「仍在运行」心跳行 |
 | `codeblocks.clangd.enabled` | `true` | 是否启用 clangd 集成（自动生成 `compile_commands.json` 并更新 clangd 用户配置） |
 | `codeblocks.clangd.buildLogDiagnostics` | `build` | 检测到 clangd 时 Build Log 的诊断来源：`build` = 构建引擎完整诊断（默认）；`clangd` = clangd 诊断（仅打开过的文件） |

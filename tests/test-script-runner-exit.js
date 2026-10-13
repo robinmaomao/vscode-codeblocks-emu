@@ -23,7 +23,7 @@ Module._load = function (request, parent, isMain) {
   return origLoad(request, parent, isMain);
 };
 
-const { runScriptCommand, runScriptCommands, scriptExitGraceMs, scriptCommandTimeoutMs, SCRIPT_EXIT_GRACE_DEFAULT_MS, SCRIPT_EXIT_GRACE_MAX_MS, SCRIPT_TIMEOUT_MAX_MS, SCRIPT_HEARTBEAT_MS } = require('../dist/build/scriptRunner.js');
+const { runScriptCommand, runScriptCommands, scriptExitGraceMs, scriptCommandTimeoutMs, SCRIPT_EXIT_GRACE_DEFAULT_MS, SCRIPT_EXIT_GRACE_MAX_MS, SCRIPT_TIMEOUT_MAX_MS, SCRIPT_HEARTBEAT_MS, SCRIPT_EXIT_QUIET_MS } = require('../dist/build/scriptRunner.js');
 const { resetBuildLogPrefsCache } = require('../dist/build/logLang.js');
 
 let pass = 0, fail = 0;
@@ -46,12 +46,14 @@ const BG_CMD = 'start "" /b ping -n 6 127.0.0.1 >nul';
   check('前台命令未触发宽限等待（<1.5s）', fgMs < SCRIPT_EXIT_GRACE_DEFAULT_MS, fgMs, '<1500ms');
 
   // 2. 后台孙进程：命令本体（cmd.exe）秒退，不得被孙进程拖住（修复前 5.1s）
+  //    FIX-3：宽限是**上限**，管道安静 SCRIPT_EXIT_QUIET_MS 即收尾 ⇒ 默认 1500ms 宽限下实测 ~250ms
   t0 = Date.now();
   const bg = await runScriptCommand(BG_CMD, process.cwd(), {});
   const bgMs = Date.now() - t0;
   check('后台孙进程：有界结束（<3s，修复前 ~5.1s）', bgMs < 3000, bgMs, '<3000ms');
   check('后台孙进程：标记 trailingBackground', bg.trailingBackground === true, bg.trailingBackground, true);
-  check('后台孙进程：默认宽限生效（>=1.2s 以排空管道）', bgMs >= 1200, bgMs, '>=1200ms');
+  check(`后台孙进程：管道安静 ${SCRIPT_EXIT_QUIET_MS}ms 即提前收尾（<1s，宽限上限 1.5s）`, bgMs < 1000, bgMs, '<1000ms');
+  check('后台孙进程：安静期已生效（>= 安静阈值，未立即返回）', bgMs >= SCRIPT_EXIT_QUIET_MS, bgMs, `>=${SCRIPT_EXIT_QUIET_MS}ms`);
 
   // 3. scriptExitGraceMs = 0：命令本体结束即继续（严格等同 CodeBlocks；不观察后台进程）
   cfgOverrides = { 'build.scriptExitGraceMs': 0 };
@@ -61,6 +63,27 @@ const BG_CMD = 'start "" /b ping -n 6 127.0.0.1 >nul';
   const bg0Ms = Date.now() - t0;
   check('宽限 0：立即结束（<1s）', bg0Ms < 1000, bg0Ms, '<1000ms');
   check('宽限 0：不做后台进程观察（无标记）', !bg0.trailingBackground, bg0.trailingBackground, undefined);
+  cfgOverrides = {};
+
+  // 3b. 有持续输出时安静期不会提前触发：宽限仍是**上限**（到点收尾并标记后台进程）
+  //     后台 node 每 100ms 写一行（间隔 < 安静阈值 250ms）⇒ 安静判定永不成立，只能等宽限到点。
+  const tickFile = require('path').join(require('os').tmpdir(), `cb-tick-${process.pid}-${Date.now()}.js`);
+  require('fs').writeFileSync(tickFile, [
+    'let n = 0;',
+    'const t = setInterval(() => { process.stdout.write("TICK_" + (++n) + "\\n"); if (n >= 18) clearInterval(t); }, 100);',
+    '',
+  ].join('\n'));
+  cfgOverrides = { 'build.scriptExitGraceMs': 400 };
+  t0 = Date.now();
+  const tickRes = await runScriptCommand(`echo PB_TICK_START & start "" /b node "${tickFile}"`, process.cwd(), {});
+  const tickMs = Date.now() - t0;
+  check('持续输出：宽限上限到点收尾（>=400ms，未提前）', tickMs >= 400, tickMs, '>=400ms');
+  check('持续输出：不等后台进程结束（<1.4s，后台 ~1.8s）', tickMs < 1400, tickMs, '<1400ms');
+  check('持续输出：标记 trailingBackground', tickRes.trailingBackground === true, tickRes.trailingBackground, true);
+  check('持续输出：本体输出在最前（顺序保持）', /^PB_TICK_START[ \t]*\r?\n/.test(tickRes.output), tickRes.output.trim().split('\n').slice(0, 3).join('|'), 'PB_TICK_START 首行');
+  check('持续输出：收尾前到达的后台行已进入 output', /TICK_[12]/.test(tickRes.output), tickRes.output.trim().split('\n').slice(0, 5).join('|'), 'TICK_1..');
+  cfgOverrides = {};
+  try { require('fs').rmSync(tickFile, { force: true }); } catch { /* ignore */ }
 
   // 4. 非法值钳制：负值/NaN → 0，超大 → 上限
   cfgOverrides = { 'build.scriptExitGraceMs': -5 };

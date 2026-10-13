@@ -85,6 +85,12 @@ interface CompileUnit {
 /** 跨构建持久化的 include 依赖缓存（BuildEngine 每次构建新建实例，故用模块级静态缓存；LRU 上限防无界增长） */
 const depsIncludeCache = new LruCache<string, { srcMtimeMs: number; srcSize: number; dirsKey: string; includes: string[] }>(2000);
 
+/**
+ * 自动并行上限（`codeblocks.parallelJobs = 0` 时生效；显式设置值不受此限制，仅受设置项范围约束）。
+ * 2026-10-13 由 64 收到 32：并发越高宿主 CPU 越接近 100%，且每条编译进程链常驻内存较大。
+ */
+export const MAX_PARALLEL_JOBS = 32;
+
 /** 正斜杠归一化（供 PCH 对象路径等使用） */
 function toUnix(p: string): string {
   return p.replace(/\\/g, '/');
@@ -2218,13 +2224,14 @@ export class BuildEngine {
   /**
    * 并行任务数：显式设置为准；0 = 自动。
    *
-   * 自动值 = min(逻辑核数 × 2, 64)（R1，M0 实测，2026-10-08，用户选 64 上限）：
+   * 自动值 = min(逻辑核数 × 2, 32)（R1，M0 实测 2026-10-08；上限 2026-10-13 由 64 收到 32）：
    * 编译单元墙钟远大于其 CPU 占用（gcc→cc1→as 进程链 + Windows 杀软扫描停顿），
    * 按核数并行只能填满线程、大量停顿被浪费；2× 超额订阅把停顿重叠——
    * 大型工程（487 文件/248 单元）全量构建：8 并发 ~70s → 16 并发 ~44s（-35%），
-   * 24 并发回退（~52s，开始争抢）。上限 64 与设置范围上限一致；
-   * 注意：每个编译进程链常驻几十至几百 MB（巨型 TU 的 cc1 可达 1–2GB），
-   * 高核数机器如遇内存紧张/卡顿，请显式指定较小值。
+   * 24 并发回退（~52s，开始争抢）。
+   * 上限收到 32 的原因：并发越高 CPU 越接近 100%（用户侧「编译时占用大量 CPU」的反馈），
+   * 且每个编译进程链常驻几十至几百 MB（巨型 TU 的 cc1 可达 1–2GB）——32 兼顾吞吐与资源占用。
+   * 需要更快/更省可显式设置 `codeblocks.parallelJobs`（1–32）。
    * （CB 对照：cbthreadpool.cpp:32-39 线程数 ≤0 → wxThread::GetCPUCount()；
    * 本项为保护性性能增强，显式设置值仍优先、可一键回退。）
    */
@@ -2233,7 +2240,7 @@ export class BuildEngine {
     const n = cfg.get<number>('parallelJobs', 0);
     if (n && n > 0) return n;
     const logical = Math.max(1, os.cpus().length || 2);
-    return Math.min(logical * 2, 64);
+    return Math.min(logical * 2, MAX_PARALLEL_JOBS);
   }
 
   private async runInParallel(units: CompileUnit[], maxJobs: number, options: BuildOptions, totalCount: number): Promise<(boolean | undefined)[]> {
