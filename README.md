@@ -184,6 +184,8 @@ code --extensionDevelopmentPath="." --disable-extensions --new-window
 | `codeblocks.build.compilerCache` | `none` | 编译缓存（ccache/sccache，保护性增强，默认关）：启用后仅标准编译命令前置缓存程序（链接/资源/脚本不注入）；未找到工具时构建回退原编译器（不使构建失败）；命令「Install Compiler Cache (ccache/sccache)…」提供安装引导 |
 | `codeblocks.build.compilerCachePath` | `` | 编译缓存工具显式路径（留空 = 自动探测 PATH 与常见安装目录；显式路径无效等同未找到） |
 | `codeblocks.build.cleanResponseFiles` | `false` | Clean/Rebuild 时删除对象目录下响应文件（`*.respFile`，超长命令的 `@file` 临时输入）；默认关=对齐 CB 不清理，开启避免旧文件永久遗留 |
+| `codeblocks.build.scriptExitGraceMs` | `1500` | pre/post-build 脚本结束宽限（毫秒，0–60000）：命令本体退出后最多再等这段时间排空管道尾部输出，期间管道关闭即继续。Code::Blocks 只等命令本体 → 设 `0` 完全对齐（脚本内后台程序 `start`/守护进程不再拖慢 post-build）；需等后台程序结束时请用前台命令或 `start /wait` |
+| `codeblocks.build.scriptCommandTimeoutMs` | `0` | 单条 pre/post-build 脚本命令超时（毫秒，0 = 不超时，与 Code::Blocks 无限等待一致；上限 3600000）：超时强杀命令整棵进程树并记构建失败，适用于脚本内网络盘（SMB）重连、上传服务（.NET 默认 100s 超时）等阻塞场景；脚本运行期间每 5s 输出「仍在运行」心跳行 |
 | `codeblocks.clangd.enabled` | `true` | 是否启用 clangd 集成（自动生成 `compile_commands.json` 并更新 clangd 用户配置） |
 | `codeblocks.clangd.buildLogDiagnostics` | `build` | 检测到 clangd 时 Build Log 的诊断来源：`build` = 构建引擎完整诊断（默认）；`clangd` = clangd 诊断（仅打开过的文件） |
 | `codeblocks.clangd.forcedIncludes` | `["global.h"]` | clangd 分析头文件时强制预包含的基础头文件名（默认 `global.h`：typedef/macro/sfr/clib 上下文；勿用 `include.h` 这类全量主头文件，否则递归包含产生误报） |
