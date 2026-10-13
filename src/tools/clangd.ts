@@ -312,6 +312,11 @@ function buildScopeFragment(s: ClangdScopeConfig, marker: { begin: string; end: 
       lines.push(`    - ${w}`);
     }
   }
+  // 补全不自动插入 #include：clangd 默认 HeaderInsertion=IWYU（接受补全时插入所属头文件），
+  // 与「按工程编译命令补全」的预期不符（嵌入式/裸机工程常无标准头可插），固定为 Never。
+  // 主片段 PathMatch 覆盖工程树下全部文件（含头文件），故头文件子片段无需重复声明。
+  lines.push('Completion:');
+  lines.push('  HeaderInsertion: Never');
   if (s.headerFlags && s.headerFlags.length) {
     lines.push('---');
     lines.push('If:');
@@ -333,8 +338,9 @@ function buildScopeFragment(s: ClangdScopeConfig, marker: { begin: string; end: 
 /**
  * 更新用户级 clangd 配置：按作用域各自的 hash 标记替换，不碰用户自有内容，
  * 也不影响其它工作区写入的片段（多工作区共存）。
- * 每个作用域写两个片段：① 全部文件 → CompilationDatabase 指向缓存目录；② 头文件 →
- * CompileFlags.Add 回退 flag（头文件在编译数据库里没有条目，否则会报 unknown type name 等）。
+ * 每个作用域写两个片段：① 全部文件 → CompilationDatabase 指向缓存目录 +
+ * Diagnostics（未使用头文件提示关闭、可选压制）+ Completion.HeaderInsertion=Never（补全不插入头文件）；
+ * ② 头文件 → CompileFlags.Add 回退 flag（头文件在编译数据库里没有条目，否则会报 unknown type name 等）。
  */
 export function updateClangdUserConfig(scopes: ClangdScopeConfig[]): void {
   const cfgPath = clangdUserConfigPath();
