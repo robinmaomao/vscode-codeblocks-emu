@@ -48,6 +48,7 @@ import {
   resolveCompilerCachePath,
 } from './build/compilerCache';
 import { createCbOutput, CbOutput } from './build/cbChannel';
+import { warmWindowsSystemPath } from './tools/windowsPath';
 import { BuildCancelSource, BuildCancelHandle } from './build/cancelToken';
 import { expandMacros } from './build/scriptRunner';
 import { applyGeneratedFiles } from './build/generatedFiles';
@@ -761,6 +762,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   // R4：后台检测编译缓存工具（延迟启动，与编译器探测并行；未启用时也仅作一次性建议提示）
   setTimeout(() => { void checkCompilerCachePrompt(); }, 4000);
+
+  // 预热 Windows 系统 PATH 缓存（异步、非关键）：首次构建的「环境准备」不再同步付出 2×reg.exe（本机 184–209ms）
+  warmWindowsSystemPath();
 
   // 打开最近工程（E1）
   context.subscriptions.push(

@@ -1,74 +1,80 @@
 {
-  "updatedAt": "2026-10-10T10:12:41.706Z",
+  "updatedAt": "2026-10-13T01:56:54.779Z",
   "env": {
     "node": "v24.19.0",
     "platform": "win32-x64",
     "cpus": 8,
     "cpuModel": "Intel(R) Core(TM) i3-10105 CPU @ 3.70GHz",
     "totalMemGB": 15.8,
-    "date": "2026-10-10"
+    "date": "2026-10-13"
   },
   "benches": {
     "B1 大工程冷解析（1200 文件 / 6 目标）": {
       "budget": 128.22,
-      "median": 42.74,
-      "p95": 46.68,
-      "note": "探针：C:\\Users\\peng_du\\AppData\\Local\\Temp\\cb-perf-60oleJ\\perf-big.cbp"
+      "median": 45.22,
+      "p95": 52.95,
+      "note": "探针：C:\\Users\\peng_du\\AppData\\Local\\Temp\\cb-perf-UyKolr\\perf-big.cbp"
     },
     "B1b 解析缓存命中（同一文件重复解析）": {
       "budget": 48.03,
-      "median": 16.01,
-      "p95": 21.32
+      "median": 20.84,
+      "p95": 28.89
     },
     "B1c 序列化往返（parse→serialize 全工程）": {
       "budget": 67.44,
-      "median": 22.48,
-      "p95": 24.14
+      "median": 28.4,
+      "p95": 31.25
     },
     "B2 编译命令行生成 + 宏展开（1200 文件目标）": {
       "budget": 3894.15,
-      "median": 1298.05,
-      "p95": 1685.3
+      "median": 1751.92,
+      "p95": 1832.79
     },
     "B3 编译输出解析 → 诊断（2 万行 / 2000 条）": {
       "budget": 1888.65,
-      "median": 629.55,
-      "p95": 697.6
+      "median": 744.44,
+      "p95": 765.76
     },
     "B4 编译器选项 XML 全量加载（options_gcc.xml）": {
       "budget": 11.13,
-      "median": 3.71,
-      "p95": 6.93
+      "median": 8.74,
+      "p95": 11.73
     },
     "B5 LRU 10 万次操作 + 盘符归一化 5 万次": {
       "budget": 200.46,
-      "median": 66.82,
-      "p95": 67.87
+      "median": 87.24,
+      "p95": 136.1
     },
     "B6 虚拟文件夹索引构建（1200 文件归属 + 计数）": {
       "budget": 10,
-      "median": 1.02,
-      "p95": 2.25
+      "median": 2.11,
+      "p95": 2.42
     },
     "B7 增量判定 isUpToDate（真实源/对象 + include 依赖缓存）": {
       "budget": 36.84,
-      "median": 12.28,
-      "p95": 18.93
+      "median": 28.95,
+      "p95": 33.21
     },
     "B8 真实全量构建（gcc 3 文件编译 + 链接，含清理）": {
       "budget": 1123.29,
-      "median": 374.43,
-      "p95": 380.4
+      "median": 440.8,
+      "p95": 589.38
     },
     "B9 真实增量构建 up-to-date（无变更 → 零编译命令）": {
       "budget": 177.18,
-      "median": 59.06,
-      "p95": 64.69
+      "median": 65.36,
+      "p95": 97.27
     },
     "B10 真实单文件编译 compileFile（main.c）": {
       "budget": 450.6,
-      "median": 150.2,
-      "p95": 252.77
+      "median": 138.79,
+      "p95": 164.03
+    },
+    "B11 post-build 后台进程不阻塞（start /b 场景，宽限 1.5s）": {
+      "budget": 3500,
+      "median": 1891.49,
+      "p95": 1899.42,
+      "note": "预算人工下调至 3500ms（默认 max(3×median) 过松）：覆盖「后台进程拖住 post-build」回归（修复前实测 ≈5.1s）"
     }
   }
 }

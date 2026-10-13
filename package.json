@@ -2,7 +2,7 @@
   "name": "codeblocks-vscode",
   "displayName": "Code::Blocks for VS Code",
   "description": "原生移植 Code::Blocks 核心功能到 VS Code：项目模型、构建引擎、编译器管理与调试引擎",
-  "version": "0.8.128",
+  "version": "0.8.129",
   "icon": "resources/icon.png",
   "publisher": "robinmaomao",
   "author": {
@@ -699,6 +699,13 @@
             "type": "boolean",
             "default": false,
             "description": "纯 Code::Blocks 日志模式：关闭脚本编号/单行完成式/Emoji 汇总块/最慢 Top3，构建结束输出 CB 风格 === Build finished === 行"
+          },
+          "codeblocks.build.scriptExitGraceMs": {
+            "type": "number",
+            "default": 1500,
+            "minimum": 0,
+            "maximum": 60000,
+            "description": "pre/post-build 脚本命令的结束宽限（毫秒，默认 1500，上限 60000）。命令本体（cmd.exe）退出后最多再等这段时间排空管道尾部输出，期间管道关闭则立即继续。Code::Blocks 只等命令本体 → 设为 0 可完全对齐（脚本里的后台程序 start/守护进程不再拖慢 post-build）；脚本确需等后台程序结束时请改用前台命令或 start /wait"
           },
           "codeblocks.build.persistLog": {
             "type": "boolean",

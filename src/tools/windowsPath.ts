@@ -9,6 +9,7 @@
  * - 首次调用：同步读取（保持既有语义）；
  * - 已有缓存：立即返回缓存值；若超过 TTL（5s）则**后台异步刷新**（stale-while-revalidate），
  *   刷新完成后下一次调用即拿到新值——构建/脚本路径不再被 reg.exe 同步阻塞。
+ * - 扩展激活时调用 warmWindowsSystemPath() 预热（异步）：首次构建连「首次同步读取」也省掉。
  */
 import { execFile, execFileSync } from 'child_process';
 import * as path from 'path';
@@ -42,6 +43,25 @@ export function getWindowsSystemPath(): string {
   cachedPath = readBothSync();
   cachedAt = now;
   return cachedPath;
+}
+
+/**
+ * 预热缓存（异步，不阻塞调用方）——扩展激活时调用，使首次构建不必在关键路径上付出
+ * 2×reg.exe 同步查询（M0 实测 90–196ms；本机 184–209ms）。已有缓存或已在读取时直接返回。
+ */
+export function warmWindowsSystemPath(): void {
+  if (process.platform !== 'win32') return; // 仅 Windows 有注册表 PATH
+  if (cachedPath !== undefined || refreshing) return;
+  refreshing = true;
+  void readBothAsync()
+    .then((v) => {
+      if (v) cachedPath = v;
+    })
+    .catch(() => { /* 预热失败：首次调用仍走同步路径 */ })
+    .finally(() => {
+      refreshing = false;
+      cachedAt = Date.now();
+    });
 }
 
 /** 同步读取两级 PATH（仅首次调用使用） */
