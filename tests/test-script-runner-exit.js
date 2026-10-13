@@ -52,8 +52,15 @@ const BG_CMD = 'start "" /b ping -n 6 127.0.0.1 >nul';
   const bgMs = Date.now() - t0;
   check('后台孙进程：有界结束（<3s，修复前 ~5.1s）', bgMs < 3000, bgMs, '<3000ms');
   check('后台孙进程：标记 trailingBackground', bg.trailingBackground === true, bg.trailingBackground, true);
-  check(`后台孙进程：管道安静 ${SCRIPT_EXIT_QUIET_MS}ms 即提前收尾（<1s，宽限上限 1.5s）`, bgMs < 1000, bgMs, '<1000ms');
   check('后台孙进程：安静期已生效（>= 安静阈值，未立即返回）', bgMs >= SCRIPT_EXIT_QUIET_MS, bgMs, `>=${SCRIPT_EXIT_QUIET_MS}ms`);
+  // 安静期的自校准判据（不依赖机器速度）：宽限只是**上限** ⇒ 放宽限不应让等待变长。
+  // 若回归成「固定等满宽限」，两次之差会 ≈ 宽限差（1500ms）。
+  cfgOverrides = { 'build.scriptExitGraceMs': 3000 };
+  t0 = Date.now();
+  const bg3 = await runScriptCommand(BG_CMD, process.cwd(), {});
+  const bg3Ms = Date.now() - t0;
+  cfgOverrides = {};
+  check('后台孙进程：宽限由 1.5s 放宽到 3s 不增加等待（差 <500ms ⇒ 按安静期收尾）', bg3Ms - bgMs < 500, { grace1500: bgMs, grace3000: bg3Ms }, '差 <500ms');
 
   // 3. scriptExitGraceMs = 0：命令本体结束即继续（严格等同 CodeBlocks；不观察后台进程）
   cfgOverrides = { 'build.scriptExitGraceMs': 0 };
@@ -65,25 +72,40 @@ const BG_CMD = 'start "" /b ping -n 6 127.0.0.1 >nul';
   check('宽限 0：不做后台进程观察（无标记）', !bg0.trailingBackground, bg0.trailingBackground, undefined);
   cfgOverrides = {};
 
-  // 3b. 有持续输出时安静期不会提前触发：宽限仍是**上限**（到点收尾并标记后台进程）
-  //     后台 node 每 100ms 写一行（间隔 < 安静阈值 250ms）⇒ 安静判定永不成立，只能等宽限到点。
+  // 3b. 后台进程持续输出时安静期不会触发：宽限仍是**上限**（到点收尾并标记后台进程）
+  //     后台 node 每 100ms 写一行（间隔 < 安静阈值 250ms）⇒ 安静判定永不成立，只能等宽限到点；
+  //     后台共写 6s（60 行），本体约 1s + 宽限 600ms 收尾 ⇒「已收到的行数」远小于 60。
+  //     判据用**行数**而非绝对墙钟：机器越慢收到的行越少，不会误判（等后台退出必然收满 60 行）。
+  //     脚本额外轮询 .stop 文件：测试结束即让写入进程自行退出，不留残留。
   const tickFile = require('path').join(require('os').tmpdir(), `cb-tick-${process.pid}-${Date.now()}.js`);
+  const tickStop = `${tickFile}.stop`;
   require('fs').writeFileSync(tickFile, [
     'let n = 0;',
-    'const t = setInterval(() => { process.stdout.write("TICK_" + (++n) + "\\n"); if (n >= 18) clearInterval(t); }, 100);',
+    'const fs = require("fs");',
+    `const stop = ${JSON.stringify(tickStop)};`,
+    'const t = setInterval(() => {',
+    '  if (fs.existsSync(stop)) { clearInterval(t); return; }',
+    '  process.stdout.write("TICK_" + (++n) + "\\n");',
+    '  if (n >= 60) clearInterval(t);',
+    '}, 100);',
     '',
   ].join('\n'));
-  cfgOverrides = { 'build.scriptExitGraceMs': 400 };
+  cfgOverrides = { 'build.scriptExitGraceMs': 600 };
   t0 = Date.now();
-  const tickRes = await runScriptCommand(`echo PB_TICK_START & start "" /b node "${tickFile}"`, process.cwd(), {});
+  const tickRes = await runScriptCommand(`start "" /b node "${tickFile}" & echo PB_TICK_START & ping -n 2 127.0.0.1 >nul`, process.cwd(), {});
   const tickMs = Date.now() - t0;
-  check('持续输出：宽限上限到点收尾（>=400ms，未提前）', tickMs >= 400, tickMs, '>=400ms');
-  check('持续输出：不等后台进程结束（<1.4s，后台 ~1.8s）', tickMs < 1400, tickMs, '<1400ms');
+  const tickCount = (tickRes.output.match(/TICK_\d+/g) || []).length;
+  // 停掉后台写入进程（避免残留），随后清理临时文件
+  try { require('fs').writeFileSync(tickStop, ''); } catch { /* ignore */ }
+  await new Promise((r) => setTimeout(r, 300));
+  check('持续输出：宽限未提前触发（>= 本体 1s，安静期被持续输出抑制）', tickMs >= 1000, tickMs, '>=1000ms');
+  check('持续输出：宽限到点收尾（收到的行数 ≪ 60 ⇒ 未等后台写入进程退出）', tickCount > 0 && tickCount < 45, tickCount, '0 < n < 45');
+  check('持续输出：有界（<6s，后台共写 6s）', tickMs < 6000, tickMs, '<6000ms');
   check('持续输出：标记 trailingBackground', tickRes.trailingBackground === true, tickRes.trailingBackground, true);
   check('持续输出：本体输出在最前（顺序保持）', /^PB_TICK_START[ \t]*\r?\n/.test(tickRes.output), tickRes.output.trim().split('\n').slice(0, 3).join('|'), 'PB_TICK_START 首行');
   check('持续输出：收尾前到达的后台行已进入 output', /TICK_[12]/.test(tickRes.output), tickRes.output.trim().split('\n').slice(0, 5).join('|'), 'TICK_1..');
   cfgOverrides = {};
-  try { require('fs').rmSync(tickFile, { force: true }); } catch { /* ignore */ }
+  for (const f of [tickFile, tickStop]) { try { require('fs').rmSync(f, { force: true }); } catch { /* ignore */ } }
 
   // 4. 非法值钳制：负值/NaN → 0，超大 → 上限
   cfgOverrides = { 'build.scriptExitGraceMs': -5 };
