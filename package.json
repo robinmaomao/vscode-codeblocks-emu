@@ -707,6 +707,13 @@
             "maximum": 60000,
             "description": "pre/post-build 脚本命令的结束宽限（毫秒，默认 1500，上限 60000）。命令本体（cmd.exe）退出后最多再等这段时间排空管道尾部输出，期间管道关闭则立即继续。Code::Blocks 只等命令本体 → 设为 0 可完全对齐（脚本里的后台程序 start/守护进程不再拖慢 post-build）；脚本确需等后台程序结束时请改用前台命令或 start /wait"
           },
+          "codeblocks.build.scriptCommandTimeoutMs": {
+            "type": "number",
+            "default": 0,
+            "minimum": 0,
+            "maximum": 3600000,
+            "description": "单条 pre/post-build 脚本命令的超时（毫秒，默认 0 = 不超时，与 Code::Blocks 的无限等待一致；上限 3600000）。超时后强杀该命令的整棵进程树并把构建记为失败，适用于脚本内网络盘（SMB）重连、上传服务（.NET 默认 100s 超时）等长时间阻塞场景；仅作用于脚本命令，不影响编译/链接"
+          },
           "codeblocks.build.persistLog": {
             "type": "boolean",
             "default": false,

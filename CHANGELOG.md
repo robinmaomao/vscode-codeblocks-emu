@@ -8,11 +8,12 @@
 
 - **post-build 脚本结束判定对齐 Code::Blocks**（本版新增）：pre/post-build 脚本以**命令本体退出**为结束信号——脚本里的后台程序（`start` / `start /b` / GUI / 守护进程）不再拖住构建（修复前实测 `start "" /b ping -n 6 …` 白等 **5113ms** → 修复后 **1557ms**，`scriptExitGraceMs=0` 时 7ms）
 - 新增设置 `codeblocks.build.scriptExitGraceMs`（默认 `1500`，可设 `0` 完全对齐 CB，上限 60000）；后台进程存在时日志给出说明行，单条脚本命令 >3s 给出 `耗时 x.xs` 行（`plainCbLog` 模式静默）
+- **post-build 观感与阻塞治理**：脚本输出**实时流式**写入日志（不再等命令结束才回放，卡住期间不再空白）；长命令每 5s 输出「仍在运行 (x s)」心跳行（首条附排障提示）；新增 `codeblocks.build.scriptCommandTimeoutMs`（默认 `0` = 不超时，对齐 CB 无限等待；超时强杀进程树并记失败）——用于脚本内网络盘（SMB）重连、上传服务（.NET 默认 100s 超时）等阻塞场景；杀树按「运行期采集进程树 PID + 超时后多轮收割逃逸孤儿」加固（`taskkill /T /F` 是瞬时快照式：快照后新生的子孙、以及根已退出时的空操作会让脚本继续启动 `start /b` 后台进程，实测杀树后 1~10s 仍出现且长期存活 → 加固后 8 组超时点 × 24 轮零残留）
 - 构建关键路径：项目级 pre/post 宏展开复用 `CommandGenerator`（1200 文件 / 6 目标工程 48.2ms/次 → 0.7ms/次）；扩展激活时异步预热 Windows 系统 PATH 缓存（首次构建「环境准备」省 2×`reg.exe` ≈184–209ms）
 - **clangd 补全不自动插入头文件**：生成的用户级 `config.yaml` 片段固定 `Completion.HeaderInsertion: Never`（clangd 默认 `IWYU` 会在接受补全时插入 `#include`）；如需恢复默认需自行覆盖该片段（下次生成会被重写）
 - **测试分层体系（L-1…L5 + CI）**：契约 / 无头 / 真实工程·调试·工具链·边界 E2E / VS Code 宿主 / 像素视觉 / 性能 / 打包 七层统一运行器 + GitHub Actions；覆盖补齐（命令 / 设置 / 快捷键 / 语法 / DAP 30/30）
 - **缺陷收口**：测试阶段登记的 D-01…D-20 与能力缺口 C-01（`stopOnEntry` 入口首停）全部修复
-- 规模：命令 103 项、设置 61 项（7 分区 + 中英 nls）、视图 5 个；分层回归 contract 2/2、unit 151 脚本 FAIL=0 SKIP=1、e2e 4/4、perf 13 项 0 fail、pack 14 pass
+- 规模：命令 103 项、设置 62 项（7 分区 + 中英 nls）、视图 5 个；分层回归 contract 2/2、unit 151 脚本 FAIL=0 SKIP=1、e2e 4/4、perf 13 项 0 fail、pack 14 pass
 
 📄 详细发布说明：[`docs/release/0.8.129.md`](docs/release/0.8.129.md)
 

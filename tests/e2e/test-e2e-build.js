@@ -2,7 +2,8 @@
 //
 // 覆盖：全量构建 / 增量 up-to-date / 头文件依赖触发重编 / 单文件编译与清理 / 目标清理 /
 //       对象目录自动创建 / 含空格路径 / 汇编源参与链接 / 链接脚本不参与 / 响应文件 /
-//       pre-post 脚本 / post-build 后台进程不阻塞 / 编译失败诊断 / compile_commands.json / 工作区依赖顺序 + 静态库
+//       pre-post 脚本 / post-build 后台进程不阻塞 / post-build 输出实时化 / 编译失败诊断 /
+//       compile_commands.json / 工作区依赖顺序 + 静态库
 //
 // 用法：node tests/e2e/test-e2e-build.js [--filter <子串>]
 const fs = require('fs');
@@ -311,6 +312,56 @@ async function scenarioPostBuildBackground() {
   check('S15 总时长 <10s（未等 25s 自终止的后台进程）', elapsed < 10000, elapsed, '<10000ms');
 }
 
+async function scenarioPostBuildStreaming() {
+  // S16 post-build 输出实时化：脚本「echo 标记 → 睡眠」期间，标记行必须在 build() 返回之前进入日志
+  if (!H.toolAvailable('node')) { skipCheck('S16 post-build 输出实时化', 'node 不可用'); return; }
+  const dir = H.mkTemp('cb-e2e-poststream-');
+  H.writeFile(path.join(dir, 'main.c'), 'int main(void){return 0;}\n');
+  // echo 标记后睡眠约 3s（用 node 跨平台；标记先落 stdout，随后长时间无输出）
+  const script = `node -e "console.log('PB_STREAM_MARK');setTimeout(function(){},3000)"`;
+  const esc = (s) => s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  H.writeFile(path.join(dir, 'poststream.cbp'), `<?xml version="1.0" encoding="UTF-8" standalone="yes" ?>
+<CodeBlocks_project_file>
+\t<FileVersion major="1" minor="6" />
+\t<Project>
+\t\t<Option title="poststream" />
+\t\t<Option compiler="gcc" />
+\t\t<Build>
+\t\t\t<Target title="Debug">
+\t\t\t\t<Option type="1" />
+\t\t\t\t<Option compiler="gcc" />
+\t\t\t\t<Option output="bin/Debug/poststream" />
+\t\t\t\t<Option object_output="obj/Debug/" />
+\t\t\t</Target>
+\t\t</Build>
+\t\t<ExtraCommands>
+\t\t\t<Add after="${esc(script)}" />
+\t\t</ExtraCommands>
+\t\t<Unit filename="main.c" />
+\t</Project>
+</CodeBlocks_project_file>
+`);
+  const ctx = H.openProject(path.join(dir, 'poststream.cbp'));
+  // 自建带时间戳 output：定位标记行相对「构建结束」的时刻
+  const lines = [];
+  const sink = {
+    info: (m) => lines.push({ line: String(m), t: Date.now() }),
+    warn: (m) => lines.push({ line: String(m), t: Date.now() }),
+    error: (m) => lines.push({ line: String(m), t: Date.now() }),
+    debug: (m) => lines.push({ line: String(m), t: Date.now() }),
+  };
+  const engine = new (H.modules().BuildEngine)(ctx.project, ctx.compiler, sink, ctx.getCompiler);
+  const tStart = Date.now();
+  const ok = await engine.build('Debug', {});
+  const endMs = Date.now();
+  const mark = lines.find((l) => l.line.trim() === 'PB_STREAM_MARK');
+  check('S16 含长 post-build 的构建成功', ok === true, ok, true);
+  check('S16 脚本标记行进入日志', !!mark, lines.map((l) => l.line).slice(-4), 'PB_STREAM_MARK');
+  check('S16 标记行在构建结束前到达（实时流式，非结束回放）',
+    !!mark && endMs - mark.t >= 1500, { markAfterStart: mark ? mark.t - tStart : null, total: endMs - tStart }, '构建结束 ≥1.5s 后才结束');
+  check('S16 脚本输出缩进两空格（与命令行区分层次）', mark?.line === '  PB_STREAM_MARK', mark?.line, '  PB_STREAM_MARK');
+}
+
 async function main() {
   if (!HAS_GCC) {
     console.log('SKIP e2e：gcc 不可用，跳过真实工程构建矩阵');
@@ -323,6 +374,7 @@ async function main() {
     await scenarioSpacesAndAsm();
     await scenarioLongCommandAndScripts();
     await scenarioPostBuildBackground();
+    await scenarioPostBuildStreaming();
     await scenarioCompileCommands();
     await scenarioWorkspace();
   } finally {

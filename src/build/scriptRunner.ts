@@ -14,7 +14,7 @@ import { spawn } from 'child_process';
 import { decodeText } from '../tools/encoding';
 import { getWindowsSystemPath } from '../tools/windowsPath';
 import { upperDrive } from '../tools/pathCase';
-import { BuildCancelHandle } from './cancelToken';
+import { BuildCancelHandle, killProcessTree, reapOrphans, snapshotDescendantPids } from './cancelToken';
 import { replaceCbMacros } from '../compiler/cbMacros';
 import { buildLogPrefs } from './logLang';
 
@@ -53,6 +53,8 @@ export interface ScriptResult {
    * 宽限设为 0 时不做该观察（严格对齐 CodeBlocks：不检测、不提示）。
    */
   trailingBackground?: boolean;
+  /** 是否因超时（codeblocks.build.scriptCommandTimeoutMs）被强杀 */
+  timedOut?: boolean;
 }
 
 /** 命令结束后管道排空的宽限默认值（设置 codeblocks.build.scriptExitGraceMs；0 = 立即结束） */
@@ -61,6 +63,18 @@ export const SCRIPT_EXIT_GRACE_DEFAULT_MS = 1500;
 export const SCRIPT_EXIT_GRACE_MAX_MS = 60_000;
 /** 单条脚本命令耗时提示阈值（超过则在日志中给出耗时行） */
 export const SCRIPT_SLOW_HINT_MS = 3000;
+/** 长命令心跳间隔（运行期间周期性输出「仍在运行」，让「脚本慢」与「扩展慢」一眼可辨） */
+export const SCRIPT_HEARTBEAT_MS = 5000;
+/** 脚本命令超时上限（设置 codeblocks.build.scriptCommandTimeoutMs；默认 0 = 不超时，对齐 CodeBlocks 无限等待） */
+export const SCRIPT_TIMEOUT_MAX_MS = 3_600_000;
+/** 超时杀树后收割孤儿进程的轮数/间隔（毫秒）：覆盖脚本被杀后继续 spawn 的后台进程 */
+export const SCRIPT_REAP_ROUNDS = 6;
+export const SCRIPT_REAP_INTERVAL_MS = 800;
+/** 命令启动后延迟采集进程树 PID 的时间（ms）：等 shell/中间 cmd 建好，又能覆盖整个命令生命周期 */
+export const SCRIPT_TREE_SNAPSHOT_DELAY_MS = 150;
+/** 命令运行期间的进程树采集次数与间隔（ms）：wmic 枚举约 0.4s，采 4 次即可覆盖 10s+ 的命令 */
+export const SCRIPT_TREE_SNAPSHOT_COUNT = 4;
+export const SCRIPT_TREE_SNAPSHOT_INTERVAL_MS = 2500;
 
 /**
  * 脚本结束后的管道排空宽限（毫秒）。
@@ -78,6 +92,23 @@ export function scriptExitGraceMs(): number {
   const n = Number(raw);
   if (!Number.isFinite(n) || n <= 0) return 0;
   return Math.min(SCRIPT_EXIT_GRACE_MAX_MS, Math.floor(n));
+}
+
+/**
+ * 单条 pre/post-build 脚本命令的超时（毫秒；0 = 不超时，对齐 CodeBlocks 的无限等待）。
+ *
+ * 仅作用于脚本命令（编译/链接不受影响）；超时后强杀整棵进程树并把该命令记为失败。
+ * 无 vscode 宿主（headless 单测）时回退默认；非法/负值钳制为 0，上限 SCRIPT_TIMEOUT_MAX_MS。
+ */
+export function scriptCommandTimeoutMs(): number {
+  let raw: unknown = 0;
+  try {
+    const vs: typeof import('vscode') = require('vscode');
+    raw = vs.workspace.getConfiguration('codeblocks').get<number>('build.scriptCommandTimeoutMs', 0);
+  } catch { /* 无宿主：默认值（不超时） */ }
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n <= 0) return 0;
+  return Math.min(SCRIPT_TIMEOUT_MAX_MS, Math.floor(n));
 }
 
 /** 解码子进程输出：UTF-8 严格优先，失败回退 GBK（中文 Windows） */
@@ -102,13 +133,18 @@ function mergePath(...parts: string[]): string {
   return out.join(';');
 }
 
-/** 执行单条脚本命令（可附加环境变量，如编译器 bin 目录加入 PATH；cancel 提供时注册子进程并支持强杀） */
+/**
+ * 执行单条脚本命令（可附加环境变量，如编译器 bin 目录加入 PATH；cancel 提供时注册子进程并支持强杀）。
+ *
+ * @param onOutputLine 实时输出回调（逐行、已解码、行尾 \r 已去除；命令收尾时 flush 无换行的尾行）
+ */
 export function runScriptCommand(
   command: string,
   cwd: string,
   vars: Record<string, string>,
   extraPath?: string,
   cancel?: BuildCancelHandle,
+  onOutputLine?: (line: string) => void,
 ): Promise<ScriptResult> {
   return new Promise((resolve) => {
     // 取消检查点：spawn 前
@@ -135,8 +171,56 @@ export function runScriptCommand(
     cancel?.register(proc);
     let output = '';
     const grace = scriptExitGraceMs();
+    const timeout = scriptCommandTimeoutMs();
     let settled = false;
     let graceTimer: NodeJS.Timeout | undefined;
+    let timeoutTimer: NodeJS.Timeout | undefined;
+    let timedOut = false;
+    // 逐行解码状态：待解码字节 + 粘性编码（首个非空数据块探测一次，避免短行误判）
+    let pending: Buffer[] = [];
+    let decoder: InstanceType<typeof TextDecoder> | undefined;
+
+    /** 行解码器：UTF-8 严格成功则用 UTF-8，否则整条命令回退 GBK（与原「整段解码」结论一致） */
+    const lineDecoder = (): InstanceType<typeof TextDecoder> => {
+      if (!decoder) {
+        const head = pending.length ? Buffer.concat(pending) : Buffer.alloc(0);
+        try {
+          new TextDecoder('utf-8', { fatal: true }).decode(head);
+          decoder = new TextDecoder('utf-8', { fatal: false });
+        } catch {
+          decoder = new TextDecoder('gbk', { fatal: false });
+        }
+      }
+      return decoder;
+    };
+
+    /** 取出缓冲中已完成的行（按最后一个 \n 切分；\n 不属于 UTF-8/GBK 多字节序列 ⇒ 切分安全） */
+    const flushLines = (final: boolean): void => {
+      if (!pending.length) return;
+      const buf = Buffer.concat(pending);
+      const lastNl = buf.lastIndexOf(0x0a);
+      let head: Buffer;
+      let rest: Buffer;
+      if (lastNl >= 0) {
+        head = buf.subarray(0, lastNl + 1);
+        rest = buf.subarray(lastNl + 1);
+      } else {
+        head = final ? buf : Buffer.alloc(0);
+        rest = final ? Buffer.alloc(0) : buf;
+      }
+      if (head.length) {
+        const text = lineDecoder().decode(head);
+        output += text;
+        if (onOutputLine) {
+          for (const line of text.split('\n')) {
+            const trimmed = line.replace(/\r$/, '');
+            if (trimmed) onOutputLine(trimmed);
+          }
+        }
+      }
+      pending = rest.length ? [rest] : [];
+    };
+
     const finish = (success: boolean, trailingBackground: boolean): void => {
       if (settled) return;
       settled = true;
@@ -144,11 +228,23 @@ export function runScriptCommand(
         clearTimeout(graceTimer);
         graceTimer = undefined;
       }
+      if (timeoutTimer) {
+        clearTimeout(timeoutTimer);
+        timeoutTimer = undefined;
+      }
       cancel?.unregister(proc);
-      resolve({ success, output, trailingBackground });
+      // 命令已结束：把无换行的尾行也交给日志（不再等管道关闭）
+      flushLines(true);
+      resolve({ success, output, trailingBackground, timedOut });
     };
-    proc.stdout?.on('data', (d: Buffer) => (output += decodeOutput(d)));
-    proc.stderr?.on('data', (d: Buffer) => (output += decodeOutput(d)));
+    proc.stdout?.on('data', (d: Buffer) => {
+      pending.push(d);
+      flushLines(false);
+    });
+    proc.stderr?.on('data', (d: Buffer) => {
+      pending.push(d);
+      flushLines(false);
+    });
     proc.on('exit', (code) => {
       // 命令本体结束（对齐 CodeBlocks wxExecute 同步等待语义）。
       // 不再等 close：close 会等所有 stdio 管道关闭，脚本启动的后台进程一旦继承管道，
@@ -165,9 +261,40 @@ export function runScriptCommand(
     });
     proc.on('close', (code) => finish(code === 0, false));
     proc.on('error', (err) => {
-      output += err.message;
+      pending.push(Buffer.from(err.message, 'utf-8'));
+      flushLines(true);
       finish(false, false);
     });
+    // 可选超时（默认关闭）：到期强杀整棵进程树并把该命令记为失败。
+    // 杀树是「瞬时快照」式的：快照后才出现的子孙、以及「根已退出」时 taskkill 的空操作，
+    // 都会让脚本继续解释后续行并启动 start /b 后台进程（实测杀树后 1~10s 仍有新进程且长期存活）。
+    // 因此运行期多次采集进程树 PID（中间 cmd 退出后，其子进程的 PPID 值仍指向它，
+    // 收割时可按「父 PID ∈ 已终止集合」追出孤儿）；超时后按该集合多轮收割。
+    if (timeout > 0) {
+      const pid0 = proc.pid;
+      const treePids: number[] = [];
+      let snapshots = 0;
+      const takeSnapshot = (): void => {
+        if (settled || pid0 === undefined || snapshots >= SCRIPT_TREE_SNAPSHOT_COUNT) return;
+        snapshots++;
+        snapshotDescendantPids(pid0).then((pids) => {
+          for (const p of pids) if (!treePids.includes(p)) treePids.push(p);
+          if (!settled) setTimeout(takeSnapshot, SCRIPT_TREE_SNAPSHOT_INTERVAL_MS);
+        }).catch(() => { /* ignore */ });
+      };
+      if (pid0 !== undefined) setTimeout(takeSnapshot, SCRIPT_TREE_SNAPSHOT_DELAY_MS);
+      timeoutTimer = setTimeout(() => {
+        timedOut = true;
+        const pid = proc.pid;
+        // 立即杀树（不等待采集结果）：超时语义优先；收割用「根 PID + 运行期采集到的整棵树」集合，
+        // 覆盖中间 cmd 已退出、PPID 链断掉的孤儿（treePids 在 finish 后不再增长）。
+        killProcessTree(proc);
+        if (pid !== undefined) {
+          reapOrphans([pid, ...treePids], SCRIPT_REAP_ROUNDS, SCRIPT_REAP_INTERVAL_MS);
+        }
+        finish(false, false);
+      }, timeout);
+    }
   });
 }
 
@@ -191,18 +318,36 @@ export async function runScriptCommands(
     const cmd = commands[i];
     // 脚本命令编号（[script 1-5]，连字符避免 Output 面板误判为路径链接；plainCbLog 模式关闭编号）
     const numbered = `[script ${i + 1}-${total}]`;
+    const enhanced = !!onLog && !buildLogPrefs().plain;
     if (onLog) onLog(buildLogPrefs().plain ? cmd : `${numbered} ${cmd}`);
     const t0 = Date.now();
-    const r = await runScriptCommand(cmd, cwd, vars, extraPath, cancel);
-    const elapsed = Date.now() - t0;
-    if (r.output) {
-      // 子进程输出缩进两空格，与脚本命令区分层次
-      for (const line of r.output.split(/\r?\n/)) {
-        if (line) onLog?.(`  ${line}`);
-      }
+    // 实时输出（缩进两空格，与脚本命令区分层次）——不再等命令结束才回放，卡住期间也能看到进展
+    const streamLine = onLog ? (line: string) => onLog(`  ${line}`) : undefined;
+    // 心跳：长命令期间周期性提示，让「脚本自身慢/网络等待」与「扩展卡住」一眼可分
+    let heartbeatTimer: NodeJS.Timeout | undefined;
+    let heartbeatCount = 0;
+    if (enhanced) {
+      heartbeatTimer = setInterval(() => {
+        heartbeatCount++;
+        const secs = ((Date.now() - t0) / 1000).toFixed(0);
+        onLog(heartbeatCount === 1
+          ? `  ${numbered} 仍在运行 (${secs}s)…（若是网络盘/服务等待：可在脚本内设置超时，或点「停止构建」终止）`
+          : `  ${numbered} 仍在运行 (${secs}s)…`);
+      }, SCRIPT_HEARTBEAT_MS);
+      heartbeatTimer.unref?.();
     }
-    // 可诊断性：慢命令给出耗时行，一眼区分「脚本自身慢」与「扩展慢」（plainCbLog 模式保持纯 CB 输出）
-    if (onLog && !buildLogPrefs().plain) {
+    let r: ScriptResult;
+    try {
+      r = await runScriptCommand(cmd, cwd, vars, extraPath, cancel, streamLine);
+    } finally {
+      if (heartbeatTimer) clearInterval(heartbeatTimer);
+    }
+    const elapsed = Date.now() - t0;
+    // 可诊断性（plainCbLog 模式保持纯 CB 输出）：超时 / 后台进程 / 慢命令各给一行说明
+    if (enhanced) {
+      if (r.timedOut) {
+        onLog(`  ${numbered} 超时（${(elapsed / 1000).toFixed(1)}s > ${(scriptCommandTimeoutMs() / 1000).toFixed(1)}s），已终止该命令`);
+      }
       if (r.trailingBackground) {
         onLog(`  ${numbered} 后台进程仍在运行（不阻塞构建；如需等待请改用前台命令或 start /wait）`);
       }

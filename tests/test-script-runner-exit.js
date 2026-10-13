@@ -1,7 +1,9 @@
-// post-build 脚本结束判定回归（P1 根因修复）：
+// post-build 脚本结束判定回归（P1 根因修复 + 输出实时化/心跳/超时）：
 //   · 命令本体（cmd.exe）退出后不再等后台孙进程 —— 对齐 CodeBlocks wxExecute 同步等待语义
 //   · 管道排空宽限 codeblocks.build.scriptExitGraceMs（默认 1500，0 = 立即结束）
-//   · ScriptResult.trailingBackground 标记 + runScriptCommands 的后台进程说明行 / 慢命令耗时行
+//   · 输出实时流式写入（不再等命令结束才回放）+ 长命令心跳行（区分脚本慢 / 扩展慢）
+//   · 可选超时 codeblocks.build.scriptCommandTimeoutMs（默认 0 = 不超时，对齐 CB 无限等待）
+//   · ScriptResult.trailingBackground / timedOut 标记 + runScriptCommands 的说明行
 // 复现基线（修复前）：`start "" /b ping -n 6 …` 命令本体 47ms 结束，引擎却等 5113ms（5s 白等）。
 const Module = require('module');
 const origLoad = Module._load;
@@ -21,7 +23,7 @@ Module._load = function (request, parent, isMain) {
   return origLoad(request, parent, isMain);
 };
 
-const { runScriptCommand, runScriptCommands, scriptExitGraceMs, SCRIPT_EXIT_GRACE_DEFAULT_MS, SCRIPT_EXIT_GRACE_MAX_MS } = require('../dist/build/scriptRunner.js');
+const { runScriptCommand, runScriptCommands, scriptExitGraceMs, scriptCommandTimeoutMs, SCRIPT_EXIT_GRACE_DEFAULT_MS, SCRIPT_EXIT_GRACE_MAX_MS, SCRIPT_TIMEOUT_MAX_MS, SCRIPT_HEARTBEAT_MS } = require('../dist/build/scriptRunner.js');
 const { resetBuildLogPrefsCache } = require('../dist/build/logLang.js');
 
 let pass = 0, fail = 0;
@@ -107,6 +109,134 @@ const BG_CMD = 'start "" /b ping -n 6 127.0.0.1 >nul';
   check('取消后不再执行命令', cancelOk === false && cancelLogs.length === 0, { ok: cancelOk, lines: cancelLogs.length }, { ok: false, lines: 0 });
   const preCancelled = await runScriptCommand('echo PB_NEVER', process.cwd(), {}, undefined, cancel);
   check('spawn 前取消：立即返回失败', preCancelled.success === false && preCancelled.output === '', preCancelled, { success: false, output: '' });
+
+  // 9. 输出实时流式（不再等命令结束才回放）
+  //    命令先 echo 再睡眠：该行必须在 Promise resolve 之前回调
+  const streamLines = [];
+  t0 = Date.now();
+  const streamP = runScriptCommand('echo PB_EARLY & ping -n 4 127.0.0.1 >nul', process.cwd(), {}, undefined, undefined, (l) => streamLines.push({ l, ms: Date.now() - t0 }));
+  const streamRes = await streamP;
+  const streamMs = Date.now() - t0;
+  const early = streamLines.find((x) => /PB_EARLY/.test(x.l));
+  check('流式：首行在命令结束前已回调（端到端证明不缓冲）', !!early && early.ms < streamMs - 1000, { early: early?.ms, total: streamMs }, 'early < total-1000');
+  check('流式：回调行为已解码纯文本（无换行）', !!early && !/\r|\n/.test(early.l), early?.l, 'PB_EARLY');
+  check('流式：命令本体仍等待结束（>=2s）', streamMs >= 2000, streamMs, '>=2000ms');
+  check('流式：返回的 output 与流式内容一致', /PB_EARLY/.test(streamRes.output), streamRes.output, 'PB_EARLY');
+
+  // 10. 心跳行（长命令运行期间周期性提示；plainCbLog 静默）
+  const hbLogs = [];
+  const hbStart = Date.now();
+  const hbOk = await runScriptCommands([`ping -n ${Math.ceil((SCRIPT_HEARTBEAT_MS + 1500) / 1000)} 127.0.0.1 >nul`], process.cwd(), {}, (l) => hbLogs.push({ l, ms: Date.now() - hbStart }));
+  const hbLines = hbLogs.filter((x) => /仍在运行 \(\d+s\)…/.test(x.l));
+  check('心跳：长命令期间出现「仍在运行」行', hbOk === true && hbLines.length >= 1, hbLines.map((x) => x.l), '>=1');
+  check('心跳：首条含可操作提示（网络盘/停止构建）', hbLines.some((x) => /网络盘\/服务等待/.test(x.l) && /停止构建/.test(x.l)), hbLines[0]?.l, '含提示');
+  check('心跳：出现在命令结束之前', !!hbLines[0] && hbLines[0].ms < (hbLogs[hbLogs.length - 1]?.ms ?? Infinity), hbLines[0]?.ms, 'early');
+  cfgOverrides = { 'build.plainCbLog': true };
+  resetBuildLogPrefsCache();
+  const hbPlain = [];
+  await runScriptCommands([`ping -n ${Math.ceil((SCRIPT_HEARTBEAT_MS + 1500) / 1000)} 127.0.0.1 >nul`], process.cwd(), {}, (l) => hbPlain.push(l));
+  check('心跳：plainCbLog 模式静默', !hbPlain.some((l) => /仍在运行/.test(l)), hbPlain, 'no heartbeat');
+  cfgOverrides = {};
+  resetBuildLogPrefsCache();
+
+  // 11. 可选超时（codeblocks.build.scriptCommandTimeoutMs，默认 0 = 不超时）
+  check('超时读取：默认 0（不超时，对齐 CB）', scriptCommandTimeoutMs() === 0, scriptCommandTimeoutMs(), 0);
+  cfgOverrides = { 'build.scriptCommandTimeoutMs': 2000 };
+  check('超时读取：2000 生效', scriptCommandTimeoutMs() === 2000, scriptCommandTimeoutMs(), 2000);
+  const toStart = Date.now();
+  const toRes = await runScriptCommand('ping -n 8 127.0.0.1 >nul', process.cwd(), {});
+  const toMs = Date.now() - toStart;
+  check('超时：命令被终止并标记 timedOut', toRes.success === false && toRes.timedOut === true, { ok: toRes.success, timedOut: toRes.timedOut }, { ok: false, timedOut: true });
+  check('超时：在超时点附近收敛（<6s，命令本体 7s+）', toMs < 6000, toMs, '<6000ms');
+  // 超时杀进程树后，同会话后续命令仍可正常执行（无残留阻塞）
+  const afterTo = await runScriptCommand('echo PB_AFTER_TIMEOUT', process.cwd(), {});
+  check('超时后：后续命令仍可执行', afterTo.success === true && /PB_AFTER_TIMEOUT/.test(afterTo.output), afterTo.output, 'PB_AFTER_TIMEOUT');
+  // 超时日志行（runScriptCommands 层）
+  cfgOverrides = { 'build.scriptCommandTimeoutMs': 1500 };
+  const toLogs = [];
+  const toOk = await runScriptCommands(['ping -n 8 127.0.0.1 >nul'], process.cwd(), {}, (l) => toLogs.push(l));
+  check('超时：runScriptCommands 返回失败', toOk === false, toOk, false);
+  check('超时：日志给出明确超时行', toLogs.some((l) => /\[script 1-1\] 超时（[\d.]+s > 1\.5s），已终止该命令/.test(l)), toLogs, '超时行');
+  cfgOverrides = { 'build.scriptCommandTimeoutMs': -100 };
+  check('超时读取：负值钳制为 0', scriptCommandTimeoutMs() === 0, scriptCommandTimeoutMs(), 0);
+  cfgOverrides = { 'build.scriptCommandTimeoutMs': Number.NaN };
+  check('超时读取：NaN 回退 0', scriptCommandTimeoutMs() === 0, scriptCommandTimeoutMs(), 0);
+  cfgOverrides = { 'build.scriptCommandTimeoutMs': 9_999_999 };
+  check('超时读取：超大值钳制上限', scriptCommandTimeoutMs() === SCRIPT_TIMEOUT_MAX_MS, scriptCommandTimeoutMs(), SCRIPT_TIMEOUT_MAX_MS);
+  cfgOverrides = {};
+
+  // 12. 超时杀树后的「孤儿收割」硬化（仅 Windows）
+  //     杀树（taskkill /T /F）是瞬时快照式的：快照之后才产生的子孙、或者根已退出时的空操作，
+  //     都会让脚本继续解释后续行并启动 start /b 后台进程（实测：杀树后 1~10s 仍出现新进程）。
+  //     硬化做法：运行期采集进程树 PID → 杀树 → 按「父 PID ∈ 已终止集合」多轮收割孤儿。
+  const { snapshotDescendantPids, reapOrphans, killProcessTree } = require('../dist/build/cancelToken.js');
+  const { spawn, execFile } = require('child_process');
+  const os = require('os');
+  const fs = require('fs');
+  const nodePath = require('path');
+  const psOut = (script) => new Promise((resolve) => {
+    const encoded = Buffer.from(script, 'utf16le').toString('base64');
+    execFile('powershell.exe', ['-NoProfile', '-NonInteractive', '-EncodedCommand', encoded],
+      { encoding: 'utf8', windowsHide: true, timeout: 20000 }, (err, stdout) => resolve(err ? '' : String(stdout || '').trim()));
+  });
+  const psNumbers = async (script) => (await psOut(script)).split(/\r?\n/)
+    .map((s) => Number(s.trim())).filter((n) => Number.isFinite(n) && n > 0);
+  /** 按「命令行含唯一标记」找进程（标记按前后两半分写，避免 PowerShell 命中自身命令行） */
+  const findMarked = (marker) => psOut([
+    '$ErrorActionPreference = "SilentlyContinue"',
+    `$m = "${marker.slice(0, 9)}" + "${marker.slice(9)}"`,
+    'Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -and ($_.CommandLine -like ("*" + $m + "*")) } | ForEach-Object { "{0}|{1}" -f $_.ProcessId, $_.ParentProcessId }',
+  ].join('\n')).then((out) => out.split(/\r?\n/).map((s) => s.trim()).filter(Boolean)
+    .map((row) => row.split('|')[0]).filter((s) => Number(s) > 0 && Number(s) !== process.pid));
+  if (process.platform !== 'win32') {
+    console.log('SKIP 孤儿收割（仅 Windows）');
+  } else {
+    // 12a. 进程树采集：root → 子孙 的 PID 集合（中间层退出后仍可按 PPID 值追溯的依据）
+    const tree = spawn('cmd.exe', ['/c', 'ping -n 20 127.0.0.1 >nul'], { windowsHide: true, stdio: 'ignore' });
+    await new Promise((r) => setTimeout(r, 500));
+    const treePids = await snapshotDescendantPids(tree.pid);
+    check('快照：采集到子孙进程（cmd → ping）', treePids.length >= 1, treePids, '>=1');
+    check('快照：不含 root 自身', !treePids.includes(tree.pid), treePids, 'no root');
+    check('快照：非法 PID 返回空集', (await snapshotDescendantPids(-1)).length === 0, 'n/a', '[]');
+    killProcessTree(tree);
+    await new Promise((r) => setTimeout(r, 1500));
+    const stillAlive = await psNumbers(`$ErrorActionPreference = "SilentlyContinue"; Get-Process -Id ${treePids.join(',')} | ForEach-Object { $_.Id }`);
+    check('杀树：快照内进程全部终止', stillAlive.length === 0, stillAlive, '[]');
+
+    // 12b. 孤儿收割：模拟「逃逸」形态 —— 中间 cmd 先退出，后台 node 的 PPID 指向已消失的 PID
+    const marker = `CBESC_${process.pid}_${Date.now()}`;
+    const sleeper = nodePath.join(os.tmpdir(), `cb-escape-${process.pid}-${Date.now()}.js`);
+    fs.writeFileSync(sleeper, 'setTimeout(function () {}, 15000);\n');
+    // 中间 cmd 执行 start /b node … 后立即退出：node 的 PPID 指向已消失的中间 cmd（逃逸形态）
+    const launch = (m) => new Promise((resolve) => {
+      const mid = spawn('cmd.exe', ['/c', 'start', '', '/b', 'node', sleeper, m], { windowsHide: true, stdio: 'ignore' });
+      mid.on('exit', () => resolve(mid.pid));
+      setTimeout(() => resolve(mid.pid), 4000);
+    });
+    const staleMarker = `${marker}_old`;
+    const midPid = await launch(staleMarker);
+    await new Promise((r) => setTimeout(r, 900));
+    const before = await findMarked(staleMarker);
+    check('收割前置：后台 node 已启动（其父 cmd 已退出）', before.length >= 1, before, '>=1');
+    // 收割集合 = 已终止的中间 cmd PID + 探测到的父 PID（模拟 snapshotDescendantPids 的产出）
+    const beforePpids = await psNumbers([
+      '$ErrorActionPreference = "SilentlyContinue"',
+      `$m = "${staleMarker.slice(0, 9)}" + "${staleMarker.slice(9)}"`,
+      'Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -and ($_.CommandLine -like ("*" + $m + "*")) } | ForEach-Object { $_.ParentProcessId }',
+    ].join('\n'));
+    reapOrphans([midPid, ...beforePpids], 3, 500);
+    let gone = [];
+    for (let i = 0; i < 16; i++) {
+      await new Promise((r) => setTimeout(r, 500));
+      gone = await findMarked(staleMarker);
+      if (!gone.length) break;
+    }
+    check('收割：孤儿后台进程被回收（父 PID 已消失）', gone.length === 0, gone, '[]');
+    for (const pid of gone) { try { require('child_process').execFileSync('taskkill', ['/PID', String(pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' }); } catch { /* ignore */ } }
+    check('收割：空集合调用安全（no-op）', (() => { try { reapOrphans([]); return true; } catch { return false; } })(), 'n/a', true);
+    check('收割：自身 PID 不会被纳入（防 PID 复用误杀）', (() => { try { reapOrphans([process.pid]); return true; } catch { return false; } })(), 'n/a', true);
+    try { fs.rmSync(sleeper, { force: true }); } catch { /* ignore */ }
+  }
 
   await Promise.resolve();
   console.log(`post-build 脚本结束判定: ${pass} pass, ${fail} fail`);
