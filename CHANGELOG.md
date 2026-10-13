@@ -17,7 +17,12 @@
 - **clangd 补全不自动插入头文件**：生成的用户级 `config.yaml` 片段固定 `Completion.HeaderInsertion: Never`（clangd 默认 `IWYU` 会在接受补全时插入 `#include`）；如需恢复默认需自行覆盖该片段（下次生成会被重写）
 - **测试分层体系（L-1…L5 + CI）**：契约 / 无头 / 真实工程·调试·工具链·边界 E2E / VS Code 宿主 / 像素视觉 / 性能 / 打包 七层统一运行器 + GitHub Actions；覆盖补齐（命令 / 设置 / 快捷键 / 语法 / DAP 30/30）
 - **缺陷收口**：测试阶段登记的 D-01…D-20 与能力缺口 C-01（`stopOnEntry` 入口首停）全部修复
-- 规模：命令 103 项、设置 62 项（7 分区 + 中英 nls）、视图 5 个；分层回归 contract 2/2、unit 152 脚本 FAIL=0 SKIP=1、e2e 4/4、perf 13 项 0 fail、pack 14 pass
+- **clangd 配置治理（本版新增）**：
+  - **失效片段自动清理**：扩展只重写「本次打开作用域」的片段，历史残留（项目删除/移动、临时目录）会永久堆积（本机实测 76 个片段里 68 个已失效）⇒ 现在每次生成配置时顺带清理「作用域目录或编译数据库目录已不存在」的片段并在输出通道留痕；新增命令 `Code::Blocks: Clean Stale clangd Config Fragments`（预览 + 确认，同时清理扩展缓存目录里的孤儿 `compile_commands.json` 目录）。安全边界：只动扩展标记块、用户内容不碰；**卷未挂载 / UNC 路径一律跳过**（不误删移动硬盘、网络盘上的工程片段）
+  - **片段只写「需要写」的键（12 项新设置，默认值 = 现状）**：`Diagnostics.UnusedIncludes`、`Completion.HeaderInsertion`、`Index.Background`（`skip` 可显著降低大 SDK 上 clangd 的 CPU/内存占用）、`Index.StandardLibrary`、`Diagnostics.ClangTidy`、`Completion.AllScopes`、`InlayHints.Enabled`、`Documentation.CommentFormat`、`If.PathExclude`（`excludeDirs`）、`CompileFlags.BuiltinHeaders`、`queryDriver`、`extraConfig`；留 `default`/`omit` 即**不写该键**，交给 clangd 默认值或你自己的配置（文档说明优先级：扩展写的是用户级 config.yaml，按 clangd 规则**高于**项目 `.clangd`）
+  - **`extraConfig` 自由 YAML**：作为同作用域的**后置片段**注入（扩展自动补 `If.PathMatch`），可覆盖扩展写入的任意键；写入前对「制表符 / `---` / 顶层 `If:`」给出提示（YAML 错误会让 clangd 丢弃整个配置文件）
+  - **交叉编译器保真（可选）**：新命令 `Code::Blocks: Configure clangd --query-driver` 按活动工程推导 `--query-driver=<编译器目录>/*`，与既有 `clangd.arguments` **合并去重**，写入位置三选一（工作区/用户/剪贴板）+ 预览确认；配合 `codeblocks.clangd.builtinHeaders=queryDriver` 使用交叉工具链的内建头
+- 规模：命令 105 项、设置 74 项（7 分区 + 中英 nls）、视图 5 个；分层回归 contract 2/2、unit 153 脚本 FAIL=0 SKIP=1、e2e 4/4、perf 13 项 0 fail、pack 14 pass
 
 📄 详细发布说明：[`docs/release/0.8.129.md`](docs/release/0.8.129.md)
 

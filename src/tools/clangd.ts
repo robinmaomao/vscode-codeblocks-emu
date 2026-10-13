@@ -292,31 +292,109 @@ export interface ClangdScopeConfig {
   suppressedWarnings?: string[];
   /** 是否在头文件中压制全部诊断（SDK 头文件不自包含，单独分析必然产生大量误报） */
   suppressHeaderDiagnostics?: boolean;
+  /**
+   * 以下键一律「有值才写」：`undefined` = 不写该键，交由 clangd 默认值或用户自有配置决定
+   * （扩展写的是**用户级** config.yaml，优先级高于项目 `.clangd`，不写才是真正的「让位」）。
+   * 默认值（设置项默认）与历史硬编码值一致，保证默认产物不变。
+   */
+  /** Diagnostics.UnusedIncludes */
+  unusedIncludes?: 'None' | 'Strict';
+  /** Completion.HeaderInsertion */
+  headerInsertion?: 'Never' | 'IWYU';
+  /** CompileFlags.BuiltinHeaders（queryDriver = 用交叉编译器提取的内建头） */
+  builtinHeaders?: 'Clangd' | 'QueryDriver';
+  /** Index.StandardLibrary */
+  indexStandardLibrary?: boolean;
+  /** Index.Background */
+  indexBackground?: 'Build' | 'Skip';
+  /** Diagnostics.ClangTidy.Remove: ['*']（关闭 clang-tidy 诊断） */
+  clangTidyOff?: boolean;
+  /** Completion.AllScopes */
+  completionAllScopes?: boolean;
+  /** InlayHints.Enabled */
+  inlayHintsEnabled?: boolean;
+  /** Documentation.CommentFormat */
+  documentationCommentFormat?: 'Plaintext' | 'Markdown' | 'Doxygen';
+  /** If.PathExclude：相对作用域根目录名列表（生成 '<scopeRe>/(d1|d2)/.*'，让 obj/bin 等不进配置作用域） */
+  excludeDirs?: string[];
+  /** 用户自由 YAML：作为**带作用域 If 的后置片段**注入，可覆盖扩展写入的键（空 = 不注入） */
+  extraConfig?: string;
 }
 
-/** 构造单个作用域的 YAML 片段 */
+/** 正斜杠归一化 + 去尾斜杠（片段中的路径一律用正斜杠） */
+function normSlash(p: string): string {
+  return p.replace(/\\/g, '/').replace(/\/+$/, '');
+}
+
+/**
+ * 用户自由 YAML 的轻量校验（不阻断写入，仅提示）：
+ * 非法 YAML 会让 clangd **丢弃整个配置文件**（含扩展片段），所以对最常见的两类破坏做出提示。
+ */
+export function extraConfigWarnings(text: string): string[] {
+  const out: string[] = [];
+  if (!text || !text.trim()) return out;
+  if (/^\t/m.test(text) || /^ +\t/m.test(text)) out.push('包含制表符（YAML 缩进不允许 tab）');
+  if (/^---\s*$/m.test(text)) out.push('包含文档分隔行 ---（会打断扩展片段结构，请去掉）');
+  if (/^If:/m.test(text)) out.push('包含顶层 If:（扩展已注入作用域 If，重复会导致 YAML 重复键）');
+  return out;
+}
+
+/** 构造单个作用域的 YAML 片段（只写「有值」的键；undefined/空 = 该键交给 clangd 默认值或用户自有配置） */
 function buildScopeFragment(s: ClangdScopeConfig, marker: { begin: string; end: string }): string {
-  const dirRe = escapeRegex(s.dir.replace(/\\/g, '/').replace(/\/+$/, ''));
+  const dirRe = escapeRegex(normSlash(s.dir));
   const lines = [
     marker.begin,
     'If:',
     `  PathMatch: ${yamlSingleQuote(`${dirRe}/.*`)}`,
-    'CompileFlags:',
-    `  CompilationDatabase: ${yamlSingleQuote(s.databaseDir.replace(/\\/g, '/'))}`,
-    'Diagnostics:',
-    '  UnusedIncludes: None',
   ];
+  const excluded = (s.excludeDirs ?? []).map((d) => normSlash(d).replace(/^\/+/, '')).filter(Boolean);
+  if (excluded.length) {
+    lines.push(`  PathExclude: ${yamlSingleQuote(`${dirRe}/(${excluded.map(escapeRegex).join('|')})/.*`)}`);
+  }
+  lines.push('CompileFlags:');
+  lines.push(`  CompilationDatabase: ${yamlSingleQuote(normSlash(s.databaseDir))}`);
+  if (s.builtinHeaders) {
+    lines.push(`  BuiltinHeaders: ${s.builtinHeaders}`);
+  }
+  const diag: string[] = [];
+  if (s.unusedIncludes) diag.push(`  UnusedIncludes: ${s.unusedIncludes}`);
   if (s.suppressedWarnings && s.suppressedWarnings.length) {
-    lines.push('  Suppress:');
+    diag.push('  Suppress:');
     for (const w of s.suppressedWarnings) {
-      lines.push(`    - ${w}`);
+      diag.push(`    - ${w}`);
     }
   }
+  if (s.clangTidyOff) {
+    diag.push('  ClangTidy:');
+    diag.push("    Remove: ['*']");
+  }
+  if (diag.length) {
+    lines.push('Diagnostics:');
+    lines.push(...diag);
+  }
   // 补全不自动插入 #include：clangd 默认 HeaderInsertion=IWYU（接受补全时插入所属头文件），
-  // 与「按工程编译命令补全」的预期不符（嵌入式/裸机工程常无标准头可插），固定为 Never。
+  // 与「按工程编译命令补全」的预期不符（嵌入式/裸机工程常无标准头可插）⇒ 扩展默认写 Never。
   // 主片段 PathMatch 覆盖工程树下全部文件（含头文件），故头文件子片段无需重复声明。
-  lines.push('Completion:');
-  lines.push('  HeaderInsertion: Never');
+  const completion: string[] = [];
+  if (s.headerInsertion) completion.push(`  HeaderInsertion: ${s.headerInsertion}`);
+  if (s.completionAllScopes !== undefined) completion.push(`  AllScopes: ${s.completionAllScopes ? 'Yes' : 'No'}`);
+  if (completion.length) {
+    lines.push('Completion:');
+    lines.push(...completion);
+  }
+  if (s.indexStandardLibrary !== undefined || s.indexBackground) {
+    lines.push('Index:');
+    if (s.indexBackground) lines.push(`  Background: ${s.indexBackground}`);
+    if (s.indexStandardLibrary !== undefined) lines.push(`  StandardLibrary: ${s.indexStandardLibrary}`);
+  }
+  if (s.inlayHintsEnabled !== undefined) {
+    lines.push('InlayHints:');
+    lines.push(`  Enabled: ${s.inlayHintsEnabled}`);
+  }
+  if (s.documentationCommentFormat) {
+    lines.push('Documentation:');
+    lines.push(`  CommentFormat: ${s.documentationCommentFormat}`);
+  }
   if (s.headerFlags && s.headerFlags.length) {
     lines.push('---');
     lines.push('If:');
@@ -331,28 +409,164 @@ function buildScopeFragment(s: ClangdScopeConfig, marker: { begin: string; end: 
       lines.push("  Suppress: '*'");
     }
   }
+  // 用户自由 YAML：后置片段（同一作用域），因此可覆盖上面扩展写入的任意键
+  const extra = (s.extraConfig ?? '').replace(/\r\n/g, '\n').replace(/\s+$/, '');
+  if (extra.trim()) {
+    lines.push('---');
+    lines.push('If:');
+    lines.push(`  PathMatch: ${yamlSingleQuote(`${dirRe}/.*`)}`);
+    lines.push(...extra.split('\n'));
+  }
   lines.push(marker.end);
   return lines.join('\n');
+}
+
+/** 扩展写入的片段（按 hash 标记识别） */
+export interface ManagedClangdFragment {
+  /** 标记中的作用域 hash */
+  hash: string;
+  /** 片段完整文本（含首尾标记行） */
+  block: string;
+  /** 作用域根目录（由 If.PathMatch 的 '<re>/.*' 反解） */
+  scopeDir: string;
+  /** CompilationDatabase 指向的目录（无则空串） */
+  databaseDir: string;
+}
+
+/** 反解 escapeRegex + yamlSingleQuote 生成的路径（先去掉单引号包裹，再去掉正则转义） */
+function unquoteRegexPath(s: string): string {
+  let v = s.trim();
+  if (v.startsWith("'") && v.endsWith("'") && v.length >= 2) v = v.slice(1, -1).replace(/''/g, "'");
+  return v.replace(/\\([.*+?^${}()|[\]\\])/g, '$1');
+}
+
+/** 列出配置文本中所有扩展写入的片段（用户自有内容不受影响） */
+export function listManagedFragments(text: string): ManagedClangdFragment[] {
+  const out: ManagedClangdFragment[] = [];
+  const beginRe = /^# >>> codeblocks-vscode ([0-9a-f]{12}) begin <<<$/gm;
+  let m: RegExpExecArray | null;
+  while ((m = beginRe.exec(text)) !== null) {
+    const hash = m[1];
+    const endMark = `# <<< codeblocks-vscode ${hash} end <<<`;
+    const end = text.indexOf(endMark, m.index);
+    if (end === -1) continue;
+    const block = text.slice(m.index, end + endMark.length);
+    const body = text.slice(m.index, end);
+    const pk = body.match(/^\s*PathMatch:\s*(.+)$/m);
+    const db = body.match(/^\s*CompilationDatabase:\s*(.+)$/m);
+    // 主片段 PathMatch 形如 '<scopeRe>/.*'（头文件子片段为 '...\.(h|hpp...)$'）；取第一个即可
+    const rawPath = pk ? unquoteRegexPath(pk[1]) : '';
+    const scopeDir = normSlash(rawPath.replace(/\/\.\*.*$/, '').replace(/\/\\\.\(.*$/, ''));
+    out.push({ hash, block, scopeDir, databaseDir: db ? normSlash(unquoteRegexPath(db[1])) : '' });
+  }
+  return out;
+}
+
+/** 失效原因（'' = 有效/需保留） */
+export type StaleReason = '' | 'scope-missing' | 'database-missing';
+
+/**
+ * 判断片段是否失效。
+ * 安全规则：卷不可用（网络盘未映射 / U 盘未插）与 UNC 路径一律视为「不确定」，**不清理**——
+ * 作用域可能只是暂时不可见（项目在移动硬盘/网络盘上是常态）。
+ */
+export function staleReasonOf(f: ManagedClangdFragment): StaleReason {
+  const dir = f.scopeDir;
+  if (!dir || dir === '.' || dir === '/') return '';
+  // UNC（//server/share/...）不上手
+  if (dir.startsWith('//')) return '';
+  const rootMatch = dir.match(/^([a-zA-Z]:)\//);
+  if (rootMatch && !fs.existsSync(`${rootMatch[1]}/`)) return ''; // 卷未挂载
+  const exists = (p: string): boolean => {
+    try {
+      return fs.existsSync(p);
+    } catch {
+      return true; // 访问异常 → 保守起见按「存在」处理
+    }
+  };
+  if (!exists(dir)) return 'scope-missing';
+  if (f.databaseDir && !exists(f.databaseDir)) return 'database-missing';
+  return '';
+}
+
+/** 待清理片段（含原因，供日志/预览） */
+export interface StaleClangdFragment extends ManagedClangdFragment {
+  hash: string;
+  reason: Exclude<StaleReason, ''>;
+}
+
+/** 扫描配置文本中的失效片段（只读，可用于预览） */
+export function findStaleClangdFragments(text: string): StaleClangdFragment[] {
+  const out: StaleClangdFragment[] = [];
+  for (const f of listManagedFragments(text)) {
+    const reason = staleReasonOf(f);
+    if (reason) out.push({ ...f, reason });
+  }
+  return out;
+}
+
+/** 按标记块清理指定片段（返回新文本与清理数） */
+export function pruneStaleClangdFragments(text: string): { text: string; removed: StaleClangdFragment[] } {
+  const removed = findStaleClangdFragments(text);
+  let out = text;
+  for (const f of removed) {
+    const beginMark = `# >>> codeblocks-vscode ${f.hash} begin <<<`;
+    const endMark = `# <<< codeblocks-vscode ${f.hash} end <<<`;
+    out = removeBlock(out, beginMark, endMark);
+  }
+  if (removed.length) out = sanitizeRemainder(out);
+  return { text: out, removed };
+}
+
+/** 读取用户级 clangd 配置文本（不存在/不可读 → 空串） */
+export function readClangdUserConfigText(): string {
+  try {
+    return fs.readFileSync(clangdUserConfigPath(), 'utf-8');
+  } catch {
+    return '';
+  }
+}
+
+/** 写入用户级 clangd 配置的文本（内容未变时不写；返回是否实际写入） */
+export function writeClangdUserConfig(out: string): boolean {
+  const cfgPath = clangdUserConfigPath();
+  let old = '';
+  try {
+    old = fs.readFileSync(cfgPath, 'utf-8');
+  } catch {
+    old = '';
+  }
+  if (old === out) return false; // 内容未变则跳过写入，避免 clangd 无谓地重新加载配置
+  fs.mkdirSync(path.dirname(cfgPath), { recursive: true });
+  fs.writeFileSync(cfgPath, out, 'utf-8');
+  return true;
 }
 
 /**
  * 更新用户级 clangd 配置：按作用域各自的 hash 标记替换，不碰用户自有内容，
  * 也不影响其它工作区写入的片段（多工作区共存）。
- * 每个作用域写两个片段：① 全部文件 → CompilationDatabase 指向缓存目录 +
- * Diagnostics（未使用头文件提示关闭、可选压制）+ Completion.HeaderInsertion=Never（补全不插入头文件）；
- * ② 头文件 → CompileFlags.Add 回退 flag（头文件在编译数据库里没有条目，否则会报 unknown type name 等）。
+ *
+ * 每个作用域写：① 全部文件 → If.PathMatch（+ 可选 PathExclude）+ CompileFlags.CompilationDatabase
+ * （+ 可选 BuiltinHeaders）+ Diagnostics（未使用头文件提示、压制列表、可选关闭 clang-tidy）+
+ * Completion（HeaderInsertion / AllScopes）+ Index / InlayHints / Documentation（**仅写有值的键**）；
+ * ②（有头文件回退 flag 时）头文件子片段 → CompileFlags.Add 回退 flag（头文件在编译数据库里没有条目，
+ * 否则会报 unknown type name 等）；③（用户填了 extraConfig 时）同作用域的后置片段，可覆盖以上任意键。
+ *
+ * 顺带**自动清理失效片段**（作用域目录/编译数据库已不存在的历史残留）⇒ 返回值里带回明细，
+ * 调用方据此在输出通道留痕。卷不可用 / UNC 路径一律跳过（见 staleReasonOf）。
  */
-export function updateClangdUserConfig(scopes: ClangdScopeConfig[]): void {
-  const cfgPath = clangdUserConfigPath();
-  let existing = '';
-  try {
-    existing = fs.readFileSync(cfgPath, 'utf-8');
-  } catch {
-    existing = '';
-  }
+export function updateClangdUserConfig(scopes: ClangdScopeConfig[]): {
+  written: boolean;
+  removed: StaleClangdFragment[];
+} {
+  let existing = readClangdUserConfigText();
 
   // 清理旧版本（无 hash 标记）的遗留片段
   existing = removeBlock(existing, LEGACY_BEGIN, LEGACY_END);
+
+  // 清理本轮生成之外的历史残留（作用域目录/编译数据库已不存在）
+  const pruned = pruneStaleClangdFragments(existing);
+  existing = pruned.text;
 
   // 逐个作用域移除旧片段（按 hash 标记），互不干扰
   const newFrags: string[] = [];
@@ -369,16 +583,19 @@ export function updateClangdUserConfig(scopes: ClangdScopeConfig[]): void {
   const ours = newFrags.join('\n---\n');
   // 空作用域（清理场景）时不留悬空 ---
   const out = !ours ? existing + '\n' : (existing ? existing + '\n---\n' + ours + '\n' : ours + '\n');
-
-  // 内容未变则跳过写入，避免 clangd 无谓地重新加载配置
-  let old = '';
-  try {
-    old = fs.readFileSync(cfgPath, 'utf-8');
-  } catch {
-    old = '';
-  }
-  if (old === out) return;
-
-  fs.mkdirSync(path.dirname(cfgPath), { recursive: true });
-  fs.writeFileSync(cfgPath, out, 'utf-8');
+  const written = writeClangdUserConfig(out);
+  return { written, removed: pruned.removed };
 }
+
+/**
+ * 显式清理：只清理失效片段（不新增/不重写任何作用域片段），用于「清理 clangd 遗留配置」命令。
+ * 返回清理明细与实际是否发生写入。
+ */
+export function cleanStaleClangdFragments(): { removed: StaleClangdFragment[]; written: boolean } {
+  const existing = readClangdUserConfigText();
+  const pruned = pruneStaleClangdFragments(existing);
+  if (!pruned.removed.length) return { removed: [], written: false };
+  const written = writeClangdUserConfig(pruned.text + '\n');
+  return { removed: pruned.removed, written };
+}
+

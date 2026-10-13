@@ -194,6 +194,16 @@
         "icon": "$(code)"
       },
       {
+        "command": "codeblocks.cleanClangdConfig",
+        "title": "Code::Blocks: Clean Stale clangd Config Fragments",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "codeblocks.clangd.applyQueryDriver",
+        "title": "Code::Blocks: Configure clangd --query-driver",
+        "icon": "$(compass)"
+      },
+      {
         "command": "codeblocks.debug",
         "title": "Code::Blocks: Debug",
         "icon": "$(debug-alt)"
@@ -896,6 +906,113 @@
             "type": "boolean",
             "default": true,
             "description": "是否在头文件中压制全部诊断（单独打开 .h 文件时不再显示 unknown type name 等误报）。SDK 头文件普遍不自包含，单独分析必然报错；.c 文件的真实诊断不受影响"
+          },
+          "codeblocks.clangd.unusedIncludes": {
+            "type": "string",
+            "enum": [
+              "none",
+              "strict",
+              "omit"
+            ],
+            "default": "none",
+            "description": "写入 Diagnostics.UnusedIncludes（未使用头文件提示）：none = 关闭提示（默认，嵌入式 SDK 头文件普遍互相包含）；strict = 让 clangd 提示未使用的 #include；omit = 本键不写入配置，交给 clangd 默认值或你自己的配置决定（注意 clangd 17+ 的默认值是 strict）"
+          },
+          "codeblocks.clangd.headerInsertion": {
+            "type": "string",
+            "enum": [
+              "never",
+              "iwyu",
+              "omit"
+            ],
+            "default": "never",
+            "description": "写入 Completion.HeaderInsertion（接受补全时是否自动插入 #include）：never = 从不插入（默认，避免在嵌入式工程里插入不存在的头文件）；iwyu = clangd 默认行为（按需插入所属头文件）；omit = 本键不写入配置，交给 clangd 默认值或你自己的配置决定"
+          },
+          "codeblocks.clangd.indexBackground": {
+            "type": "string",
+            "enum": [
+              "default",
+              "build",
+              "skip"
+            ],
+            "default": "default",
+            "description": "写入 Index.Background（后台索引）：default = 不写该键（clangd 默认 build）；skip = 不为工程文件建后台索引（大 SDK 可显著降低 clangd 的 CPU/内存占用，代价是跨文件跳转/引用查找变弱）；build = 显式开启"
+          },
+          "codeblocks.clangd.indexStandardLibrary": {
+            "type": "string",
+            "enum": [
+              "default",
+              "true",
+              "false"
+            ],
+            "default": "default",
+            "description": "写入 Index.StandardLibrary（是否预索引标准库以在空文件里补全 std 符号）：default = 不写该键（clangd 默认开启）；false = 关闭（裸机/嵌入式无标准库时可省内存）；true = 显式开启"
+          },
+          "codeblocks.clangd.clangTidy": {
+            "type": "string",
+            "enum": [
+              "default",
+              "off"
+            ],
+            "default": "default",
+            "description": "clang-tidy 诊断：default = 不写该键（clangd 默认开启 clang-tidy 检查）；off = 写入 Diagnostics.ClangTidy.Remove: ['*'] 关闭全部 clang-tidy 诊断（嵌入式代码里噪声较多）。只想关掉某几项时用 extraConfig 自行写 Remove 列表"
+          },
+          "codeblocks.clangd.completionAllScopes": {
+            "type": "string",
+            "enum": [
+              "default",
+              "yes",
+              "no"
+            ],
+            "default": "default",
+            "description": "写入 Completion.AllScopes（补全是否包含当前不可见作用域的符号，会自动补作用域前缀）：default = 不写该键（clangd 默认 Yes）；no = 只提示可见作用域（补全列表更短、更省 CPU）；yes = 显式开启"
+          },
+          "codeblocks.clangd.inlayHints": {
+            "type": "string",
+            "enum": [
+              "default",
+              "on",
+              "off"
+            ],
+            "default": "default",
+            "description": "写入 InlayHints.Enabled（参数名/推导类型等内联提示）：default = 不写该键（由 clangd 与 VS Code 设置共同决定）；off = 关闭内联提示（代码区更清爽）；on = 开启"
+          },
+          "codeblocks.clangd.documentationCommentFormat": {
+            "type": "string",
+            "enum": [
+              "default",
+              "plaintext",
+              "markdown",
+              "doxygen"
+            ],
+            "default": "default",
+            "description": "写入 Documentation.CommentFormat（注释文档解析方式）：default = 不写该键（clangd 默认 Plaintext，markdown 语法不会渲染）；doxygen = 按 Doxygen 解析（悬停会补上参数/返回值说明，SDK 注释规范的工程推荐）；markdown / plaintext 亦可显式指定"
+          },
+          "codeblocks.clangd.excludeDirs": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": [],
+            "description": "写入 If.PathExclude：这些目录名（相对工程树，如 obj / bin / Debug）下的文件不套用本工程片段。默认空（不排除）。调试产物目录通常没有分析价值，排除后可减少 clangd 的无谓处理"
+          },
+          "codeblocks.clangd.builtinHeaders": {
+            "type": "string",
+            "enum": [
+              "clangd",
+              "queryDriver"
+            ],
+            "default": "clangd",
+            "description": "写入 CompileFlags.BuiltinHeaders：clangd = 用 clangd 自带的内建头（默认，现状）；queryDriver = 用 --query-driver 从交叉编译器提取的内建头（stddef.h/stdarg.h 等与真实工具链一致，配合下面两项一起开启效果最好）"
+          },
+          "codeblocks.clangd.queryDriver": {
+            "type": "boolean",
+            "default": false,
+            "description": "是否在生成配置时提示/启用 --query-driver（让 clangd 直接向交叉 gcc 查询系统头与目标信息，替代扩展手写的 -isystem/--target 迂回方案）。写入位置由命令 codeblocks.clangd.applyQueryDriver 交互选择（工作区设置 / 用户设置 / 复制到剪贴板），本开关只影响提示与文档指引"
+          },
+          "codeblocks.clangd.extraConfig": {
+            "type": "string",
+            "default": "",
+            "description": "附加到每个工程片段的自由 YAML（作为同作用域的后置片段，可覆盖扩展写入的任意键，例如 Diagnostics: MissingIncludes: Strict 或 Completion: ArgumentLists: Delimiters）。扩展会自动为它加上本工程的作用域 If，无需自己写 If。注意：YAML 语法错误会让 clangd 丢弃整个 config.yaml（含扩展片段），请确保缩进用空格、不要写 --- 分隔行"
           }
         }
       },

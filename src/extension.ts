@@ -62,7 +62,7 @@ import { OutputParser } from './build/outputParser';
 import { isCompilerUsable, renderInvalidCompilerMessage, renderTriedCompilerPaths, triedCompilerPaths } from './build/invalidCompiler';
 import { collectClangdEntries, writeClangdDatabase, CompileCommandEntry } from './build/compileCommands';
 import { DiagnosticPublisher } from './build/diagnosticPublisher';
-import { detectClangd, queryCompilerSystemIncludes, queryCompilerTarget, updateClangdUserConfig, clangdUserConfigPath, clearClangdDetectionCache } from './tools/clangd';
+import { detectClangd, queryCompilerSystemIncludes, queryCompilerTarget, updateClangdUserConfig, clangdUserConfigPath, clearClangdDetectionCache, extraConfigWarnings, findStaleClangdFragments, listManagedFragments, cleanStaleClangdFragments, readClangdUserConfigText } from './tools/clangd';
 import { SymbolIndex, registerFallbackIntelliSense } from './tools/codeCompletion';
 import { GdbDebugAdapter } from './debug/gdbDebugAdapter';
 import { debugStateChanged, getActiveAdapter, setDebugTraceEnabled, setDebugTraceSink } from './debug/debugRegistry';
@@ -647,6 +647,20 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   context.subscriptions.push(
     vscode.commands.registerCommand('codeblocks.generateCompileCommands', async () => {
       await generateClangdForWorkspace(true);
+    }),
+  );
+
+  // 清理 clangd 遗留配置（失效片段 + 孤儿缓存目录；预览 + 确认）
+  context.subscriptions.push(
+    vscode.commands.registerCommand('codeblocks.cleanClangdConfig', async () => {
+      await cleanClangdConfigInteractive();
+    }),
+  );
+
+  // 配置 clangd 的 --query-driver（交叉编译器保真）
+  context.subscriptions.push(
+    vscode.commands.registerCommand('codeblocks.clangd.applyQueryDriver', async () => {
+      await applyClangdQueryDriverInteractive();
     }),
   );
 
@@ -3031,6 +3045,141 @@ async function generateClangdForWorkspace(interactive = false): Promise<void> {
   }, 150);
 }
 
+/** 设置项三态解析：'default' → undefined（该键不写入片段，交给 clangd 默认值/用户配置） */
+function triStateBoolean(v: string): boolean | undefined {
+  if (v === 'true' || v === 'yes' || v === 'on') return true;
+  if (v === 'false' || v === 'no' || v === 'off') return false;
+  return undefined;
+}
+
+/** 设置项枚举解析：'default'/'omit' → undefined（不写该键）；否则取映射值（键统一小写比较） */
+function enumOrUndefined<T extends string>(v: string, map: Record<string, T>): T | undefined {
+  return map[String(v).toLowerCase()];
+}
+
+/** VS Code 的 clangd.arguments 里是否已包含 --query-driver（工作区/用户/默认值任一层级有即算） */
+function clangdArgsHaveQueryDriver(): boolean {
+  const inspected = vscode.workspace.getConfiguration('clangd').inspect<string[]>('arguments');
+  const all = [
+    ...(inspected?.defaultValue ?? []),
+    ...(inspected?.globalValue ?? []),
+    ...(inspected?.workspaceValue ?? []),
+    ...(inspected?.workspaceFolderValue ?? []),
+  ];
+  return all.some((a) => typeof a === 'string' && a.startsWith('--query-driver'));
+}
+
+/**
+ * 清理 clangd 遗留配置（命令入口）：
+ * ① 扩展片段中作用域目录/编译数据库已不存在者（历史残留）；
+ * ② 扩展缓存目录里已无对应片段的孤儿 compile_commands.json 目录（可重建）。
+ * 先打印明细与数量，用户确认后执行；全程只触碰扩展自己的标记块与缓存目录。
+ */
+async function cleanClangdConfigInteractive(): Promise<void> {
+  const stale = findStaleClangdFragments(readClangdUserConfigText());
+  const cacheRoot = extContext ? path.join(extContext.globalStorageUri.fsPath, 'clangd') : '';
+  const referenced = new Set(listManagedFragments(readClangdUserConfigText()).map((f) => f.databaseDir));
+  const orphanDirs: string[] = [];
+  if (cacheRoot && fs.existsSync(cacheRoot)) {
+    for (const e of fs.readdirSync(cacheRoot, { withFileTypes: true })) {
+      if (!e.isDirectory()) continue;
+      const dir = path.join(cacheRoot, e.name);
+      if (!referenced.has(dir.replace(/\\/g, '/'))) orphanDirs.push(dir);
+    }
+  }
+
+  outputChannel.show(true);
+  outputChannel.info(`[Code::Blocks] clangd 配置检查：失效片段 ${stale.length} 个、孤儿缓存目录 ${orphanDirs.length} 个`);
+  for (const s of stale) {
+    outputChannel.info(`[Code::Blocks]   失效片段 ${s.hash} ← ${s.scopeDir}（${s.reason === 'scope-missing' ? '作用域目录不存在' : '编译数据库目录不存在'}）`);
+  }
+  for (const d of orphanDirs) outputChannel.info(`[Code::Blocks]   孤儿缓存 ${d}`);
+
+  if (!stale.length && !orphanDirs.length) {
+    vscode.window.showInformationMessage('clangd 配置干净：没有需要清理的失效片段或缓存目录');
+    return;
+  }
+  const pick = await vscode.window.showWarningMessage(
+    `将清理 ${stale.length} 个失效 clangd 配置片段、${orphanDirs.length} 个孤儿缓存目录（用户自有配置不受影响，缓存会在下次打开工程时重建）。明细见输出通道。`,
+    { modal: true },
+    '清理',
+  );
+  if (pick !== '清理') return;
+
+  const { removed } = cleanStaleClangdFragments();
+  let cacheRemoved = 0;
+  for (const d of orphanDirs) {
+    try {
+      fs.rmSync(d, { recursive: true, force: true });
+      cacheRemoved++;
+    } catch (err) {
+      outputChannel.warn(`[Code::Blocks] 缓存目录删除失败（可忽略）：${d} — ${(err as Error).message}`);
+    }
+  }
+  outputChannel.info(`[Code::Blocks] 已清理：配置片段 ${removed.length} 个、缓存目录 ${cacheRemoved} 个`);
+  vscode.window.showInformationMessage(`已清理 ${removed.length} 个失效 clangd 配置片段、${cacheRemoved} 个孤儿缓存目录`);
+}
+
+/**
+ * 配置 clangd 的 --query-driver（交叉编译器保真）：
+ * 让 clangd 直接向工程的交叉 gcc 查询系统头/目标信息（stddef.h 等与真实工具链一致），
+ * 替代扩展手写 -isystem/--target 的迂回方案。写入 VS Code 的 clangd.arguments（合并去重）。
+ */
+async function applyClangdQueryDriverInteractive(): Promise<void> {
+  const project = activeProject;
+  if (!project) {
+    vscode.window.showWarningMessage('请先打开一个 Code::Blocks 工程（用于推导交叉编译器路径）');
+    return;
+  }
+  const compilerId = project.buildTargets[0]?.compilerId ?? project.compilerId;
+  const compiler = getCompiler(compilerId);
+  const cPath = compiler.programs.C || compiler.programs.CPP;
+  if (!cPath) {
+    vscode.window.showWarningMessage(`编译器 "${compiler.name}" 没有可用的编译器程序路径，无法推导 --query-driver`);
+    return;
+  }
+  const dir = path.dirname(cPath).replace(/\\/g, '/');
+  const arg = `--query-driver=${dir}/*`;
+  const cfg = vscode.workspace.getConfiguration('clangd');
+  const inspected = cfg.inspect<string[]>('arguments');
+  const current = inspected?.workspaceValue ?? inspected?.globalValue ?? inspected?.defaultValue ?? [];
+  const next = current.includes(arg) ? current : [...current, arg];
+
+  const target = await vscode.window.showQuickPick(
+    [
+      { label: '写入工作区设置（推荐）', description: '.vscode/settings.json —— 只影响本工程', id: 'workspace' },
+      { label: '写入用户设置', description: '影响所有工作区（含其它非 Code::Blocks 工程）', id: 'global' },
+      { label: '仅复制到剪贴板', description: '自行粘贴到设置里', id: 'clipboard' },
+    ],
+    { placeHolder: `将写入 clangd.arguments：${arg}` },
+  );
+  if (!target) return;
+
+  if (target.id === 'clipboard') {
+    await vscode.env.clipboard.writeText(JSON.stringify({ 'clangd.arguments': next }, null, 2));
+    vscode.window.showInformationMessage('已复制 clangd.arguments 到剪贴板');
+    return;
+  }
+  const cfgTarget = target.id === 'global' ? vscode.ConfigurationTarget.Global : vscode.ConfigurationTarget.Workspace;
+  const ok = await vscode.window.showWarningMessage(
+    `将把 ${arg} 合并进 clangd.arguments（原有 ${current.length} 项保留），写入${target.id === 'global' ? '用户' : '工作区'}设置？还要把 CompileFlags.BuiltinHeaders 设为 QueryDriver 吗（可稍后改 codeblocks.clangd.builtinHeaders）？`,
+    { modal: true },
+    '写入设置',
+  );
+  if (ok !== '写入设置') return;
+  await cfg.update('arguments', next, cfgTarget);
+  outputChannel.info(`[Code::Blocks] 已写入 clangd.arguments（${target.id === 'global' ? '用户' : '工作区'}设置）：${arg}`);
+  const useBuiltin = await vscode.window.showInformationMessage(
+    '已写入 --query-driver。是否同时把 codeblocks.clangd.builtinHeaders 设为 queryDriver（使用交叉工具链的内建头）？',
+    '设为 queryDriver',
+    '暂不',
+  );
+  if (useBuiltin === '设为 queryDriver') {
+    await vscode.workspace.getConfiguration('codeblocks').update('clangd.builtinHeaders', 'queryDriver', vscode.ConfigurationTarget.Workspace);
+    void generateClangdForWorkspace();
+  }
+}
+
 async function runClangdGeneration(interactive: boolean): Promise<void> {
   if (clangdGenRunning) return; // 上一次还在跑，丢弃本次（后续触发会重新调度）
   clangdGenRunning = true;
@@ -3077,11 +3226,14 @@ async function generateClangdForWorkspaceInternal(interactive: boolean): Promise
     const includeCache = new Map<string, string[]>();
     const systemIncludesAll = new Set<string>();
     let targetTriple: string | undefined;
+    /** 第一个可用工程的 C 编译器路径（供 query-driver 提示与 CompileFlags 使用） */
+    let firstCompilerPath: string | undefined;
     for (const p of orderedProjects) {
       try {
         const targetCompilerId = p.buildTargets[0]?.compilerId ?? p.compilerId;
         const compiler = getCompiler(targetCompilerId);
         const cacheKey = compiler.programs.C || compiler.name;
+        if (!firstCompilerPath && compiler.programs.C) firstCompilerPath = compiler.programs.C;
         let systemIncludes = includeCache.get(cacheKey);
         if (!systemIncludes && clangd) {
           // 带上目标架构 flag（-march 等），让 GCC 选择正确的 multilib 系统头目录
@@ -3155,13 +3307,43 @@ async function generateClangdForWorkspaceInternal(interactive: boolean): Promise
       // 更新用户级 clangd 配置（工作区外，If.PathMatch 作用域到本工程树）
       // 默认压制：嵌入式 SDK 预期噪声（-Wunused-function）+ 跨界 typedef 冲突误报（redefinition_different_typedef，SDK 头 vs 工具链系统头）
       const suppressedWarnings = cfg.get<string[]>('clangd.suppressedWarnings', ['-Wunused-function', 'redefinition_different_typedef']);
-      updateClangdUserConfig([{
+      // 片段内其余键：默认值与历史硬编码值一致（产物不变）；'omit'/'default' ⇒ 该键不写，交给 clangd 默认值或用户自有配置
+      const extraConfig = cfg.get<string>('clangd.extraConfig', '');
+      const { removed } = updateClangdUserConfig([{
         dir: scope,
         databaseDir: cacheDir,
         headerFlags,
         suppressedWarnings,
         suppressHeaderDiagnostics: suppressHeader,
+        unusedIncludes: enumOrUndefined<'None' | 'Strict'>(cfg.get<string>('clangd.unusedIncludes', 'none'), { none: 'None', strict: 'Strict' }),
+        headerInsertion: enumOrUndefined<'Never' | 'IWYU'>(cfg.get<string>('clangd.headerInsertion', 'never'), { never: 'Never', iwyu: 'IWYU' }),
+        builtinHeaders: enumOrUndefined<'Clangd' | 'QueryDriver'>(cfg.get<string>('clangd.builtinHeaders', 'clangd'), { clangd: 'Clangd', querydriver: 'QueryDriver' }),
+        indexStandardLibrary: triStateBoolean(cfg.get<string>('clangd.indexStandardLibrary', 'default')),
+        indexBackground: enumOrUndefined<'Build' | 'Skip'>(cfg.get<string>('clangd.indexBackground', 'default'), { build: 'Build', skip: 'Skip' }),
+        clangTidyOff: cfg.get<string>('clangd.clangTidy', 'default') === 'off',
+        completionAllScopes: triStateBoolean(cfg.get<string>('clangd.completionAllScopes', 'default')),
+        inlayHintsEnabled: triStateBoolean(cfg.get<string>('clangd.inlayHints', 'default')),
+        documentationCommentFormat: enumOrUndefined<'Plaintext' | 'Markdown' | 'Doxygen'>(cfg.get<string>('clangd.documentationCommentFormat', 'default'), {
+          plaintext: 'Plaintext', markdown: 'Markdown', doxygen: 'Doxygen',
+        }),
+        excludeDirs: cfg.get<string[]>('clangd.excludeDirs', []),
+        extraConfig,
       }]);
+      if (removed.length) {
+        outputChannel.info(`[Code::Blocks] 已清理 ${removed.length} 个失效 clangd 配置片段（作用域目录/编译数据库已不存在）`);
+        for (const r of removed.slice(0, 5)) {
+          outputChannel.debug(`[Code::Blocks]   清理 ${r.hash} ← ${r.scopeDir}（${r.reason === 'scope-missing' ? '作用域目录不存在' : '编译数据库目录不存在'}）`);
+        }
+        if (removed.length > 5) outputChannel.debug(`[Code::Blocks]   …另有 ${removed.length - 5} 个（执行「清理 clangd 遗留配置」可查看全部）`);
+      }
+      for (const w of extraConfigWarnings(extraConfig)) {
+        outputChannel.warn(`[Code::Blocks] codeblocks.clangd.extraConfig ${w}，可能导致 clangd 丢弃整个 config.yaml（含本扩展片段）`);
+      }
+      // queryDriver 开启但 clangd.arguments 还没配 --query-driver：给一次性可操作提示（不自动改设置）
+      if (cfg.get<boolean>('clangd.queryDriver', false) && firstCompilerPath && !clangdArgsHaveQueryDriver()) {
+        outputChannel.warn(`[Code::Blocks] codeblocks.clangd.queryDriver 已开启，但 VS Code 的 clangd.arguments 尚未包含 --query-driver；`
+          + `执行命令「Code::Blocks: Configure clangd --query-driver」可一键写入（建议值 --query-driver=${path.dirname(firstCompilerPath).replace(/\\/g, '/')}/*）`);
+      }
       outputChannel.info(`[Code::Blocks] 已更新 clangd 用户配置 → ${clangdUserConfigPath()}`);
       outputChannel.info(`[Code::Blocks] 检测到 clangd: ${clangd}`);
       if (interactive) {
