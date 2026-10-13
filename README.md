@@ -190,8 +190,21 @@ code --extensionDevelopmentPath="." --disable-extensions --new-window
 | `codeblocks.clangd.buildLogDiagnostics` | `build` | 检测到 clangd 时 Build Log 的诊断来源：`build` = 构建引擎完整诊断（默认）；`clangd` = clangd 诊断（仅打开过的文件） |
 | `codeblocks.clangd.forcedIncludes` | `["global.h"]` | clangd 分析头文件时强制预包含的基础头文件名（默认 `global.h`：typedef/macro/sfr/clib 上下文；勿用 `include.h` 这类全量主头文件，否则递归包含产生误报） |
 | `codeblocks.clangd.suppressedWarnings` | `["-Wunused-function", "redefinition_different_typedef"]` | 在 clangd 诊断中压制的诊断（`-W` 组名或诊断名）：默认压制嵌入式 SDK 跨界误报——静态函数编译期断言（`-Wunused-function`）与 SDK 头 vs 工具链系统头的 typedef 冲突（`__int32_t` 等）；移除对应项即恢复显示 |
+| `codeblocks.clangd.suppressHeaderDiagnostics` | `true` | 压制头文件（`.h`）单独分析时的全部诊断（SDK 头不自包含，误报多；`.c` 诊断不受影响） |
+| `codeblocks.clangd.unusedIncludes` | `none` | 写入 `Diagnostics.UnusedIncludes`：`none` 关闭提示（默认）/ `strict` 提示 / `omit` 不写该键（交 clangd 默认或你的配置） |
+| `codeblocks.clangd.headerInsertion` | `never` | 写入 `Completion.HeaderInsertion`：`never` 补全不自动插入 `#include`（默认）/ `iwyu` clangd 默认行为 / `omit` 不写该键 |
+| `codeblocks.clangd.indexBackground` | `default` | 写入 `Index.Background`：`default` 不写 / `skip` 不建后台索引（大 SDK 省 CPU/内存）/ `build` 显式开启 |
+| `codeblocks.clangd.indexStandardLibrary` | `default` | 写入 `Index.StandardLibrary`：`default` 不写 / `false` 不预索引标准库（裸机省内存）/ `true` 显式开启 |
+| `codeblocks.clangd.clangTidy` | `default` | `default` 不写 / `off` 写入 `Diagnostics.ClangTidy.Remove: ['*']` 关闭全部 clang-tidy 检查 |
+| `codeblocks.clangd.completionAllScopes` | `default` | 写入 `Completion.AllScopes`：`default` 不写 / `no` 只提示可见作用域 / `yes` 显式开启 |
+| `codeblocks.clangd.inlayHints` | `default` | 写入 `InlayHints.Enabled`：`default` 不写 / `off` 关闭内联提示 / `on` 开启 |
+| `codeblocks.clangd.documentationCommentFormat` | `default` | 写入 `Documentation.CommentFormat`：`default` 不写 / `doxygen` 悬停显示参数与返回值说明 / `markdown` / `plaintext` |
+| `codeblocks.clangd.excludeDirs` | `[]` | 写入 `If.PathExclude`：这些目录名（如 `obj`、`bin`）下的文件不套用本工程片段 |
+| `codeblocks.clangd.builtinHeaders` | `clangd` | 写入 `CompileFlags.BuiltinHeaders`：`clangd` 用 clangd 内建头（默认）/ `queryDriver` 用交叉编译器内建头（配 `--query-driver`） |
+| `codeblocks.clangd.queryDriver` | `false` | 开启后若 `clangd.arguments` 缺 `--query-driver` 则在输出通道提示（命令 `Configure clangd --query-driver` 可一键写入） |
+| `codeblocks.clangd.extraConfig` | `""` | 自由 YAML，作为同作用域**后置**片段注入（可覆盖扩展写入的任意键；扩展自动补 `If.PathMatch`） |
 
-> 完整 60 项设置（7 个分区）见 [docs/使用说明.md](docs/使用说明.md) §13。
+> 完整 74 项设置（7 个分区）见 [docs/使用说明.md](docs/使用说明.md) §13。另有两条 clangd 命令：`Code::Blocks: Clean Stale clangd Config Fragments`（清理失效片段 + 孤儿缓存目录，预览后确认）与 `Code::Blocks: Configure clangd --query-driver`（交叉编译器保真）。
 
 ## 架构
 

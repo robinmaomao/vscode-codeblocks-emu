@@ -34,6 +34,18 @@ const SETTINGS = [
   ['codeblocks.clangd.restartOnActiveProjectSwitch', 'src/extension.ts', 'dist/extension.js', '切换活动工程时重启 clangd（generateClangdForWorkspaceInternal）'],
   ['codeblocks.clangd.forcedIncludes', 'src/extension.ts', 'dist/extension.js', '强制包含头文件（generateClangdForWorkspaceInternal）'],
   ['codeblocks.clangd.suppressHeaderDiagnostics', 'src/extension.ts', 'dist/extension.js', '头文件诊断压制（generateClangdForWorkspaceInternal）'],
+  ['codeblocks.clangd.unusedIncludes', 'src/extension.ts', 'dist/extension.js', '片段 Diagnostics.UnusedIncludes（generateClangdForWorkspaceInternal）'],
+  ['codeblocks.clangd.headerInsertion', 'src/extension.ts', 'dist/extension.js', '片段 Completion.HeaderInsertion（generateClangdForWorkspaceInternal）'],
+  ['codeblocks.clangd.indexBackground', 'src/extension.ts', 'dist/extension.js', '片段 Index.Background（generateClangdForWorkspaceInternal）'],
+  ['codeblocks.clangd.indexStandardLibrary', 'src/extension.ts', 'dist/extension.js', '片段 Index.StandardLibrary（generateClangdForWorkspaceInternal）'],
+  ['codeblocks.clangd.clangTidy', 'src/extension.ts', 'dist/extension.js', '片段 Diagnostics.ClangTidy.Remove（generateClangdForWorkspaceInternal）'],
+  ['codeblocks.clangd.completionAllScopes', 'src/extension.ts', 'dist/extension.js', '片段 Completion.AllScopes（generateClangdForWorkspaceInternal）'],
+  ['codeblocks.clangd.inlayHints', 'src/extension.ts', 'dist/extension.js', '片段 InlayHints.Enabled（generateClangdForWorkspaceInternal）'],
+  ['codeblocks.clangd.documentationCommentFormat', 'src/extension.ts', 'dist/extension.js', '片段 Documentation.CommentFormat（generateClangdForWorkspaceInternal）'],
+  ['codeblocks.clangd.excludeDirs', 'src/extension.ts', 'dist/extension.js', '片段 If.PathExclude（generateClangdForWorkspaceInternal）'],
+  ['codeblocks.clangd.builtinHeaders', 'src/extension.ts', 'dist/extension.js', '片段 CompileFlags.BuiltinHeaders（generateClangdForWorkspaceInternal）'],
+  ['codeblocks.clangd.queryDriver', 'src/extension.ts', 'dist/extension.js', 'query-driver 提示（generateClangdForWorkspaceInternal）'],
+  ['codeblocks.clangd.extraConfig', 'src/extension.ts', 'dist/extension.js', '自由 YAML 注入 + 轻量校验提示（generateClangdForWorkspaceInternal）'],
   ['codeblocks.projectTree.categorize', 'src/extension.ts', 'dist/extension.js', '工程树分组显示开关（activate 内注册视图处）'],
   ['codeblocks.ui.projectToolbar', 'src/extension.ts', 'dist/extension.js', '工程工具栏按钮可见性（applyProjectToolbarContext）'],
   ['codeblocks.editor.autoHeaderGuard', 'src/extension.ts', 'dist/extension.js', '新建头文件自动加保护宏（autoInsertHeaderGuards）'],
@@ -58,8 +70,12 @@ for (const [key, srcRel, distRel, note] of SETTINGS) {
   const atSrc = lineOfKey(srcRel, key);
   check(`S ${key}：源码读点在 ${srcRel}（${note}）`, atSrc > 0, atSrc || '未找到', `出现在 ${srcRel}`);
   if (atSrc > 0) {
-    const line = fileOf(srcRel).split(/\r?\n/)[atSrc - 1].trim();
-    check(`S ${key}：读点是一次配置取值（非仅字符串出现）`, isConfigRead(line), line, '.get(...) 调用');
+    // 该键必须**在某处**被真实取值（.get(...)）；不要求是文件里的第一次出现——
+    // 同一键也可能先出现在 .update(...)（例如命令写入设置）里，按「存在真实读点」判定更贴合意图
+    const bare = key.replace(/^codeblocks\./, '');
+    const needle = new RegExp(`['"\`]${bare.replace(/\./g, '\\.')}['"\`]`);
+    const readLine = fileOf(srcRel).split(/\r?\n/).find((l) => needle.test(l) && isConfigRead(l));
+    check(`S ${key}：读点是一次配置取值（非仅字符串出现）`, !!readLine, readLine ? readLine.trim() : '未找到 .get(...) 行', '.get(...) 调用');
   }
   check(`S ${key}：已接线到编译产物 ${distRel}`, lineOfKey(distRel, key) > 0, lineOfKey(distRel, key) || '未找到', distRel);
 }

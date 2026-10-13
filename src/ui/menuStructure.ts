@@ -378,6 +378,8 @@ export const MENU_STRUCTURE: MenuDef[] = [
       { label: 'Build & Log…', command: 'workbench.action.openSettings', args: ['codeblocks.build'] },
       { label: 'Debugger…', command: 'workbench.action.openSettings', args: ['codeblocks.gdb'] },
       { label: 'clangd / IntelliSense…', command: 'workbench.action.openSettings', args: ['codeblocks.clangd'] },
+      { label: 'Clean Stale clangd Config…', command: 'codeblocks.cleanClangdConfig' },
+      { label: 'Configure clangd --query-driver…', command: 'codeblocks.clangd.applyQueryDriver' },
       SEP,
       { label: 'Keybindings…', command: 'codeblocks.keybindings.panel' },
       { label: 'Global Variables…', command: 'codeblocks.showGlobalVariables' },
