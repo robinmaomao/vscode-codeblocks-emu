@@ -2,7 +2,7 @@
 //
 // 覆盖：全量构建 / 增量 up-to-date / 头文件依赖触发重编 / 单文件编译与清理 / 目标清理 /
 //       对象目录自动创建 / 含空格路径 / 汇编源参与链接 / 链接脚本不参与 / 响应文件 /
-//       pre-post 脚本 / 编译失败诊断 / compile_commands.json / 工作区依赖顺序 + 静态库
+//       pre-post 脚本 / post-build 后台进程不阻塞 / 编译失败诊断 / compile_commands.json / 工作区依赖顺序 + 静态库
 //
 // 用法：node tests/e2e/test-e2e-build.js [--filter <子串>]
 const fs = require('fs');
@@ -256,6 +256,61 @@ async function scenarioWorkspace() {
   check('S14 依赖项目（可执行）构建成功', appRes.ok && fs.existsSync(path.join(dir, 'dep-app', 'bin', 'Debug', 'dep_app.exe')), appRes.ok, true);
 }
 
+async function scenarioPostBuildBackground() {
+  // S15 post-build 后台进程不阻塞构建（回归：命令本体已退出却等后台进程 —— 修复前 start /b 场景白等 5.1s）
+  if (!H.toolAvailable('node')) { skipCheck('S15 后台 post-build 不阻塞', 'node 不可用'); return; }
+  const dir = H.mkTemp('cb-e2e-postbg-');
+  H.writeFile(path.join(dir, 'main.c'), 'int main(void){return 0;}\n');
+  // 后台进程存活 25s（远大于宽限 1.5s、远小于总时长断言上限 10s）——修复前构建会被它拖到退出为止
+  // 启动后立即 chdir 到临时目录：避免后台进程以工程目录为 cwd 导致测试清理删除失败（Windows 目录锁）
+  const bgScript = 'process.chdir(require(\'os\').tmpdir());setTimeout(function(){},25000)';
+  const bgCmd = process.platform === 'win32'
+    ? `start "" /b node -e "${bgScript}"`
+    : `node -e "${bgScript}" &`;
+  const esc = (s) => s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  H.writeFile(path.join(dir, 'postbg.cbp'), `<?xml version="1.0" encoding="UTF-8" standalone="yes" ?>
+<CodeBlocks_project_file>
+\t<FileVersion major="1" minor="6" />
+\t<Project>
+\t\t<Option title="postbg" />
+\t\t<Option compiler="gcc" />
+\t\t<Build>
+\t\t\t<Target title="Debug">
+\t\t\t\t<Option type="1" />
+\t\t\t\t<Option compiler="gcc" />
+\t\t\t\t<Option output="bin/Debug/postbg" />
+\t\t\t\t<Option object_output="obj/Debug/" />
+\t\t\t</Target>
+\t\t</Build>
+\t\t<ExtraCommands>
+\t\t\t<Add after="${esc(bgCmd)}" />
+\t\t</ExtraCommands>
+\t\t<Unit filename="main.c" />
+\t</Project>
+</CodeBlocks_project_file>
+`);
+  const ctx = H.openProject(path.join(dir, 'postbg.cbp'));
+  // 自建记录型 output（带时间戳）：定位「脚本命令 → 构建结束」之间的尾部时段
+  const lines = [];
+  const sink = {
+    info: (m) => lines.push({ line: String(m), t: Date.now() }),
+    warn: (m) => lines.push({ line: String(m), t: Date.now() }),
+    error: (m) => lines.push({ line: String(m), t: Date.now() }),
+    debug: (m) => lines.push({ line: String(m), t: Date.now() }),
+  };
+  const engine = new (H.modules().BuildEngine)(ctx.project, ctx.compiler, sink, ctx.getCompiler);
+  const tStart = Date.now();
+  const ok = await engine.build('Debug', {});
+  const elapsed = Date.now() - tStart;
+  const scriptLine = lines.find((l) => /\[script 1-1\]/.test(l.line));
+  const tail = Date.now() - (scriptLine ? scriptLine.t : tStart);
+  check('S15 含后台进程的 post-build 构建成功', ok === true, ok, true);
+  check('S15 脚本命令输出在日志中', !!scriptLine, lines.map((l) => l.line).slice(-4), '[script 1-1]');
+  check('S15 后台进程不阻塞：脚本命令后 ≤3s 收口（修复前 ≈25s）', tail <= 3000, tail, '<=3000ms');
+  check('S15 后台进程日志说明行', lines.some((l) => /后台进程仍在运行/.test(l.line)), lines.map((l) => l.line).slice(-4), '说明行');
+  check('S15 总时长 <10s（未等 25s 自终止的后台进程）', elapsed < 10000, elapsed, '<10000ms');
+}
+
 async function main() {
   if (!HAS_GCC) {
     console.log('SKIP e2e：gcc 不可用，跳过真实工程构建矩阵');
@@ -267,6 +322,7 @@ async function main() {
     await scenarioHelloCb();
     await scenarioSpacesAndAsm();
     await scenarioLongCommandAndScripts();
+    await scenarioPostBuildBackground();
     await scenarioCompileCommands();
     await scenarioWorkspace();
   } finally {

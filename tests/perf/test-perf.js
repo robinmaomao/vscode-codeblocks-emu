@@ -309,6 +309,65 @@ async function buildBenches() {
         if (!ok) throw new Error('单文件编译失败');
       },
     });
+
+    // B11 post-build 后台进程不阻塞：命令本体（cmd.exe）秒退，后台孙进程仍持有 stdout/stderr。
+    // 修复前按 close 事件判定 ⇒ 等到后台进程退出（实测 5.1s）；修复后按 exit + 宽限（默认 1.5s）收口。
+    // 预算按最优一次判定：宽限 1.5s + 小工程增量构建（对象已存在）≈2s；修复前 ≈5.1s+ 直接超预算。
+    const bgScript = 'process.chdir(require(\'os\').tmpdir());setTimeout(function(){},8000)';
+    const bgCmd = process.platform === 'win32'
+      ? `start "" /b node -e "${bgScript}"`
+      : `node -e "${bgScript}" &`;
+    const bgDir = tmp('cb-perf-postbg-');
+    for (const f of ['main.c', 'util.c', 'util.h']) {
+      fs.copyFileSync(path.join(helloDir, f), path.join(bgDir, f));
+    }
+    const esc = (s) => s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    fs.writeFileSync(path.join(bgDir, 'postbg.cbp'), `<?xml version="1.0" encoding="UTF-8" standalone="yes" ?>
+<CodeBlocks_project_file>
+\t<FileVersion major="1" minor="6" />
+\t<Project>
+\t\t<Option title="postbg" />
+\t\t<Option compiler="gcc" />
+\t\t<Build>
+\t\t\t<Target title="Debug">
+\t\t\t\t<Option type="1" />
+\t\t\t\t<Option compiler="gcc" />
+\t\t\t\t<Option output="bin/Debug/postbg" />
+\t\t\t\t<Option object_output="obj/Debug/" />
+\t\t\t</Target>
+\t\t</Build>
+\t\t<ExtraCommands>
+\t\t\t<Add after="${esc(bgCmd)}" />
+\t\t</ExtraCommands>
+\t\t<Unit filename="main.c" />
+\t\t<Unit filename="util.c" />
+\t\t<Unit filename="util.h" />
+\t</Project>
+</CodeBlocks_project_file>
+`, 'utf-8');
+    const mkBgEngine = () => withMock(() => {
+      const cb = new CodeBlocksConfig();
+      cb.load();
+      const getCompiler = (id) => loader.load(id);
+      const p = new ProjectParser().parse(path.join(bgDir, 'postbg.cbp'));
+      const out = { info: () => {}, warn: () => {}, error: () => {}, debug: () => {} };
+      return { engine: new BuildEngine(p, getCompiler('gcc'), out, getCompiler), project: p };
+    });
+
+    add({
+      name: 'B11 post-build 后台进程不阻塞（start /b 场景，宽限 1.5s）',
+      note: '预算人工下调至 3500ms（默认 max(3×median) 过松）：覆盖「后台进程拖住 post-build」回归（修复前实测 ≈5.1s）',
+      iterations: 3,
+      warmup: 1,
+      minBudget: 3000,
+      run: async () => {
+        const { engine, project } = mkBgEngine();
+        // 每轮清目标：保证真的编译/链接（否则 up-to-date 构建按门控跳过 post-build，测不到该场景）
+        engine.cleanTarget(project.buildTargets[0]);
+        const ok = await engine.build(undefined, { onLine: () => {} });
+        if (!ok) throw new Error('构建失败');
+      },
+    });
   }
 
   return benches;
@@ -322,7 +381,7 @@ async function main() {
   if (only) console.log(`筛选: ${only}`);
 
   let benches = await buildBenches();
-  if (skipReal) benches = benches.filter((b) => !/^B(7|8|9|10) /.test(b.name));
+  if (skipReal) benches = benches.filter((b) => !/^B(7|8|9|10|11) /.test(b.name));
   if (only) benches = benches.filter((b) => b.name.includes(only) || b.id === only);
   if (!benches.length) {
     console.error(`没有匹配的基准（--only=${only}${skipReal ? ' --skip-real' : ''}）`);

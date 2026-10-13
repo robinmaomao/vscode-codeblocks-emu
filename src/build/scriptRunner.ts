@@ -47,6 +47,37 @@ export function replaceAllMacros(cmd: string, vars: Record<string, string>): str
 export interface ScriptResult {
   success: boolean;
   output: string;
+  /**
+   * 宽限到期时管道仍未关闭 ⇒ 命令本体已结束但仍有后台进程持有 stdout/stderr
+   * （`start` / GUI / 守护进程）：构建不再等待（对齐 CodeBlocks），仅记录用于日志提示。
+   * 宽限设为 0 时不做该观察（严格对齐 CodeBlocks：不检测、不提示）。
+   */
+  trailingBackground?: boolean;
+}
+
+/** 命令结束后管道排空的宽限默认值（设置 codeblocks.build.scriptExitGraceMs；0 = 立即结束） */
+export const SCRIPT_EXIT_GRACE_DEFAULT_MS = 1500;
+/** 宽限上限（防止误配置把构建拖住） */
+export const SCRIPT_EXIT_GRACE_MAX_MS = 60_000;
+/** 单条脚本命令耗时提示阈值（超过则在日志中给出耗时行） */
+export const SCRIPT_SLOW_HINT_MS = 3000;
+
+/**
+ * 脚本结束后的管道排空宽限（毫秒）。
+ *
+ * 命令本体（cmd.exe）退出后，再等这段时间把管道尾部缓冲的输出收全；期间若管道关闭则提前收尾。
+ * 无 vscode 宿主（headless 单测）时回退默认；非法/负值钳制为 0，上限 SCRIPT_EXIT_GRACE_MAX_MS。
+ */
+export function scriptExitGraceMs(): number {
+  let raw: unknown = SCRIPT_EXIT_GRACE_DEFAULT_MS;
+  try {
+    // 惰性 require：headless 单测无 vscode 宿主时回退默认（与 compilerCachePrefix 同款）
+    const vs: typeof import('vscode') = require('vscode');
+    raw = vs.workspace.getConfiguration('codeblocks').get<number>('build.scriptExitGraceMs', SCRIPT_EXIT_GRACE_DEFAULT_MS);
+  } catch { /* 无宿主：默认值 */ }
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n <= 0) return 0;
+  return Math.min(SCRIPT_EXIT_GRACE_MAX_MS, Math.floor(n));
 }
 
 /** 解码子进程输出：UTF-8 严格优先，失败回退 GBK（中文 Windows） */
@@ -103,15 +134,39 @@ export function runScriptCommand(
     // 注册进取消源：cancel() 时强杀整棵进程树
     cancel?.register(proc);
     let output = '';
+    const grace = scriptExitGraceMs();
+    let settled = false;
+    let graceTimer: NodeJS.Timeout | undefined;
+    const finish = (success: boolean, trailingBackground: boolean): void => {
+      if (settled) return;
+      settled = true;
+      if (graceTimer) {
+        clearTimeout(graceTimer);
+        graceTimer = undefined;
+      }
+      cancel?.unregister(proc);
+      resolve({ success, output, trailingBackground });
+    };
     proc.stdout?.on('data', (d: Buffer) => (output += decodeOutput(d)));
     proc.stderr?.on('data', (d: Buffer) => (output += decodeOutput(d)));
-    proc.on('close', (code) => {
-      cancel?.unregister(proc);
-      resolve({ success: code === 0, output });
+    proc.on('exit', (code) => {
+      // 命令本体结束（对齐 CodeBlocks wxExecute 同步等待语义）。
+      // 不再等 close：close 会等所有 stdio 管道关闭，脚本启动的后台进程一旦继承管道，
+      // post-build 会被拖到它们退出为止（实测 start /b 场景白等 5.1s）。
+      // 宽限仅用于排空管道尾部缓冲输出：期间 close 到达即收尾；宽限到期仍无 close
+      // ⇒ 后台进程仍持有输出（标记 trailingBackground，构建继续）。
+      const ok = code === 0;
+      if (grace > 0) {
+        graceTimer = setTimeout(() => finish(ok, true), grace);
+      } else {
+        // 宽限 0：命令本体结束即继续，不做后台进程观察（严格等同 CodeBlocks：不检测、不提示）
+        finish(ok, false);
+      }
     });
+    proc.on('close', (code) => finish(code === 0, false));
     proc.on('error', (err) => {
-      cancel?.unregister(proc);
-      resolve({ success: false, output: err.message });
+      output += err.message;
+      finish(false, false);
     });
   });
 }
@@ -135,12 +190,24 @@ export async function runScriptCommands(
     }
     const cmd = commands[i];
     // 脚本命令编号（[script 1-5]，连字符避免 Output 面板误判为路径链接；plainCbLog 模式关闭编号）
-    if (onLog) onLog(buildLogPrefs().plain ? cmd : `[script ${i + 1}-${total}] ${cmd}`);
+    const numbered = `[script ${i + 1}-${total}]`;
+    if (onLog) onLog(buildLogPrefs().plain ? cmd : `${numbered} ${cmd}`);
+    const t0 = Date.now();
     const r = await runScriptCommand(cmd, cwd, vars, extraPath, cancel);
+    const elapsed = Date.now() - t0;
     if (r.output) {
       // 子进程输出缩进两空格，与脚本命令区分层次
       for (const line of r.output.split(/\r?\n/)) {
         if (line) onLog?.(`  ${line}`);
+      }
+    }
+    // 可诊断性：慢命令给出耗时行，一眼区分「脚本自身慢」与「扩展慢」（plainCbLog 模式保持纯 CB 输出）
+    if (onLog && !buildLogPrefs().plain) {
+      if (r.trailingBackground) {
+        onLog(`  ${numbered} 后台进程仍在运行（不阻塞构建；如需等待请改用前台命令或 start /wait）`);
+      }
+      if (elapsed >= SCRIPT_SLOW_HINT_MS) {
+        onLog(`  ${numbered} 耗时 ${(elapsed / 1000).toFixed(1)}s（命令自身运行时）`);
       }
     }
     if (!r.success) ok = false;
