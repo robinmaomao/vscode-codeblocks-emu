@@ -1,5 +1,6 @@
 // clangd 用户配置回归（跨界 typedef 冲突修复）：
 //  - Diagnostics.Suppress 默认含 -Wunused-function 与 redefinition_different_typedef（SDK 头 vs 工具链系统头误报）
+//  - Completion.HeaderInsertion: Never（补全不自动插入 #include；clangd 默认 IWYU）
 //  - 头文件子片段（Suppress:'*' + --target/-include/-isystem 回退）结构正确
 //  - 幂等；保留用户自有内容；空作用域清理不留悬空 ---
 //  - 设置默认值（package.json）与 extension 接线（dist）静态断言
@@ -69,6 +70,23 @@ check('头文件子片段含 -include 基础头', text.includes('- -include'), n
 check('头文件子片段含 -isystem', text.includes('- -isystem'), null);
 check('片段标记成对', text.includes('codeblocks-vscode') && /begin <<<[\s\S]*end <<</.test(text), null);
 
+// 补全不自动插入头文件（clangd 默认 IWYU ⇒ 接受补全时插入 #include）
+check('主片段含 Completion 块', text.includes('Completion:'), null);
+check('Completion.HeaderInsertion 为 Never', text.includes('  HeaderInsertion: Never'), null);
+{
+  // 必须在扩展标记之间（避免污染用户自有内容 / 落到标记外）
+  const beginIdx = text.indexOf('# >>> codeblocks-vscode');
+  const endIdx = text.indexOf('# <<< codeblocks-vscode');
+  const cmpIdx = text.indexOf('  HeaderInsertion: Never');
+  check('HeaderInsertion 位于扩展片段标记之间', beginIdx >= 0 && endIdx > beginIdx && cmpIdx > beginIdx && cmpIdx < endIdx,
+    { beginIdx, cmpIdx, endIdx });
+  // 只出现一次（头文件子片段不重复声明，避免冗余）
+  const n = (text.match(/HeaderInsertion:/g) || []).length;
+  check('HeaderInsertion 仅声明一次（头文件共用主片段）', n === 1, n);
+  // YAML 缩进结构：Completion 顶格、HeaderInsertion 两空格缩进
+  check('Completion/HeaderInsertion 缩进层级正确', /\nCompletion:\n  HeaderInsertion: Never\n/.test(text), null);
+}
+
 // 幂等：相同入参重复调用内容不变
 updateClangdUserConfig([scope]);
 const text2 = fs.readFileSync(cfgPath, 'utf-8');
@@ -81,12 +99,15 @@ const beginCount = (text3.match(/codeblocks-vscode [0-9a-f]+ begin/g) || []).len
 check('同作用域重写后仅一个片段标记', beginCount === 1, beginCount);
 check('Suppress 清空后不再输出旧压制项', !text3.includes('- -Wunused-function'), null);
 check('suppressHeaderDiagnostics=false 时移除 Suppress:*', !text3.includes("  Suppress: '*'"), null);
+check('重写后仍保留 HeaderInsertion: Never', text3.includes('  HeaderInsertion: Never'), null);
 check('重写后仍保留用户内容', text3.includes('# user own'), null);
 
 // 空作用域调用（健壮性）：不报错、保留用户内容、不留悬空 ---
 updateClangdUserConfig([]);
 const text4 = fs.readFileSync(cfgPath, 'utf-8');
 check('空作用域调用健壮（保留用户内容、无悬空 ---）', text4.includes('# user own') && !/---\s*$/.test(text4), JSON.stringify(text4).slice(0, 120));
+// 空作用域调用按传入作用域的 hash 定位旧块 ⇒ 无作用域信息时不会清理既有片段（既有语义，非本次回归）
+check('空作用域调用不误删既有片段', text4.includes('HeaderInsertion: Never'), null);
 
 // 设置默认值 / 接线
 const pkg = JSON.parse(fs.readFileSync(path.resolve(__dirname, '../package.json'), 'utf-8'));
