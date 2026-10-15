@@ -1,5 +1,5 @@
 // 设置结构回归（第53轮配置整理）：
-//  - configuration 为 7 个分区块（title+order），设置项总数 74、无重复键
+//  - configuration 为 7 个分区块（title+order），设置项总数 76、无重复键
 //  - 关键默认值/枚举/scope/数值校验/DBGconfig/描述无轮次标记
 //  - 全部设置键在 dist 中被读取（无死配置；ui.symbolsView 由 when 子句使用）
 const fs = require('fs');
@@ -38,7 +38,7 @@ for (const b of cfg) {
     byKey[k] = v;
   }
 }
-  check('设置项总数 = 74', keys.length === 74, keys.length);
+  check('设置项总数 = 76', keys.length === 76, keys.length);
 check('无重复键', new Set(keys).size === keys.length, keys.length - new Set(keys).size);
 check('disableInit 默认 true（对齐 CB disable_init）', byKey['codeblocks.debug.disableInit']?.default === true, byKey['codeblocks.debug.disableInit']);
 check('saveHtmlLogFullCommandLine 默认 false（对齐 CB full_command_line）', byKey['codeblocks.build.saveHtmlLogFullCommandLine']?.default === false, byKey['codeblocks.build.saveHtmlLogFullCommandLine']);
@@ -67,6 +67,13 @@ check('buildLogFocusFirstError 默认 true（对齐 CB auto_focus_build_errors�
 check('quietFailure 默认 false', byKey['codeblocks.ui.quietFailure']?.default === false, byKey['codeblocks.ui.quietFailure']);
 
 // ---- 关键项抽查 ----
+check('detect.autoOpen 默认 all + 三值枚举（工作区工程自动检测）',
+  JSON.stringify(byKey['codeblocks.detect.autoOpen']?.enum) === JSON.stringify(['all', 'single', 'off'])
+  && byKey['codeblocks.detect.autoOpen']?.default === 'all', byKey['codeblocks.detect.autoOpen']);
+check('detect.autoOpenThreshold 默认 20（1-1000，大工作区保护阈值）',
+  byKey['codeblocks.detect.autoOpenThreshold']?.default === 20
+  && byKey['codeblocks.detect.autoOpenThreshold']?.minimum === 1
+  && byKey['codeblocks.detect.autoOpenThreshold']?.maximum === 1000, byKey['codeblocks.detect.autoOpenThreshold']);
 check('tidyCommentWidth 默认 80（20-200）',
   byKey['codeblocks.editor.tidyCommentWidth']?.default === 80
   && byKey['codeblocks.editor.tidyCommentWidth']?.minimum === 20

@@ -93,7 +93,31 @@ const missing = path.join(dir, 'gone.c'); // 不存在 → scanFile 静默跳过
     check('B5 同步 rebuild 仍可用（兼容）', idx5.lookup('add').length >= 1, idx5.lookup('add').length, '>=1');
   }
 
-  // ---- 6. extension 接线静态断言 ----
+  // ---- 6. 增量缓存：mtime/size 未变的文件不重新解析 ----
+  {
+    const idx6 = new SymbolIndex();
+    await idx6.rebuildAsync([...files]);
+    const first = idx6.stats();
+    check('B6 首次构建全部解析（parsed = 可索引文件数）', first.parsed === files.length && first.reused === 0, first, `${files.length} parsed`);
+    await idx6.rebuildAsync([...files]);
+    const second = idx6.stats();
+    check('B7 二次构建命中缓存（parsed = 0，reused = 可索引文件数）', second.parsed === 0 && second.reused === files.length, second, `0 parsed / ${files.length} reused`);
+    check('B8 缓存复用后索引内容仍完整', idx6.lookup('FOO').length === 1 && idx6.lookup('MyType').length === 1, { FOO: idx6.lookup('FOO').length }, '1/1');
+    // 触碰一个文件（mtime 变化）→ 只重解析该文件
+    const target = files[0];
+    const later = new Date(Date.now() + 2000);
+    fs.utimesSync(target, later, later);
+    await idx6.rebuildAsync([...files]);
+    const third = idx6.stats();
+    check('B9 仅 mtime 变化的文件被重解析（parsed = 1）', third.parsed === 1 && third.reused === files.length - 1, third, `1 parsed / ${files.length - 1} reused`);
+    check('B10 文件缺失不进入缓存（下轮不误判复用）', (() => {
+      const idx7 = new SymbolIndex();
+      idx7.rebuild([...files, missing]);
+      return idx7.allEntries().length > 0;
+    })(), true, true);
+  }
+
+  // ---- 7. extension 接线静态断言 ----
   const ext = fs.readFileSync(path.resolve(__dirname, '../dist/extension.js'), 'utf8');
   check('C1 dist 含懒构建入口 markFallbackIndexDirty', ext.includes('markFallbackIndexDirty'), null);
   check('C2 dist 含按需构建 requestFallbackIndexBuild（单飞）', ext.includes('requestFallbackIndexBuild'), null);

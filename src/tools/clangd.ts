@@ -339,6 +339,15 @@ export function extraConfigWarnings(text: string): string[] {
   return out;
 }
 
+/**
+ * 字符串数组键防御：非数组（设置被手改成字符串/数字等）或含非字符串项一律丢弃。
+ * 否则 `for (const x of value)` 在字符串上会**按字符**迭代，把片段写成单字符压制项等垃圾内容。
+ */
+function asStringArray(v: unknown): string[] {
+  if (!Array.isArray(v)) return [];
+  return v.filter((x): x is string => typeof x === 'string' && x.trim() !== '').map((x) => x.trim());
+}
+
 /** 构造单个作用域的 YAML 片段（只写「有值」的键；undefined/空 = 该键交给 clangd 默认值或用户自有配置） */
 function buildScopeFragment(s: ClangdScopeConfig, marker: { begin: string; end: string }): string {
   const dirRe = escapeRegex(normSlash(s.dir));
@@ -347,7 +356,7 @@ function buildScopeFragment(s: ClangdScopeConfig, marker: { begin: string; end: 
     'If:',
     `  PathMatch: ${yamlSingleQuote(`${dirRe}/.*`)}`,
   ];
-  const excluded = (s.excludeDirs ?? []).map((d) => normSlash(d).replace(/^\/+/, '')).filter(Boolean);
+  const excluded = asStringArray(s.excludeDirs).map((d) => normSlash(d).replace(/^\/+/, '')).filter(Boolean);
   if (excluded.length) {
     lines.push(`  PathExclude: ${yamlSingleQuote(`${dirRe}/(${excluded.map(escapeRegex).join('|')})/.*`)}`);
   }
@@ -358,9 +367,10 @@ function buildScopeFragment(s: ClangdScopeConfig, marker: { begin: string; end: 
   }
   const diag: string[] = [];
   if (s.unusedIncludes) diag.push(`  UnusedIncludes: ${s.unusedIncludes}`);
-  if (s.suppressedWarnings && s.suppressedWarnings.length) {
+  const suppressions = asStringArray(s.suppressedWarnings);
+  if (suppressions.length) {
     diag.push('  Suppress:');
-    for (const w of s.suppressedWarnings) {
+    for (const w of suppressions) {
       diag.push(`    - ${w}`);
     }
   }
@@ -395,13 +405,14 @@ function buildScopeFragment(s: ClangdScopeConfig, marker: { begin: string; end: 
     lines.push('Documentation:');
     lines.push(`  CommentFormat: ${s.documentationCommentFormat}`);
   }
-  if (s.headerFlags && s.headerFlags.length) {
+  const headerFlags = asStringArray(s.headerFlags);
+  if (headerFlags.length) {
     lines.push('---');
     lines.push('If:');
     lines.push(`  PathMatch: ${yamlSingleQuote(`${dirRe}/.*\\.(h|hpp|hh|hxx|inl)$`)}`);
     lines.push('CompileFlags:');
     lines.push('  Add:');
-    for (const f of s.headerFlags) {
+    for (const f of headerFlags) {
       lines.push(`    - ${f}`);
     }
     if (s.suppressHeaderDiagnostics) {

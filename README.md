@@ -4,7 +4,7 @@
 
 直接在 VS Code 中打开 `.cbp` / `.workspace` 工程，即可获得与 Code::Blocks 对齐的构建、调试与工程浏览体验。
 
-> **作者**：Robinmaomao ｜ **版本**：0.8.130
+> **作者**：Robinmaomao ｜ **版本**：0.8.131
 
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE.md)
 
@@ -66,7 +66,7 @@
 
 ### IntelliSense 与符号
 
-- ✨ **IntelliSense 补全**：自动生成 `compile_commands.json`（复用与 Code::Blocks 对齐的编译命令，写到工作区外缓存并更新 clangd 用户配置），配合 clangd 获得补全 / 跳转 / 悬停 / 重命名等能力；未安装 clangd 时自动回退到项目内轻量符号补全 / 悬停 / 跳转。
+- ✨ **IntelliSense 补全**：自动生成 `compile_commands.json`（复用与 Code::Blocks 对齐的编译命令，写到工作区外缓存并更新 clangd 用户配置；改 `codeblocks.clangd.*` 或编译器设置后自动重新生成，改编译器还会重启 clangd 刷新已打开文件），配合 clangd 获得补全 / 跳转 / 悬停 / 重命名等能力；未安装 clangd 时自动回退到项目内轻量符号补全 / 悬停 / 跳转。
 - 🔍 **符号浏览器（Symbols）**：对齐 Code::Blocks Symbols 面板，按 函数 / 宏 / 类型 / 变量 分组展示项目符号，点击精确定位。
 
 ### 界面与快捷键
@@ -79,7 +79,7 @@
 ### 日志与输出
 
 - 📋 **结构化构建日志**：构建摘要树（编译器 / 编译统计 / 链接结果 + **错误 (N) / 警告 (N) 分组**，诊断挂在分组下一层级），点击诊断节点精确定位到行列；`F4` / `Shift+F4` 循环跳转错误。
-- 🖥️ **构建输出**：单行完成式进度（`✔️ [Compiled] 123-248 xxx.c (2.0s)`）与 `[Skipping]` / `[Linking]` / `[Archiving]` 状态；构建结束在输出末尾给出 Emoji 汇总块（编译/跳过/失败、链接结果、错误/警告数、耗时、最慢 Top3、编译时间）。输出通道默认普通模式（窗口重载清空；警告 `⚠️` / 错误 `❌` 文本标记）；`codeblocks.build.persistLog` 可切换为日志通道（分级着色、跨窗口保留历史），`codeblocks.build.outputTimestamp` 为普通通道附加每行时间戳。
+- 🖥️ **构建输出**：单行完成式进度（`✔️ [Compiled] 123-248 xxx.c (2.0s)`）与 `[Skipping]` / `[Linking]` / `[Archiving]` 状态；构建结束在输出末尾给出 Emoji 汇总块（编译/跳过/失败、链接结果、错误/警告数、耗时、最慢 Top3、编译时间）。输出通道默认普通模式（窗口重载清空；警告 `⚠️` / 错误 `❌` 文本标记）；`codeblocks.build.persistLog` 可切换为日志通道（分级着色、跨窗口保留历史；切换需重载窗口，改动时会弹提醒 + 一键重载），`codeblocks.build.outputTimestamp` 为普通通道附加每行时间戳。
 
 ### 工具
 
@@ -114,10 +114,10 @@ code --install-extension robinmaomao.codeblocks-vscode
 
 ### 方式二：从 GitHub Releases 安装
 
-从 [Releases](https://github.com/robinmaomao/vscode-codeblocks-emu/releases) 下载最新 `codeblocks-vscode-0.8.130.vsix`：
+从 [Releases](https://github.com/robinmaomao/vscode-codeblocks-emu/releases) 下载最新 `codeblocks-vscode-0.8.131.vsix`：
 
 ```powershell
-code --install-extension codeblocks-vscode-0.8.130.vsix --force
+code --install-extension codeblocks-vscode-0.8.131.vsix --force
 ```
 
 ### 方式三：从源码构建
@@ -125,7 +125,7 @@ code --install-extension codeblocks-vscode-0.8.130.vsix --force
 ```powershell
 npm install
 npm run package
-code --install-extension codeblocks-vscode-0.8.130.vsix --force
+code --install-extension codeblocks-vscode-0.8.131.vsix --force
 ```
 
 > `npm run package` = `vsce package`（打包前会自动执行 `vscode:prepublish` 钩子 = `tsc` 编译（`dist/`，本地测试用）+ esbuild 单文件打包（`bundle/extension.js`，发布入口））；直接运行 `npx vsce package` / `npx vsce publish` 同样会自动构建，不会打进过期或缺失的 `bundle/`；Windows 下建议使用 `npm.cmd` / `npx.cmd`（PSReadLine 执行策略）。
@@ -186,7 +186,7 @@ code --extensionDevelopmentPath="." --disable-extensions --new-window
 | `codeblocks.build.cleanResponseFiles` | `false` | Clean/Rebuild 时删除对象目录下响应文件（`*.respFile`，超长命令的 `@file` 临时输入）；默认关=对齐 CB 不清理，开启避免旧文件永久遗留 |
 | `codeblocks.build.scriptExitGraceMs` | `1500` | pre/post-build 脚本结束**宽限上限**（毫秒，0–60000）：命令本体退出后**管道安静约 250ms 即继续**，最多不超过本值；期间管道关闭立即继续。Code::Blocks 只等命令本体 → 设 `0` 完全对齐（脚本内后台程序 `start`/守护进程不再拖慢 post-build）；需等后台程序结束时请用前台命令或 `start /wait` |
 | `codeblocks.build.scriptCommandTimeoutMs` | `0` | 单条 pre/post-build 脚本命令超时（毫秒，0 = 不超时，与 Code::Blocks 无限等待一致；上限 3600000）：超时强杀命令整棵进程树并记构建失败，适用于脚本内网络盘（SMB）重连、上传服务（.NET 默认 100s 超时）等阻塞场景；脚本运行期间每 5s 输出「仍在运行」心跳行 |
-| `codeblocks.clangd.enabled` | `true` | 是否启用 clangd 集成（自动生成 `compile_commands.json` 并更新 clangd 用户配置） |
+| `codeblocks.clangd.enabled` | `true` | 是否启用 clangd 集成（自动生成 `compile_commands.json` 并更新 clangd 用户配置）；关闭时回退轻量补全，并提醒「既有扩展片段仍会被 clangd 读取」（可打开配置清理） |
 | `codeblocks.clangd.buildLogDiagnostics` | `build` | 检测到 clangd 时 Build Log 的诊断来源：`build` = 构建引擎完整诊断（默认）；`clangd` = clangd 诊断（仅打开过的文件） |
 | `codeblocks.clangd.forcedIncludes` | `["global.h"]` | clangd 分析头文件时强制预包含的基础头文件名（默认 `global.h`：typedef/macro/sfr/clib 上下文；勿用 `include.h` 这类全量主头文件，否则递归包含产生误报） |
 | `codeblocks.clangd.suppressedWarnings` | `["-Wunused-function", "redefinition_different_typedef"]` | 在 clangd 诊断中压制的诊断（`-W` 组名或诊断名）：默认压制嵌入式 SDK 跨界误报——静态函数编译期断言（`-Wunused-function`）与 SDK 头 vs 工具链系统头的 typedef 冲突（`__int32_t` 等）；移除对应项即恢复显示 |
@@ -204,7 +204,7 @@ code --extensionDevelopmentPath="." --disable-extensions --new-window
 | `codeblocks.clangd.queryDriver` | `false` | 开启后若 `clangd.arguments` 缺 `--query-driver` 则在输出通道提示（命令 `Configure clangd --query-driver` 可一键写入） |
 | `codeblocks.clangd.extraConfig` | `""` | 自由 YAML，作为同作用域**后置**片段注入（可覆盖扩展写入的任意键；扩展自动补 `If.PathMatch`） |
 
-> 完整 74 项设置（7 个分区）见 [docs/使用说明.md](docs/使用说明.md) §13。另有两条 clangd 命令：`Code::Blocks: Clean Stale clangd Config Fragments`（清理失效片段 + 孤儿缓存目录，预览后确认）与 `Code::Blocks: Configure clangd --query-driver`（交叉编译器保真）。
+> 完整 76 项设置（7 个分区）见 [docs/使用说明.md](docs/使用说明.md) §13。另有两条 clangd 命令：`Code::Blocks: Clean Stale clangd Config Fragments`（清理失效片段 + 孤儿缓存目录，预览后确认）与 `Code::Blocks: Configure clangd --query-driver`（交叉编译器保真）。
 
 ## 架构
 

@@ -69,6 +69,12 @@ function createVscodeMock(opts = {}) {
   const infos = [];
   const configStore = { ...(opts.config || {}) };
   const fileWatchers = [];
+  /** findFiles 调用记录（含 include/exclude/maxResults），用于"事件不再触发全量扫描"回归 */
+  const findFilesCalls = [];
+  /** 状态栏项（createStatusBarItem 返回值，文本可变，供断言） */
+  const statusBarItems = [];
+  /** onDidChangeConfiguration 监听器（供 emitConfigChange 派发设置变更事件） */
+  const configChangeListeners = [];
   /** 命令处理器注册表：commandId → 处理器数组（供测试直接调用） */
   const commandHandlers = new Map();
 
@@ -164,21 +170,42 @@ function createVscodeMock(opts = {}) {
         update: () => Promise.resolve(),
         has: (key) => (section ? `${section}.${key}` : key) in configStore,
       }),
-      onDidChangeConfiguration: () => new Disposable(),
+      onDidChangeConfiguration: (listener) => { configChangeListeners.push(listener); return new Disposable(); },
       onDidSaveTextDocument: () => new Disposable(),
       onDidOpenTextDocument: () => new Disposable(),
       onDidCloseTextDocument: () => new Disposable(),
       onDidChangeTextDocument: () => new Disposable(),
       onDidChangeWorkspaceFolders: () => new Disposable(),
-      createFileSystemWatcher: () => {
-        const w = { onDidChange: () => new Disposable(), onDidCreate: () => new Disposable(), onDidDelete: () => new Disposable(), dispose() {} };
+      createFileSystemWatcher: (pattern) => {
+        const handlers = { create: [], change: [], delete: [] };
+        const w = {
+          pattern,
+          onDidChange: (l) => { handlers.change.push(l); return new Disposable(); },
+          onDidCreate: (l) => { handlers.create.push(l); return new Disposable(); },
+          onDidDelete: (l) => { handlers.delete.push(l); return new Disposable(); },
+          dispose() {},
+          /** 测试用：触发对应事件（kind: create | change | delete） */
+          __emit: (kind, uri) => handlers[kind].forEach((l) => l(uri)),
+        };
         fileWatchers.push(w);
         return w;
       },
       openTextDocument: (p) => Promise.resolve({ uri: typeof p === 'string' ? Uri.file(p) : p, getText: () => '' }),
       applyEdit: () => Promise.resolve(true),
       asRelativePath: (p) => String(p && p.fsPath ? p.fsPath : p),
-      findFiles: () => Promise.resolve([]),
+      findFiles: (include, exclude, maxResults) => {
+        findFilesCalls.push({ include, exclude, maxResults });
+        const raw = typeof opts.findFilesResult === 'function'
+          ? opts.findFilesResult(include, exclude)
+          : opts.findFilesResult;
+        const list = (raw || []).filter((p) => {
+          // 尊重调用方 exclude 的重目录（模拟 ripgrep 剪枝）：供"扫描降本"回归断言使用
+          if (typeof p !== 'string' || !exclude) return true;
+          const parts = p.replace(/\\/g, '/').split('/');
+          return !parts.some((seg) => /^(node_modules|Output|obj|bin|\.git)$/.test(seg));
+        });
+        return Promise.resolve(list.map((p) => Uri.file(p)));
+      },
       fs: {
         readFile: () => Promise.resolve(Buffer.from('')),
         writeFile: () => Promise.resolve(),
@@ -196,7 +223,11 @@ function createVscodeMock(opts = {}) {
         channels.push(ch);
         return ch;
       },
-      createStatusBarItem: () => ({ text: '', tooltip: '', command: undefined, color: undefined, backgroundColor: undefined, shown: false, show() { this.shown = true; }, hide() { this.shown = false; }, dispose: noop }),
+      createStatusBarItem: () => {
+        const item = { text: '', tooltip: '', command: undefined, color: undefined, backgroundColor: undefined, shown: false, show() { this.shown = true; }, hide() { this.shown = false; }, dispose: noop };
+        statusBarItems.push(item);
+        return item;
+      },
       createTreeView: () => ({ onDidChangeVisibility: () => new Disposable(), onDidChangeSelection: () => new Disposable(), reveal: () => Promise.resolve(), dispose: noop, badge: undefined }),
       createTerminal: () => ({ sendText: noop, show: noop, hide: noop, dispose: noop, processId: Promise.resolve(0) }),
       createTextEditorDecorationType: () => ({ dispose: noop, key: 'mock' }),
@@ -269,7 +300,29 @@ function createVscodeMock(opts = {}) {
     },
   });
 
-  return { vscode: proxied, webviews, channels, warnings, infos, configStore, fileWatchers, commandHandlers };
+  return {
+    vscode: proxied, webviews, channels, warnings, infos, configStore, fileWatchers, commandHandlers, findFilesCalls, statusBarItems,
+    /** 测试用：向 .cbp 监视器派发事件（kind: create | change | delete） */
+    emitFileEvent(kind, fsPath) {
+      const target = fileWatchers.find((w) => String(w.pattern || '').includes('.cbp'));
+      if (!target) throw new Error('未注册 .cbp 文件监视器');
+      target.__emit(kind, Uri.file(fsPath));
+    },
+    /**
+     * 测试用：派发设置变更事件。affectsConfiguration 语义与 VS Code 一致——
+     * 变更键自身、其子键（`key.x`）以及其父节（`parent` 命中 `parent.key`）都算命中。
+     */
+    emitConfigChange(...keys) {
+      for (const key of keys) {
+        const event = {
+          affectsConfiguration: (section) => section === key
+            || section.startsWith(`${key}.`)
+            || key.startsWith(`${section}.`),
+        };
+        for (const l of [...configChangeListeners]) l(event);
+      }
+    },
+  };
 }
 
 let installed = null;

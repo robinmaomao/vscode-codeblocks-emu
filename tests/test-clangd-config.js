@@ -3,7 +3,8 @@
 //  - Completion.HeaderInsertion: Never（补全不自动插入 #include；clangd 默认 IWYU）
 //  - 头文件子片段（Suppress:'*' + --target/-include/-isystem 回退）结构正确
 //  - 幂等；保留用户自有内容；空作用域清理不留悬空 ---
-//  - 设置默认值（package.json）与 extension 接线（dist）静态断言
+//  - 非数组压制项防御（设置被手改成字符串 ⇒ 不写该键、绝不按字符迭代）
+//  - 设置默认值（package.json）与 extension 接线（dist）静态断言（含 codeblocks.clangd 设置变化监听）
 const Module = require('module');
 const origLoad = Module._load;
 Module._load = function (request, parent, isMain) {
@@ -107,6 +108,15 @@ check('Suppress 清空后不再输出旧压制项', !text3.includes('- -Wunused-
 check('suppressHeaderDiagnostics=false 时移除 Suppress:*', !text3.includes("  Suppress: '*'"), null);
 check('重写后仍保留 HeaderInsertion: Never', text3.includes('  HeaderInsertion: Never'), null);
 check('重写后仍保留用户内容', text3.includes('# user own'), null);
+
+// 片段层防御：压制项不是数组（设置被手改成字符串时 JS 侧会是 string）→ 该键不写，绝不按字符迭代
+// （历史缺陷：for (const w of '-Wunused-function') 会写出 `- -`、`- W`… 单字符压制项）
+updateClangdUserConfig([{ ...scope, suppressedWarnings: '-Wunused-function,-Wempty-body', suppressHeaderDiagnostics: false }]);
+const textStr = fs.readFileSync(cfgPath, 'utf-8');
+check('非数组压制项：不写 Suppress 键（不按字符迭代）', !/^ {2}Suppress:/m.test(textStr), textStr.match(/^ {2}Suppress:.*$/gm));
+check('非数组压制项：无单字符项', !/^ {4}- .$/m.test(textStr), textStr.match(/^ {4}- .$/gm));
+check('非数组压制项：作用域片段仍正常写入', textStr.includes('CompilationDatabase:'), null);
+check('非数组压制项：不写入 -Wempty-body（未拆分，由 extension 侧容错处理）', !textStr.includes('-Wempty-body'), null);
 
 // 空作用域调用（健壮性）：不报错、保留用户内容、不留悬空 ---
 updateClangdUserConfig([]);
@@ -320,6 +330,23 @@ for (const key of Object.keys(NEW_SETTINGS)) {
   check(`dist 已接线设置读取：${key}`, ext.includes(`'${key.replace('codeblocks.', '')}'`) || ext.includes(key), null);
 }
 check('dist 含清理命令实现（cleanClangdConfigInteractive）', ext.includes('cleanClangdConfigInteractive') && ext.includes('codeblocks.cleanClangdConfig'), null);
+check('dist 监听 codeblocks.clangd 设置变化（自动重新生成，免重开工程）', ext.includes("affectsConfiguration('codeblocks.clangd')"), null);
+check('dist 监听编译器设置变化（G1：状态栏刷新 + 按新编译器重生成，免重开工程）',
+  ["'codeblocks.compilerId'", "'codeblocks.masterPath'", "'codeblocks.compilerPrograms'"]
+    .every((k) => ext.includes(`affectsConfiguration(${k})`))
+  && ext.includes('编译器设置已变更，按新编译器重新生成 clangd 编译数据库')
+  && ext.includes('updateCompilerStatusBar();'), null);
+check('dist 编译器设置变化后无条件重启 clangd（restartClangdReason = compiler 不走开关）',
+  ext.includes("restartClangdReason = 'compiler'") && ext.includes("restartReason === 'compiler'"), null);
+check('dist 含 build.persistLog 变更重载提示（G3）',
+  ext.includes('promptReloadForPersistLog') && ext.includes('workbench.action.reloadWindow'), null);
+check('dist 含 clangd.enabled 关闭遗留片段提示（G4）',
+  ext.includes('promptClangdDisabledLeftover')
+  && ext.includes('打开 clangd 配置')
+  && /listManagedFragments\)\(\(0, clangd_\d+\.readClangdUserConfigText\)\(\)\)/.test(ext)
+  && ext.includes('clangdEnabledLast'), null);
+check('dist 含字符串数组设置容错读取（readStringArraySetting）', ext.includes('readStringArraySetting'), null);
+check('dist 含非数组压制项防御（asStringArray）', clangdDist.includes('asStringArray'), null);
 check('dist 含 query-driver 命令实现', ext.includes('applyClangdQueryDriverInteractive') && ext.includes('--query-driver='), null);
 check('dist 含 CompileFlags.BuiltinHeaders 写入分支', clangdDist.includes('BuiltinHeaders:'), null);
 check('dist 含失效片段清理实现', clangdDist.includes('pruneStaleClangdFragments') && clangdDist.includes('scope-missing') && clangdDist.includes('database-missing'), null);
