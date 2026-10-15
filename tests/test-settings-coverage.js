@@ -1,10 +1,10 @@
 // 设置项覆盖回归：16 个此前未被任何测试引用的设置键
-//  - 静态读点断言：键的字面量出现在「消费它的实现文件」，且该行是一次真实的配置读取（.get(...)）
+//  - 静态读点断言：键的字面量出现在「消费它的实现文件」，且该行是一次真实的配置读取（.get(...) 或封装读取器 readStringArraySetting(...)）
 //  - 行为断言：低风险项的运行时效果（树分组、工具栏上下文、自动头文件保护、工具解析、astyle 参数）
 //
 // 位置断言刻意不比对绝对行号：对无关代码的增删不应报错（历史：gdbDebugAdapter.ts 增行 44 行后
 // ±40 行容差误判，main CI 变红）。而「键被删/改名/挪到别的文件」由前两条断言拦截，
-// 「键退化为普通字符串、不再取值」由 .get(...) 断言拦截。
+// 「键退化为普通字符串、不再取值」由 .get(...)/readStringArraySetting(...) 断言拦截。
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -64,8 +64,8 @@ const lineOfKey = (rel, key) => {
   const needle = new RegExp(`['"\`]${bare.replace(/\./g, '\\.')}['"\`]`);
   return fileOf(rel).split(/\r?\n/).findIndex((l) => needle.test(l)) + 1;
 };
-// 一行内是否是一次真实的配置取值调用（get / get<T>）
-const isConfigRead = (line) => /\.get\s*(<[^>]*>)?\s*\(/.test(line);
+// 一行内是否是一次真实的配置取值调用（get / get<T>，或封装读取器 readStringArraySetting）
+const isConfigRead = (line) => /\.get\s*(<[^>]*>)?\s*\(/.test(line) || /readStringArraySetting\s*\(/.test(line);
 for (const [key, srcRel, distRel, note] of SETTINGS) {
   const atSrc = lineOfKey(srcRel, key);
   check(`S ${key}：源码读点在 ${srcRel}（${note}）`, atSrc > 0, atSrc || '未找到', `出现在 ${srcRel}`);
@@ -75,7 +75,7 @@ for (const [key, srcRel, distRel, note] of SETTINGS) {
     const bare = key.replace(/^codeblocks\./, '');
     const needle = new RegExp(`['"\`]${bare.replace(/\./g, '\\.')}['"\`]`);
     const readLine = fileOf(srcRel).split(/\r?\n/).find((l) => needle.test(l) && isConfigRead(l));
-    check(`S ${key}：读点是一次配置取值（非仅字符串出现）`, !!readLine, readLine ? readLine.trim() : '未找到 .get(...) 行', '.get(...) 调用');
+    check(`S ${key}：读点是一次配置取值（非仅字符串出现）`, !!readLine, readLine ? readLine.trim() : '未找到 .get(...)/readStringArraySetting(...) 行', '.get(...) 调用');
   }
   check(`S ${key}：已接线到编译产物 ${distRel}`, lineOfKey(distRel, key) > 0, lineOfKey(distRel, key) || '未找到', distRel);
 }

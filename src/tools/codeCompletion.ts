@@ -79,18 +79,38 @@ function stripCommentsAndStrings(content: string): string {
   return out;
 }
 
+/** 单文件解析结果缓存（路径 → mtime/size + 条目），用于"只重解析变化文件" */
+interface FileScanCacheEntry {
+  mtimeMs: number;
+  size: number;
+  entries: SymbolEntry[];
+}
+
 export class SymbolIndex {
   private byName = new Map<string, SymbolEntry[]>();
   private all: SymbolEntry[] = [];
+  /** 上次重建的单文件缓存：mtime + size 未变的文件直接复用条目，避免多工程全量重读磁盘 */
+  private fileCache = new Map<string, FileScanCacheEntry>();
+  private lastStats = { parsed: 0, reused: 0 };
 
-  /** 从源文件列表重建索引（增量全量重建均可） */
+  /** 上次重建的解析统计（parsed = 重新解析的文件数，reused = 命中缓存的文件数） */
+  stats(): { parsed: number; reused: number } {
+    return { ...this.lastStats };
+  }
+
+  /** 从源文件列表重建索引（增量全量重建均可；mtime/size 未变的文件复用上次解析结果） */
   rebuild(files: string[]): void {
     this.byName.clear();
     this.all = [];
+    this.lastStats = { parsed: 0, reused: 0 };
+    const next = new Map<string, FileScanCacheEntry>();
     for (const file of files) {
       if (!isIndexable(file)) continue;
-      this.scanFile(file);
+      const entries = this.entriesFor(file, next);
+      if (!entries) continue;
+      for (const e of entries) this.add(e);
     }
+    this.fileCache = next;
   }
 
   /**
@@ -101,16 +121,42 @@ export class SymbolIndex {
   async rebuildAsync(files: string[], opts: RebuildAsyncOptions = {}): Promise<void> {
     this.byName.clear();
     this.all = [];
+    this.lastStats = { parsed: 0, reused: 0 };
+    const next = new Map<string, FileScanCacheEntry>();
     const chunk = Math.max(1, Math.floor(opts.chunkSize ?? 64));
     const yieldControl = opts.yieldControl
       ?? ((): Promise<void> => new Promise((resolve) => setImmediate(resolve)));
     let scanned = 0;
     for (const file of files) {
       if (!isIndexable(file)) continue;
-      this.scanFile(file);
+      const entries = this.entriesFor(file, next);
+      if (entries) for (const e of entries) this.add(e);
       scanned++;
       if (scanned % chunk === 0) await yieldControl();
     }
+    this.fileCache = next;
+  }
+
+  /** 取单个文件的符号条目（mtime + size 未变则复用缓存）；返回 undefined 表示不可读/跳过 */
+  private entriesFor(file: string, next: Map<string, FileScanCacheEntry>): SymbolEntry[] | undefined {
+    let stat: fs.Stats;
+    try {
+      stat = fs.statSync(file);
+    } catch {
+      return undefined; // 文件已被删除 / 无权限
+    }
+    if (stat.isDirectory()) return undefined;
+    const cached = this.fileCache.get(file);
+    let entries: SymbolEntry[];
+    if (cached && cached.mtimeMs === stat.mtimeMs && cached.size === stat.size) {
+      entries = cached.entries;
+      this.lastStats.reused++;
+    } else {
+      entries = this.scanFile(file);
+      this.lastStats.parsed++;
+    }
+    next.set(file, { mtimeMs: stat.mtimeMs, size: stat.size, entries });
+    return entries;
   }
 
   lookup(name: string): SymbolEntry[] {
@@ -134,12 +180,14 @@ export class SymbolIndex {
     this.all.push(entry);
   }
 
-  private scanFile(file: string): void {
+  /** 解析单个文件的符号（返回条目数组，便于按文件缓存复用；不直接写入索引） */
+  private scanFile(file: string): SymbolEntry[] {
+    const entries: SymbolEntry[] = [];
     let content: string;
     try {
       content = fs.readFileSync(file, 'utf-8');
     } catch {
-      return; // 二进制 / 无权限，跳过
+      return entries; // 二进制 / 无权限，跳过
     }
     const cleaned = stripCommentsAndStrings(content);
     const lines = cleaned.split(/\r?\n/);
@@ -153,7 +201,7 @@ export class SymbolIndex {
       if (def) {
         const name = def[1];
         const isFn = def[2] !== undefined;
-        this.add({
+        entries.push({
           name,
           kind: isFn ? vscode.CompletionItemKind.Function : vscode.CompletionItemKind.Constant,
           detail: isFn ? `#define ${name}(${def[2]})` : `#define ${name}`,
@@ -173,7 +221,7 @@ export class SymbolIndex {
           union: vscode.CompletionItemKind.Struct,
           class: vscode.CompletionItemKind.Class,
         };
-        this.add({
+        entries.push({
           name: type[2],
           kind: kindMap[type[1]],
           detail: `${type[1]} ${type[2]}`,
@@ -186,7 +234,7 @@ export class SymbolIndex {
       // typedef struct {...} Name; / typedef ... Name;
       const typedef = line.match(/\}\s*([A-Za-z_]\w*)\s*;/) || line.match(/^\s*typedef\b[^;]*?\s([A-Za-z_]\w*)\s*;/);
       if (typedef && !KEYWORDS.has(typedef[1])) {
-        this.add({
+        entries.push({
           name: typedef[1],
           kind: vscode.CompletionItemKind.TypeParameter,
           detail: `typedef ${typedef[1]}`,
@@ -199,7 +247,7 @@ export class SymbolIndex {
       // 函数：return_type name(params) { / ; / const
       const fn = line.match(/^\s*(?:[\w:<>~*&\[\]\s]+?\s+)?([A-Za-z_]\w*)\s*\(([^;{}()]*)\)\s*(?:\{|;|const\b)/);
       if (fn && !KEYWORDS.has(fn[1]) && !/^\s*(?:if|for|while|switch)\s*\(/.test(line)) {
-        this.add({
+        entries.push({
           name: fn[1],
           kind: vscode.CompletionItemKind.Function,
           detail: `${fn[1]}(${fn[2].trim()})`,
@@ -215,7 +263,7 @@ export class SymbolIndex {
       if (hasType && !line.includes('(')) {
         const vr = line.match(/^\s*(?:[\w:<>~*&\[\]\s]+?\s+)([A-Za-z_]\w*)\s*(?:=|;|\[)/);
         if (vr && !KEYWORDS.has(vr[1])) {
-          this.add({
+          entries.push({
             name: vr[1],
             kind: vscode.CompletionItemKind.Variable,
             detail: `${vr[1]} (变量)`,
@@ -225,6 +273,8 @@ export class SymbolIndex {
         }
       }
     }
+
+    return entries;
   }
 }
 

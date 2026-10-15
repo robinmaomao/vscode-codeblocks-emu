@@ -2,6 +2,27 @@
 
 本文件记录**正式版**里程碑；每个 dev 迭代的逐轮发布说明见 [`docs/release/`](docs/release/)（`0.8.xx-dev.md`），版本号与维护约定见 [`docs/release/00-说明.md`](docs/release/00-说明.md)。
 
+## 0.8.131 — 2026-10-15
+
+**工作区检测开销治理 · clangd 设置改动立即生效**
+
+- **工作区检测开销治理**（本版新增，对齐"构建期进程暴增 + CPU 冲 100%"修复简报）：
+  - `.cbp` 文件新增/删除改为**增量登记**：不再触发全工作区 `findFiles`（历史上每次事件固定起 2 个 ripgrep 进程，成本 ∝ 工作区文件数）
+  - 工作区工程扫描合并为**一次** `findFiles('**/*.{cbp,workspace}')`，exclude 排除 `Output`/`obj`/`bin`/`node_modules`/`.git` 等重目录（显式传 exclude 会覆盖 `files.exclude`，故把默认项写回），并加 30s 结果缓存 + 单飞；宿主实测（36 工程 / 36,829 文件）激活期扫描 **211ms → 89ms**
+  - 新设置 `codeblocks.detect.autoOpen`（`all`/`single`/`off`，默认 `all`）与 `codeblocks.detect.autoOpenThreshold`（默认 `20`）：未打开工程数超阈值时不再自动弹多选（仅状态栏入口 + 输出通道提示），并限制会话恢复的工程数；多选**默认不再全选**（仅勾选最近使用/活动工程）
+  - 兜底符号索引 `SymbolIndex` 增加"mtime + size"单文件缓存：多工程重建只重解析变化文件（`stats()` 可读 parsed/reused）
+  - 新增命令 `Code::Blocks: Workspace Scan Report`：输出扫描耗时、工程数、工程目录数、当前 ripgrep 并发与"单工程工作区"建议
+- **clangd 设置改动立即生效**（本版新增，修复「设置里配了 `-Wempty-body` 却没写进 clangd 配置」）：
+  - **自动重新生成**：改任意 `codeblocks.clangd.*` 后自动重写用户级 `config.yaml` 片段（约 150ms 去抖合并；clangd 自身会重载配置），不再需要重开工程或手动跑一次 `Generate compile_commands.json`；生成中到达的请求改为**跑完再补一次**（原先单飞直接丢弃，恰逢生成中改设置会静默失效）；未打开工程时跳过（作用域未知），下次打开工程按新设置生成
+  - **取值容错**：`suppressedWarnings` / `forcedIncludes` / `excludeDirs` 手改成字符串（如 `"-Wunused-function, -Wempty-body"`）时按逗号/分号/空白拆分、写成其它类型则回退默认值，并在输出通道提示取值类型问题；数组值顺带 trim/去空/去重。片段层再加非数组防御——历史上字符串会**按字符**迭代，写出 `- -`、`- W`… 单字符压制项（等于该设置彻底失效）
+- **设置即时生效收口**（本版新增，回应"哪些设置改了不会立即生效"的逐项审计）：
+  - **改编译器立即生效（G1）**：修改 `codeblocks.compilerId` / `masterPath` / `compilerPrograms` 时，底部状态栏 `Compiler:` 立即刷新，并按新编译器重新生成编译数据库（编译命令、`--target`、系统头 `-isystem` 全按新编译器推导）；数据库**真正变化**且存在已打开 C/C++ 文件时**重启 clangd**，免去"换了编译器、红波浪线/补全还是旧的"。编译器变化不提供关闭项（不重启等于设置没生效），切换活动工程的重启仍受 `codeblocks.clangd.restartOnActiveProjectSwitch` 控制；未打开源文件时不重启、未打开工程时只刷新状态栏
+  - **`codeblocks.build.persistLog` 重载提醒（G3）**：输出通道类型在激活期创建、不可热切换（重建会清空当前输出）⇒ 改动时**弹提醒**并提供「重载窗口 / 稍后」，选前者执行 `workbench.action.reloadWindow`
+  - **`codeblocks.clangd.enabled` 关闭提醒（G4）**：关闭只让扩展停止**生成/更新**用户级 `config.yaml`，已写入的片段（用户级配置，优先级高于项目 `.clangd`）仍会被 clangd 读取 ⇒ 关闭时**弹提醒**并提供「打开 clangd 配置 / 稍后」；无既存片段、或值未变化（其它来源重复派发事件）时静默，不重复打扰
+- 规模：命令 106 项、设置 76 项（7 分区 + 中英 nls）、视图 5 个；分层回归 contract 2/2、unit 155 脚本 FAIL=0 SKIP=1、e2e 4/4、perf 13 项 0 fail、pack 14 pass
+
+📄 详细发布说明：[`docs/release/0.8.131.md`](docs/release/0.8.131.md)
+
 ## 0.8.130 — 2026-10-13
 
 **构建观感与 CPU 收口 · post-build 可观测性 · clangd 补全与配置治理**

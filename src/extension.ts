@@ -148,6 +148,20 @@ let compilerStatusBar: vscode.StatusBarItem | undefined;
 let cbpStatusBar: vscode.StatusBarItem | undefined;
 /** 检测到但未打开的 .cbp 文件（供状态栏入口重新打开） */
 let pendingCbpFiles: string[] = [];
+/** 已登记的工程文件（.cbp/.workspace 归一化路径）——.cbp 监视器事件走增量登记，避免每次事件全量扫描工作区 */
+let knownProjectFiles = new Set<string>();
+/** 全工作区工程扫描的结果缓存（TTL 内复用；见 findProjectFiles） */
+let projectScanCache: string[] = [];
+let projectScanCacheAt = 0;
+/** 全工作区工程扫描的单飞句柄（同一时刻只允许一个 ripgrep 扫描在跑） */
+let projectScanInFlight: Promise<string[]> | undefined;
+/** 工作区工程扫描的重目录排除（.cbp/.workspace 不会出现在这些目录；显式传 exclude 会覆盖 files.exclude，故把默认项写回） */
+const PROJECT_SCAN_EXCLUDE =
+  '**/{node_modules,.git,.svn,.hg,CVS,Output,obj,bin,build,out,dist,Debug,Release,.vs,__pycache__}/**';
+/** 工程扫描结果缓存有效期（毫秒） */
+const PROJECT_SCAN_TTL_MS = 30_000;
+/** 工程扫描结果上限（历史：两次 findFiles 各 500，合并为一次后放宽到 1000） */
+const PROJECT_SCAN_MAX_RESULTS = 1000;
 
 /** 兜底 IntelliSense 符号索引（clangd 不可用时启用） */
 const fallbackIndex = new SymbolIndex();
@@ -159,8 +173,19 @@ let clangdDiagnosticsEnabled = false;
 let clangdGenTimer: NodeJS.Timeout | undefined;
 /** clangd 配置生成进行中标志（防止并发写同一文件） */
 let clangdGenRunning = false;
-/** 活动工程切换后，若编译数据库实际变化则重启 clangd（刷新已打开文件） */
-let restartClangdAfterGeneration = false;
+/** 生成期间到达的重新生成请求（合并为一次；避免「改设置恰逢生成中」被静默丢弃） */
+let clangdGenPending = false;
+/** 被合并的请求中是否含交互式（手动命令）：有则重跑时保留交互提示 */
+let clangdGenPendingInteractive = false;
+/**
+ * 本次生成后是否需要重启 clangd（仅当编译数据库实际变化时执行）与触发原因：
+ *  - 'project'：切换活动工程（受 codeblocks.clangd.restartOnActiveProjectSwitch 控制）
+ *  - 'compiler'：编译器设置变化（compilerId / masterPath / compilerPrograms）——已打开文件的诊断/补全
+ *    全部基于旧编译命令推导，必须重启才会按新编译器重新分析
+ */
+let restartClangdReason: 'project' | 'compiler' | undefined;
+/** clangd.enabled 的上次取值（只在「开 → 关」时提醒既有片段仍在生效，避免其它设置变更重复弹窗） */
+let clangdEnabledLast = true;
 /** 汇编注释动态覆盖的 Disposable（设置开启 `#` 时注册；释放后回退静态 `//`） */
 let asmCommentOverride: vscode.Disposable | undefined;
 
@@ -211,6 +236,48 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   // P7：clangd.path 变化 → 清除检测缓存（下次生成时重新探测）
   context.subscriptions.push(vscode.workspace.onDidChangeConfiguration((e) => {
     if (e.affectsConfiguration('clangd.path')) clearClangdDetectionCache();
+  }));
+  // clangd 用户配置（config.yaml 片段）由 codeblocks.clangd.* 设置驱动：变更后自动重新生成一次
+  // （去抖合并；clangd 自己会重载 config.yaml），免去「改完设置还得重开工程/手动跑一次生成」的困惑。
+  // 未打开工程时无从确定作用域 ⇒ 跳过，下次打开工程按新设置生成。
+  context.subscriptions.push(vscode.workspace.onDidChangeConfiguration((e) => {
+    if (!e.affectsConfiguration('codeblocks.clangd')) return;
+    if (!openProjects.length) return;
+    outputChannel.info('[Code::Blocks] codeblocks.clangd 设置已变更，按新设置重新生成 clangd 用户配置');
+    void generateClangdForWorkspace();
+  }));
+  // G1：编译器相关设置变化（compilerId / masterPath / compilerPrograms）——编译数据库里的编译命令、
+  // --target / -isystem 全部按当前编译器推导，换编译器必须重新生成，否则 clangd 仍按旧编译器分析。
+  // 状态栏 Compiler: 同步刷新（原先只在工程事件/探测命令里更新，改设置后不刷新）。
+  context.subscriptions.push(vscode.workspace.onDidChangeConfiguration((e) => {
+    if (
+      !e.affectsConfiguration('codeblocks.compilerId')
+      && !e.affectsConfiguration('codeblocks.masterPath')
+      && !e.affectsConfiguration('codeblocks.compilerPrograms')
+    ) {
+      return;
+    }
+    updateCompilerStatusBar();
+    // 未打开工程 ⇒ 无从确定作用域，跳过（下次打开工程按新设置生成）
+    if (!openProjects.length) return;
+    outputChannel.info('[Code::Blocks] 编译器设置已变更，按新编译器重新生成 clangd 编译数据库');
+    // DB 实际变化时重启 clangd（编译器变化不提供关闭项：不重启等于设置没生效）
+    restartClangdReason = 'compiler';
+    void generateClangdForWorkspace();
+  }));
+  // G3：build.persistLog 决定输出通道类型（激活期创建）⇒ 变更后提示重载窗口
+  context.subscriptions.push(vscode.workspace.onDidChangeConfiguration((e) => {
+    if (e.affectsConfiguration('codeblocks.build.persistLog')) void promptReloadForPersistLog();
+  }));
+  // G4：clangd.enabled 关闭后既有片段仍在生效 ⇒ 提示（不自动清理：片段是用户级配置，且当前工程的
+  // 片段会被「清理失效片段」命令视为有效而保留）
+  clangdEnabledLast = vscode.workspace.getConfiguration('codeblocks').get<boolean>('clangd.enabled', true);
+  context.subscriptions.push(vscode.workspace.onDidChangeConfiguration((e) => {
+    if (!e.affectsConfiguration('codeblocks.clangd.enabled')) return;
+    const now = vscode.workspace.getConfiguration('codeblocks').get<boolean>('clangd.enabled', true);
+    const was = clangdEnabledLast;
+    clangdEnabledLast = now;
+    if (was && !now) void promptClangdDisabledLeftover();
   }));
   // 日志/行为偏好缓存失效：plainCbLog / log.english / strictQuoting / quietSuccess 即时生效（免重载窗口）
   context.subscriptions.push(vscode.workspace.onDidChangeConfiguration((e) => {
@@ -1757,28 +1824,30 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     }),
   );
 
+  context.subscriptions.push(
+    vscode.commands.registerCommand('codeblocks.workspaceScanReport', async () => {
+      await showWorkspaceScanReport();
+    }),
+  );
+
   // 恢复上次会话打开的项目（.workspace 或项目列表）
   await restorePersistedProjects();
 
   // 自动检测并打开工作区中的 .cbp
-  await autoDetectAndOpenProject();
+  await autoDetectAndOpenProject(true);
 
-  // 监听工作区文件夹变化，重新检测
+  // 监听工作区文件夹变化，重新检测（工作区根变化才需要全量扫描）
   context.subscriptions.push(
     vscode.workspace.onDidChangeWorkspaceFolders(() => {
-      autoDetectAndOpenProject();
+      autoDetectAndOpenProject(true);
     }),
   );
 
-  // 监听 .cbp 文件的新增/删除（延迟去抖）
-  let cbpWatcherTimer: NodeJS.Timeout | undefined;
+  // 监听 .cbp 文件的新增/删除：**增量登记**，不再触发全工作区 ripgrep 扫描
+  // （历史上此处每次事件都会 findFiles 全工作区；父目录多工程场景下一次事件即 2 个 rg 进程）
   const cbpWatcher = vscode.workspace.createFileSystemWatcher('**/*.cbp');
-  const scheduleRescan = () => {
-    if (cbpWatcherTimer) clearTimeout(cbpWatcherTimer);
-    cbpWatcherTimer = setTimeout(() => autoDetectAndOpenProject(), 800);
-  };
-  cbpWatcher.onDidCreate(scheduleRescan);
-  cbpWatcher.onDidDelete(scheduleRescan);
+  cbpWatcher.onDidCreate((uri) => handleProjectFileCreated(uri));
+  cbpWatcher.onDidDelete((uri) => handleProjectFileDeleted(uri));
   context.subscriptions.push(cbpWatcher);
 
   // 初始状态：无工程时仅显示 Code::Blocks 入口，有工程时显示 Target/Build/Rebuild/Compiler
@@ -1787,8 +1856,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   return;
 }
 
-/** 自动检测项目：扫描目录下所有 .cbp/.workspace，由用户多选打开 */
-async function autoDetectAndOpenProject(): Promise<void> {
+/** 自动检测项目：扫描目录下所有 .cbp/.workspace，由用户多选打开（可被设置抑制，避免大工作区反复全量扫描） */
+async function autoDetectAndOpenProject(force = false): Promise<void> {
   const folders = vscode.workspace.workspaceFolders;
   if (!folders || folders.length === 0) {
     // 无工作区：若已记录了上次项目则尝试恢复（workspaceState 存储）
@@ -1799,15 +1868,18 @@ async function autoDetectAndOpenProject(): Promise<void> {
     return;
   }
 
-  const projectFiles = await findProjectFiles();
+  const projectFiles = await findProjectFiles(force);
+  syncKnownProjectFiles(projectFiles);
 
   if (projectFiles.length === 0) {
+    pendingCbpFiles = [];
+    updateCbpStatusBar();
     return;
   }
 
   // 已打开的项目不重复列在可选列表里（但标记）
-  const alreadyOpen = new Set(openProjects.map((p) => p.filename));
-  const notOpen = projectFiles.filter((f) => !alreadyOpen.has(f));
+  const alreadyOpen = new Set(openProjects.map((p) => normPath(p.filename)));
+  const notOpen = projectFiles.filter((f) => !alreadyOpen.has(normPath(f)));
 
   // 更新待打开列表与状态栏入口
   pendingCbpFiles = notOpen;
@@ -1818,11 +1890,27 @@ async function autoDetectAndOpenProject(): Promise<void> {
   // 已有项目打开（如 reload 后已恢复上次会话）：不自动打开/弹窗，仅更新状态栏入口
   if (openProjects.length > 0) return;
 
+  const mode = detectAutoOpenMode();
+  if (mode === 'off') return;
+
   // 单文件直接打开；多文件让用户多选
   if (notOpen.length === 1) {
     await openProject(notOpen[0]);
     pendingCbpFiles = [];
     updateCbpStatusBar();
+    return;
+  }
+
+  if (mode === 'single') return;
+
+  // 大工作区保护：工程数超阈值时不自动弹多选（避免一次打开 N 个工程 → clangd/索引全量放大）
+  const threshold = detectAutoOpenThreshold();
+  if (notOpen.length > threshold) {
+    outputChannel?.info(
+      `[Code::Blocks] 检测到 ${notOpen.length} 个未打开工程，超过自动打开阈值 ${threshold}，已跳过自动弹窗；` +
+        `可从状态栏「Code::Blocks 项目」或项目管理菜单按需打开。建议以单个工程目录作为工作区，避免工作区级全量扫描。` +
+        `（阈值设置：codeblocks.detect.autoOpenThreshold；关闭自动检测：codeblocks.detect.autoOpen=off）`,
+    );
     return;
   }
 
@@ -1834,22 +1922,27 @@ async function autoDetectAndOpenProject(): Promise<void> {
 
 /** 弹出多选让用户打开检测到的 .cbp（供自动检测与状态栏入口复用） */
 async function pickAndOpenCbp(files: string[]): Promise<void> {
-  const alreadyOpen = new Set(openProjects.map((p) => p.filename));
-  const notOpen = files.filter((f) => !alreadyOpen.has(f));
+  const openSet = new Set(openProjects.map((p) => normPath(p.filename)));
+  const notOpen = files.filter((f) => !openSet.has(normPath(f)));
   if (notOpen.length === 0) {
     pendingCbpFiles = [];
     updateCbpStatusBar();
     return;
   }
+  // 默认勾选：最近打开过的工程 + 当前活动工程（不再默认全选——父目录多工程工作区下"回车打开全部"会放大 clangd/索引开销）
+  const preferred = new Set(
+    (extContext?.globalState.get<string[]>('codeblocks.recentProjects', []) ?? []).map((f) => normPath(f)),
+  );
+  if (activeProject) preferred.add(normPath(activeProject.filename));
   const picked = await vscode.window.showQuickPick(
     notOpen.map((f) => ({
       label: `${path.basename(path.dirname(f))}/${path.basename(f)}`,
       description: f,
-      picked: true,
+      picked: preferred.has(normPath(f)),
     })),
     {
       title: `检测到 ${notOpen.length} 个 Code::Blocks 项目`,
-      placeHolder: '回车打开全部，空格勾选/取消，Esc 跳过',
+      placeHolder: '空格勾选/取消（默认仅勾选最近使用的工程），回车打开已勾选项，Esc 跳过',
       canPickMany: true,
     },
   );
@@ -1971,6 +2064,85 @@ interface WorkspaceProjectPickItem extends vscode.QuickPickItem {
   filename: string;
 }
 
+/** 统计当前 ripgrep 进程数（诊断用；Windows 走 tasklist，POSIX 走 ps） */
+function countRipgrepProcesses(): Promise<number> {
+  return new Promise((resolve) => {
+    if (process.platform === 'win32') {
+      execFile(
+        'tasklist',
+        ['/FI', 'IMAGENAME eq rg.exe', '/FO', 'CSV', '/NH'],
+        { maxBuffer: 1024 * 1024, windowsHide: true },
+        (err, stdout) => {
+          if (err || !stdout) return resolve(0);
+          resolve((String(stdout).match(/"rg\.exe"/gi) ?? []).length);
+        },
+      );
+      return;
+    }
+    execFile('ps', ['-eo', 'comm'], { maxBuffer: 1024 * 1024 }, (err, stdout) => {
+      if (err || !stdout) return resolve(0);
+      resolve(String(stdout).split(/\r?\n/).filter((l) => l.trim() === 'rg').length);
+    });
+  });
+}
+
+/** 求多个路径的公共父目录（诊断报告用：识别"同一父目录下多工程"结构） */
+function commonParentDir(dirs: string[]): string {
+  if (dirs.length === 0) return '';
+  const parts = dirs.map((d) => d.split(/[\\/]/).filter(Boolean));
+  const first = parts[0];
+  let i = 0;
+  for (; i < first.length; i++) {
+    if (!parts.every((p) => p[i] === first[i])) break;
+  }
+  return first.slice(0, i).join(path.sep) || path.parse(dirs[0]).root;
+}
+
+/**
+ * 工作区扫描诊断报告（命令 codeblocks.workspaceScanReport）：
+ * 量化"全量扫描成本 + 当前 ripgrep 并发 + 是否属于父目录多工程工作区"，供现场自查（对齐修复简报的验证方法）。
+ */
+async function showWorkspaceScanReport(): Promise<void> {
+  const roots = (vscode.workspace.workspaceFolders ?? []).map((f) => f.uri.fsPath);
+  const startedAt = Date.now();
+  const files = await findProjectFiles(true);
+  const scanMs = Date.now() - startedAt;
+  const rgCount = await countRipgrepProcesses();
+  const mode = detectAutoOpenMode();
+  const threshold = detectAutoOpenThreshold();
+  const lines: string[] = [];
+  lines.push('[Code::Blocks] 工作区扫描诊断报告');
+  lines.push(`  工作区根（${roots.length}）：${roots.join(' | ') || '（无）'}`);
+  lines.push(`  检测到工程文件：${files.length} 个（.cbp/.workspace；单次 findFiles + 重目录排除）`);
+  lines.push(`  本次全量扫描耗时：${scanMs}ms`);
+  lines.push(`  当前 rg（ripgrep）进程数：${rgCount}`);
+  lines.push(`  自动打开模式：${mode}（阈值 ${threshold}）`);
+  lines.push(`  已打开工程：${openProjects.length} 个；待打开：${pendingCbpFiles.length} 个`);
+  const projectDirs = [...new Set(files.map((f) => path.dirname(f)))];
+  lines.push(`  工程目录数：${projectDirs.length}（共同父目录：${commonParentDir(projectDirs) || '（无）'}）`);
+  if (projectDirs.length > 1) {
+    lines.push(
+      `  提示：${projectDirs.length} 个工程分散在多个目录（同一父目录多工程结构）——` +
+        `建议以单个工程目录作为工作区：工作区级扫描成本与目录文件数成正比，父目录多工程叠加时会明显拖慢构建期机器。`,
+    );
+  }
+  const sameDirMulti = files.length > projectDirs.length;
+  if (sameDirMulti) {
+    lines.push('  提示：存在同一目录下多个工程文件的情形，检测列表会一次性列出全部工程。');
+  }
+  if (scanMs > 3000) {
+    lines.push('  提示：单次扫描超过 3s，常见原因：磁盘较慢 / 网络盘 / 杀软实时扫描；可把工程目录加入杀软排除项。');
+  }
+  if (rgCount > 4) {
+    lines.push(`  提示：当前有 ${rgCount} 个 ripgrep 进程在跑（可能来自其它扩展对工作区的全量扫描）。`);
+  }
+  if (openProjects.length > threshold) {
+    lines.push(`  提示：已打开工程数 ${openProjects.length} 超过阈值 ${threshold}，clangd/符号索引会成倍放大；建议减少同时打开的工程。`);
+  }
+  outputChannel?.info(lines.join('\n'));
+  vscode.window.showInformationMessage(`工作区扫描诊断：${files.length} 个工程，扫描 ${scanMs}ms（详见 Code::Blocks 输出通道）`);
+}
+
 /** 扫描工作区所有 .cbp/.workspace，多选打开（已打开则设为活动工程） */
 async function scanAndOpenWorkspaceProjects(): Promise<void> {
   const folders = vscode.workspace.workspaceFolders;
@@ -1978,7 +2150,7 @@ async function scanAndOpenWorkspaceProjects(): Promise<void> {
     vscode.window.showWarningMessage('请先打开一个工作区文件夹');
     return;
   }
-  const files = await findProjectFiles();
+  const files = await findProjectFiles(true);
   if (files.length === 0) {
     vscode.window.showInformationMessage('工作区未检测到 .cbp / .workspace 项目');
     return;
@@ -2013,13 +2185,116 @@ async function scanAndOpenWorkspaceProjects(): Promise<void> {
   updateCbpStatusBar();
 }
 
-/** 扫描工作区所有项目文件（.cbp + .workspace，并行 + 去重；findFiles 全局搜索多根工作区） */
-async function findProjectFiles(): Promise<string[]> {
-  const [cbps, wss] = await Promise.all([
-    vscode.workspace.findFiles('**/*.cbp', '**/node_modules/**', 500),
-    vscode.workspace.findFiles('**/*.workspace', '**/node_modules/**', 500),
-  ]);
-  return [...new Set([...cbps, ...wss].map((u) => u.fsPath))];
+/**
+ * 扫描工作区所有项目文件（.cbp + .workspace）。
+ *
+ * 性能要点（对齐"构建期进程暴增"修复）：
+ *  - **一次** findFiles 取代历史上的两次（每次事件少起 1 个 ripgrep 进程）；
+ *  - exclude 排除 Output/obj/bin 等重目录（显式传 exclude 会覆盖 files.exclude，故把 .git/.svn/.hg/CVS 等默认项写回）；
+ *  - 30s 结果缓存 + 单飞：同一时刻只允许一个全量扫描在跑；
+ *  - 结果按路径排序，保证 UI 列表顺序稳定。
+ * @param force 忽略缓存强制扫描（激活期、工作区变化、诊断命令、手动"检测工作区项目"）
+ */
+async function findProjectFiles(force = false): Promise<string[]> {
+  const now = Date.now();
+  if (!force && projectScanCacheAt > 0 && now - projectScanCacheAt < PROJECT_SCAN_TTL_MS) {
+    return [...projectScanCache];
+  }
+  if (projectScanInFlight) return projectScanInFlight;
+  const startedAt = Date.now();
+  projectScanInFlight = (async () => {
+    try {
+      const hits = await vscode.workspace.findFiles('**/*.{cbp,workspace}', PROJECT_SCAN_EXCLUDE, PROJECT_SCAN_MAX_RESULTS);
+      const files = [...new Set(hits.map((u) => u.fsPath))].sort((a, b) => a.localeCompare(b));
+      projectScanCache = files;
+      projectScanCacheAt = Date.now();
+      return files;
+    } finally {
+      projectScanInFlight = undefined;
+    }
+  })();
+  const files = await projectScanInFlight;
+  outputChannel?.debug(
+    `[Code::Blocks] 工作区扫描：命中 ${files.length} 个工程文件，耗时 ${Date.now() - startedAt}ms（已排除 Output/obj/bin/node_modules 等重目录）`,
+  );
+  return [...files];
+}
+
+/** 全量扫描后同步已知工程集合（激活、工作区变化、诊断命令使用） */
+function syncKnownProjectFiles(files: string[]): void {
+  knownProjectFiles = new Set(files.map((f) => normPath(f)));
+}
+
+/** 使工程扫描缓存失效（工程文件增删后由事件路径调用） */
+function invalidateProjectScanCache(): void {
+  projectScanCacheAt = 0;
+}
+
+/** 待打开列表里登记一个工程文件（去重；归一化比较，Windows 大小写不敏感） */
+function addPendingProjectFile(file: string): void {
+  const key = normPath(file);
+  if (openProjects.some((p) => normPath(p.filename) === key)) return;
+  if (pendingCbpFiles.some((f) => normPath(f) === key)) return;
+  pendingCbpFiles = [...pendingCbpFiles, file];
+}
+
+/** 从待打开列表移除一个工程文件 */
+function removePendingProjectFile(file: string): void {
+  const key = normPath(file);
+  pendingCbpFiles = pendingCbpFiles.filter((f) => normPath(f) !== key);
+}
+
+/** 自动打开模式（设置 codeblocks.detect.autoOpen：all=多选/all 语义、single=仅单个、off=不自动打开） */
+function detectAutoOpenMode(): 'all' | 'single' | 'off' {
+  const raw = vscode.workspace.getConfiguration('codeblocks').get<string>('detect.autoOpen', 'all');
+  return raw === 'single' || raw === 'off' ? raw : 'all';
+}
+
+/** 自动弹多选的工程数阈值（设置 codeblocks.detect.autoOpenThreshold，钳制 1–1000，默认 20） */
+function detectAutoOpenThreshold(): number {
+  const raw = vscode.workspace.getConfiguration('codeblocks').get<number>('detect.autoOpenThreshold', 20);
+  return Number.isFinite(raw) ? Math.max(1, Math.min(1000, raw)) : 20;
+}
+
+/** .cbp 新建：增量登记（不触发全量扫描）；必要时沿用"唯一工程自动打开"行为 */
+function handleProjectFileCreated(uri: vscode.Uri): void {
+  const file = uri.fsPath;
+  const key = normPath(file);
+  const wasKnown = knownProjectFiles.has(key);
+  knownProjectFiles.add(key);
+  invalidateProjectScanCache();
+  addPendingProjectFile(file);
+  updateCbpStatusBar();
+  if (!wasKnown) {
+    outputChannel?.debug(`[Code::Blocks] 检测到新增工程文件：${file}（增量登记，未触发工作区扫描）`);
+  }
+  if (openProjects.length > 0) return;
+  const mode = detectAutoOpenMode();
+  if (mode === 'off') return;
+  // 仅有这一个工程且尚未打开 → 保持"自动打开唯一工程"的既有体验
+  const notOpen = [...knownProjectFiles].filter((f) => !openProjects.some((p) => normPath(p.filename) === f));
+  if (notOpen.length !== 1) return;
+  const only = pendingCbpFiles.find((f) => normPath(f) === notOpen[0]) ?? file;
+  void openProject(only).then(() => {
+    removePendingProjectFile(only);
+    updateCbpStatusBar();
+  });
+}
+
+/** .cbp 删除：增量移除（不触发全量扫描）；已打开的工程仅提示，不自动关闭 */
+function handleProjectFileDeleted(uri: vscode.Uri): void {
+  const file = uri.fsPath;
+  const key = normPath(file);
+  const wasKnown = knownProjectFiles.delete(key);
+  invalidateProjectScanCache();
+  removePendingProjectFile(file);
+  updateCbpStatusBar();
+  const opened = openProjects.find((p) => normPath(p.filename) === key);
+  if (opened) {
+    outputChannel?.info(`[Code::Blocks] 工程文件已被删除：${file}（仍保留在已打开列表中，可手动移除）`);
+  } else if (wasKnown) {
+    outputChannel?.debug(`[Code::Blocks] 已移除不存在的工程文件：${file}`);
+  }
 }
 
 /** 选择编译器（内置模板 + 探测到的实际编译器），返回编译器 ID */
@@ -2424,7 +2699,7 @@ function setActiveProject(project: Project | undefined, opts: { persist?: boolea
   // 仅当存在共享文件时才需重建（共享文件按活动工程去重）；无共享文件则 DB 内容与活动工程无关
   if (hasSharedFiles()) {
     // 标记：若 DB 实际变化，则重启 clangd 强制刷新已打开文件
-    restartClangdAfterGeneration = true;
+    restartClangdReason = 'project';
     void generateClangdForWorkspace();
   }
 }
@@ -2909,6 +3184,46 @@ async function restartClangd(): Promise<void> {
 }
 
 /**
+ * G3：codeblocks.build.persistLog 变更提醒。
+ * 输出通道类型在激活期创建（普通通道 ⇄ 日志通道），中途切换需重建通道且会清空当前输出，
+ * 故不做热切换，只提示重载窗口（给一键重载按钮，避免用户以为设置没生效）。
+ */
+async function promptReloadForPersistLog(): Promise<void> {
+  const on = vscode.workspace.getConfiguration('codeblocks').get<boolean>('build.persistLog', false);
+  const pick = await vscode.window.showWarningMessage(
+    `codeblocks.build.persistLog 已${on ? '开启（日志写盘，跨会话保留）' : '关闭（窗口重载即清空）'}，需重载窗口后生效。`,
+    '重载窗口', '稍后',
+  );
+  if (pick === '重载窗口') {
+    await vscode.commands.executeCommand('workbench.action.reloadWindow');
+  }
+}
+
+/**
+ * G4：clangd.enabled 关闭提醒（true → false）。
+ * 扩展只是停止「生成/更新」用户级 config.yaml，已写入的片段仍会被 clangd 读取（继续用旧编译数据库），
+ * 且片段是用户级配置（优先级高于项目 .clangd），不清理就等于设置没生效 ⇒ 提示如何让其失效。
+ */
+async function promptClangdDisabledLeftover(): Promise<void> {
+  const fragments = listManagedFragments(readClangdUserConfigText());
+  if (!fragments.length) return; // 从未写过片段 ⇒ 无遗留，静默
+  const pick = await vscode.window.showWarningMessage(
+    'codeblocks.clangd.enabled 已关闭：扩展不再生成/更新 clangd 配置，但用户级 clangd config.yaml 里'
+    + `仍有 ${fragments.length} 个扩展片段会被继续读取（clangd 仍按旧编译数据库分析）。`
+    + '如需彻底停用，请打开该配置删除 `# >>> codeblocks-vscode …` 标记块。',
+    '打开 clangd 配置', '稍后',
+  );
+  if (pick === '打开 clangd 配置') {
+    try {
+      const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(clangdUserConfigPath()));
+      await vscode.window.showTextDocument(doc, { preview: false });
+    } catch {
+      outputChannel.warn(`[Code::Blocks] 无法打开 clangd 配置：${clangdUserConfigPath()}`);
+    }
+  }
+}
+
+/**
  * 是否存在被多个工程共享的文件（同一源文件出现在多个 .cbp 中）。
  * P3：结果按索引代缓存（invalidateOwnerIndex 失效），不再每次活动工程切换全量重扫。
  * 语义保留旧实现：统计 项目文件 + 目标文件（path.normalize + 小写）。
@@ -3057,6 +3372,44 @@ function enumOrUndefined<T extends string>(v: string, map: Record<string, T>): T
   return map[String(v).toLowerCase()];
 }
 
+/** clangd 默认压制项（与 package.json 里 codeblocks.clangd.suppressedWarnings 的默认值一致） */
+const SUPPRESSED_WARNINGS_DEFAULT = ['-Wunused-function', 'redefinition_different_typedef'];
+
+/** 去重（保持原有顺序；clangd 片段里重复项无意义，还会把片段撑长） */
+function dedupeStrings(list: string[]): string[] {
+  const out: string[] = [];
+  for (const v of list) {
+    if (!out.includes(v)) out.push(v);
+  }
+  return out;
+}
+
+/**
+ * 读取「字符串数组」设置（容错）：手改 settings.json 时容易把数组写成字符串
+ * （如 `"codeblocks.clangd.suppressedWarnings": "-Wunused-function, -Wempty-body"`，VS Code 不强制类型）
+ * 或写成非数组。字符串按逗号/分号/空白拆分，非数组回退设置默认值；两者都在输出通道留痕——
+ * 否则「设置里配了却没写进 config.yaml」无从排查（片段里会出现单字符压制项）。
+ * 顺带 trim、去空、去重。返回可直接写入片段的列表。
+ */
+function readStringArraySetting(cfg: vscode.WorkspaceConfiguration, key: string, fallback: string[]): string[] {
+  const raw = cfg.get<unknown>(key, fallback);
+  let value: string[];
+  let fix = '';
+  if (Array.isArray(raw)) {
+    value = dedupeStrings(raw.map((v) => String(v).trim()).filter(Boolean));
+  } else if (typeof raw === 'string') {
+    value = dedupeStrings(raw.split(/[,;\s]+/).map((v) => v.trim()).filter(Boolean));
+    fix = '检测到字符串（已按逗号/分号/空白拆分）';
+  } else {
+    value = dedupeStrings(fallback.map((v) => String(v).trim()).filter(Boolean));
+    fix = '类型非法（已回退默认值）';
+  }
+  if (fix) {
+    outputChannel.warn(`[Code::Blocks] 设置 codeblocks.${key} ${fix} → ${JSON.stringify(value)}`);
+  }
+  return value;
+}
+
 /** VS Code 的 clangd.arguments 里是否已包含 --query-driver（工作区/用户/默认值任一层级有即算） */
 function clangdArgsHaveQueryDriver(): boolean {
   const inspected = vscode.workspace.getConfiguration('clangd').inspect<string[]>('arguments');
@@ -3181,19 +3534,33 @@ async function applyClangdQueryDriverInteractive(): Promise<void> {
 }
 
 async function runClangdGeneration(interactive: boolean): Promise<void> {
-  if (clangdGenRunning) return; // 上一次还在跑，丢弃本次（后续触发会重新调度）
+  // 生成进行中：记下待重跑（合并为一次），跑完后再执行一次，避免「生成期间改设置」被静默丢弃
+  if (clangdGenRunning) {
+    clangdGenPending = true;
+    if (interactive) clangdGenPendingInteractive = true;
+    return;
+  }
   clangdGenRunning = true;
   try {
-    await generateClangdForWorkspaceInternal(interactive);
+    let runInteractive = interactive;
+    for (;;) {
+      clangdGenPending = false;
+      clangdGenPendingInteractive = false;
+      await generateClangdForWorkspaceInternal(runInteractive);
+      if (!clangdGenPending) break;
+      runInteractive = clangdGenPendingInteractive || runInteractive;
+    }
   } finally {
     clangdGenRunning = false;
+    clangdGenPending = false;
+    clangdGenPendingInteractive = false;
   }
 }
 
 async function generateClangdForWorkspaceInternal(interactive: boolean): Promise<void> {
-  // 捕获本次是否由「活动工程切换」触发（用于 DB 变化后决定是否重启 clangd）
-  const restartRequested = restartClangdAfterGeneration;
-  restartClangdAfterGeneration = false;
+  // 捕获本次是否由「活动工程切换 / 编译器设置变化」触发（用于 DB 变化后决定是否重启 clangd）
+  const restartReason = restartClangdReason;
+  restartClangdReason = undefined;
   try {
     if (!extContext) return;
     const cfg = vscode.workspace.getConfiguration('codeblocks');
@@ -3269,9 +3636,18 @@ async function generateClangdForWorkspaceInternal(interactive: boolean): Promise
       ? 'compile_commands.json 未变化，跳过写入'
       : `已重新生成 compile_commands.json（${count} 条编译命令）→ ${outPath}`}`);
 
-    // 活动工程切换且 DB 实际变化：重启 clangd，让已打开文件按新编译命令重新分析
-    if (restartRequested && !skipped && cfg.get<boolean>('clangd.restartOnActiveProjectSwitch', true) && hasOpenSourceFile()) {
-      outputChannel.info('[Code::Blocks] 活动工程已切换，重启 clangd 以刷新已打开文件');
+    // 编译数据库实际变化 → 重启 clangd，让已打开文件按新编译命令重新分析：
+    //  - 切换活动工程：尊重 clangd.restartOnActiveProjectSwitch（重启会触发重新索引，允许关闭）
+    //  - 编译器设置变化：必须重启（已打开文件的诊断/补全全部基于旧编译命令，不重启等于设置没生效）
+    if (
+      restartReason
+      && !skipped
+      && (restartReason === 'compiler' || cfg.get<boolean>('clangd.restartOnActiveProjectSwitch', true))
+      && hasOpenSourceFile()
+    ) {
+      outputChannel.info(restartReason === 'compiler'
+        ? '[Code::Blocks] 编译器设置已变更，重启 clangd 以刷新已打开文件'
+        : '[Code::Blocks] 活动工程已切换，重启 clangd 以刷新已打开文件');
       void restartClangd();
     }
 
@@ -3288,7 +3664,7 @@ async function generateClangdForWorkspaceInternal(interactive: boolean): Promise
       // 用 global.h（typedef.h + macro.h + sfr.h + clib.h），而非 include.h：
       // include.h 会包含几乎所有头文件，对「被 include.h 包含的头文件」造成递归包含
       // （clangd 报 main file cannot be included recursively），进而产生大量级联错误。
-      const forcedIncludes = cfg.get<string[]>('clangd.forcedIncludes', ['global.h']);
+      const forcedIncludes = readStringArraySetting(cfg, 'clangd.forcedIncludes', ['global.h']);
       for (const h of forcedIncludes) {
         if (includeDirs.some((d) => fs.existsSync(path.join(d, h)))) {
           headerFlags.push('-include', h);
@@ -3306,7 +3682,7 @@ async function generateClangdForWorkspaceInternal(interactive: boolean): Promise
 
       // 更新用户级 clangd 配置（工作区外，If.PathMatch 作用域到本工程树）
       // 默认压制：嵌入式 SDK 预期噪声（-Wunused-function）+ 跨界 typedef 冲突误报（redefinition_different_typedef，SDK 头 vs 工具链系统头）
-      const suppressedWarnings = cfg.get<string[]>('clangd.suppressedWarnings', ['-Wunused-function', 'redefinition_different_typedef']);
+      const suppressedWarnings = readStringArraySetting(cfg, 'clangd.suppressedWarnings', SUPPRESSED_WARNINGS_DEFAULT);
       // 片段内其余键：默认值与历史硬编码值一致（产物不变）；'omit'/'default' ⇒ 该键不写，交给 clangd 默认值或用户自有配置
       const extraConfig = cfg.get<string>('clangd.extraConfig', '');
       const { removed } = updateClangdUserConfig([{
@@ -3326,7 +3702,7 @@ async function generateClangdForWorkspaceInternal(interactive: boolean): Promise
         documentationCommentFormat: enumOrUndefined<'Plaintext' | 'Markdown' | 'Doxygen'>(cfg.get<string>('clangd.documentationCommentFormat', 'default'), {
           plaintext: 'Plaintext', markdown: 'Markdown', doxygen: 'Doxygen',
         }),
-        excludeDirs: cfg.get<string[]>('clangd.excludeDirs', []),
+        excludeDirs: readStringArraySetting(cfg, 'clangd.excludeDirs', []),
         extraConfig,
       }]);
       if (removed.length) {
@@ -3449,7 +3825,16 @@ async function restorePersistedProjects(): Promise<void> {
   const order = restoreProjectOrder();
   const fallback = extContext?.workspaceState.get<string>('codeblocks.activeProject', '') ?? '';
   const list = order.length ? order : [fallback].filter(Boolean);
-  for (const fn of list) {
+  // 恢复上限：上次会话打开了 N 个工程时不再全部恢复（父目录多工程工作区下会成倍放大 clangd/索引开销）
+  const limit = detectAutoOpenThreshold();
+  const use = list.length > limit ? list.slice(0, limit) : list;
+  if (list.length > limit) {
+    outputChannel?.info(
+      `[Code::Blocks] 上次会话打开了 ${list.length} 个工程，本次仅恢复前 ${limit} 个` +
+        `（阈值设置：codeblocks.detect.autoOpenThreshold；其余可用状态栏或项目管理菜单打开）`,
+    );
+  }
+  for (const fn of use) {
     if (fn && fs.existsSync(fn) && !openProjects.some((p) => p.filename === fn)) {
       await openProject(fn);
     }

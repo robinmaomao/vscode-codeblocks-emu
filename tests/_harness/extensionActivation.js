@@ -75,13 +75,17 @@ function makeWorkspaceEdit() {
  * @param {object} [opts.config] 预置配置（`codeblocks.xxx` 扁平键）
  * @param {string} [opts.tmpDir] 工作目录（默认新建临时目录）
  * @param {object} [opts.workspaceFolders] 工作区文件夹（默认 tmpDir）
+ * @param {string[]|Function} [opts.findFilesResult] mock 的 workspace.findFiles 返回（数组或 (include, exclude) => 数组）
  */
 async function activate(opts = {}) {
   const tmpDir = opts.tmpDir || fs.mkdtempSync(path.join(os.tmpdir(), 'cb-ext-'));
   const userDir = path.join(tmpDir, 'User');
   fs.mkdirSync(userDir, { recursive: true });
 
-  const mock = installVscodeMock({ config: { 'codeblocks.clangd.enabled': false, ...(opts.config || {}) } });
+  const mock = installVscodeMock({
+    config: { 'codeblocks.clangd.enabled': false, ...(opts.config || {}) },
+    findFilesResult: opts.findFilesResult,
+  });
   const vscode = mock.vscode;
   const records = {
     executeCommand: [], saveAll: 0, clipboard: [], tasks: [], setContext: [], openExternal: [], appliedEdits: [], decorations: [], shownDocuments: [],
@@ -132,7 +136,11 @@ async function activate(opts = {}) {
   vscode.window.setStatusBarMessage = (m) => { records.statusBarMessages.push(m); return new MockDisposable(); };
   vscode.window.onDidChangeActiveTextEditor = (l) => { events.activeEditor.listeners.push(l); return new MockDisposable(); };
   vscode.window.showQuickPick = (items, o) => {
-    records.quickPickPrompts.push({ items: (items || []).map((i) => (typeof i === 'string' ? i : i.label)), options: o });
+    records.quickPickPrompts.push({
+      items: (items || []).map((i) => (typeof i === 'string' ? i : i.label)),
+      raw: items || [],
+      options: o,
+    });
     return Promise.resolve(queues.quickPick.length ? queues.quickPick.shift() : undefined);
   };
   vscode.window.showInputBox = (o) => {

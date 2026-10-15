@@ -2,7 +2,7 @@
   "name": "codeblocks-vscode",
   "displayName": "Code::Blocks for VS Code",
   "description": "原生移植 Code::Blocks 核心功能到 VS Code：项目模型、构建引擎、编译器管理与调试引擎",
-  "version": "0.8.130",
+  "version": "0.8.131",
   "icon": "resources/icon.png",
   "publisher": "robinmaomao",
   "author": {
@@ -177,6 +177,11 @@
       {
         "command": "codeblocks.detectCompilers",
         "title": "Code::Blocks: Detect Compilers"
+      },
+      {
+        "command": "codeblocks.workspaceScanReport",
+        "title": "Code::Blocks: Workspace Scan Report",
+        "icon": "$(pulse)"
       },
       {
         "command": "codeblocks.compilerOptions",
@@ -1094,6 +1099,28 @@
             "type": "boolean",
             "default": false,
             "description": "查找文件时同时打开选中的文件（对齐 Code::Blocks 的 Find file → “Open file” 复选框；默认仅在本工程树中定位）"
+          },
+          "codeblocks.detect.autoOpen": {
+            "type": "string",
+            "enum": [
+              "all",
+              "single",
+              "off"
+            ],
+            "enumDescriptions": [
+              "检测到多个工程时弹出多选（受 autoOpenThreshold 阈值保护，默认）",
+              "仅在检测到单个工程时自动打开",
+              "不自动检测/打开（仍可用状态栏入口或项目管理菜单手动检测）"
+            ],
+            "default": "all",
+            "description": "工作区工程自动检测行为：all / single / off。父目录含大量工程的工作区建议 single 或 off，避免每次窗口启动都做工作区级全量扫描"
+          },
+          "codeblocks.detect.autoOpenThreshold": {
+            "type": "number",
+            "default": 20,
+            "minimum": 1,
+            "maximum": 1000,
+            "description": "自动检测阈值（1–1000）：未打开工程数超过该值时不再自动弹出多选（仅状态栏入口 + 输出通道提示），同时限制会话恢复的工程数；用于避免“一次打开 N 个工程”导致 clangd/符号索引成倍开销"
           }
         }
       },
