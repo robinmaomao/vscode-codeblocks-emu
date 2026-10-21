@@ -68,10 +68,12 @@ function row(key, id) {
 }
 
 const commands = c.commands || [];
-const cmdRows = commands.map((x) => ({ id: x.command, title: x.title, ...row(x.command, x.command) }));
+// 命令/视图标题已改为 nls 占位符（%key%）——覆盖矩阵文档面向中文读者，按 zh-cn 解析后写入
+const nls = require(path.resolve(__dirname, '..', '_harness', 'nls.js'));
+const cmdRows = commands.map((x) => ({ id: x.command, title: nls.nlsText(x.title), ...row(x.command, x.command) }));
 
 const allViews = Object.values(c.views || {}).flat();
-const viewRows = allViews.map((v) => ({ id: v.id, title: v.name, ...row(v.id, v.id) }));
+const viewRows = allViews.map((v) => ({ id: v.id, title: nls.nlsText(v.name), ...row(v.id, v.id) }));
 
 const props = Array.isArray(c.configuration)
   ? Object.assign({}, ...c.configuration.map((b) => b.properties || {}))

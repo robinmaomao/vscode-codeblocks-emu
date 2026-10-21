@@ -71,6 +71,7 @@
 
 ### 界面与快捷键
 
+- 🌐 **中英文界面语言**：静态贡献（命令标题 / 设置描述 / 视图名）跟随 **VS Code 显示语言**（`package.nls.json` 英文默认 + `package.nls.zh-cn.json` 中文）；运行时文案（弹窗 / QuickPick / 状态栏 / WebView 面板标题）由设置 **`codeblocks.ui.language`**（`auto` / `en` / `zh-cn`，默认 `auto`）控制并**即时生效**，也可用命令 `Code::Blocks: Switch UI Language…` 切换（三态选择 + 一键重载窗口）。详见 [docs/国际化.md](docs/国际化.md)。
 - 🗂️ **Code::Blocks 菜单（状态栏 `Menu`）**：File / Edit / View / Search / Project / Build / Debug / Tools / Settings 九大菜单——支持**子菜单下钻**、分隔线、**快捷键标注**；Build 菜单含 Compile Current File（Ctrl+Shift+F9）、Workspace 三连（Build / Rebuild / Clean Workspace）、Abort、Errors（上一/下一/清除全部）、Select Target、Export compile_commands.json；未打开工程时相关项标注提示；悬停就地展开常用命令链接。
 - ⌨️ **快捷键与冲突处理**：默认键位全部避开 VS Code 默认（`Alt+G` Goto File / `Shift+F2` Project 视图 / `Alt+F1-F2` 错误导航 / `Ctrl+Shift+R` Replace in Files 等 CB 键位）；设置 `codeblocks.keybindings.cbStyle` 启用 **CB 保真键位**（F5 断点、Ctrl+R 替换 等 12 项，会覆盖 VS Code 默认，可随时关闭）；命令 `Code::Blocks: Check Keybinding Conflicts` 扫描内置默认 / 用户 keybindings.json / 其它扩展并生成冲突报告。
 - 🎛️ **快捷键可配置**：设置 `codeblocks.keybindings.overrides`（30 项：构建/调试/错误导航/工程管理 + 外部别名 + CB 保真组）为唯一数据源，修改后**自动写入用户 keybindings.json**（自定义键 + 对默认键的移除规则；仅托管条目、注释保留、首次备份、回读校验回滚）；另提供**可视化设置面板**（`Code::Blocks: Keybinding Settings`：按键捕获录入、行内冲突/生效状态、检查冲突、方案导入导出）。
@@ -204,7 +205,7 @@ code --extensionDevelopmentPath="." --disable-extensions --new-window
 | `codeblocks.clangd.queryDriver` | `false` | 开启后若 `clangd.arguments` 缺 `--query-driver` 则在输出通道提示（命令 `Configure clangd --query-driver` 可一键写入） |
 | `codeblocks.clangd.extraConfig` | `""` | 自由 YAML，作为同作用域**后置**片段注入（可覆盖扩展写入的任意键；扩展自动补 `If.PathMatch`） |
 
-> 完整 76 项设置（7 个分区）见 [docs/使用说明.md](docs/使用说明.md) §13。另有两条 clangd 命令：`Code::Blocks: Clean Stale clangd Config Fragments`（清理失效片段 + 孤儿缓存目录，预览后确认）与 `Code::Blocks: Configure clangd --query-driver`（交叉编译器保真）。
+> 完整 77 项设置（7 个分区，中英双语描述）见 [docs/使用说明.md](docs/使用说明.md) §13。另有两条 clangd 命令：`Code::Blocks: Clean Stale clangd Config Fragments`（清理失效片段 + 孤儿缓存目录，预览后确认）与 `Code::Blocks: Configure clangd --query-driver`（交叉编译器保真）。
 
 ## 架构
 

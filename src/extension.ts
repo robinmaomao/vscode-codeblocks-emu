@@ -57,6 +57,7 @@ import { cbBuiltinVars, replaceCbMacros, globalVariables, envVarMap } from './co
 import { buildLogPrefs, msg, quietSuccess, resetBuildLogPrefsCache } from './build/logLang';
 import { decodeText } from './tools/encoding';
 import { ASM_HASH_COMMENT_SETTING, ASM_LANGUAGE_ID, asmCommentsRule } from './tools/asmCommentConfig';
+import * as i18n from './i18n';
 import { clearBackticksCache, CommandGenerator } from './compiler/commandGenerator';
 import { OutputParser } from './build/outputParser';
 import { isCompilerUsable, renderInvalidCompilerMessage, renderTriedCompilerPaths, triedCompilerPaths } from './build/invalidCompiler';
@@ -269,6 +270,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   context.subscriptions.push(vscode.workspace.onDidChangeConfiguration((e) => {
     if (e.affectsConfiguration('codeblocks.build.persistLog')) void promptReloadForPersistLog();
   }));
+  // L1：ui.language 决定运行时文案语言 ⇒ 变更后立即重新解析 + 刷新状态栏与已打开面板
+  // （静态贡献项——命令标题 / 设置界面——只能跟随 VS Code 显示语言，需重载窗口，见 docs/国际化.md）
+  context.subscriptions.push(vscode.workspace.onDidChangeConfiguration((e) => {
+    if (!e.affectsConfiguration(i18n.LANGUAGE_SETTING_FULL)) return;
+    i18n.refreshUiLanguage();
+    refreshStatusBars();
+    refreshOpenPanelsForLanguage();
+  }));
   // G4：clangd.enabled 关闭后既有片段仍在生效 ⇒ 提示（不自动清理：片段是用户级配置，且当前工程的
   // 片段会被「清理失效片段」命令视为有效而保留）
   clangdEnabledLast = vscode.workspace.getConfiguration('codeblocks').get<boolean>('clangd.enabled', true);
@@ -363,9 +372,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   context.subscriptions.push(vscode.commands.registerCommand('codeblocks.debug.refreshRegisters', () => registersProvider.refresh()));
   context.subscriptions.push(vscode.commands.registerCommand('codeblocks.debug.sendGdbCommand', async () => {
     const adapter = getActiveAdapter();
-    if (!adapter || !adapter.isActive()) { vscode.window.showWarningMessage('没有活动的 Code::Blocks 调试会话'); return; }
+    if (!adapter || !adapter.isActive()) { vscode.window.showWarningMessage(i18n.t('No active Code::Blocks debug session')); return; }
     const text = await vscode.window.showInputBox({
-      prompt: 'GDB 命令：MI 以 - 开头（如 -exec-until main）；其它按 CLI 执行（如 add-symbol-file app.elf）',
+      prompt: i18n.t('GDB command: MI when it starts with "-" (e.g. -exec-until main); otherwise it runs as a CLI command (e.g. add-symbol-file app.elf)'),
       placeHolder: 'add-symbol-file build/app.elf',
     });
     if (!text || !text.trim()) return;
@@ -373,38 +382,38 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       const out = await adapter.sendUserCommand(text);
       vscode.window.setStatusBarMessage(`GDB: ${out || 'OK'}`, 4000);
     } catch (err) {
-      vscode.window.showErrorMessage(`GDB 命令失败: ${(err as Error).message}`);
+      vscode.window.showErrorMessage(i18n.t('GDB command failed: {0}', (err as Error).message));
     }
   }));
   context.subscriptions.push(vscode.commands.registerCommand('codeblocks.debug.setNextStatement', async () => {
     const adapter = getActiveAdapter();
-    if (!adapter || !adapter.isActive()) { vscode.window.showWarningMessage('没有活动的 Code::Blocks 调试会话'); return; }
+    if (!adapter || !adapter.isActive()) { vscode.window.showWarningMessage(i18n.t('No active Code::Blocks debug session')); return; }
     const ed = vscode.window.activeTextEditor;
-    if (!ed) { vscode.window.showWarningMessage('请在目标源码中放置光标'); return; }
+    if (!ed) { vscode.window.showWarningMessage(i18n.t('Place the cursor in the target source file')); return; }
     const line = ed.selection.active.line + 1;
     try {
       await adapter.setNextStatement(ed.document.uri.fsPath, line);
-      vscode.window.setStatusBarMessage(`已跳转到第 ${line} 行`, 4000);
+      vscode.window.setStatusBarMessage(i18n.t('Jumped to line {0}', line), 4000);
     } catch (err) {
-      vscode.window.showErrorMessage(`设置下一条语句失败: ${(err as Error).message}`);
+      vscode.window.showErrorMessage(i18n.t('Failed to set the next statement: {0}', (err as Error).message));
     }
   }));
   // 第五轮批次二 D1：Detach（对齐 CB Debug → Detach，debuggergdb.cpp:2486-2491；
   // 附加为 CB 语义，launch 为保护性扩展；分离后被调试进程继续运行、会话结束）
   context.subscriptions.push(vscode.commands.registerCommand('codeblocks.debug.detach', async () => {
     const adapter = getActiveAdapter();
-    if (!adapter || !adapter.isActive()) { vscode.window.showWarningMessage('没有活动的 Code::Blocks 调试会话'); return; }
+    if (!adapter || !adapter.isActive()) { vscode.window.showWarningMessage(i18n.t('No active Code::Blocks debug session')); return; }
     if (adapter.isDetached()) return;
     if (!adapter.isStopped()) {
-      vscode.window.showWarningMessage('请先暂停程序（对齐 Code::Blocks：仅暂停时提供 Detach）');
+      vscode.window.showWarningMessage(i18n.t('Pause the program first (as in Code::Blocks, Detach is only available while paused)'));
       return;
     }
     try {
       await adapter.detach();
-      vscode.window.setStatusBarMessage('已从进程分离；被调试进程继续运行', 5000);
+      vscode.window.setStatusBarMessage(i18n.t('Detached from the process; the debugged process keeps running'), 5000);
       outputChannel.info('[Code::Blocks] 已从被调试进程分离（进程继续运行）');
     } catch (err) {
-      vscode.window.showErrorMessage(`分离失败: ${(err as Error).message}`);
+      vscode.window.showErrorMessage(i18n.t('Detach failed: {0}', (err as Error).message));
     }
   }));
 
@@ -412,9 +421,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   // 可用版：已加载库列表自动带地址 + 地址必填校验，实测 GDB 8.1 无地址必失败）
   context.subscriptions.push(vscode.commands.registerCommand('codeblocks.debug.addSymbolFile', async () => {
     const adapter = getActiveAdapter();
-    if (!adapter || !adapter.isActive()) { vscode.window.showWarningMessage('没有活动的 Code::Blocks 调试会话'); return; }
+    if (!adapter || !adapter.isActive()) { vscode.window.showWarningMessage(i18n.t('No active Code::Blocks debug session')); return; }
     if (!adapter.isStopped()) {
-      vscode.window.showWarningMessage('请先暂停程序（对齐 Code::Blocks：仅暂停时提供 Add symbol file）');
+      vscode.window.showWarningMessage(i18n.t('Pause the program first (as in Code::Blocks, Add symbol file is only available while paused)'));
       return;
     }
     const libs = adapter.loadedLibraries();
@@ -428,7 +437,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
           lib: l,
         })),
       ],
-      { placeHolder: '符号来源：已加载库（自动带地址）或磁盘文件', matchOnDescription: true },
+      { placeHolder: i18n.t('Symbol source: a loaded library (address filled in automatically) or a file on disk'), matchOnDescription: true },
     );
     if (!pick) return;
 
@@ -451,7 +460,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     }
 
     const input = await vscode.window.showInputBox({
-      prompt: `符号文件的 .text 加载地址（GDB 要求；${path.basename(file)}）`,
+      prompt: i18n.t('.text load address of the symbol file (required by GDB; {0})', path.basename(file)),
       value: defaultAddr,
       placeHolder: '0x10000000',
       validateInput: (v) => {
@@ -464,19 +473,19 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     if (input === undefined) return;
     try {
       await adapter.addSymbolFile(file, input.trim());
-      vscode.window.setStatusBarMessage(`已加载符号: ${path.basename(file)}`, 5000);
+      vscode.window.setStatusBarMessage(i18n.t('Symbols loaded: {0}', path.basename(file)), 5000);
       outputChannel.info(`[Code::Blocks] 已加载附加符号: ${file} @ ${input.trim()}`);
     } catch (err) {
-      vscode.window.showErrorMessage(`加载符号失败: ${(err as Error).message}`);
+      vscode.window.showErrorMessage(i18n.t('Failed to load symbols: {0}', (err as Error).message));
     }
   }));
 
   context.subscriptions.push(vscode.commands.registerCommand('codeblocks.debug.attachToProcess', async () => {
     const procs = await listProcesses();
-    if (!procs.length) { vscode.window.showWarningMessage('未获取到进程列表'); return; }
+    if (!procs.length) { vscode.window.showWarningMessage(i18n.t('Could not retrieve the process list')); return; }
     const pick = await vscode.window.showQuickPick(
       procs.map((p): vscode.QuickPickItem & { pid: number } => ({ label: p.name, description: `PID ${p.pid}`, pid: p.pid })),
-      { placeHolder: '选择要附加的进程', matchOnDescription: true },
+      { placeHolder: i18n.t('Select the process to attach to'), matchOnDescription: true },
     );
     if (!pick) return;
     const attachSearchDirs = activeProject
@@ -623,7 +632,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       const xml: string | undefined = node?.xml;
       if (!xml) return;
       await vscode.env.clipboard.writeText(xml);
-      vscode.window.showInformationMessage('已复制 .cbp 片段');
+      vscode.window.showInformationMessage(i18n.t('.cbp snippet copied'));
     }),
   );
 
@@ -735,7 +744,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   context.subscriptions.push(
     vscode.commands.registerCommand('codeblocks.nextError', () => {
       if (!buildLogTreeProvider?.hasErrors()) {
-        vscode.window.showInformationMessage('没有可导航的编译错误');
+        vscode.window.showInformationMessage(i18n.t('No compile errors to navigate'));
         return;
       }
       buildLogTreeProvider.gotoNextError();
@@ -746,7 +755,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   context.subscriptions.push(
     vscode.commands.registerCommand('codeblocks.prevError', () => {
       if (!buildLogTreeProvider?.hasErrors()) {
-        vscode.window.showInformationMessage('没有可导航的编译错误');
+        vscode.window.showInformationMessage(i18n.t('No compile errors to navigate'));
         return;
       }
       buildLogTreeProvider.gotoPreviousError();
@@ -787,7 +796,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   // 底部状态栏：构建目标切换项
   targetStatusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
   targetStatusBar.command = 'codeblocks.selectTarget';
-  targetStatusBar.tooltip = '点击切换构建目标';
+  targetStatusBar.tooltip = i18n.t('Click to switch the build target');
   context.subscriptions.push(targetStatusBar);
   updateTargetStatusBar();
 
@@ -828,7 +837,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   // 底部状态栏：编译器选择
   compilerStatusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 70);
   compilerStatusBar.command = 'codeblocks.detectCompilers';
-  compilerStatusBar.tooltip = '点击选择编译器';
+  compilerStatusBar.tooltip = i18n.t('Click to select the compiler');
   context.subscriptions.push(compilerStatusBar);
   updateCompilerStatusBar();
 
@@ -958,7 +967,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       outputChannel.show(true);
       const targetTitle = getSelectedTarget(project) ?? project.buildTargets.find((t) => supportsCurrentPlatform(t.platforms))?.title;
       if (!targetTitle) {
-        vscode.window.showWarningMessage('项目没有构建目标');
+        vscode.window.showWarningMessage(i18n.t('The project has no build targets'));
         return;
       }
       await cleanTargets(project, targetTitle);
@@ -1025,14 +1034,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       }
       const prefix = node?.kind === 'virtualFolder' && node?.dirKey ? `${node.dirKey}/` : '';
       const input = await vscode.window.showInputBox({
-        prompt: '虚拟文件夹路径（可多级，如 Headers/Sub；不能含 “;” 或 “\\”）',
+        prompt: i18n.t('Virtual folder path (multi-level allowed, e.g. Headers/Sub; must not contain ";" or "\\")'),
         value: prefix,
         validateInput: (v) => validateVirtualFolderPath(v, true),
       });
       if (input === undefined) return;
       const res = addVirtualFolder(project, input);
       if (!res.ok) {
-        vscode.window.showWarningMessage(`新建虚拟文件夹失败: ${res.reason}`);
+        vscode.window.showWarningMessage(i18n.t('Failed to create the virtual folder: {0}', res.reason));
         return;
       }
       outputChannel.info(`[Code::Blocks] 已新建虚拟文件夹: ${input.trim()}`);
@@ -1045,14 +1054,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       const folder: string | undefined = node?.dirKey;
       if (!project || !folder) return;
       const input = await vscode.window.showInputBox({
-        prompt: '新的虚拟文件夹路径（保留子文件夹）',
+        prompt: i18n.t('New virtual folder path (subfolders are preserved)'),
         value: folder,
         validateInput: (v) => validateVirtualFolderPath(v, true),
       });
       if (input === undefined) return;
       const res = renameVirtualFolder(project, folder, input);
       if (!res.ok) {
-        vscode.window.showWarningMessage(`重命名虚拟文件夹失败: ${res.reason}`);
+        vscode.window.showWarningMessage(i18n.t('Failed to rename the virtual folder: {0}', res.reason));
         return;
       }
       outputChannel.info(
@@ -1183,11 +1192,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     vscode.commands.registerCommand('codeblocks.newProjectFromTemplate', async () => {
       const items = userTemplateQuickPickItems();
       if (!items.length) {
-        const pick = await vscode.window.showInformationMessage('暂无用户模板：先用「Save Project as Template…」把现有工程存为模板', '立即保存');
-        if (pick === '立即保存') await vscode.commands.executeCommand('codeblocks.saveProjectAsTemplate');
+        const pick = await vscode.window.showInformationMessage(i18n.t('No user templates yet — save an existing project as a template with "Save Project as Template…" first'), i18n.t('Save now'));
+        if (pick === i18n.t('Save now')) await vscode.commands.executeCommand('codeblocks.saveProjectAsTemplate');
         return;
       }
-      const pick = await vscode.window.showQuickPick(items, { placeHolder: '选择用户模板', matchOnDescription: true });
+      const pick = await vscode.window.showQuickPick(items, { placeHolder: i18n.t('Select a user template'), matchOnDescription: true });
       if (!pick) return;
       await createProjectFromUserTemplate(pick.templateId);
     }),
@@ -1211,14 +1220,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     context.subscriptions.push(
       vscode.commands.registerCommand(cmd, async () => {
         const adapter = getActiveAdapter();
-        if (!adapter || !adapter.isActive()) { vscode.window.showWarningMessage('没有活动的 Code::Blocks 调试会话'); return; }
+        if (!adapter || !adapter.isActive()) { vscode.window.showWarningMessage(i18n.t('No active Code::Blocks debug session')); return; }
         try {
           const out = await adapter.sendUserCommand(gdb);
           outputChannel.info(`[Code::Blocks] GDB ${gdb}:`);
           outputChannel.info(out || '（无输出）');
           outputChannel.show(true);
         } catch (err) {
-          vscode.window.showErrorMessage(`GDB 命令失败: ${(err as Error).message}`);
+          vscode.window.showErrorMessage(i18n.t('GDB command failed: {0}', (err as Error).message));
         }
       }),
     );
@@ -1249,7 +1258,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   context.subscriptions.push(
     vscode.commands.registerCommand('codeblocks.build.stop', () => {
       if (!currentBuildCancel || currentBuildCancel.isCancelled()) {
-        vscode.window.showInformationMessage('当前没有进行中的构建');
+        vscode.window.showInformationMessage(i18n.t('No build in progress'));
         return;
       }
       currentBuildCancel.cancel();
@@ -1270,7 +1279,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
           { label: '$(multiple-windows) Build Workspace', detail: '全部工程增量编译', target: 'codeblocks.buildWorkspace' },
           { label: '$(multiple-windows) Rebuild Workspace', detail: '全部工程 Clean + Build（会弹确认）', target: 'codeblocks.rebuildWorkspace' },
         ],
-        { placeHolder: '构建菜单 — 选择操作' },
+        { placeHolder: i18n.t('Build menu — select an action') },
       );
       if (picked) await vscode.commands.executeCommand(picked.target);
     }),
@@ -1374,7 +1383,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     vscode.commands.registerCommand('codeblocks.compileCurrentFile', async () => {
       const editor = vscode.window.activeTextEditor;
       if (!editor || editor.document.uri.scheme !== 'file') {
-        vscode.window.showWarningMessage('没有打开的源文件');
+        vscode.window.showWarningMessage(i18n.t('No source file is open'));
         return;
       }
       // 无工程：走单文件编译（对齐 CompileFileWithoutProject）
@@ -1395,7 +1404,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         }
       }
       // 对齐 GetBuildTargetForFile：文件未归属任何目标 → 提示中止
-      vscode.window.showWarningMessage('当前文件不属于任何已打开的工程（可先添加到工程后再编译）');
+      vscode.window.showWarningMessage(i18n.t('The current file does not belong to any opened project (add it to a project first, then build)'));
     }),
   );
 
@@ -1413,7 +1422,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   context.subscriptions.push(
     vscode.commands.registerCommand('codeblocks.clearErrors', () => {
       clearBuildOutput();
-      vscode.window.setStatusBarMessage('已清除构建输出与编译错误', 3000);
+      vscode.window.setStatusBarMessage(i18n.t('Build output and compile errors cleared'), 3000);
     }),
   );
 
@@ -1421,7 +1430,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   context.subscriptions.push(
     vscode.commands.registerCommand('codeblocks.buildLog.clearOutput', () => {
       clearBuildOutput();
-      vscode.window.setStatusBarMessage('已清除构建输出', 3000);
+      vscode.window.setStatusBarMessage(i18n.t('Build output cleared'), 3000);
     }),
   );
 
@@ -1442,7 +1451,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       const cfg = vscode.workspace.getConfiguration('codeblocks');
       const next = !cfg.get<boolean>('projectTree.categorize', true);
       await cfg.update('projectTree.categorize', next, vscode.ConfigurationTarget.Workspace);
-      vscode.window.setStatusBarMessage(`工程树分组显示: ${next ? '开启' : '关闭'}`, 3000);
+      vscode.window.setStatusBarMessage(i18n.t('Project tree grouping: {0}', next ? i18n.t('On') : i18n.t('Off')), 3000);
     }),
   );
 
@@ -1450,7 +1459,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   context.subscriptions.push(
     vscode.commands.registerCommand('codeblocks.clearRecentProjects', async () => {
       await extContext?.globalState.update('codeblocks.recentProjects', []);
-      vscode.window.setStatusBarMessage('已清空最近工程列表', 3000);
+      vscode.window.setStatusBarMessage(i18n.t('Recent projects list cleared'), 3000);
     }),
   );
 
@@ -1469,28 +1478,28 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       const project = requireProject();
       if (!project) return;
       if (!project.buildTargets.length) {
-        vscode.window.showWarningMessage('项目没有构建目标');
+        vscode.window.showWarningMessage(i18n.t('The project has no build targets'));
         return;
       }
       const remembered = getSelectedTarget(project);
       let target = project.buildTargets.find((t) => t.title === remembered) ?? project.buildTargets[0];
       if (project.buildTargets.length > 1) {
         const picked = await vscode.window.showQuickPick(
-          project.buildTargets.map((t) => ({ label: t.title, description: t.title === remembered ? '当前' : undefined, t })),
-          { placeHolder: `选择目标（${project.title}）` },
+          project.buildTargets.map((t) => ({ label: t.title, description: t.title === remembered ? i18n.t('Current') : undefined, t })),
+          { placeHolder: i18n.t('Select a target ({0})', project.title) },
         );
         if (!picked) return;
         target = picked.t;
       }
       const value = await vscode.window.showInputBox({
-        prompt: `执行参数（${target.title}）— 运行/调试时传递给程序`,
+        prompt: i18n.t('Execution parameters ({0}) — passed to the program when running/debugging', target.title),
         value: target.executionParameters ?? '',
-        placeHolder: '例如 --verbose input.txt',
+        placeHolder: i18n.t('For example --verbose input.txt'),
       });
       if (value === undefined) return;
       target.executionParameters = value;
       await persistProjectAndReload(project);
-      vscode.window.setStatusBarMessage(`已保存执行参数: ${target.title}`, 3000);
+      vscode.window.setStatusBarMessage(i18n.t('Execution parameters saved: {0}', target.title), 3000);
     }),
   );
 
@@ -1509,13 +1518,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         }
       }
       if (!items.length) {
-        vscode.window.showInformationMessage('未解析到全局编译器变量（default.conf /gcv 为空）');
+        vscode.window.showInformationMessage(i18n.t('No global compiler variables resolved (default.conf /gcv is empty)'));
         return;
       }
-      const picked = await vscode.window.showQuickPick(items, { placeHolder: '全局编译器变量（只读）— 选择复制到剪贴板' });
+      const picked = await vscode.window.showQuickPick(items, { placeHolder: i18n.t('Global compiler variables (read-only) — select to copy to the clipboard') });
       if (picked) {
         await vscode.env.clipboard.writeText(`${picked.label} = ${picked.detail ?? ''}`);
-        vscode.window.setStatusBarMessage('已复制全局变量', 3000);
+        vscode.window.setStatusBarMessage(i18n.t('Global variables copied'), 3000);
       }
     }),
   );
@@ -1524,7 +1533,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   context.subscriptions.push(
     vscode.commands.registerCommand('codeblocks.clearBacktickCache', () => {
       clearBackticksCache();
-      vscode.window.setStatusBarMessage('已清空反引号缓存（下次构建重新执行反引号命令）', 3000);
+      vscode.window.setStatusBarMessage(i18n.t('Backtick cache cleared (backtick commands run again on the next build)'), 3000);
     }),
   );
 
@@ -1536,7 +1545,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       outputChannel.show(true);
       if (!findings.length && !managed.length) {
         outputChannel.info('[Code::Blocks] 快捷键冲突检测：未发现冲突（无托管覆盖）');
-        vscode.window.showInformationMessage('未检测到快捷键冲突 ✔️');
+        vscode.window.showInformationMessage(i18n.t('No keybinding conflicts detected ✔️'));
         return;
       }
       const report = [formatConflictReport(findings), ...managed.map((m) => m.line)].join('\n');
@@ -1564,7 +1573,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         });
       }
       const picked = await vscode.window.showQuickPick(picks, {
-        placeHolder: `快捷键：冲突 ${findings.length} 项 · 托管覆盖 ${managed.length} 项 — 查看详情或选择操作`,
+        placeHolder: i18n.t('Keybindings: {0} conflict(s) · {1} managed override(s) — view details or choose an action', findings.length, managed.length),
         title: 'Code::Blocks: Keybinding Conflicts',
       });
       if (!picked?.action) return;
@@ -1573,10 +1582,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       } else if (picked.action === 'openJson') {
         const p = userKeybindingsPath();
         if (p && fs.existsSync(p)) await vscode.commands.executeCommand('vscode.open', vscode.Uri.file(p));
-        else vscode.window.showInformationMessage('用户 keybindings.json 尚不存在（可从键盘快捷方式编辑器右上角创建）');
+        else vscode.window.showInformationMessage(i18n.t('The user keybindings.json does not exist yet (create it from the keyboard shortcuts editor)'));
       } else if (picked.action === 'copy') {
         await vscode.env.clipboard.writeText(report);
-        vscode.window.setStatusBarMessage('冲突报告已复制到剪贴板', 3000);
+        vscode.window.setStatusBarMessage(i18n.t('Conflict report copied to the clipboard'), 3000);
       }
     }),
   );
@@ -1604,7 +1613,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       items.push({ label: '', kind: vscode.QuickPickItemKind.Separator });
       items.push({ label: '$(trash) 重置全部为默认（清除所有覆盖）', action: 'reset' });
       const picked = await vscode.window.showQuickPick(items, {
-        placeHolder: '选择要修改的快捷键（Esc 取消）',
+        placeHolder: i18n.t('Select the keybinding to change (Esc to cancel)'),
         title: 'Code::Blocks: Configure Keybindings',
       });
       if (!picked) return;
@@ -1616,7 +1625,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       if (!managed) return;
       const current = overrides.get(managed.id) ?? (managed.defaults[0] ?? '');
       const input = await vscode.window.showInputBox({
-        prompt: `${managed.label} — 输入新键位（空 = 解绑；输入 default = 恢复默认；如 ctrl+alt+b、f7、ctrl+k ctrl+c）`,
+        prompt: i18n.t('{0} — enter the new keybinding (empty = unbind; "default" = restore the default; e.g. ctrl+alt+b, f7, ctrl+k ctrl+c)', managed.label),
         value: current,
         validateInput: (v: string) => {
           const t = v.trim();
@@ -1636,13 +1645,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       }
       await cfg.update('keybindings.overrides', map, vscode.ConfigurationTarget.Global);
       applyKeybindings(); // 立即应用（自动监听可能随后再触发一次，二次为 no-change）
-      vscode.window.setStatusBarMessage(`已更新 ${managed.id} → ${t === 'default' ? '默认' : (t === '' ? '解绑' : t)}`, 3000);
+      vscode.window.setStatusBarMessage(i18n.t('Updated {0} → {1}', managed.id, t === 'default' ? i18n.t('Default') : (t === '' ? i18n.t('Unbind') : t)), 3000);
     }),
   );
   context.subscriptions.push(
     vscode.commands.registerCommand('codeblocks.keybindings.reset', async () => {
       const r = await performKeybindingsReset();
-      vscode.window.showInformationMessage(r.message ?? '快捷键已恢复默认');
+      vscode.window.showInformationMessage(r.message ?? i18n.t('Keybinding restored to the default'));
       KeybindingPanel.refreshIfOpen();
     }),
   );
@@ -1719,10 +1728,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     }),
     vscode.commands.registerCommand('codeblocks.bookmarks.clearAll', async () => {
       if (!bookmarks.length) {
-        vscode.window.showInformationMessage('没有书签');
+        vscode.window.showInformationMessage(i18n.t('No bookmarks'));
         return;
       }
-      const ok = await vscode.window.showWarningMessage(`清除全部 ${bookmarks.length} 个书签？`, { modal: true }, 'Clear');
+      const ok = await vscode.window.showWarningMessage(i18n.t('Clear all {0} bookmarks?', bookmarks.length), { modal: true }, 'Clear');
       if (ok !== 'Clear') return;
       bookmarks = [];
       await persistBookmarks();
@@ -1805,12 +1814,15 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     vscode.commands.registerCommand('codeblocks.openDefaultConfig', async () => {
       await openDefaultConf();
     }),
+    vscode.commands.registerCommand('codeblocks.ui.switchLanguage', async () => {
+      await switchUiLanguage();
+    }),
   );
 
   // 状态栏入口：检测到未打开的 .cbp 时显示，点击重新选择打开
   cbpStatusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 110);
   cbpStatusBar.command = 'codeblocks.openDetectedProject';
-  cbpStatusBar.tooltip = '检测到未打开的 Code::Blocks 项目，点击选择打开';
+  cbpStatusBar.tooltip = i18n.t('Code::Blocks projects detected but not opened — click to choose which to open');
   cbpStatusBar.hide();
   context.subscriptions.push(cbpStatusBar);
   context.subscriptions.push(
@@ -1942,7 +1954,7 @@ async function pickAndOpenCbp(files: string[]): Promise<void> {
     })),
     {
       title: `检测到 ${notOpen.length} 个 Code::Blocks 项目`,
-      placeHolder: '空格勾选/取消（默认仅勾选最近使用的工程），回车打开已勾选项，Esc 跳过',
+      placeHolder: i18n.t('Space to toggle (only the most recently used projects are pre-selected), Enter to open the selected ones, Esc to skip'),
       canPickMany: true,
     },
   );
@@ -1961,18 +1973,18 @@ async function pickAndOpenCbp(files: string[]): Promise<void> {
 function updateCbpStatusBar(): void {
   if (!cbpStatusBar) return;
   if (openProjects.length > 0) {
-    cbpStatusBar.text = `$(project) Code::Blocks: ${openProjects.length} 项目`;
-    cbpStatusBar.tooltip = '点击管理项目（打开 / 新建 / 检测工作区项目）';
+    cbpStatusBar.text = i18n.t('$(project) Code::Blocks: {0} project(s)', openProjects.length);
+    cbpStatusBar.tooltip = i18n.t('Click to manage projects (open / new / detect workspace projects)');
     cbpStatusBar.command = 'codeblocks.projectManager';
     cbpStatusBar.show();
   } else if (pendingCbpFiles.length > 0) {
-    cbpStatusBar.text = `$(project) Code::Blocks 项目 (${pendingCbpFiles.length})`;
-    cbpStatusBar.tooltip = '检测到未打开的 Code::Blocks 项目，点击选择打开';
+    cbpStatusBar.text = i18n.t('$(project) Code::Blocks projects ({0})', pendingCbpFiles.length);
+    cbpStatusBar.tooltip = i18n.t('Code::Blocks projects detected but not opened — click to choose which to open');
     cbpStatusBar.command = 'codeblocks.openDetectedProject';
     cbpStatusBar.show();
   } else {
     cbpStatusBar.text = '$(project) Code::Blocks';
-    cbpStatusBar.tooltip = '点击打开 Code::Blocks 项目';
+    cbpStatusBar.tooltip = i18n.t('Click to open Code::Blocks projects');
     cbpStatusBar.command = 'codeblocks.openProject';
     cbpStatusBar.show();
   }
@@ -1992,7 +2004,7 @@ function buildManagerItems(): ProjectManagerItem[] {
     { label: '$(search) 检测工作区项目...', description: '扫描并打开工作区中的 .cbp / .workspace', action: 'scan' },
   ];
   if (openProjects.length > 0) {
-    items.push({ label: '已打开项目', kind: vscode.QuickPickItemKind.Separator });
+    items.push({ label: i18n.t('Projects opened'), kind: vscode.QuickPickItemKind.Separator });
     for (const p of openProjects) {
       const isActive = p.filename === activeProject?.filename;
       items.push({
@@ -2140,19 +2152,19 @@ async function showWorkspaceScanReport(): Promise<void> {
     lines.push(`  提示：已打开工程数 ${openProjects.length} 超过阈值 ${threshold}，clangd/符号索引会成倍放大；建议减少同时打开的工程。`);
   }
   outputChannel?.info(lines.join('\n'));
-  vscode.window.showInformationMessage(`工作区扫描诊断：${files.length} 个工程，扫描 ${scanMs}ms（详见 Code::Blocks 输出通道）`);
+  vscode.window.showInformationMessage(i18n.t('Workspace scan diagnostics: {0} project(s), scan took {1}ms (see the Code::Blocks output channel)', files.length, scanMs));
 }
 
 /** 扫描工作区所有 .cbp/.workspace，多选打开（已打开则设为活动工程） */
 async function scanAndOpenWorkspaceProjects(): Promise<void> {
   const folders = vscode.workspace.workspaceFolders;
   if (!folders || folders.length === 0) {
-    vscode.window.showWarningMessage('请先打开一个工作区文件夹');
+    vscode.window.showWarningMessage(i18n.t('Open a workspace folder first'));
     return;
   }
   const files = await findProjectFiles(true);
   if (files.length === 0) {
-    vscode.window.showInformationMessage('工作区未检测到 .cbp / .workspace 项目');
+    vscode.window.showInformationMessage(i18n.t('No .cbp / .workspace projects detected in the workspace'));
     return;
   }
   const openSet = new Set(openProjects.map((p) => p.filename));
@@ -2168,7 +2180,7 @@ async function scanAndOpenWorkspaceProjects(): Promise<void> {
   });
   const picked = await vscode.window.showQuickPick(items, {
     title: `检测到 ${files.length} 个 Code::Blocks 项目`,
-    placeHolder: '回车打开，空格勾选/取消，Esc 跳过',
+    placeHolder: i18n.t('Enter to open, Space to toggle, Esc to skip'),
     canPickMany: true,
   });
   if (!picked || picked.length === 0) return;
@@ -2333,18 +2345,18 @@ async function pickCompiler(): Promise<string | undefined> {
   };
 
   // 内置模板优先（gcc / clang；MSVC 仅 Windows 平台）
-  push('gcc', defaultId === 'gcc' ? '默认' : undefined);
-  push('clang', defaultId === 'clang' ? '默认' : undefined);
+  push('gcc', defaultId === 'gcc' ? i18n.t('Default') : undefined);
+  push('clang', defaultId === 'clang' ? i18n.t('Default') : undefined);
   if (process.platform === 'win32') {
     push('msvc17');
   }
   // 探测到的（去重；MSVC id 统一映射到 msvc17，与 options_msvc17.xml 对齐）
   for (const d of detected) {
     const id = d.id === 'msvc' ? 'msvc17' : d.id;
-    push(id, id === defaultId ? '默认' : (d.version ? `v${d.version}` : undefined));
+    push(id, id === defaultId ? i18n.t('Default') : (d.version ? `v${d.version}` : undefined));
   }
 
-  const picked = await vscode.window.showQuickPick(items, { placeHolder: '选择编译器' });
+  const picked = await vscode.window.showQuickPick(items, { placeHolder: i18n.t('Select a compiler') });
   return picked?.label ?? defaultId;
 }
 
@@ -2357,7 +2369,7 @@ async function createNewProject(): Promise<void> {
       ...userItems,
       ...PROJECT_TEMPLATES.map((t) => ({ label: `$(file-code) ${t.label}`, description: t.description, template: t })),
     ],
-    { placeHolder: '选择工程模板（带 $(library) 者为用户模板）', matchOnDescription: true },
+    { placeHolder: i18n.t('Select a project template (entries with $(library) are user templates)'), matchOnDescription: true },
   );
   if (!tplPick) return;
   if ((tplPick as any).templateId) {
@@ -2368,7 +2380,7 @@ async function createNewProject(): Promise<void> {
 
   // 2. 输入工程名
   const name = await vscode.window.showInputBox({
-    prompt: '输入工程名称',
+    prompt: i18n.t('Enter the project name'),
     placeHolder: 'my-project',
     validateInput: (v) => {
       if (!v.trim()) return '工程名不能为空';
@@ -2390,7 +2402,7 @@ async function createNewProject(): Promise<void> {
   });
   const basePath = dirUris?.[0]?.fsPath ?? defaultUri?.fsPath;
   if (!basePath) {
-    vscode.window.showWarningMessage('请先打开一个工作区文件夹，或选择一个目录');
+    vscode.window.showWarningMessage(i18n.t('Open a workspace folder first, or choose a directory'));
     return;
   }
 
@@ -2411,7 +2423,7 @@ async function createNewProject(): Promise<void> {
     fs.writeFileSync(project.filename, xml, 'utf-8');
     outputChannel.info(`[Code::Blocks] 已创建工程: ${project.title}（${tpl.label}）`);
   } catch (err) {
-    vscode.window.showErrorMessage(`创建工程失败: ${(err as Error).message}`);
+    vscode.window.showErrorMessage(i18n.t('Failed to create the project: {0}', (err as Error).message));
     return;
   }
 
@@ -2457,7 +2469,7 @@ async function pickBaseDir(title: string): Promise<string | undefined> {
 /** 从用户模板实例化工程（复制骨架 + 写 <新名>.cbp），随后打开 */
 async function createProjectFromUserTemplate(templateId: string): Promise<void> {
   const name = await vscode.window.showInputBox({
-    prompt: '输入工程名称（基于模板）',
+    prompt: i18n.t('Enter the project name (from template)'),
     placeHolder: 'my-project',
     validateInput: (v) => {
       if (!v.trim()) return '工程名不能为空';
@@ -2468,7 +2480,7 @@ async function createProjectFromUserTemplate(templateId: string): Promise<void> 
   if (!name?.trim()) return;
   const basePath = await pickBaseDir('选择工程存放目录');
   if (!basePath) {
-    vscode.window.showWarningMessage('请先打开一个工作区文件夹，或选择一个目录');
+    vscode.window.showWarningMessage(i18n.t('Open a workspace folder first, or choose a directory'));
     return;
   }
   try {
@@ -2479,7 +2491,7 @@ async function createProjectFromUserTemplate(templateId: string): Promise<void> 
     );
     await openProject(res.cbpPath);
   } catch (err) {
-    vscode.window.showErrorMessage(`从模板创建工程失败: ${(err as Error).message}`);
+    vscode.window.showErrorMessage(i18n.t('Failed to create the project from the template: {0}', (err as Error).message));
   }
 }
 
@@ -2490,22 +2502,22 @@ async function saveProjectAsTemplate(): Promise<void> {
   await saveAllBeforeBuild();
 
   const name = await vscode.window.showInputBox({
-    prompt: '模板名称',
+    prompt: i18n.t('Template name'),
     value: project.title,
-    validateInput: (v) => (v.trim() ? undefined : '模板名称不能为空'),
+    validateInput: (v) => (v.trim() ? undefined : i18n.t('The template name must not be empty')),
   });
   if (!name?.trim()) return;
   const description = await vscode.window.showInputBox({
-    prompt: '模板描述（可留空）',
-    placeHolder: '例如：嵌入式控制台工程骨架',
+    prompt: i18n.t('Template description (optional)'),
+    placeHolder: i18n.t('For example: embedded console project skeleton'),
   });
   if (description === undefined) return;
 
   const root = userTemplateRoot();
   const existing = listUserTemplates(root).some((m) => m.name === name.trim());
   if (existing) {
-    const ok = await vscode.window.showWarningMessage(`模板「${name.trim()}」已存在，覆盖？`, { modal: true }, '覆盖');
-    if (ok !== '覆盖') return;
+    const ok = await vscode.window.showWarningMessage(i18n.t('Template "{0}" already exists — overwrite it?', name.trim()), { modal: true }, i18n.t('Overwrite'));
+    if (ok !== i18n.t('Overwrite')) return;
   }
 
   // 骨架文件：工程目录下被引用的文件（排除 .cbp 自身与构建产物目录）
@@ -2538,7 +2550,7 @@ async function saveProjectAsTemplate(): Promise<void> {
       await vscode.commands.executeCommand('revealFileInOS', vscode.Uri.file(path.join(root, manifest.id)));
     }
   } catch (err) {
-    vscode.window.showErrorMessage(`保存模板失败: ${(err as Error).message}`);
+    vscode.window.showErrorMessage(i18n.t('Failed to save the template: {0}', (err as Error).message));
   }
 }
 
@@ -2613,12 +2625,12 @@ async function openProject(filename: string): Promise<void> {
       await extContext?.workspaceState.update('codeblocks.activeProject', filename);
     }
 
-    vscode.window.showInformationMessage(`已打开 Code::Blocks 项目: ${project.title}`);
+    vscode.window.showInformationMessage(i18n.t('Code::Blocks project opened: {0}', project.title));
 
     // 生成 compile_commands.json（clangd 补全，写到工作区外缓存），失败不阻塞
     void generateClangdForWorkspace();
   } catch (err) {
-    vscode.window.showErrorMessage(`打开项目失败: ${(err as Error).message}`);
+    vscode.window.showErrorMessage(i18n.t('Failed to open the project: {0}', (err as Error).message));
   }
 }
 
@@ -2632,7 +2644,7 @@ async function saveAllBeforeBuild(): Promise<void> {
 
 function requireProject(): Project | undefined {
   if (!activeProject) {
-    vscode.window.showWarningMessage('请先打开一个 Code::Blocks 项目 (.cbp)');
+    vscode.window.showWarningMessage(i18n.t('Open a Code::Blocks project (.cbp) first'));
     return undefined;
   }
   return activeProject;
@@ -2714,7 +2726,7 @@ function activateRelativeProject(delta: number): void {
   const nextIdx = idx === -1 ? 0 : (idx + delta + openProjects.length) % openProjects.length;
   const next = openProjects[nextIdx];
   setActiveProject(next, { persist: true });
-  vscode.window.setStatusBarMessage(`活动工程: ${next.title}`, 2000);
+  vscode.window.setStatusBarMessage(i18n.t('Active project: {0}', next.title), 2000);
 }
 
 /** 打开工程属性面板（initialTab 可直达指定 tab，如 notes；focusFile 可在文件 tab 定位某文件） */
@@ -2756,7 +2768,7 @@ async function exportTargetAsProject(targetTitleArg?: unknown): Promise<void> {
   if (!targetTitle || !project.buildTargets.some((t) => t.title === targetTitle)) {
     const pick = await vscode.window.showQuickPick(
       project.buildTargets.map((t) => ({ label: t.title, description: `输出: ${t.outputFilename}` })),
-      { placeHolder: '选择要导出的构建目标' },
+      { placeHolder: i18n.t('Select the build target to export') },
     );
     if (!pick) return;
     targetTitle = pick.label;
@@ -2779,8 +2791,8 @@ async function exportTargetAsProject(targetTitleArg?: unknown): Promise<void> {
   const exported = buildTargetExportProject(project, targetTitle);
   fs.writeFileSync(save.fsPath, serializeProject(exported), 'utf-8');
   outputChannel.info(`[Code::Blocks] 已从目标导出工程: ${save.fsPath}（目标 ${targetTitle}，${exported.files.length} 个文件）`);
-  const pick = await vscode.window.showInformationMessage(`已导出工程（${exported.files.length} 个文件）`, '打开', '稍后');
-  if (pick === '打开') {
+  const pick = await vscode.window.showInformationMessage(i18n.t('Project exported ({0} file(s))', exported.files.length), i18n.t('Open'), i18n.t('Later'));
+  if (pick === i18n.t('Open')) {
     await openProject(save.fsPath);
   }
 }
@@ -2894,7 +2906,7 @@ function checkUserKeybindingConflictsQuietly(context: vscode.ExtensionContext): 
     }
     const item = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 40);
     item.text = `$(warning) Code::Blocks: ${fresh.length} 个快捷键冲突`;
-    item.tooltip = '检测到与用户键位（或其它来源）的冲突，点击查看清单';
+    item.tooltip = i18n.t('Detected conflicts with user keybindings (or another source) — click to view the list');
     item.command = 'codeblocks.keybindings.check';
     item.show();
     setTimeout(() => item.dispose(), 30000);
@@ -2940,7 +2952,7 @@ function applyKeybindings(opts: { silent?: boolean } = {}): KeybindingApplyResul
       outputChannel.warn(`[Code::Blocks] 键位设置含未知键名：${u}（键名列表见设置说明）`);
     }
     if (!result.changed) {
-      if (!opts.silent) vscode.window.setStatusBarMessage('快捷键已与设置一致，无需写入', 3000);
+      if (!opts.silent) vscode.window.setStatusBarMessage(i18n.t('Keybindings already match the settings — nothing to write'), 3000);
       return { ok: true, changed: false, added: 0, removed: 0, path: target, message: '已与设置一致，无需写入' };
     }
     if (exists && text.trim() && !fs.existsSync(backup)) fs.copyFileSync(target, backup);
@@ -2953,11 +2965,11 @@ function applyKeybindings(opts: { silent?: boolean } = {}): KeybindingApplyResul
       throw new Error(`写入后校验失败，已回滚：${(err as Error).message}`);
     }
     outputChannel.info(`[Code::Blocks] 快捷键已写入用户 keybindings.json：+${result.added} / -${result.removed} 条目（${target}）`);
-    if (!opts.silent) vscode.window.setStatusBarMessage(`快捷键已应用（+${result.added} / -${result.removed}）`, 3000);
+    if (!opts.silent) vscode.window.setStatusBarMessage(i18n.t('Keybindings applied (+{0} / -{1})', result.added, result.removed), 3000);
     return { ok: true, changed: true, added: result.added, removed: result.removed, path: target, message: `已写入 +${result.added} / -${result.removed} 条目` };
   } catch (err) {
     outputChannel.error(`[Code::Blocks] 应用快捷键失败：${(err as Error).message}`);
-    if (!opts.silent) vscode.window.showErrorMessage(`应用快捷键失败：${(err as Error).message}`);
+    if (!opts.silent) vscode.window.showErrorMessage(i18n.t('Failed to apply keybindings: {0}', (err as Error).message));
     return { ok: false, changed: false, added: 0, removed: 0, message: (err as Error).message };
   }
 }
@@ -3101,7 +3113,7 @@ function openKeybindingPanel(): void {
     openFile: () => {
       const p = userKeybindingsPath();
       if (p && fs.existsSync(p)) void vscode.commands.executeCommand('vscode.open', vscode.Uri.file(p));
-      else vscode.window.showInformationMessage('用户 keybindings.json 尚不存在（修改任意一项后会自动创建）');
+      else vscode.window.showInformationMessage(i18n.t('The user keybindings.json does not exist yet (it is created automatically once you change any keybinding)'));
     },
     exportScheme: () => void vscode.commands.executeCommand('codeblocks.keybindings.export'),
     importScheme: () => void vscode.commands.executeCommand('codeblocks.keybindings.import'),
@@ -3112,7 +3124,7 @@ function openKeybindingPanel(): void {
 async function exportKeybindingScheme(): Promise<void> {
   const overrides = keybindingsOverrideMap();
   if (!overrides.size) {
-    vscode.window.showWarningMessage('当前没有自定义快捷键可导出（先在面板/设置中修改任意键位）');
+    vscode.window.showWarningMessage(i18n.t('There are no custom keybindings to export (change any keybinding in the panel or settings first)'));
     return;
   }
   const uri = await vscode.window.showSaveDialog({
@@ -3123,9 +3135,9 @@ async function exportKeybindingScheme(): Promise<void> {
   if (!uri) return;
   try {
     fs.writeFileSync(uri.fsPath, buildExportPayload(overrides), 'utf-8');
-    vscode.window.showInformationMessage(`已导出 ${overrides.size} 项键位方案: ${uri.fsPath}`);
+    vscode.window.showInformationMessage(i18n.t('Exported {0} keybinding(s) to {1}', overrides.size, uri.fsPath));
   } catch (err) {
-    vscode.window.showErrorMessage(`导出失败：${(err as Error).message}`);
+    vscode.window.showErrorMessage(i18n.t('Export failed: {0}', (err as Error).message));
   }
 }
 
@@ -3141,18 +3153,18 @@ async function importKeybindingScheme(): Promise<void> {
   try {
     parsed = parseImportPayload(fs.readFileSync(uris[0].fsPath, 'utf-8'));
   } catch (err) {
-    vscode.window.showErrorMessage(`读取失败：${(err as Error).message}`);
+    vscode.window.showErrorMessage(i18n.t('Read failed: {0}', (err as Error).message));
     return;
   }
   if (parsed.error) { vscode.window.showErrorMessage(parsed.error); return; }
-  if (!parsed.overrides.size) { vscode.window.showWarningMessage('方案中没有可用的键位项'); return; }
+  if (!parsed.overrides.size) { vscode.window.showWarningMessage(i18n.t('The scheme contains no usable keybindings')); return; }
   const ignored = parsed.invalid.length + parsed.unknown.length;
   const mode = await vscode.window.showQuickPick(
     [
       { label: '$(merge) 合并', description: '保留现有自定义，导入项覆盖同名命令', m: 'merge' },
       { label: '$(replace) 覆盖', description: '替换全部现有自定义', m: 'replace' },
     ],
-    { placeHolder: `导入 ${parsed.overrides.size} 项${ignored ? `（忽略 ${ignored} 项非法/未知）` : ''}` },
+    { placeHolder: i18n.t('Import {0} item(s){1}', parsed.overrides.size, ignored ? i18n.t(' ({0} invalid/unknown item(s) ignored)', ignored) : '') },
   );
   if (!mode) return;
   const cfg = vscode.workspace.getConfiguration('codeblocks');
@@ -3163,7 +3175,7 @@ async function importKeybindingScheme(): Promise<void> {
   await cfg.update('keybindings.overrides', next, vscode.ConfigurationTarget.Global);
   const r = applyKeybindings();
   if (!r.ok) return;
-  vscode.window.showInformationMessage(`已导入 ${parsed.overrides.size} 项并应用${ignored ? `（忽略 ${ignored} 项）` : ''}`);
+  vscode.window.showInformationMessage(i18n.t('Imported {0} item(s) and applied{1}', parsed.overrides.size, ignored ? i18n.t(' ({0} item(s) ignored)', ignored) : ''));
   KeybindingPanel.refreshIfOpen();
 }
 
@@ -3188,11 +3200,72 @@ async function restartClangd(): Promise<void> {
  * 输出通道类型在激活期创建（普通通道 ⇄ 日志通道），中途切换需重建通道且会清空当前输出，
  * 故不做热切换，只提示重载窗口（给一键重载按钮，避免用户以为设置没生效）。
  */
+/**
+ * 切换运行时界面语言（命令 `codeblocks.ui.switchLanguage`）。
+ *
+ * 三态：跟随 VS Code 显示语言 / 始终英文 / 始终中文（简体）→ 写全局设置 `codeblocks.ui.language`。
+ * 运行时文案（弹窗/QuickPick/状态栏/面板标题）写入后即时生效（设置监听刷新语言缓存）；
+ * 静态贡献项（命令标题、设置界面描述、视图名）由 VS Code 按显示语言解析 package.nls.*.json，
+ * **无法**运行时切换 ⇒ 提示用户可重载窗口（重载只为让显示语言解析生效，不是本设置有缓存）。
+ */
+async function switchUiLanguage(): Promise<void> {
+  const cfg = vscode.workspace.getConfiguration('codeblocks');
+  const current = cfg.get<string>(i18n.LANGUAGE_SETTING, 'auto');
+  const languageName = (value: i18n.UiLanguageSetting): string => {
+    if (value === 'en') return 'English';
+    if (value === 'zh-cn') return i18n.t('Always Chinese (Simplified)');
+    return i18n.t('Follow the VS Code display language');
+  };
+  const items: (vscode.QuickPickItem & { value: i18n.UiLanguageSetting })[] = [
+    {
+      label: i18n.t('Follow the VS Code display language'),
+      detail: i18n.t('Runtime text follows the VS Code display language'),
+      value: 'auto',
+    },
+    { label: 'English', detail: i18n.t('Force English runtime text'), value: 'en' },
+    { label: '中文（简体）', detail: i18n.t('Force Chinese (Simplified) runtime text'), value: 'zh-cn' },
+  ];
+  for (const it of items) {
+    if (it.value === current) it.description = i18n.t('Current');
+  }
+  const picked = await vscode.window.showQuickPick(items, {
+    title: i18n.t('Switch UI Language…'),
+    placeHolder: i18n.t('Runtime UI language'),
+  });
+  if (!picked) return;
+  await cfg.update(i18n.LANGUAGE_SETTING, picked.value, vscode.ConfigurationTarget.Global);
+  // update() 会触发设置监听（即时生效）；显式刷新一次以覆盖「值未变化 / 监听未派发」的宿主差异
+  i18n.refreshUiLanguage();
+  refreshStatusBars();
+  refreshOpenPanelsForLanguage();
+  const pick = await vscode.window.showInformationMessage(
+    i18n.t(
+      'UI language: {0}. Command titles and the Settings UI follow the VS Code display language — reload the window to apply them.',
+      languageName(picked.value),
+    ),
+    i18n.t('Reload Window'),
+  );
+  if (pick === i18n.t('Reload Window')) {
+    await vscode.commands.executeCommand('workbench.action.reloadWindow');
+  }
+}
+
+/**
+ * 语言切换后刷新已打开面板的**标题**（正文与标签在下次打开时按新语言渲染）。
+ * 刻意不重渲染 HTML：工程属性面板的编辑态只存在于 WebView（未保存的改动会被整体丢弃），
+ * 而语言属于外观偏好，不值得冒丢改动的风险。
+ */
+function refreshOpenPanelsForLanguage(): void {
+  ProjectPropertiesPanel.refreshTitleIfOpen();
+  KeybindingPanel.refreshTitleIfOpen();
+  CompilerOptionsPanel.refreshTitleIfOpen();
+}
+
 async function promptReloadForPersistLog(): Promise<void> {
   const on = vscode.workspace.getConfiguration('codeblocks').get<boolean>('build.persistLog', false);
   const pick = await vscode.window.showWarningMessage(
     `codeblocks.build.persistLog 已${on ? '开启（日志写盘，跨会话保留）' : '关闭（窗口重载即清空）'}，需重载窗口后生效。`,
-    '重载窗口', '稍后',
+    '重载窗口', i18n.t('Later'),
   );
   if (pick === '重载窗口') {
     await vscode.commands.executeCommand('workbench.action.reloadWindow');
@@ -3211,7 +3284,7 @@ async function promptClangdDisabledLeftover(): Promise<void> {
     'codeblocks.clangd.enabled 已关闭：扩展不再生成/更新 clangd 配置，但用户级 clangd config.yaml 里'
     + `仍有 ${fragments.length} 个扩展片段会被继续读取（clangd 仍按旧编译数据库分析）。`
     + '如需彻底停用，请打开该配置删除 `# >>> codeblocks-vscode …` 标记块。',
-    '打开 clangd 配置', '稍后',
+    '打开 clangd 配置', i18n.t('Later'),
   );
   if (pick === '打开 clangd 配置') {
     try {
@@ -3449,7 +3522,7 @@ async function cleanClangdConfigInteractive(): Promise<void> {
   for (const d of orphanDirs) outputChannel.info(`[Code::Blocks]   孤儿缓存 ${d}`);
 
   if (!stale.length && !orphanDirs.length) {
-    vscode.window.showInformationMessage('clangd 配置干净：没有需要清理的失效片段或缓存目录');
+    vscode.window.showInformationMessage(i18n.t('clangd config is clean: no stale fragments or cache directories to remove'));
     return;
   }
   const pick = await vscode.window.showWarningMessage(
@@ -3470,7 +3543,7 @@ async function cleanClangdConfigInteractive(): Promise<void> {
     }
   }
   outputChannel.info(`[Code::Blocks] 已清理：配置片段 ${removed.length} 个、缓存目录 ${cacheRemoved} 个`);
-  vscode.window.showInformationMessage(`已清理 ${removed.length} 个失效 clangd 配置片段、${cacheRemoved} 个孤儿缓存目录`);
+  vscode.window.showInformationMessage(i18n.t('Cleaned {0} stale clangd config fragment(s) and {1} orphan cache directory(ies)', removed.length, cacheRemoved));
 }
 
 /**
@@ -3481,14 +3554,14 @@ async function cleanClangdConfigInteractive(): Promise<void> {
 async function applyClangdQueryDriverInteractive(): Promise<void> {
   const project = activeProject;
   if (!project) {
-    vscode.window.showWarningMessage('请先打开一个 Code::Blocks 工程（用于推导交叉编译器路径）');
+    vscode.window.showWarningMessage(i18n.t('Open a Code::Blocks project first (needed to derive the cross-compiler path)'));
     return;
   }
   const compilerId = project.buildTargets[0]?.compilerId ?? project.compilerId;
   const compiler = getCompiler(compilerId);
   const cPath = compiler.programs.C || compiler.programs.CPP;
   if (!cPath) {
-    vscode.window.showWarningMessage(`编译器 "${compiler.name}" 没有可用的编译器程序路径，无法推导 --query-driver`);
+    vscode.window.showWarningMessage(i18n.t('Compiler "{0}" has no usable compiler program path, cannot derive --query-driver', compiler.name));
     return;
   }
   const dir = path.dirname(cPath).replace(/\\/g, '/');
@@ -3504,13 +3577,13 @@ async function applyClangdQueryDriverInteractive(): Promise<void> {
       { label: '写入用户设置', description: '影响所有工作区（含其它非 Code::Blocks 工程）', id: 'global' },
       { label: '仅复制到剪贴板', description: '自行粘贴到设置里', id: 'clipboard' },
     ],
-    { placeHolder: `将写入 clangd.arguments：${arg}` },
+    { placeHolder: i18n.t('Will write clangd.arguments: {0}', arg) },
   );
   if (!target) return;
 
   if (target.id === 'clipboard') {
     await vscode.env.clipboard.writeText(JSON.stringify({ 'clangd.arguments': next }, null, 2));
-    vscode.window.showInformationMessage('已复制 clangd.arguments 到剪贴板');
+    vscode.window.showInformationMessage(i18n.t('clangd.arguments copied to the clipboard'));
     return;
   }
   const cfgTarget = target.id === 'global' ? vscode.ConfigurationTarget.Global : vscode.ConfigurationTarget.Workspace;
@@ -3723,7 +3796,7 @@ async function generateClangdForWorkspaceInternal(interactive: boolean): Promise
       outputChannel.info(`[Code::Blocks] 已更新 clangd 用户配置 → ${clangdUserConfigPath()}`);
       outputChannel.info(`[Code::Blocks] 检测到 clangd: ${clangd}`);
       if (interactive) {
-        vscode.window.showInformationMessage(`已生成 compile_commands.json（${count} 条）并检测到 clangd，补全 / 跳转已就绪`);
+        vscode.window.showInformationMessage(i18n.t('compile_commands.json generated ({0} entries) and clangd detected — completion / navigation are ready', count));
       }
     } else {
       outputChannel.warn('[Code::Blocks] 未检测到 clangd，补全 / 跳转暂不可用。安装方式见下方提示。');
@@ -3741,7 +3814,7 @@ async function generateClangdForWorkspaceInternal(interactive: boolean): Promise
       }
     }
   } catch (err) {
-    vscode.window.showErrorMessage(`生成 compile_commands.json 失败: ${(err as Error).message}`);
+    vscode.window.showErrorMessage(i18n.t('Failed to generate compile_commands.json: {0}', (err as Error).message));
   }
 }
 
@@ -4204,7 +4277,7 @@ async function removeFileFromProject(project: Project, file: ProjectFile): Promi
       updateCompilerStatusBar();
     }
   } catch (err) {
-    vscode.window.showErrorMessage(`移除文件失败: ${(err as Error).message}`);
+    vscode.window.showErrorMessage(i18n.t('Failed to remove the file: {0}', (err as Error).message));
   }
 }
 
@@ -4212,7 +4285,7 @@ async function removeFileFromProject(project: Project, file: ProjectFile): Promi
 async function toggleFileOption(project: Project, file: ProjectFile, opt: 'compile' | 'link', enable: boolean): Promise<void> {
   try {
     setUnitOptionInCbp(project.filename, file.relativeFilename, opt, enable);
-    const name = opt === 'compile' ? '编译' : '链接';
+    const name = opt === 'compile' ? i18n.t('Compile') : i18n.t('Link');
     outputChannel.info(`[Code::Blocks] 文件 ${file.relativeFilename} ${name} = ${enable}`);
     // 重新解析项目刷新树
     const idx = openProjects.findIndex((p) => p.filename === project.filename);
@@ -4226,7 +4299,7 @@ async function toggleFileOption(project: Project, file: ProjectFile, opt: 'compi
       updateCompilerStatusBar();
     }
   } catch (err) {
-    vscode.window.showErrorMessage(`切换${opt === 'compile' ? '编译' : '链接'}选项失败: ${(err as Error).message}`);
+    vscode.window.showErrorMessage(i18n.t('Failed to toggle the {0} option: {1}', opt === 'compile' ? i18n.t('Compile') : i18n.t('Link'), (err as Error).message));
   }
 }
 
@@ -4236,9 +4309,9 @@ async function editFileBuildCommand(project: Project, file: ProjectFile): Promis
   const current = file.customBuildCommands[cmp];
   const value = await vscode.window.showInputBox({
     title: `自定义构建命令: ${file.relativeFilename}`,
-    prompt: `默认编译器 "${cmp}"；留空则删除该文件的自定义构建命令`,
+    prompt: i18n.t('Default compiler "{0}"; leave empty to remove the custom build command of this file', cmp),
     value: current?.command ?? '',
-    placeHolder: '例如: make -f custom.mk',
+    placeHolder: i18n.t('For example: make -f custom.mk'),
     ignoreFocusOut: true,
   });
   if (value === undefined) return; // 用户取消
@@ -4267,7 +4340,7 @@ async function editFileBuildCommand(project: Project, file: ProjectFile): Promis
       updateCompilerStatusBar();
     }
   } catch (err) {
-    vscode.window.showErrorMessage(`更新自定义构建命令失败: ${(err as Error).message}`);
+    vscode.window.showErrorMessage(i18n.t('Failed to update the custom build command: {0}', (err as Error).message));
   }
 }
 
@@ -4334,7 +4407,7 @@ function setUnitOptionInCbp(cbpPath: string, relativeFilename: string, opt: 'com
 async function addFilesToProject(filename: string): Promise<void> {
   const project = openProjects.find((p) => p.filename === filename);
   if (!project) {
-    vscode.window.showWarningMessage('项目未找到');
+    vscode.window.showWarningMessage(i18n.t('Project not found'));
     return;
   }
 
@@ -4373,7 +4446,7 @@ async function addFilesToProject(filename: string): Promise<void> {
   }
 
   if (addedUnits.length === 0) {
-    vscode.window.showInformationMessage('没有新文件需要添加（可能已存在）');
+    vscode.window.showInformationMessage(i18n.t('No new files to add (they may already exist)'));
     return;
   }
 
@@ -4393,7 +4466,7 @@ async function addFilesToProject(filename: string): Promise<void> {
       updateCompilerStatusBar();
     }
   } catch (err) {
-    vscode.window.showErrorMessage(`添加文件失败: ${(err as Error).message}`);
+    vscode.window.showErrorMessage(i18n.t('Failed to add files: {0}', (err as Error).message));
   }
 }
 
@@ -4433,25 +4506,25 @@ async function renameProjectFile(project: Project, file: ProjectFile): Promise<v
     return;
   }
   if (buildInProgress) {
-    vscode.window.showWarningMessage('构建进行中，请先停止或等待构建结束后再重命名文件');
+    vscode.window.showWarningMessage(i18n.t('A build is in progress — stop it or wait for it to finish before renaming files'));
     return;
   }
 
   const abs = file.absolutePath;
   if (!fs.existsSync(abs)) {
-    vscode.window.showErrorMessage(`文件不存在，无法重命名: ${abs}`);
+    vscode.window.showErrorMessage(i18n.t('File does not exist, cannot rename: {0}', abs));
     return;
   }
   try {
     fs.accessSync(abs, fs.constants.W_OK);
   } catch {
-    vscode.window.showErrorMessage(`文件为只读，无法重命名: ${abs}`);
+    vscode.window.showErrorMessage(i18n.t('File is read-only, cannot rename: {0}', abs));
     return;
   }
 
   const oldName = path.basename(abs);
   const input = await vscode.window.showInputBox({
-    prompt: `重命名 ${file.relativeFilename}（仅文件名，不改变所在目录）`,
+    prompt: i18n.t('Rename {0} (file name only, the directory is unchanged)', file.relativeFilename),
     value: oldName,
     validateInput: (v) => {
       const name = v.trim();
@@ -4470,7 +4543,7 @@ async function renameProjectFile(project: Project, file: ProjectFile): Promise<v
   const newAbs = path.join(dir, newName);
   const caseOnly = newAbs.toLowerCase() === abs.toLowerCase();
   if (!caseOnly && fs.existsSync(newAbs)) {
-    vscode.window.showErrorMessage(`目标文件已存在: ${newAbs}`);
+    vscode.window.showErrorMessage(i18n.t('The target file already exists: {0}', newAbs));
     return;
   }
 
@@ -4489,7 +4562,7 @@ async function renameProjectFile(project: Project, file: ProjectFile): Promise<v
       try {
         if (doc.isDirty) await doc.save();
       } catch {
-        vscode.window.showErrorMessage(`保存失败，已中止重命名: ${doc.fileName}`);
+        vscode.window.showErrorMessage(i18n.t('Save failed, rename aborted: {0}', doc.fileName));
         return;
       }
     }
@@ -4522,11 +4595,11 @@ async function renameProjectFile(project: Project, file: ProjectFile): Promise<v
         } catch {
           // 回滚也失败：保留现场，错误信息已足够定位
         }
-        vscode.window.showErrorMessage(`重命名失败: ${(err2 as Error).message}`);
+        vscode.window.showErrorMessage(i18n.t('Rename failed: {0}', (err2 as Error).message));
         return;
       }
     } else {
-      vscode.window.showErrorMessage(`重命名失败: ${(err as Error).message}`);
+      vscode.window.showErrorMessage(i18n.t('Rename failed: {0}', (err as Error).message));
       return;
     }
   }
@@ -4545,10 +4618,10 @@ async function renameProjectFile(project: Project, file: ProjectFile): Promise<v
       outputChannel.info(`[Code::Blocks] 已重命名文件: ${oldRel} → ${newRel}`);
     }
   } catch (err) {
-    vscode.window.showErrorMessage(`磁盘已重命名但更新工程引用失败: ${(err as Error).message}（请手动修正 .cbp）`);
+    vscode.window.showErrorMessage(i18n.t('Renamed on disk but updating the project reference failed: {0} (fix the .cbp manually)', (err as Error).message));
   }
   if (!cbpUpdated) {
-    vscode.window.showWarningMessage(`未能在 .cbp 中更新引用 “${oldRel}”（磁盘文件已重命名）`);
+    vscode.window.showWarningMessage(i18n.t('Could not update the reference "{0}" in the .cbp (the file was renamed on disk)', oldRel));
   }
 
   // 6. 其它已打开工程引用同一文件 → 仅提示（对齐 CB 不自动修改）
@@ -4585,7 +4658,7 @@ async function renameProjectFile(project: Project, file: ProjectFile): Promise<v
 async function addFilesRecursivelyToProject(filename: string): Promise<void> {
   const project = openProjects.find((p) => p.filename === filename);
   if (!project) {
-    vscode.window.showWarningMessage('项目未找到');
+    vscode.window.showWarningMessage(i18n.t('Project not found'));
     return;
   }
 
@@ -4610,7 +4683,7 @@ async function addFilesRecursivelyToProject(filename: string): Promise<void> {
     rels.push({ rel, abs });
   }
   if (rels.length === 0) {
-    vscode.window.showInformationMessage('该目录下没有可添加的源文件（可能已全部在项目中）');
+    vscode.window.showInformationMessage(i18n.t('No source files to add in that directory (they may all be in the project already)'));
     return;
   }
 
@@ -4620,7 +4693,7 @@ async function addFilesRecursivelyToProject(filename: string): Promise<void> {
     {
       canPickMany: true,
       matchOnDescription: true,
-      placeHolder: `递归添加 ${rels.length} 个文件到 ${path.basename(project.filename)}（默认全选）`,
+      placeHolder: i18n.t('Recursively add {0} file(s) to {1} (all selected by default)', rels.length, path.basename(project.filename)),
     },
   );
   if (!picked || picked.length === 0) return;
@@ -4631,7 +4704,7 @@ async function addFilesRecursivelyToProject(filename: string): Promise<void> {
   if (project.buildTargets.length > 1) {
     const ALL = '全部构建目标（默认）';
     const tPick = await vscode.window.showQuickPick([ALL, ...project.buildTargets.map((t) => t.title)], {
-      placeHolder: '新添加的文件归属哪个构建目标？',
+      placeHolder: i18n.t('Which build target should the newly added files belong to?'),
     });
     if (tPick === undefined) return;
     if (tPick !== ALL) subset = [tPick];
@@ -4656,7 +4729,7 @@ async function addFilesRecursivelyToProject(filename: string): Promise<void> {
       updateCompilerStatusBar();
     }
   } catch (err) {
-    vscode.window.showErrorMessage(`递归添加文件失败: ${(err as Error).message}`);
+    vscode.window.showErrorMessage(i18n.t('Failed to add files recursively: {0}', (err as Error).message));
   }
 }
 
@@ -4722,14 +4795,14 @@ async function findFileCommand(node?: any): Promise<void> {
   }
 
   if (entries.length === 0) {
-    vscode.window.showInformationMessage('没有可查找的文件');
+    vscode.window.showInformationMessage(i18n.t('No files to search'));
     return;
   }
 
   const pick = await vscode.window.showQuickPick(
     entries.map((e) => ({ label: e.label, description: e.description, entry: e })),
     {
-      placeHolder: `查找文件（作用域内 ${entries.length} 个）`,
+      placeHolder: i18n.t('Find file ({0} in scope)', entries.length),
       matchOnDescription: true,
     },
   );
@@ -5072,7 +5145,7 @@ async function installCompilerCacheGuide(): Promise<void> {
       { label: 'ccache', description: `${COMPILER_CACHE_INSTALL.ccache.license} · ccache.dev（GCC/Clang 通用，嵌入式工具链同样适用）` },
       { label: 'sccache', description: `${COMPILER_CACHE_INSTALL.sccache.license} · Mozilla（本地磁盘缓存，另支持云端后端）` },
     ],
-    { placeHolder: '选择要安装的编译缓存工具（扩展仅提供引导，不会静默安装）', ignoreFocusOut: true },
+    { placeHolder: i18n.t('Select the compiler cache tool to install (the extension only guides you, it never installs silently)'), ignoreFocusOut: true },
   );
   if (!pick) return;
   const tool = pick.label as CompilerCacheTool;
@@ -5081,7 +5154,7 @@ async function installCompilerCacheGuide(): Promise<void> {
     label: it.label, description: it.description, action: it.action,
   }));
   const sel = await vscode.window.showQuickPick(items, {
-    placeHolder: `安装 ${tool}（winget 不可用时可用官方下载页手动安装）`,
+    placeHolder: i18n.t('Install {0} (if winget is unavailable, install manually from the official download page)', tool),
     ignoreFocusOut: true,
   });
   if (!sel) return;
@@ -5089,7 +5162,7 @@ async function installCompilerCacheGuide(): Promise<void> {
   if (sel.action === 'winget-copy') {
     await vscode.env.clipboard.writeText(info.wingetCommand);
     vscode.window.createTerminal('Compiler Cache Install').show();
-    vscode.window.showInformationMessage(`已复制安装命令，请在终端粘贴执行：${info.wingetCommand}`);
+    vscode.window.showInformationMessage(i18n.t('Install command copied — paste it into a terminal: {0}', info.wingetCommand));
   } else if (sel.action === 'winget-run') {
     const confirm = await vscode.window.showWarningMessage(
       `将在终端执行 winget 安装（可能弹出 UAC 提权提示）：${info.wingetCommand}`,
@@ -5099,10 +5172,10 @@ async function installCompilerCacheGuide(): Promise<void> {
     const term = vscode.window.createTerminal('Compiler Cache Install');
     term.show();
     term.sendText(info.wingetCommand);
-    vscode.window.showInformationMessage('已启动安装；完成后回到本命令选择「重新检测并启用」。');
+    vscode.window.showInformationMessage(i18n.t('Installation started; when it finishes, run this command again and choose "Re-detect and enable".'));
   } else if (sel.action === 'open-download') {
     await vscode.env.openExternal(vscode.Uri.parse(info.downloadUrl));
-    vscode.window.showInformationMessage('已打开官方下载页；安装完成后请再次运行本命令并选择「重新检测并启用」。');
+    vscode.window.showInformationMessage(i18n.t('The official download page has been opened; after installing, run this command again and choose "Re-detect and enable".'));
   } else if (sel.action === 'redetect') {
     clearCompilerCacheResolveCache();
     ccDetectionCache = undefined;
@@ -5110,8 +5183,8 @@ async function installCompilerCacheGuide(): Promise<void> {
     return;
   }
   // 安装动作收尾：附加一次「重新检测」（含 winget 安装完成后的启用路径）
-  const again = await vscode.window.showInformationMessage('安装完成后可立即重新检测并启用。', '重新检测');
-  if (again === '重新检测') {
+  const again = await vscode.window.showInformationMessage(i18n.t('Once installed you can re-detect and enable it right away.'), i18n.t('Re-detect'));
+  if (again === i18n.t('Re-detect')) {
     clearCompilerCacheResolveCache();
     ccDetectionCache = undefined;
     await checkCompilerCachePrompt(true);
@@ -5168,7 +5241,7 @@ async function detectCompilers(): Promise<void> {
       qp.items = toItems(detected);
       if (detected.length === 0) {
         qp.hide();
-        vscode.window.showWarningMessage('未探测到可用的编译器（GCC/Clang/MSVC/RISC-V）');
+        vscode.window.showWarningMessage(i18n.t('No usable compiler detected (GCC/Clang/MSVC/RISC-V)'));
       }
     }
   } else if (!chosen) {
@@ -5176,7 +5249,7 @@ async function detectCompilers(): Promise<void> {
     qp.placeholder = initial.length ? '选择要使用的编译器（探测失败，显示缓存结果）' : '编译器探测失败';
     if (initial.length === 0) {
       qp.hide();
-      vscode.window.showWarningMessage('编译器探测失败（详情见 Code::Blocks 输出）');
+      vscode.window.showWarningMessage(i18n.t('Compiler detection failed (see the Code::Blocks output for details)'));
     }
   }
 
@@ -5199,7 +5272,7 @@ async function detectCompilers(): Promise<void> {
       prevCompilerId,
     );
     await cfg.update('compilerPrograms', nextPrograms, vscode.ConfigurationTarget.Global);
-    vscode.window.showInformationMessage(`已选择编译器: ${picked.name}`);
+    vscode.window.showInformationMessage(i18n.t('Compiler selected: {0}', picked.name));
     updateCompilerStatusBar();
   }
 }
@@ -5213,7 +5286,7 @@ async function showCodeStats(): Promise<void> {
     .filter((p) => isSourceFile(p));
 
   if (files.length === 0) {
-    vscode.window.showWarningMessage('项目没有可统计的源文件');
+    vscode.window.showWarningMessage(i18n.t('The project has no source files to count'));
     return;
   }
 
@@ -5247,7 +5320,7 @@ async function showTodoList(): Promise<void> {
   const todos = scanTodos(files, keywords.length ? { startStrings: keywords, allowedTypes: keywords } : undefined);
 
   if (todos.length === 0) {
-    vscode.window.showInformationMessage('项目中没有 TODO/FIXME/NOTE 标记');
+    vscode.window.showInformationMessage(i18n.t('No TODO/FIXME/NOTE markers in the project'));
     return;
   }
 
@@ -5324,7 +5397,7 @@ async function bookmarkGoto(dir: 1 | -1): Promise<void> {
   const line = ed ? ed.selection.active.line + 1 : 1;
   const bm = dir > 0 ? nextBookmark(bookmarks, file, line) : prevBookmark(bookmarks, file, line);
   if (!bm) {
-    vscode.window.showInformationMessage('没有书签');
+    vscode.window.showInformationMessage(i18n.t('No bookmarks'));
     return;
   }
   const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(bm.file));
@@ -5342,7 +5415,7 @@ async function openIncludeFileCmd(): Promise<void> {
   if (!ed) return;
   const directive = parseIncludeDirective(ed.document.lineAt(ed.selection.active.line).text);
   if (!directive) {
-    vscode.window.showWarningMessage('光标所在行不是 #include 指令');
+    vscode.window.showWarningMessage(i18n.t('The current line is not an #include directive'));
     return;
   }
   const fromDir = path.dirname(ed.document.uri.fsPath);
@@ -5368,7 +5441,7 @@ async function openIncludeFileCmd(): Promise<void> {
   }
   const hit = resolveIncludePath(directive, fromDir, dirs, fs.existsSync);
   if (!hit) {
-    vscode.window.showWarningMessage(`未找到包含文件: ${directive.name}（已搜索 ${(directive.quoted ? 1 : 0) + dirs.length} 个目录）`);
+    vscode.window.showWarningMessage(i18n.t('Include file not found: {0} (searched {1} directories)', directive.name, (directive.quoted ? 1 : 0) + dirs.length));
     return;
   }
   const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(hit));
@@ -5382,11 +5455,11 @@ async function addTodoItemCmd(): Promise<void> {
   const cfg = vscode.workspace.getConfiguration('codeblocks');
   const keywords = (cfg.get<string[]>('todo.keywords', []) ?? []).map((k) => String(k).trim()).filter(Boolean);
   const list = keywords.length ? keywords : ['TODO', 'FIXME', 'NOTE', 'HACK', 'XXX'];
-  const type = await vscode.window.showQuickPick(list, { placeHolder: 'TODO 类型（codeblocks.todo.keywords 可配置）' });
+  const type = await vscode.window.showQuickPick(list, { placeHolder: i18n.t('TODO type (configurable via codeblocks.todo.keywords)') });
   if (!type) return;
-  const userInput = await vscode.window.showInputBox({ prompt: '用户名（可留空）', value: process.env.USERNAME ?? process.env.USER ?? '' });
+  const userInput = await vscode.window.showInputBox({ prompt: i18n.t('User name (optional)'), value: process.env.USERNAME ?? process.env.USER ?? '' });
   if (userInput === undefined) return;
-  const text = await vscode.window.showInputBox({ prompt: 'TODO 内容' });
+  const text = await vscode.window.showInputBox({ prompt: i18n.t('TODO text') });
   if (text === undefined) return;
   const pos = ed.selection.active;
   const line = ed.document.lineAt(pos.line);
@@ -5467,10 +5540,10 @@ function buildStatusHoverTooltip(): vscode.MarkdownString {
   md.isTrusted = true;
   const l = (icon: string, label: string, command: string): string => `[${icon} ${label}](command:${command})`;
   md.value = [
-    '**构建菜单**',
+    i18n.t('**Build menu**'),
     [l('$(package)', 'Build', 'codeblocks.build'), l('$(sync)', 'Rebuild', 'codeblocks.rebuild')].join('　'),
     [l('$(multiple-windows)', 'Build Workspace', 'codeblocks.buildWorkspace'), l('$(multiple-windows)', 'Rebuild Workspace', 'codeblocks.rebuildWorkspace')].join('　'),
-    '点击打开构建菜单（构建中点击 = 停止构建）',
+    i18n.t('Click to open the build menu (while building, click = stop the build)'),
   ].join('\n\n');
   return md;
 }
@@ -5479,7 +5552,7 @@ function buildStatusHoverTooltip(): vscode.MarkdownString {
 function buildStopHoverTooltip(seconds: number): vscode.MarkdownString {
   const md = new vscode.MarkdownString(undefined, true);
   md.isTrusted = true;
-  md.value = `**构建进行中（${seconds}s）**\n\n[$(debug-stop) 停止构建](command:codeblocks.build.stop)`;
+  md.value = i18n.t('**Building ({0}s)**\n\n[$(debug-stop) Stop Build](command:codeblocks.build.stop)', seconds);
   return md;
 }
 
@@ -5522,7 +5595,7 @@ async function selectTarget(): Promise<string | undefined> {
     ...project.virtualTargets.map((v) => v.title),
   ];
   if (titles.length === 0) {
-    vscode.window.showWarningMessage('项目没有构建目标');
+    vscode.window.showWarningMessage(i18n.t('The project has no build targets'));
     return undefined;
   }
   // 该工程已记忆且目标仍存在则直接返回，不弹窗
@@ -5543,18 +5616,18 @@ async function promptSelectTargetForProject(project: Project): Promise<void> {
     ...project.virtualTargets.map((v) => v.title),
   ];
   if (titles.length === 0) {
-    vscode.window.showWarningMessage('项目没有构建目标');
+    vscode.window.showWarningMessage(i18n.t('The project has no build targets'));
     return;
   }
   const current = getSelectedTarget(project);
   const picked = await vscode.window.showQuickPick(
-    titles.map((t) => ({ label: t, description: t === current ? '当前' : undefined })),
-    { placeHolder: `选择构建目标: ${project.title}` },
+    titles.map((t) => ({ label: t, description: t === current ? i18n.t('Current') : undefined })),
+    { placeHolder: i18n.t('Select the build target: {0}', project.title) },
   );
   if (picked) {
     setSelectedTarget(project, picked.label);
     updateTargetStatusBar();
-    vscode.window.showInformationMessage(`已切换到构建目标: ${picked.label}`);
+    vscode.window.showInformationMessage(i18n.t('Build target switched to: {0}', picked.label));
   }
 }
 
@@ -5640,7 +5713,7 @@ function reportBuildResult(success: boolean, cancelled: boolean, buildStartMs: n
   if (cancelled) {
     const en = 'Build cancelled (user interrupted)';
     outputChannel.warn(buildLogPrefs().plain ? en : msg('[Code::Blocks] ⚠️ 构建已取消（用户中断）', en));
-    vscode.window.showWarningMessage(buildLogPrefs().plain ? en : msg('⚠️ 构建已取消', en));
+    vscode.window.showWarningMessage(buildLogPrefs().plain ? en : msg(i18n.t('⚠️ Build cancelled'), en));
     return;
   }
   if (buildLogPrefs().plain) {
@@ -5654,13 +5727,13 @@ function reportBuildResult(success: boolean, cancelled: boolean, buildStartMs: n
     outputChannel.info(msg('[Code::Blocks] 构建成功', '[Code::Blocks] Build finished'));
     // quietSuccess 模式：不弹 toast，仅日志 + 状态栏徽标
     if (!quietSuccess()) {
-      vscode.window.showInformationMessage(msg(`✅ 构建成功 · ${errorCount} 错误 · ${warningCount} 警告`, `Build finished: ${errorCount} error(s), ${warningCount} warning(s)`));
+      vscode.window.showInformationMessage(msg(i18n.t('✅ Build succeeded · {0} error(s) · {1} warning(s)', errorCount, warningCount), `Build finished: ${errorCount} error(s), ${warningCount} warning(s)`));
     }
   } else {
     outputChannel.error(msg('[Code::Blocks] 构建失败', '[Code::Blocks] Build failed'));
     // 第六轮 F1b：quietFailure 时不弹错误 toast（仅日志 + Build Log/状态栏徽标）
     if (!quietFailure()) {
-      vscode.window.showErrorMessage(msg(`❌ 构建失败 · ${errorCount} 错误 · ${warningCount} 警告`, `Build failed: ${errorCount} error(s), ${warningCount} warning(s)`));
+      vscode.window.showErrorMessage(msg(i18n.t('❌ Build failed · {0} error(s) · {1} warning(s)', errorCount, warningCount), `Build failed: ${errorCount} error(s), ${warningCount} warning(s)`));
     }
   }
 }
@@ -5672,7 +5745,7 @@ function reportBuildResult(success: boolean, cancelled: boolean, buildStartMs: n
  */
 function claimBuildMutex(): boolean {
   if (buildInProgress) {
-    vscode.window.showWarningMessage('已有构建正在进行，请等待完成或先停止');
+    vscode.window.showWarningMessage(i18n.t('A build is already running — wait for it to finish or stop it first'));
     return false;
   }
   buildInProgress = true;
@@ -5717,11 +5790,11 @@ function publishBuildDiagnostic(uri: vscode.Uri, diag: vscode.Diagnostic): void 
 async function build(rebuild: boolean): Promise<boolean> {
   // 构建互斥：进行中时忽略新的构建命令（防止双开构建进程打架）
   if (buildInProgress) {
-    vscode.window.showWarningMessage('已有构建正在进行，请等待完成或先停止');
+    vscode.window.showWarningMessage(i18n.t('A build is already running — wait for it to finish or stop it first'));
     return false;
   }
   if (openProjects.length === 0) {
-    vscode.window.showWarningMessage('请先打开一个 Code::Blocks 项目 (.cbp)');
+    vscode.window.showWarningMessage(i18n.t('Open a Code::Blocks project (.cbp) first'));
     return false;
   }
 
@@ -5731,7 +5804,7 @@ async function build(rebuild: boolean): Promise<boolean> {
   if (!project) {
     // 对齐 AskForActiveProject：多工程且无活动项目 → 询问选择
     const title = await vscode.window.showQuickPick(openProjects.map((p) => p.title), {
-      placeHolder: '选择要构建的工程（设为活动项目）',
+      placeHolder: i18n.t('Select the project to build (set as the active project)'),
     });
     project = openProjects.find((p) => p.title === title);
     if (!project) return false;
@@ -5755,7 +5828,7 @@ async function buildWorkspace(rebuild: boolean, clearLog = true): Promise<boolea
 /** Build Workspace 主体（互斥已由 buildWorkspace 占有） */
 async function buildWorkspaceLocked(rebuild: boolean, clearLog: boolean): Promise<boolean> {
   if (openProjects.length === 0) {
-    vscode.window.showWarningMessage('请先打开一个 Code::Blocks 项目 (.cbp)');
+    vscode.window.showWarningMessage(i18n.t('Open a Code::Blocks project (.cbp) first'));
     return false;
   }
 
@@ -5886,7 +5959,7 @@ async function buildSingleProjectLocked(filename: string, rebuild: boolean): Pro
 
   const project = openProjects.find((p) => p.filename === filename);
   if (!project) {
-    vscode.window.showWarningMessage('项目未找到');
+    vscode.window.showWarningMessage(i18n.t('Project not found'));
     return false;
   }
   // 单工程编译时，活动工程也切换为该工程（状态栏 / 后续构建 / clangd 随之更新）
@@ -5896,13 +5969,13 @@ async function buildSingleProjectLocked(filename: string, rebuild: boolean): Pro
   // 项目级平台过滤（对齐 compilergcc.cpp:2724）
   if (!supportsCurrentPlatform(project.platforms)) {
     outputChannel.warn(`[Code::Blocks] 项目 "${project.title}" 不支持当前平台，跳过`);
-    vscode.window.showWarningMessage(`项目 "${project.title}" 不支持当前平台`);
+    vscode.window.showWarningMessage(i18n.t('Project "{0}" does not support the current platform', project.title));
     return false;
   }
 
   const targetTitle = getSelectedTarget(project) ?? project.buildTargets.find((t) => supportsCurrentPlatform(t.platforms))?.title;
   if (!targetTitle) {
-    vscode.window.showWarningMessage('项目没有构建目标');
+    vscode.window.showWarningMessage(i18n.t('The project has no build targets'));
     return false;
   }
 
@@ -5986,7 +6059,7 @@ async function buildSingleFileLocked(project: Project, file: ProjectFile): Promi
   }
   const targetTitle = getSelectedTarget(project) ?? project.buildTargets.find((t) => supportsCurrentPlatform(t.platforms))?.title;
   if (!targetTitle) {
-    vscode.window.showWarningMessage('项目没有构建目标');
+    vscode.window.showWarningMessage(i18n.t('The project has no build targets'));
     return;
   }
   const target = project.buildTargets.find((t) => t.title === targetTitle);
@@ -6051,12 +6124,12 @@ async function buildSingleFileLocked(project: Project, file: ProjectFile): Promi
 /** 单文件清理（对齐 Code::Blocks Clean file：删除对象文件，needDependencies 时连带依赖文件） */
 async function cleanSingleFile(project: Project, file: ProjectFile): Promise<void> {
   if (buildInProgress) {
-    vscode.window.showWarningMessage('已有构建正在进行，请等待完成或先停止');
+    vscode.window.showWarningMessage(i18n.t('A build is already running — wait for it to finish or stop it first'));
     return;
   }
   const targetTitle = getSelectedTarget(project) ?? project.buildTargets.find((t) => supportsCurrentPlatform(t.platforms))?.title;
   if (!targetTitle) {
-    vscode.window.showWarningMessage('项目没有构建目标');
+    vscode.window.showWarningMessage(i18n.t('The project has no build targets'));
     return;
   }
   const target = project.buildTargets.find((t) => t.title === targetTitle);
@@ -6332,14 +6405,14 @@ function activeEditorFsPath(): string | undefined {
 async function insertHeaderGuardInActiveEditor(): Promise<void> {
   const editor = vscode.window.activeTextEditor;
   if (!editor || editor.document.uri.scheme !== 'file') {
-    vscode.window.showInformationMessage('请先打开一个文件');
+    vscode.window.showInformationMessage(i18n.t('Open a file first'));
     return;
   }
   const doc = editor.document;
   const text = doc.getText();
   const updated = applyHeaderGuard(doc.uri.fsPath, text, headerGuardStyle());
   if (updated === null) {
-    vscode.window.showInformationMessage('已存在头文件保护（#pragma once / #ifndef）');
+    vscode.window.showInformationMessage(i18n.t('A header guard already exists (#pragma once / #ifndef)'));
     return;
   }
   const edit = new vscode.WorkspaceEdit();
@@ -6373,12 +6446,12 @@ async function autoInsertHeaderGuards(files: readonly vscode.Uri[]): Promise<voi
 async function tidyCommentsInActiveEditor(): Promise<void> {
   const editor = vscode.window.activeTextEditor;
   if (!editor || editor.document.uri.scheme !== 'file') {
-    vscode.window.showInformationMessage('请先打开一个文件');
+    vscode.window.showInformationMessage(i18n.t('Open a file first'));
     return;
   }
   const sel = editor.selection;
   if (sel.isEmpty) {
-    vscode.window.showInformationMessage('请先选中要整理的块注释（多行），再执行 Tidy Comments');
+    vscode.window.showInformationMessage(i18n.t('Select the block comment (multi-line) to tidy, then run Tidy Comments'));
     return;
   }
   const selected = editor.document.getText(sel);
@@ -6386,7 +6459,7 @@ async function tidyCommentsInActiveEditor(): Promise<void> {
   const width = Number.isFinite(rawWidth) ? Math.max(20, Math.min(200, rawWidth)) : 80;
   const updated = tidyCommentBlock(selected, width);
   if (updated === selected) {
-    vscode.window.setStatusBarMessage('注释已是整洁格式，无更改', 2500);
+    vscode.window.setStatusBarMessage(i18n.t('The comment is already tidy — no changes'), 2500);
     return;
   }
   await editor.edit((b) => b.replace(sel, updated));
@@ -6399,7 +6472,7 @@ async function tidyCommentsInActiveEditor(): Promise<void> {
 async function swapHeaderSource(): Promise<void> {
   const cur = activeEditorFsPath();
   if (!cur) {
-    vscode.window.showInformationMessage('请先打开一个 C/C++ 源文件或头文件');
+    vscode.window.showInformationMessage(i18n.t('Open a C/C++ source or header file first'));
     return;
   }
   const extMap: Record<string, string[]> = {
@@ -6415,7 +6488,7 @@ async function swapHeaderSource(): Promise<void> {
   const ext = path.extname(cur).toLowerCase();
   const targets = extMap[ext];
   if (!targets) {
-    vscode.window.showInformationMessage(`不支持的文件类型：${ext || '(无扩展名)'}`);
+    vscode.window.showInformationMessage(i18n.t('Unsupported file type: {0}', ext || i18n.t('(no extension)')));
     return;
   }
   const dir = path.dirname(cur);
@@ -6443,7 +6516,7 @@ async function swapHeaderSource(): Promise<void> {
     }
   }
   if (!found) {
-    vscode.window.showInformationMessage(`未找到与「${path.basename(cur)}」同名的 ${targets.join(' / ')} 文件`);
+    vscode.window.showInformationMessage(i18n.t('No {1} file named "{0}" found', path.basename(cur), targets.join(' / ')));
     return;
   }
   const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(found));
@@ -6473,7 +6546,7 @@ async function runConfiguredTool(index: number): Promise<void> {
   const tools = parseToolsSetting(vscode.workspace.getConfiguration('codeblocks').get('tools'));
   const tool = tools[index];
   if (!tool) {
-    vscode.window.showWarningMessage('未找到自定义工具（设置 → codeblocks.tools）');
+    vscode.window.showWarningMessage(i18n.t('Custom tool not found (Settings → codeblocks.tools)'));
     return;
   }
   const file = activeEditorFsPath();
@@ -6534,7 +6607,7 @@ async function showCompilerCommandsDocument(): Promise<void> {
   const compilerId = project?.compilerId || vscode.workspace.getConfiguration('codeblocks').get<string>('compilerId', 'gcc');
   const compiler = getCompiler(compilerId);
   if (!compiler) {
-    vscode.window.showWarningMessage(`未找到编译器定义: ${compilerId}`);
+    vscode.window.showWarningMessage(i18n.t('Compiler definition not found: {0}', compilerId));
     return;
   }
   const L: string[] = [];
@@ -6594,18 +6667,18 @@ async function exportProjectMakefile(): Promise<void> {
   const targetTitle = getSelectedTarget(project) ?? project.buildTargets.find((t) => supportsCurrentPlatform(t.platforms))?.title;
   const compiler = getCompiler(project.compilerId || vscode.workspace.getConfiguration('codeblocks').get<string>('compilerId', 'gcc'));
   if (!compiler) {
-    vscode.window.showWarningMessage(`未找到编译器定义: ${project.compilerId}`);
+    vscode.window.showWarningMessage(i18n.t('Compiler definition not found: {0}', project.compilerId));
     return;
   }
   let data: ReturnType<BuildEngine['collectMakefileData']>;
   try {
     data = new BuildEngine(project, compiler, outputChannel).collectMakefileData(targetTitle);
   } catch (err) {
-    vscode.window.showErrorMessage(`Makefile 数据收集失败: ${(err as Error).message}`);
+    vscode.window.showErrorMessage(i18n.t('Failed to collect Makefile data: {0}', (err as Error).message));
     return;
   }
   if (!data.length || data.every((t) => !t.compile.length && !t.link)) {
-    vscode.window.showWarningMessage('没有可导出的编译/链接命令（检查目标类型/平台支持）');
+    vscode.window.showWarningMessage(i18n.t('No compile/link commands to export (check the target type / platform support)'));
     return;
   }
   const content = generateMakefile({
@@ -6624,7 +6697,7 @@ async function exportProjectMakefile(): Promise<void> {
   try {
     fs.writeFileSync(uri.fsPath, content, 'utf-8');
   } catch (err) {
-    vscode.window.showErrorMessage(`写入失败: ${(err as Error).message}`);
+    vscode.window.showErrorMessage(i18n.t('Write failed: {0}', (err as Error).message));
     return;
   }
   outputChannel.info(`[Code::Blocks] 已导出 Makefile: ${uri.fsPath}（${data.reduce((n, t) => n + t.compile.length, 0)} 条编译命令）`);
@@ -6642,7 +6715,7 @@ async function exportProjectMakefile(): Promise<void> {
 async function editWorkspaceDependencies(): Promise<void> {
   const wsFile = openedWorkspaceFile;
   if (!wsFile || !fs.existsSync(wsFile)) {
-    vscode.window.showWarningMessage('当前会话未打开 .workspace 工作区（依赖编辑需先打开 .workspace）');
+    vscode.window.showWarningMessage(i18n.t('No .workspace is open in this session (dependency editing requires an open .workspace)'));
     return;
   }
   const project = requireProject();
@@ -6651,19 +6724,19 @@ async function editWorkspaceDependencies(): Promise<void> {
   try {
     ws = new WorkspaceParser().parse(wsFile);
   } catch (err) {
-    vscode.window.showErrorMessage(`.workspace 解析失败: ${(err as Error).message}`);
+    vscode.window.showErrorMessage(i18n.t('Failed to parse the .workspace: {0}', (err as Error).message));
     return;
   }
   const normAbs = (p: string): string => path.resolve(p).replace(/\\/g, '/').toLowerCase();
   const targetRel = ws.projectPaths.find((rel) => normAbs(path.join(ws.basePath, rel)) === normAbs(project.filename));
   if (!targetRel) {
-    vscode.window.showWarningMessage(`工程「${project.title}」不在该 .workspace 中：${path.basename(wsFile)}`);
+    vscode.window.showWarningMessage(i18n.t('Project "{0}" is not part of that .workspace: {1}', project.title, path.basename(wsFile)));
     return;
   }
   const currentDeps = new Set((ws.dependencies[targetRel] ?? []).map((d) => normAbs(path.join(ws.basePath, d))));
   const candidates = ws.projectPaths.filter((rel) => normAbs(path.join(ws.basePath, rel)) !== normAbs(project.filename));
   if (!candidates.length) {
-    vscode.window.showInformationMessage('该 .workspace 中没有其它工程');
+    vscode.window.showInformationMessage(i18n.t('That .workspace contains no other projects'));
     return;
   }
   type DepItem = vscode.QuickPickItem & { rel: string; cycle: boolean };
@@ -6680,25 +6753,25 @@ async function editWorkspaceDependencies(): Promise<void> {
   });
   const sel = await vscode.window.showQuickPick(items, {
     canPickMany: true,
-    placeHolder: `选择「${project.title}」依赖的工程（依赖先构建；已勾选 = 当前依赖）`,
+    placeHolder: i18n.t('Select the projects that "{0}" depends on (dependencies build first; checked = current dependency)', project.title),
   });
   if (!sel) return;
   const pickedCycle = sel.filter((s) => s.cycle);
   if (pickedCycle.length) {
-    vscode.window.showWarningMessage(`已忽略会形成循环依赖的选择: ${pickedCycle.map((s) => s.rel).join(', ')}`);
+    vscode.window.showWarningMessage(i18n.t('Ignored a selection that would create a circular dependency: {0}', pickedCycle.map((s) => s.rel).join(', ')));
   }
   const newDeps = sel.filter((s) => !s.cycle).map((s) => s.rel);
   const text = fs.readFileSync(wsFile, 'utf-8');
   const updated = setProjectDependencies(text, targetRel, newDeps);
   if (updated === null) {
-    vscode.window.showErrorMessage(`未在 ${path.basename(wsFile)} 中找到工程节点: ${targetRel}`);
+    vscode.window.showErrorMessage(i18n.t('Project node not found in {0}: {1}', path.basename(wsFile), targetRel));
     return;
   }
   if (updated !== text) {
     try {
       fs.writeFileSync(wsFile, updated, 'utf-8');
     } catch (err) {
-      vscode.window.showErrorMessage(`写入 .workspace 失败: ${(err as Error).message}`);
+      vscode.window.showErrorMessage(i18n.t('Failed to write the .workspace: {0}', (err as Error).message));
       return;
     }
     outputChannel.info(`[Code::Blocks] 已更新工作区依赖: ${targetRel} → [${newDeps.join(', ')}]`);
@@ -6729,7 +6802,7 @@ async function importExternalProject(): Promise<void> {
   try {
     text = decodeText(fs.readFileSync(src));
   } catch (err) {
-    vscode.window.showErrorMessage(`读取失败: ${(err as Error).message}`);
+    vscode.window.showErrorMessage(i18n.t('Read failed: {0}', (err as Error).message));
     return;
   }
   const fallback = path.basename(src, path.extname(src));
@@ -6741,19 +6814,19 @@ async function importExternalProject(): Promise<void> {
         ? importDspProject(text, fallback)
         : importDevProject(text, fallback);
   } catch (err) {
-    vscode.window.showErrorMessage(`解析失败（${path.basename(src)}）: ${(err as Error).message}`);
+    vscode.window.showErrorMessage(i18n.t('Parse failed ({0}): {1}', path.basename(src), (err as Error).message));
     return;
   }
   const compilerId = vscode.workspace.getConfiguration('codeblocks').get<string>('compilerId', 'gcc');
   const { project, cbpPath, skipped } = buildProjectFromImport(src, imp, compilerId);
   if (fs.existsSync(cbpPath)) {
-    vscode.window.showWarningMessage(`目标工程已存在，取消导入: ${cbpPath}`);
+    vscode.window.showWarningMessage(i18n.t('The target project already exists, import cancelled: {0}', cbpPath));
     return;
   }
   try {
     fs.writeFileSync(cbpPath, serializeProject(project), 'utf-8');
   } catch (err) {
-    vscode.window.showErrorMessage(`写入 .cbp 失败: ${(err as Error).message}`);
+    vscode.window.showErrorMessage(i18n.t('Failed to write the .cbp: {0}', (err as Error).message));
     return;
   }
   outputChannel.info(`[Code::Blocks] 已导入工程 ${path.basename(src)} → ${cbpPath}（${project.files.length} 个文件${skipped.length ? `，跳过 ${skipped.length} 个工程外文件` : ''}）`);
@@ -6821,7 +6894,7 @@ async function locateInCbp(filename: string, candidates: string[]): Promise<void
         return;
       }
     }
-    vscode.window.showInformationMessage('未在 .cbp 中找到对应配置行（已打开文件）');
+    vscode.window.showInformationMessage(i18n.t('No matching configuration line found in the .cbp (the file has been opened)'));
   } catch { /* 打开失败忽略 */ }
 }
 
@@ -6837,8 +6910,8 @@ function computeAnalysisData(): AnalysisData {
         compilerId: p.compilerId,
         basePath: p.basePath,
         pchMode: p.pchMode,
-        pchLabel: p.pchMode === 2 ? '生成 PCH' : p.pchMode === 1 ? '使用 PCH' : '关闭',
-        objectNamingLabel: p.extendedObjNames ? '扩展名（如 .cpp.o）' : '默认',
+        pchLabel: p.pchMode === 2 ? '生成 PCH' : p.pchMode === 1 ? '使用 PCH' : i18n.t('Off'),
+        objectNamingLabel: p.extendedObjNames ? '扩展名（如 .cpp.o）' : i18n.t('Default'),
         platformsLabel: platformsLabelOf(p.platforms),
         fileCount: p.files.length,
         compileCount: p.files.filter((f) => f.compile).length,
@@ -7010,7 +7083,7 @@ async function clean(): Promise<void> {
   // 对齐 OnClean → Clean("") → GetTargetString：只清理选中目标（虚拟目标展开组）
   const targetTitle = getSelectedTarget(project) ?? project.buildTargets.find((t) => supportsCurrentPlatform(t.platforms))?.title;
   if (!targetTitle) {
-    vscode.window.showWarningMessage('项目没有构建目标');
+    vscode.window.showWarningMessage(i18n.t('The project has no build targets'));
     return;
   }
   await cleanTargets(project, targetTitle);
@@ -7138,7 +7211,7 @@ async function runMakeBuild(project: Project, command: string, targetTitle: stri
 /** Clean Workspace —— 对齐 OnCleanAll → CleanWorkspace：全部已打开工程各自的选中目标，依赖拓扑排序 */
 async function cleanWorkspace(): Promise<void> {
   if (openProjects.length === 0) {
-    vscode.window.showWarningMessage('请先打开一个 Code::Blocks 项目 (.cbp)');
+    vscode.window.showWarningMessage(i18n.t('Open a Code::Blocks project (.cbp) first'));
     return;
   }
   if (!(await confirmClean('清理全部已打开工程'))) return;
@@ -7169,11 +7242,11 @@ async function cleanWorkspace(): Promise<void> {
  */
 async function rebuildWorkspace(): Promise<void> {
   if (openProjects.length === 0) {
-    vscode.window.showWarningMessage('请先打开一个 Code::Blocks 项目 (.cbp)');
+    vscode.window.showWarningMessage(i18n.t('Open a Code::Blocks project (.cbp) first'));
     return;
   }
   if (buildInProgress) {
-    vscode.window.showWarningMessage('已有构建正在进行，请等待完成或先停止');
+    vscode.window.showWarningMessage(i18n.t('A build is already running — wait for it to finish or stop it first'));
     return;
   }
   const choice = await vscode.window.showWarningMessage(
@@ -7260,20 +7333,20 @@ function runWorkingDir(project: Project, target: BuildTarget, vars: Record<strin
 async function compileFileWithoutProject(): Promise<void> {
   const editor = vscode.window.activeTextEditor;
   if (!editor) {
-    vscode.window.showWarningMessage('没有打开的文件');
+    vscode.window.showWarningMessage(i18n.t('No file is open'));
     return;
   }
   const filePath = editor.document.uri.fsPath;
   const ext = path.extname(filePath).toLowerCase();
   if (!['.c', '.cpp', '.cc', '.cxx'].includes(ext)) {
-    vscode.window.showWarningMessage('仅支持编译 C/C++ 源文件（.c/.cpp/.cc/.cxx）');
+    vscode.window.showWarningMessage(i18n.t('Only C/C++ sources (.c/.cpp/.cc/.cxx) can be built'));
     return;
   }
   // 对齐 CB：切换默认编译器（SwitchCompiler(GetDefaultCompilerID)）
   const compiler = getCompiler(vscode.workspace.getConfiguration('codeblocks').get<string>('compilerId', 'gcc'));
   const prog = ext === '.c' ? compiler.programs.C : compiler.programs.CPP;
   if (!prog) {
-    vscode.window.showErrorMessage('默认编译器不可用，请先探测/配置编译器');
+    vscode.window.showErrorMessage(i18n.t('The default compiler is unavailable — detect or configure a compiler first'));
     return;
   }
   await saveAllBeforeBuild();
@@ -7298,8 +7371,8 @@ async function compileFileWithoutProject(): Promise<void> {
     if (e.execution.task !== task) return;
     onEnd.dispose();
     if (e.exitCode === 0) {
-      vscode.window.showInformationMessage('编译成功，是否运行生成的可执行文件？', '运行').then((pick) => {
-        if (pick === '运行') {
+      vscode.window.showInformationMessage(i18n.t('Build succeeded — run the produced executable?'), i18n.t('Run')).then((pick) => {
+        if (pick === i18n.t('Run')) {
           // UI 核查 N2（方案 C）：同名终端先弃后建，避免连续运行堆积同名标签
           const t = createRunTerminal('Run (no project)', { cwd: fileDir });
           t.show();
@@ -7372,12 +7445,12 @@ async function run(): Promise<void> {
   const expandedOut = replaceCbMacros(target.outputFilename, { vars, customVars: project.customVariables ?? {}, basePath: project.basePath });
   const exePath = resolveExecutablePath(project.basePath, expandedOut, process.platform, isExecutableTargetType(target.targetType));
   if (!fs.existsSync(exePath)) {
-    vscode.window.showErrorMessage(`可执行文件不存在，请先构建（${path.relative(project.basePath, exePath)}）`);
+    vscode.window.showErrorMessage(i18n.t('The executable does not exist — build first ({0})', path.relative(project.basePath, exePath)));
     return;
   }
   // D-13：无扩展名的产物在 Windows 下无法被 cmd.exe/CreateProcess 启动（TCC 等「-o 不补扩展名」的工具链）
   if (requiresExecutableExtensionForLaunch(exePath, process.platform)) {
-    vscode.window.showErrorMessage(`产物缺少可执行扩展名（${path.basename(exePath)}），Windows 无法直接启动；请在目标「输出文件名」中写明扩展名（如 .exe），或保留目标的「扩展名自动」选项`);
+    vscode.window.showErrorMessage(i18n.t('The output has no executable extension ({0}), so Windows cannot start it; add the extension to the target output file name (e.g. .exe), or keep the target option "automatic extension"', path.basename(exePath)));
     return;
   }
 
@@ -7409,7 +7482,7 @@ async function debug(): Promise<void> {
   }
   const started = await vscode.debug.startDebugging(undefined, derived.config);
   if (!started) {
-    vscode.window.showErrorMessage('调试启动失败');
+    vscode.window.showErrorMessage(i18n.t('Failed to start debugging'));
   }
 }
 
@@ -7421,7 +7494,7 @@ async function debug(): Promise<void> {
  */
 async function deriveDebugLaunchConfig(targetTitle?: string): Promise<DerivedLaunchConfig> {
   const project = activeProject;
-  if (!project) return { error: '请先打开一个 Code::Blocks 项目 (.cbp)' };
+  if (!project) return { error: i18n.t('Open a Code::Blocks project (.cbp) first') };
 
   const target = project.buildTargets.find((t) => t.title === targetTitle)
     ?? project.buildTargets.find((t) => t.title === getSelectedTarget(project))
@@ -7448,7 +7521,7 @@ async function deriveDebugLaunchConfig(targetTitle?: string): Promise<DerivedLau
     const expandedOut = replaceCbMacros(target.outputFilename, { vars, customVars: project.customVariables ?? {}, basePath: project.basePath });
     const exePath = resolveExecutablePath(project.basePath, expandedOut, process.platform, isExecutableTargetType(target.targetType));
     if (!fs.existsSync(exePath)) {
-      return { error: `可执行文件不存在，请先构建（${path.relative(project.basePath, exePath)}）` };
+      return { error: i18n.t('The executable does not exist — build first ({0})', path.relative(project.basePath, exePath)) };
     }
     // D-13：无扩展名产物无法启动（与 Run 同一口径，给出可操作提示而不是让 GDB 报 not in executable format）
     if (requiresExecutableExtensionForLaunch(exePath, process.platform)) {

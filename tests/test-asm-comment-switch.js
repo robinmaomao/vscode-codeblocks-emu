@@ -12,6 +12,7 @@ function check(name, cond, got, want) {
 }
 
 const root = path.resolve(__dirname, '..');
+const { nlsText } = require('./_harness/nls');
 const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf-8'));
 const cfg = Array.isArray(pkg.contributes.configuration) ? pkg.contributes.configuration : [pkg.contributes.configuration];
 const byKey = {};
@@ -20,7 +21,7 @@ for (const b of cfg) Object.assign(byKey, b.properties || {});
 // ---- 1. 设置项 ----
 const s = byKey['codeblocks.editor.asmHashComment'];
 check('S1 设置存在（boolean，默认 false）', s?.type === 'boolean' && s?.default === false, s);
-const sDesc = String(s?.markdownDescription || s?.description || '');
+const sDesc = String(nlsText(s?.markdownDescription || s?.description || ''));
 check('S2 描述含 # 与 //（说明默认与开启差异）', sDesc.includes('#') && sDesc.includes('//'), sDesc.slice(0, 60));
 
 // ---- 2. 纯模块 ----

@@ -10,6 +10,7 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import { CHILD_ICONS, HOVER_GROUPS, MENU_STRUCTURE, MenuDef, MenuItemDef, findMenuItem } from './menuStructure';
+import * as i18n from '../i18n';
 
 /** 动态区数据（最近工程 / 工作区构建顺序 / 是否已打开工程 / 自定义工具） */
 export interface MenuDynamicData {
@@ -38,7 +39,7 @@ interface RecentPick extends vscode.QuickPickItem {
 function buildHoverMenu(): vscode.MarkdownString {
   const md = new vscode.MarkdownString(undefined, true);
   md.isTrusted = true;
-  const lines: string[] = ['**Code::Blocks 菜单**'];
+  const lines: string[] = [i18n.t('**Code::Blocks menu**')];
   for (const groupLabels of HOVER_GROUPS) {
     const links: string[] = [];
     for (const label of groupLabels) {
@@ -49,7 +50,7 @@ function buildHoverMenu(): vscode.MarkdownString {
     }
     if (links.length) lines.push(links.join('　'));
   }
-  lines.push('点击状态栏项打开完整菜单（子菜单 + 快捷键）');
+  lines.push(i18n.t('Click the status bar item to open the full menu (submenus + shortcuts)'));
   md.value = lines.join('\n\n');
   return md;
 }
@@ -78,7 +79,7 @@ export function registerStatusBarMenu(
         firstLevel.push({
           label: 'Workspace',
           kindTag: 'workspace',
-          description: '构建顺序',
+          description: i18n.t('build order'),
           iconPath: new vscode.ThemeIcon('layers'),
         });
       }
@@ -86,7 +87,7 @@ export function registerStatusBarMenu(
         firstLevel.push({
           label: 'Recent Projects',
           kindTag: 'recent',
-          description: `${dyn.recents.length} 个`,
+          description: i18n.t('{0} items', dyn.recents.length),
           iconPath: new vscode.ThemeIcon('history'),
         });
       }
@@ -100,7 +101,7 @@ export function registerStatusBarMenu(
       }
 
       const picked = await vscode.window.showQuickPick(firstLevel, {
-        placeHolder: 'Code::Blocks 菜单 — 选择菜单',
+        placeHolder: i18n.t('Code::Blocks menu — select a menu'),
       });
       if (!picked) return;
 
@@ -118,7 +119,7 @@ export function registerStatusBarMenu(
       if (picked.menu) {
         await showMenuLevel(
           picked.menu.children,
-          `${picked.menu.label} — 选择命令`,
+          i18n.t('{0} — select a command', picked.menu.label),
           dyn,
           picked.menu.label === 'Tools' ? dyn.tools : undefined,
         );
@@ -136,8 +137,8 @@ async function showRecentPick(dyn: MenuDynamicData): Promise<void> {
     description: path.dirname(r.file),
     file: r.file,
   }));
-  items.push({ label: '$(trash) Clear Recent Projects', description: '清空最近工程列表', file: '', clear: true });
-  const sel = await vscode.window.showQuickPick(items, { placeHolder: 'Recent Projects — 打开工程' });
+  items.push({ label: '$(trash) Clear Recent Projects', description: i18n.t('Clear the recent projects list'), file: '', clear: true });
+  const sel = await vscode.window.showQuickPick(items, { placeHolder: i18n.t('Recent Projects — open a project') });
   if (!sel) return;
   if (sel.clear) {
     await vscode.commands.executeCommand('codeblocks.clearRecentProjects');
@@ -149,8 +150,8 @@ async function showRecentPick(dyn: MenuDynamicData): Promise<void> {
 /** 工作区二级列表：设为活动项目（E2） */
 async function showWorkspacePick(dyn: MenuDynamicData): Promise<void> {
   const sel = await vscode.window.showQuickPick(
-    dyn.order.map((o) => ({ label: o.label, description: '设为活动项目', file: o.file })),
-    { placeHolder: 'Workspace — 设为活动项目' },
+    dyn.order.map((o) => ({ label: o.label, description: i18n.t('Set as active project'), file: o.file })),
+    { placeHolder: i18n.t('Workspace — set the active project') },
   );
   if (sel) await vscode.commands.executeCommand('codeblocks.setActiveProject', sel.file);
 }
@@ -173,9 +174,9 @@ async function showMenuLevel(
     }
     const isSubmenu = !c.command && (c.children?.length ?? 0) > 0;
     const desc: string[] = [];
-    if (isSubmenu) desc.push('子菜单 ›');
+    if (isSubmenu) desc.push(i18n.t('submenu ›'));
     if (c.shortcut) desc.push(c.shortcut);
-    if (c.needsProject && !dyn.hasProjects) desc.push('（无工程）');
+    if (c.needsProject && !dyn.hasProjects) desc.push(i18n.t('(no project)'));
     const icon = CHILD_ICONS[c.label];
     items.push({
       label: c.label,
@@ -189,7 +190,7 @@ async function showMenuLevel(
     for (const t of dynamicTools) {
       items.push({
         label: t.label,
-        description: '自定义工具',
+        description: i18n.t('custom tool'),
         iconPath: new vscode.ThemeIcon('play'),
         def: { label: t.label, command: 'codeblocks.runTool', args: [t.index] },
       });
@@ -199,12 +200,12 @@ async function showMenuLevel(
   if (!sel?.def) return;
   const def = sel.def;
   if (!def.command) {
-    if (def.children?.length) await showMenuLevel(def.children, `${def.label} — 选择命令`, dyn);
+    if (def.children?.length) await showMenuLevel(def.children, i18n.t('{0} — select a command', def.label), dyn);
     return;
   }
   try {
     await vscode.commands.executeCommand(def.command, ...(def.args ?? []));
   } catch {
-    vscode.window.showWarningMessage(`命令不可用: ${def.command}`);
+    vscode.window.showWarningMessage(i18n.t('Command not available: {0}', def.command));
   }
 }

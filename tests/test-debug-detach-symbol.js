@@ -1,4 +1,4 @@
-// 批次二 D1/D2 回归（真实 GDB 8.1 e2e + 守卫路径）：
+﻿// 批次二 D1/D2 回归（真实 GDB 8.1 e2e + 守卫路径）：
 //  D1  附加外部进程 → adapter.detach() → terminated 事件、进程继续存活（对齐 CB Debug → Detach）
 //  D2  addSymbolFile：空/非法地址拒绝；带地址真实加载（输出含 add symbol table）、符号可见、
 //      主符号未被替换（区别于 -file-symbol-file 的替换语义）；已加载库（=library-loaded）跟踪
@@ -69,15 +69,18 @@ function findTool(candidates, name) {
 // ---- 接线冒烟（不依赖 GDB，先跑；确保无 GDB 环境也覆盖命令/菜单/适配器接线） ----
 {
   const pkg = JSON.parse(fs.readFileSync(path.resolve(__dirname, '../package.json'), 'utf-8'));
+  const { cmdTitle, setLanguage } = require('./_harness/nls');
+// 本文件的原断言为英文标题（package.nls.json 是默认语言）——显式按英文解析
+setLanguage('en');
   const cmd = (id) => (pkg.contributes.commands || []).find((c) => c.command === id);
   check('命令贡献：Detach / Add Symbol File…',
-    cmd('codeblocks.debug.detach')?.title === 'Code::Blocks: Detach'
-    && cmd('codeblocks.debug.addSymbolFile')?.title === 'Code::Blocks: Add Symbol File…',
-    [cmd('codeblocks.debug.detach')?.title, cmd('codeblocks.debug.addSymbolFile')?.title], 'ok');
+    cmdTitle('codeblocks.debug.detach') === 'Code::Blocks: Detach'
+    && cmdTitle('codeblocks.debug.addSymbolFile') === 'Code::Blocks: Add Symbol File…',
+    [cmdTitle('codeblocks.debug.detach'), cmdTitle('codeblocks.debug.addSymbolFile')], 'ok');
 
   const extDist = fs.readFileSync(path.resolve(__dirname, '../dist/extension.js'), 'utf-8');
   check('扩展接线：detach 命令（暂停守卫 + 调用 adapter.detach）',
-    /codeblocks\.debug\.detach/.test(extDist) && /adapter\.detach\(\)/.test(extDist) && /仅暂停时提供 Detach/.test(extDist),
+    /codeblocks\.debug\.detach/.test(extDist) && /adapter\.detach\(\)/.test(extDist) && /Detach is only available while paused/.test(extDist),
     'detach-wiring', 'ok');
   check('扩展接线：addSymbolFile 命令（库列表预填 + 地址校验 + adapter 调用）',
     /codeblocks\.debug\.addSymbolFile/.test(extDist) && /adapter\.loadedLibraries\(\)/.test(extDist)

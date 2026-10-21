@@ -11,6 +11,12 @@
 import * as vscode from 'vscode';
 import { Project, BuildTarget, OptionsRelationType } from '../model/types';
 import { parseProjectDebuggerConfig, defaultRemoteOptions } from '../model/projectDebuggerExtensions';
+import * as i18n from '../i18n';
+
+/** 面板标题（`工程属性: <工程名>`） */
+function projectPropertiesTitle(name: string): string {
+  return i18n.t('Project Properties: {0}', name);
+}
 
 /** WebView 前后端交换的目标编辑数据 */
 export interface TargetEditData {
@@ -228,7 +234,7 @@ export class ProjectPropertiesPanel {
   ) {
     this.panel = vscode.window.createWebviewPanel(
       'codeblocks.projectProperties',
-      `工程属性: ${project.title}`,
+      projectPropertiesTitle(project.title),
       vscode.ViewColumn.One,
       {
         enableScripts: true,
@@ -259,6 +265,12 @@ export class ProjectPropertiesPanel {
   ): void {
     ProjectPropertiesPanel.current?.dispose();
     ProjectPropertiesPanel.current = new ProjectPropertiesPanel(project, extensionUri, onSave, initialTab, focusFile);
+  }
+
+  /** 界面语言切换后刷新已打开面板的标题（正文与标签在下次打开时按新语言渲染，避免丢弃未保存编辑） */
+  public static refreshTitleIfOpen(): void {
+    const p = ProjectPropertiesPanel.current;
+    if (p) p.panel.title = projectPropertiesTitle(p.project.title);
   }
 
   private buildHtml(): string {
@@ -530,22 +542,22 @@ export class ProjectPropertiesPanel {
     <div class="project-subtitle">${this.escapeHtml(this.project.filename)}</div>
   </div>
   <div class="toolbar">
-    <button id="save">保存</button>
-    <button id="saveClose" class="secondary">保存并关闭</button>
-    <select id="targetSwitch" title="快速切换到该目标" style="max-width:240px;width:auto"></select>
+    <button id="save">${i18n.t('Save')}</button>
+    <button id="saveClose" class="secondary">${i18n.t('Save and Close')}</button>
+    <select id="targetSwitch" title="${i18n.t('Quick switch to this target')}" style="max-width:240px;width:auto"></select>
     <span id="status"></span>
   </div>
   <div class="main">
     <nav class="tabs">
-      <button class="tab active" data-tab="targets" id="tabbtn-targets"><span class="tab-icon">${ICONS.target}</span>构建目标</button>
-      <button class="tab" data-tab="vtargets" id="tabbtn-vtargets"><span class="tab-icon">${ICONS.target}</span>虚拟目标</button>
-      <button class="tab" data-tab="files" id="tabbtn-files"><span class="tab-icon">${ICONS.file}</span>文件</button>
-      <button class="tab" data-tab="options" id="tabbtn-options"><span class="tab-icon">${ICONS.options}</span>构建选项</button>
-      <button class="tab" data-tab="dirs" id="tabbtn-dirs"><span class="tab-icon">${ICONS.dirs}</span>搜索目录</button>
-      <button class="tab" data-tab="scripts" id="tabbtn-scripts"><span class="tab-icon">${ICONS.settings}</span>构建脚本</button>
-      <button class="tab" data-tab="settings" id="tabbtn-settings"><span class="tab-icon">${ICONS.settings}</span>项目设置</button>
-      <button class="tab" data-tab="notes" id="tabbtn-notes"><span class="tab-icon">${ICONS.file}</span>备注</button>
-      <button class="tab" data-tab="debugger" id="tabbtn-debugger"><span class="tab-icon">${ICONS.options}</span>调试器</button>
+      <button class="tab active" data-tab="targets" id="tabbtn-targets"><span class="tab-icon">${ICONS.target}</span>${i18n.t('Build targets')}</button>
+      <button class="tab" data-tab="vtargets" id="tabbtn-vtargets"><span class="tab-icon">${ICONS.target}</span>${i18n.t('Virtual targets')}</button>
+      <button class="tab" data-tab="files" id="tabbtn-files"><span class="tab-icon">${ICONS.file}</span>${i18n.t('Files')}</button>
+      <button class="tab" data-tab="options" id="tabbtn-options"><span class="tab-icon">${ICONS.options}</span>${i18n.t('Build options')}</button>
+      <button class="tab" data-tab="dirs" id="tabbtn-dirs"><span class="tab-icon">${ICONS.dirs}</span>${i18n.t('Search directories')}</button>
+      <button class="tab" data-tab="scripts" id="tabbtn-scripts"><span class="tab-icon">${ICONS.settings}</span>${i18n.t('Build scripts')}</button>
+      <button class="tab" data-tab="settings" id="tabbtn-settings"><span class="tab-icon">${ICONS.settings}</span>${i18n.t('Project settings')}</button>
+      <button class="tab" data-tab="notes" id="tabbtn-notes"><span class="tab-icon">${ICONS.file}</span>${i18n.t('Notes')}</button>
+      <button class="tab" data-tab="debugger" id="tabbtn-debugger"><span class="tab-icon">${ICONS.options}</span>${i18n.t('Debugger')}</button>
     </nav>
     <div class="content">
       <div id="tab-targets" class="tab-pane">

@@ -7,6 +7,12 @@
 import * as vscode from 'vscode';
 import { Compiler, CompilerOption } from '../compiler/compiler';
 import { Project, BuildTarget } from '../model/types';
+import * as i18n from '../i18n';
+
+/** 面板标题（`编译选项: <目标名或工程名>`） */
+function compilerOptionsTitle(name: string): string {
+  return i18n.t('Compiler Options: {0}', name);
+}
 
 export class CompilerOptionsPanel {
   private static current: CompilerOptionsPanel | undefined;
@@ -21,7 +27,7 @@ export class CompilerOptionsPanel {
   ) {
     this.panel = vscode.window.createWebviewPanel(
       'codeblocks.compilerOptions',
-      `编译选项: ${target ? target.title : project.title}`,
+      compilerOptionsTitle(target ? target.title : project.title),
       vscode.ViewColumn.One,
       {
         enableScripts: true,
@@ -36,6 +42,13 @@ export class CompilerOptionsPanel {
   public static show(compiler: Compiler, project: Project, target: BuildTarget | undefined, extensionUri: vscode.Uri): void {
     CompilerOptionsPanel.current?.dispose();
     CompilerOptionsPanel.current = new CompilerOptionsPanel(compiler, project, target, extensionUri);
+  }
+
+  /** 界面语言切换后刷新已打开面板的标题（正文标签在下次打开时按新语言渲染） */
+  public static refreshTitleIfOpen(): void {
+    const p = CompilerOptionsPanel.current;
+    if (!p) return;
+    p.panel.title = compilerOptionsTitle(p.target ? p.target.title : p.project.title);
   }
 
   private buildHtml(): string {
@@ -137,7 +150,7 @@ export class CompilerOptionsPanel {
         this.project.compilerOptions = options;
       }
       this.panel.webview.postMessage({ type: 'applied' });
-      vscode.window.showInformationMessage(`已应用 ${options.length} 个编译选项`);
+      vscode.window.showInformationMessage(i18n.t('Applied {0} compiler option(s)', options.length));
     }
   }
 
