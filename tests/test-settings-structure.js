@@ -12,8 +12,8 @@ function check(name, cond, got, want) {
 }
 
 const pkg = JSON.parse(fs.readFileSync(path.resolve(__dirname, '../package.json'), 'utf-8'));
+const { nlsText } = require('./_harness/nls');
 const cfg = pkg.contributes.configuration;
-
 check('configuration 为数组（分区块）', Array.isArray(cfg), typeof cfg);
 if (!Array.isArray(cfg)) { console.log('设置结构: 0 pass, 1 fail'); process.exit(1); }
 check('分区块数量 = 7', cfg.length === 7, cfg.length);
@@ -38,7 +38,7 @@ for (const b of cfg) {
     byKey[k] = v;
   }
 }
-  check('设置项总数 = 76', keys.length === 76, keys.length);
+  check('设置项总数 = 77', keys.length === 77, keys.length);
 check('无重复键', new Set(keys).size === keys.length, keys.length - new Set(keys).size);
 check('disableInit 默认 true（对齐 CB disable_init）', byKey['codeblocks.debug.disableInit']?.default === true, byKey['codeblocks.debug.disableInit']);
 check('saveHtmlLogFullCommandLine 默认 false（对齐 CB full_command_line）', byKey['codeblocks.build.saveHtmlLogFullCommandLine']?.default === false, byKey['codeblocks.build.saveHtmlLogFullCommandLine']);
@@ -102,7 +102,7 @@ check('scope machine-overridable ×3（路径类设置）',
   ['codeblocks.masterPath', 'codeblocks.compilerPrograms', 'codeblocks.debug.gdbPath']
     .every((k) => byKey[k]?.scope === 'machine-overridable'),
   ['codeblocks.masterPath', 'codeblocks.compilerPrograms', 'codeblocks.debug.gdbPath'].map((k) => byKey[k]?.scope));
-check('gdbPath 描述无「第 N 轮」内部标记', !String(byKey['codeblocks.debug.gdbPath']?.description || '').includes('第'), null);
+check('gdbPath 描述无「第 N 轮」内部标记', !String(nlsText(byKey['codeblocks.debug.gdbPath']?.description) || '').includes('第'), null);
 check('compilerPrograms 含 DBGconfig 属性', !!byKey['codeblocks.compilerPrograms']?.properties?.DBGconfig, null);
 
 check('parallelJobs 0–32', byKey['codeblocks.parallelJobs']?.minimum === 0 && byKey['codeblocks.parallelJobs']?.maximum === 32, null);

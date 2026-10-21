@@ -161,7 +161,7 @@ check('D1 dist 读取 build.persistLog', ext.includes("'build.persistLog'"), nul
 check('D1b dist 读取 build.outputTimestamp', ext.includes("'build.outputTimestamp'"), null);
 check('D2 dist 注册 clearOutput 命令', ext.includes("'codeblocks.buildLog.clearOutput'"), null);
 check('D3 dist 使用 createCbOutput', ext.includes('createCbOutput'), null);
-check('D4 clearErrors 增强为清空构建输出（含 outputChannel.clear 链路）', ext.includes('已清除构建输出与编译错误'), null);
+check('D4 clearErrors 增强为清空构建输出（含 outputChannel.clear 链路）', ext.includes('Build output and compile errors cleared'), null);
 check('D5 dist 传 plainCb 判定（纯 CB 模式关闭标记）', ext.includes('plainCb'), null);
 check('D6 dist 汇总块移到输出末尾（printBuildSummaryBlocks）', ext.includes('printBuildSummaryBlocks'), null);
 check('D7 dist 无任务跳过逻辑已移除', !ext.includes('nothingHappened'), null);

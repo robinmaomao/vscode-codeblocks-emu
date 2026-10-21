@@ -67,7 +67,42 @@ for (const f of files) {
 }
 check('src 无 @ts-ignore / @ts-expect-error', tsIgnore.length === 0, tsIgnore);
 
-// ---- 4. 样例自检：确认检测器本身能捕获"裸 catch" ----
+// ---- 4. 已迁移 i18n 的文件：UI 语境行不得再出现中文字面量（防新代码绕过 i18n.t） ----
+// 迁移范围与批次见 docs/国际化.md：文件迁移完成后加入白名单，此后新写的弹窗/QuickPick/状态栏文案
+// 必须走 i18n.t('English source', …)，中文译义放 src/i18n/strings.zh-cn.json。
+const I18N_MIGRATED_FILES = [
+  'extension.ts',
+  'ui/statusBarMenu.ts',
+  'ui/projectPropertiesPanel.ts',
+  'ui/keybindingPanel.ts',
+  'ui/compilerOptionsPanel.ts',
+];
+const UI_CONTEXT_PATTERNS = [
+  /showInformationMessage/,
+  /showWarningMessage/,
+  /showErrorMessage/,
+  /showQuickPick/,
+  /showInputBox/,
+  /setStatusBarMessage/,
+  /placeHolder\s*:/,
+  /validateInput/,
+  /StatusBar\.(text|tooltip)\s*=/,
+  /\.tooltip\s*=/, // 状态栏项 tooltip（如 item.tooltip = …）
+];
+const i18nViolations = [];
+for (const f of files) {
+  const rel = f.replace(/\\/g, '/').replace(SRC.replace(/\\/g, '/') + '/', '');
+  if (!I18N_MIGRATED_FILES.includes(rel)) continue;
+  fs.readFileSync(f, 'utf-8').split(/\r?\n/).forEach((l, i) => {
+    if (!/[\u4e00-\u9fff]/.test(l)) return;
+    if (!UI_CONTEXT_PATTERNS.some((p) => p.test(l))) return;
+    if (/^\s*(\/\/|\*|\/\*)/.test(l)) return; // 纯注释行
+    i18nViolations.push(`${rel}:${i + 1}  ${l.trim().slice(0, 80)}`);
+  });
+}
+check('已迁移 i18n 的文件中，UI 语境行无中文字面量', i18nViolations.length === 0, i18nViolations.slice(0, 10));
+
+// ---- 5. 样例自检：确认检测器本身能捕获"裸 catch" ----
 {
   const sample = 'function f() { try { g(); } catch { } }';
   const re = /catch\s*(\([^)]*\))?\s*\{/g;

@@ -13,6 +13,7 @@ function check(name, cond, got, want) {
 }
 
 const pkg = JSON.parse(fs.readFileSync(path.resolve(__dirname, '../package.json'), 'utf-8'));
+const { nlsText } = require('./_harness/nls');
 const contributed = new Set((pkg.contributes.commands || []).map((c) => c.command));
 // 第53轮起 configuration 为分区块数组（兼容旧的对象形式）
 const cfg = pkg.contributes.configuration;
@@ -24,10 +25,11 @@ const props = Array.isArray(cfg)
 const markdowns = [];
 function collect(key, node) {
   if (!node || typeof node !== 'object') return;
-  if (typeof node.markdownDescription === 'string') markdowns.push([key, node.markdownDescription]);
+  // markdown 文案已改为 nls 占位符（%key%），断言前先解析（见 docs/国际化.md）
+  if (typeof node.markdownDescription === 'string') markdowns.push([key, nlsText(node.markdownDescription)]);
   if (Array.isArray(node.markdownEnumDescriptions)) {
     node.markdownEnumDescriptions.forEach((t, i) => {
-      if (typeof t === 'string') markdowns.push([`${key}#enum${i}`, t]);
+      if (typeof t === 'string') markdowns.push([`${key}#enum${i}`, nlsText(t)]);
     });
   }
   if (node.properties) {

@@ -14,7 +14,8 @@
 | [测试方案.md](./测试方案.md) | 测试分层体系方案（L-1…L5 + CI）：各层覆盖范围、运行方式与环境约束（含宿主层两条硬限制、工具链安装指引） |
 | [测试报告-0.8.131.md](./测试报告-0.8.131.md) | 本轮测试执行报告：各层结果、覆盖台账、缺陷清单（D-01…D-11 与 D-14…D-19 已修 / D-12、D-13 候选）与复现命令速查 |
 | [测试覆盖矩阵.md](./测试覆盖矩阵.md) | 命令/视图/设置/键位/语言语法/DAP 能力逐项覆盖台账（`npm run coverage:matrix` 生成） |
-| [手工验收清单.md](./手工验收清单.md) | 需人工 GUI 会话执行的验收项与留档要求（自动化不可覆盖的交互） |
+| [手工验收清单.md](./手工验收清单.md) | 需人工 GUI 会话执行的验收项与留档要求（自动化不可覆盖的交互；§8 为中英文双语验收） |
+| [国际化.md](./国际化.md) | **中英双语约定与实现**：两条链路（nls 静态贡献 / `ui.language` 运行时）、`i18n.t()` 用法与占位符规则、nls 键命名、批次台账（含下一批逐文件清单）、已知限制 |
 | [性能基准.md](./性能基准.md) | 微基准 + 真实构建的性能数据与预算，含「趋势（相对上轮/最近 N 轮）」小节（`npm run test:perf --report` 更新） |
 
 ## 归档
@@ -29,4 +30,4 @@
 - 新增发布说明：`release/0.8.xx-dev.md`；版本摘要同步到 `开发进度.md` 第九节一行链接。
 - 测试类文档维护时机：**视觉基线**在 UI/WebView 变更后刷新（`npm run visual:baseline`，随 PR 附基线 PNG）；**性能基准**在构建链路或依赖变化后刷新（`npm run perf:baseline`）并同步 [性能基准.md](./性能基准.md)（`npm run perf:report`）；**覆盖矩阵**在新增/调整用例后刷新（`npm run coverage:matrix`），并与 [测试报告-0.8.131.md](./测试报告-0.8.131.md) §2 台账保持一致。
 - **文档一致性巡检**：`tests/contract/test-doc-consistency.js`（随 `npm run test:contract` 自动跑）校验「文档里的命令/相对链接真实存在」「覆盖矩阵与性能基准的计数与产物一致」「版本标记与 `package.json` 一致」；改文档后可单独跑一次，`--self-test` 自检规则本身（真实文档内存篡改、不落盘）。
-- 代码约定（空 catch 需注释、无 `console.*`、无 `@ts-ignore`）由 `tests/test-code-conventions.js` 自动检查。
+- 代码约定（空 catch 需注释、无 `console.*`、无 `@ts-ignore`、**已迁移 i18n 的文件 UI 语境禁中文字面量**）由 `tests/test-code-conventions.js` 自动检查；i18n 三条守卫 `tests/test-i18n-{nls,dict}.js` + `tests/test-i18n-runtime.js` 约定见 [国际化.md](./国际化.md) §6。

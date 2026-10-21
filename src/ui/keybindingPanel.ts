@@ -7,6 +7,7 @@
  */
 import * as vscode from 'vscode';
 import { KeybindingRow } from '../tools/keybindingConfig';
+import * as i18n from '../i18n';
 
 /** 面板数据（宿主构建；含行模型 / 文件路径 / cbStyle 状态 / 设置告警） */
 export interface KeybindingPanelState {
@@ -41,7 +42,7 @@ export class KeybindingPanel {
   ) {
     this.panel = vscode.window.createWebviewPanel(
       'codeblocks.keybindings',
-      'Code::Blocks 快捷键设置',
+      i18n.t('Code::Blocks Keybindings'),
       vscode.ViewColumn.One,
       { enableScripts: true },
     );
@@ -70,6 +71,12 @@ export class KeybindingPanel {
   /** 面板已打开时刷新（设置变更/导入等外部途径触发） */
   public static refreshIfOpen(): void {
     KeybindingPanel.current?.refresh();
+  }
+
+  /** 界面语言切换后刷新已打开面板的标题（正文标签在下次打开时按新语言渲染） */
+  public static refreshTitleIfOpen(): void {
+    const p = KeybindingPanel.current;
+    if (p) p.panel.title = i18n.t('Code::Blocks Keybindings');
   }
 
   private post(msg: unknown): void {

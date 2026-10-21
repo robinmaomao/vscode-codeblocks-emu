@@ -1,4 +1,4 @@
-// 批次一 M3 回归：文件节点「属性」直达工程属性面板的文件 tab 并定位该行
+﻿// 批次一 M3 回归：文件节点「属性」直达工程属性面板的文件 tab 并定位该行
 //  - ProjectPropertiesPanel.show 支持 (initialTab, focusFile)
 //  - 注入的 focusFile 会写入脚本状态，并在 switchTab 之前选中 + 滚入可视区
 const fs = require('fs');
@@ -58,10 +58,13 @@ check('P1 读取 ui.findFileOpen（默认 false，对齐 CB /find_file_open）',
   /get\('ui\.findFileOpen', false\)/.test(extDist), 'setting-read', '存在');
 
 const pkg = JSON.parse(fs.readFileSync(path.resolve(__dirname, '../package.json'), 'utf-8'));
+const { cmdTitle, setLanguage } = require('./_harness/nls');
+// 本文件的原断言为英文标题（package.nls.json 是默认语言）——显式按英文解析
+setLanguage('en');
 const cmd = (id) => (pkg.contributes.commands || []).find((c) => c.command === id);
 check('命令贡献：含 title/icon',
-  cmd('codeblocks.findFile')?.title === 'Find File...' && cmd('codeblocks.addFilesRecursively')?.title === 'Add Files Recursively...'
-  && cmd('codeblocks.fileProperties')?.title === 'Properties...',
+  cmdTitle('codeblocks.findFile') === 'Find File...' && cmdTitle('codeblocks.addFilesRecursively') === 'Add Files Recursively...'
+  && cmdTitle('codeblocks.fileProperties') === 'Properties...',
   [cmd('codeblocks.findFile'), cmd('codeblocks.addFilesRecursively'), cmd('codeblocks.fileProperties')], 'ok');
 const setting = (pkg.contributes.configuration || []).flatMap((b) => Object.entries(b.properties || {}))
   .find(([k]) => k === 'codeblocks.ui.findFileOpen');

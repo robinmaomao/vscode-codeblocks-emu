@@ -82,6 +82,9 @@ async function main() {
   fs.mkdirSync(path.join(userDataDir, 'User'), { recursive: true });
   fs.writeFileSync(path.join(userDataDir, 'User', 'settings.json'), JSON.stringify({
     'codeblocks.build.persistLog': true,
+    // 运行时界面语言固定中文：宿主用例（标签标题等）按仓库中文优先的断言口径编写，
+    // 而下载的 VS Code 默认显示语言为英文（auto 会解析为 en）。setting 语义见 docs/国际化.md。
+    'codeblocks.ui.language': 'zh-cn',
   }, null, 2), 'utf-8');
   console.log(`host user-data：${userDataDir}`);
   const launchArgs = [

@@ -82,8 +82,8 @@ check('run() 使用 resolveTargetCompiler + isCompilerUsable',
   seg.includes('resolveTargetCompiler') && seg.includes('isCompilerUsable'), seg.length, undefined);
 check('例外：CommandsOnly 与 null 编译器', seg.includes('CommandsOnly') && seg.includes("'null'"), seg.length, undefined);
 check('顺序：先编译器检查后 exe 存在性检查',
-  seg.indexOf('Run aborted...') >= 0 && seg.indexOf('Run aborted...') < seg.indexOf('可执行文件不存在'),
-  seg.indexOf('Run aborted...'), '<' + seg.indexOf('可执行文件不存在'));
+  seg.indexOf('Run aborted...') >= 0 && seg.indexOf('Run aborted...') < seg.indexOf('The executable does not exist'),
+  seg.indexOf('Run aborted...'), '<' + seg.indexOf('The executable does not exist'));
 
 console.log(`run-invalid-compiler: ${pass} pass, ${fail} fail`);
 process.exit(fail ? 1 : 0);

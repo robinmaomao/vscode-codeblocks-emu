@@ -122,6 +122,21 @@ suite('宿主集成 · WebView 面板（真实宿主内创建与消息协议边�
     assert.ok(propTab, `未创建 ${PROP_PANEL} WebView 标签页`);
     assert.strictEqual(propTab.label, `工程属性: ${WEBVIEW_PROJ_TITLE}`, `标签标题异常：${propTab.label}`);
 
+    // 3b) 界面语言切换（真实宿主）：codeblocks.ui.language=auto→en ⇒ 已打开面板标题立即变英文；
+    //     切回 zh-cn 立即恢复中文（详见 docs/国际化.md：面板正文在下次打开时按新语言渲染，标题即时刷新）
+    await U.setConfig('ui.language', 'en');
+    const titleEn = await U.waitFor(async () => {
+      const t = U.tabsOfViewType(PROP_PANEL)[0];
+      return t && String(t.label).startsWith('Project Properties:') ? t.label : undefined;
+    }, 10000);
+    assert.strictEqual(titleEn, `Project Properties: ${WEBVIEW_PROJ_TITLE}`, `切英文后标题未刷新：${titleEn}`);
+    await U.setConfig('ui.language', 'zh-cn');
+    const titleZh = await U.waitFor(async () => {
+      const t = U.tabsOfViewType(PROP_PANEL)[0];
+      return t && String(t.label).startsWith('工程属性:') ? t.label : undefined;
+    }, 10000);
+    assert.strictEqual(titleZh, `工程属性: ${WEBVIEW_PROJ_TITLE}`, `切回中文后标题未恢复：${titleZh}`);
+
     // 4) ≥2 个 WebView 面板可同时存在（快捷键面板此时也已打开）；viewType 归一化后比较
     const all = U.webviewTabs().map((x) => U.normalizeViewType(x.viewType));
     assert.ok([KB_PANEL, OPT_PANEL, PROP_PANEL].every((v) => all.includes(v)),

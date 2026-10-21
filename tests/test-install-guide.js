@@ -1,4 +1,4 @@
-// R4 引导安装命令与宿主接线回归（extension/package 侧静态断言）：
+﻿// R4 引导安装命令与宿主接线回归（extension/package 侧静态断言）：
 //  - package.json：命令贡献（id/标题）+ 版本 + 两项设置存在性
 //  - dist/extension.js：命令注册、提示矩阵/引导函数接线、globalState 标记键、设置变化监听
 //  - 命令标题/设置描述中的 command: 链接目标已贡献（防死链；settings-command-links 另有全量扫描）
@@ -12,18 +12,21 @@ function check(name, cond, got, want) {
 }
 
 const pkg = JSON.parse(fs.readFileSync(path.resolve(__dirname, '../package.json'), 'utf-8'));
+const { cmdTitle, nlsText, setLanguage } = require('./_harness/nls');
+// 本文件的原断言为英文标题（package.nls.json 是默认语言）——显式按英文解析
+setLanguage('en');
 const ext = fs.readFileSync(path.resolve(__dirname, '../dist/extension.js'), 'utf-8');
 const mod = fs.readFileSync(path.resolve(__dirname, '../dist/build/compilerCache.js'), 'utf-8');
 
 // ---- 1. package.json 贡献面 ----
 check('版本 0.8.131', pkg.version === '0.8.131', pkg.version);
 const cmd = (pkg.contributes.commands || []).find((c) => c.command === 'codeblocks.installCompilerCache');
-check('命令 codeblocks.installCompilerCache 已贡献', !!cmd && /Compiler Cache/.test(cmd.title || ''), cmd);
+check('命令 codeblocks.installCompilerCache 已贡献', !!cmd && /Compiler Cache/.test(cmdTitle('codeblocks.installCompilerCache') || ''), cmd);
 const cfg = pkg.contributes.configuration;
 const props = Array.isArray(cfg) ? Object.assign({}, ...cfg.map((b) => b.properties || {})) : (cfg.properties || {});
 check('设置 build.compilerCache 存在（machine-overridable）', props['codeblocks.build.compilerCache']?.scope === 'machine-overridable', props['codeblocks.build.compilerCache']?.scope);
 check('设置 build.compilerCachePath 存在（machine-overridable）', props['codeblocks.build.compilerCachePath']?.scope === 'machine-overridable', props['codeblocks.build.compilerCachePath']?.scope);
-const md = props['codeblocks.build.compilerCache']?.markdownDescription || '';
+const md = nlsText(props['codeblocks.build.compilerCache']?.markdownDescription || '');
 check('设置描述含安装引导 command: 链接（目标已贡献）', md.includes('(command:codeblocks.installCompilerCache)') && (pkg.contributes.commands || []).some((c) => c.command === 'codeblocks.installCompilerCache'), null);
 
 // ---- 2. dist/extension.js 接线 ----

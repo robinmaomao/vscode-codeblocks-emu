@@ -151,7 +151,8 @@ function createVscodeMock(opts = {}) {
     env: {
       appName: 'Visual Studio Code',
       appHost: 'desktop',
-      language: 'zh-cn',
+      /** VS Code 显示语言（`opts.language` 可覆盖；默认 zh-cn 与存量中文断言一致，见 docs/国际化.md） */
+      language: opts.language || 'zh-cn',
       machineId: 'mock-machine',
       sessionId: 'mock-session',
       clipboard: { writeText: () => Promise.resolve() },
@@ -329,7 +330,8 @@ let installed = null;
 
 /**
  * 装载 mock：拦截 require('vscode')。
- * @param {object} [opts] { config: {..}, captureWebviews: boolean }
+ * @param {object} [opts] { config: {..}, captureWebviews: boolean, language: string }
+ *   language 覆盖 VS Code 显示语言（`vscode.env.language`，默认 `zh-cn`——存量断言按中文态编写）
  */
 function installVscodeMock(opts = {}) {
   const mock = createVscodeMock(opts);
