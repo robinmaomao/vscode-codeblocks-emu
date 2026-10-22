@@ -190,14 +190,17 @@ export interface DebuggerSettingsEditData {
   remote: RemoteDebuggingEditData[];
 }
 
-const TARGET_TYPE_NAMES: Record<number, string> = {
-  0: '可执行文件 (Executable)',
-  1: '控制台程序 (Console application)',
-  2: '静态库 (Static library)',
-  3: '动态库 (Dynamic library)',
-  4: '仅命令 (Commands only)',
-  5: '本机 (Native)',
-};
+/** 目标类型下拉项（每次渲染取当前语言，勿在模块级固化） */
+function targetTypeNames(): Record<number, string> {
+  return {
+    0: i18n.t('Executable'),
+    1: i18n.t('Console application'),
+    2: i18n.t('Static library'),
+    3: i18n.t('Dynamic library'),
+    4: i18n.t('Commands only'),
+    5: i18n.t('Native'),
+  };
+}
 
 /** 内联 SVG 图标（16x16，跟随 currentColor，兼容深/浅色主题） */
 const ICONS = {
@@ -389,7 +392,7 @@ export class ProjectPropertiesPanel {
       ],
     };
 
-    const typeOptions = Object.entries(TARGET_TYPE_NAMES)
+    const typeOptions = Object.entries(targetTypeNames())
       .map(([v, name]) => `<option value="${v}">${this.escapeHtml(name)}</option>`)
       .join('');
     // 初始 tab（供脚本注入；JSON.stringify 保证引号安全）
@@ -417,7 +420,7 @@ export class ProjectPropertiesPanel {
     }).replace(/</g, '\\u003c');
 
     return `<!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="${i18n.htmlLang()}">
 <head>
   <meta charset="UTF-8">
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline';">
@@ -565,12 +568,12 @@ export class ProjectPropertiesPanel {
           <div>
             <div class="list" id="list"></div>
             <div class="list-actions">
-              <button id="add" title="添加目标">添加</button>
-              <button id="copy" title="复制选中目标">复制</button>
-              <button id="remove" title="删除选中目标">删除</button>
-              <button id="up" title="上移选中目标">上移</button>
-              <button id="down" title="下移选中目标">下移</button>
-              <button id="exportTarget" title="把选中目标导出为独立工程（对齐 CB Create project from target）">导出为工程</button>
+              <button id="add" title="${i18n.tr('添加目标')}">${i18n.tr('添加')}</button>
+              <button id="copy" title="${i18n.tr('复制选中目标')}">${i18n.tr('复制')}</button>
+              <button id="remove" title="${i18n.tr('删除选中目标')}">${i18n.tr('删除')}</button>
+              <button id="up" title="${i18n.tr('上移选中目标')}">${i18n.tr('上移')}</button>
+              <button id="down" title="${i18n.tr('下移选中目标')}">${i18n.tr('下移')}</button>
+              <button id="exportTarget" title="${i18n.tr('把选中目标导出为独立工程（对齐 CB Create project from target）')}">${i18n.tr('导出为工程')}</button>
             </div>
           </div>
           <div class="form" id="form"></div>
@@ -581,8 +584,8 @@ export class ProjectPropertiesPanel {
           <div>
             <div class="list" id="vtlist"></div>
             <div class="list-actions">
-              <button id="vt-add" title="添加虚拟目标">添加</button>
-              <button id="vt-remove" title="删除选中虚拟目标">删除</button>
+              <button id="vt-add" title="${i18n.tr('添加虚拟目标')}">${i18n.tr('添加')}</button>
+              <button id="vt-remove" title="${i18n.tr('删除选中虚拟目标')}">${i18n.tr('删除')}</button>
             </div>
           </div>
           <div class="form" id="vtform"></div>
@@ -674,7 +677,7 @@ export class ProjectPropertiesPanel {
     function renderList() {
       const el = document.getElementById('list');
       if (!targets.length) {
-        el.innerHTML = '<div class="empty">（无构建目标）</div>';
+        el.innerHTML = '<div class="empty">${i18n.tr('（无构建目标）')}</div>';
         return;
       }
       el.innerHTML = targets.map((t, i) =>
@@ -697,63 +700,63 @@ export class ProjectPropertiesPanel {
       const t = targets[selected];
       // D2：基本信息 / 输出与编译器 两组折叠
       el.innerHTML =
-        '<details open class="fg"><summary>基本信息</summary>' +
-        '<label><span class="field-name">目标标题</span>' +
+        '<details open class="fg"><summary>${i18n.tr('基本信息')}</summary>' +
+        '<label><span class="field-name">${i18n.tr('目标标题')}</span>' +
         '<input id="f-title" value="' + escAttr(t.title) + '"></label>' +
-        '<label><span class="field-name">目标类型</span>' +
+        '<label><span class="field-name">${i18n.tr('目标类型')}</span>' +
         '<select id="f-type">${typeOptions}</select></label>' +
         '</details>' +
-        '<details open class="fg"><summary>输出与编译器</summary>' +
-        '<label><span class="field-name">输出文件</span>' +
+        '<details open class="fg"><summary>${i18n.tr('输出与编译器')}</summary>' +
+        '<label><span class="field-name">${i18n.tr('输出文件')}</span>' +
         '<input id="f-output" value="' + escAttr(t.outputFilename) + '">' +
-        '<div class="hint">相对项目根目录，如 bin/Debug/hello</div></label>' +
-        '<label><span class="field-name">对象输出目录</span>' +
+        '<div class="hint">${i18n.tr('相对项目根目录，如 bin/Debug/hello')}</div></label>' +
+        '<label><span class="field-name">${i18n.tr('对象输出目录')}</span>' +
         '<input id="f-object" value="' + escAttr(t.objectOutput || '') + '">' +
-        '<div class="hint">留空则使用默认 .objs</div></label>' +
-        '<label><span class="field-name">编译器 ID</span>' +
+        '<div class="hint">${i18n.tr('留空则使用默认 .objs')}</div></label>' +
+        '<label><span class="field-name">${i18n.tr('编译器 ID')}</span>' +
         '<input id="f-compiler" value="' + escAttr(t.compilerId) + '"></label>' +
         '</details>' +
-        '<details open class="fg"><summary>运行</summary>' +
-        '<label><span class="field-name">执行参数</span>' +
+        '<details open class="fg"><summary>${i18n.tr('运行')}</summary>' +
+        '<label><span class="field-name">${i18n.tr('执行参数')}</span>' +
         '<input id="f-params" value="' + escAttr(t.executionParameters || '') + '">' +
-        '<div class="hint">运行/调试时传递给程序的命令行参数（对齐 Code::Blocks 的 Set programs’ arguments）</div></label>' +
+        '<div class="hint">${i18n.tr('运行/调试时传递给程序的命令行参数（对齐 Code::Blocks 的 Set programs’ arguments）')}</div></label>' +
         '</details>' +
-        '<details class="fg"><summary>依赖与附加输出</summary>' +
-        '<label><span class="field-name">外部依赖（每行一个）</span>' +
+        '<details class="fg"><summary>${i18n.tr('依赖与附加输出')}</summary>' +
+        '<label><span class="field-name">${i18n.tr('外部依赖（每行一个）')}</span>' +
         '<textarea id="f-extdeps">' + esc((t.externalDeps || []).join('\\n')) + '</textarea>' +
-        '<div class="hint">&lt;Option external_deps&gt;：比输出文件新时强制重链接（相对项目根，支持 $(VAR) 宏）</div></label>' +
-        '<label><span class="field-name">附加输出（每行一个）</span>' +
+        '<div class="hint">&lt;Option external_deps&gt;：${i18n.tr('比输出文件新时强制重链接（相对项目根，支持 $(VAR) 宏）')}</div></label>' +
+        '<label><span class="field-name">${i18n.tr('附加输出（每行一个）')}</span>' +
         '<textarea id="f-addout">' + esc((t.additionalOutput || []).join('\\n')) + '</textarea>' +
-        '<div class="hint">&lt;Option additional_output&gt;：外部依赖比它新时强制重链接</div></label>' +
+        '<div class="hint">&lt;Option additional_output&gt;：${i18n.tr('外部依赖比它新时强制重链接')}</div></label>' +
         '</details>' +
-        '<details class="fg"><summary>环境变量</summary>' +
-        '<label><span class="field-name">目标环境变量（每行 name=value）</span>' +
+        '<details class="fg"><summary>${i18n.tr('环境变量')}</summary>' +
+        '<label><span class="field-name">${i18n.tr('目标环境变量（每行 name=value）')}</span>' +
         '<textarea id="f-envvars">' + esc((t.envVars || []).map(v => v.name + '=' + v.value).join('\\n')) + '</textarea>' +
-        '<div class="hint">&lt;Environment&gt;&lt;Variable&gt;：构建/运行宏 $(NAME)（对齐 CB Build options → Custom variables；同名时目标覆盖项目）</div></label>' +
+        '<div class="hint">&lt;Environment&gt;&lt;Variable&gt;：${i18n.tr('构建/运行宏 $(NAME)（对齐 CB Build options → Custom variables；同名时目标覆盖项目）')}</div></label>' +
         '</details>' +
-        '<details class="fg"><summary>高级</summary>' +
-        '<label><span class="field-name">运行工作目录</span>' +
-        '<input id="f-workdir" value="' + escAttr(t.workingDir || '') + '"><div class="hint">&lt;Option working_dir&gt;：留空 = 输出文件目录；支持 $(VAR) 宏（对齐 CB Run 工作目录）</div></label>' +
-        '<label><span class="field-name">deps 输出目录</span>' +
-        '<input id="f-deps" value="' + escAttr(t.depsOutput || '') + '"><div class="hint">留空 = 默认 .deps</div></label>' +
-        '<label><span class="field-name">平台</span>' +
+        '<details class="fg"><summary>${i18n.tr('高级')}</summary>' +
+        '<label><span class="field-name">${i18n.tr('运行工作目录')}</span>' +
+        '<input id="f-workdir" value="' + escAttr(t.workingDir || '') + '"><div class="hint">&lt;Option working_dir&gt;：${i18n.tr('留空 = 输出文件目录；支持 $(VAR) 宏（对齐 CB Run 工作目录）')}</div></label>' +
+        '<label><span class="field-name">deps ${i18n.tr('输出目录')}</span>' +
+        '<input id="f-deps" value="' + escAttr(t.depsOutput || '') + '"><div class="hint">${i18n.tr('留空 = 默认 .deps')}</div></label>' +
+        '<label><span class="field-name">${i18n.tr('平台')}</span>' +
         '<span class="checks">' +
         '<label class="check"><input type="checkbox" id="f-pwin"' + ((t.platforms & 4) ? ' checked' : '') + '> Windows</label>' +
         '<label class="check"><input type="checkbox" id="f-punix"' + ((t.platforms & 2) ? ' checked' : '') + '> Unix</label>' +
         '<label class="check"><input type="checkbox" id="f-pmac"' + ((t.platforms & 1) ? ' checked' : '') + '> Mac</label>' +
-        '</span><div class="hint">全选 = All（0xff）；不支持的平台在构建与目标列表中跳过（对齐 CB platforms）</div></label>' +
-        '<label><span class="field-name">宿主程序（库/CommandsOnly 目标运行/调试用）</span>' +
+        '</span><div class="hint">${i18n.tr('全选 = All（0xff）；不支持的平台在构建与目标列表中跳过（对齐 CB platforms）')}</div></label>' +
+        '<label><span class="field-name">${i18n.tr('宿主程序（库/CommandsOnly 目标运行/调试用）')}</span>' +
         '<input id="f-host" value="' + escAttr(t.hostApplication || '') + '"></label>' +
-        '<label class="check"><input type="checkbox" id="f-hostterm"' + (t.runHostApplicationInTerminal !== false ? ' checked' : '') + '> 宿主程序在终端运行</label>' +
-        '<label class="check"><input type="checkbox" id="f-console"' + (t.useConsoleRunner !== false ? ' checked' : '') + '> 使用 console runner（结束时暂停；集成终端下为兼容项）</label>' +
-        '<label><span class="field-name">import 库文件名（动态库，空 = 推导）</span>' +
+        '<label class="check"><input type="checkbox" id="f-hostterm"' + (t.runHostApplicationInTerminal !== false ? ' checked' : '') + '> ${i18n.tr('宿主程序在终端运行')}</label>' +
+        '<label class="check"><input type="checkbox" id="f-console"' + (t.useConsoleRunner !== false ? ' checked' : '') + '> ${i18n.tr('使用 console runner（结束时暂停；集成终端下为兼容项）')}</label>' +
+        '<label><span class="field-name">import ${i18n.tr('库文件名（动态库，空 = 推导）')}</span>' +
         '<input id="f-implib" value="' + escAttr(t.impLib || '') + '"></label>' +
-        '<label><span class="field-name">def 文件名（空 = 推导）</span>' +
+        '<label><span class="field-name">def ${i18n.tr('文件名（空 = 推导）')}</span>' +
         '<input id="f-deffile" value="' + escAttr(t.defFile || '') + '"></label>' +
-        '<label class="check"><input type="checkbox" id="f-defchk"' + (t.createDefFile ? ' checked' : '') + '> 静态/动态库生成 DEF 文件</label>' +
-        '<label class="check"><input type="checkbox" id="f-staticchk"' + (t.createStaticLib ? ' checked' : '') + '> 动态库生成 import 静态库</label>' +
-        '<label class="check"><input type="checkbox" id="f-prefix"' + (t.prefixAuto !== false ? ' checked' : '') + '> 库名自动加前缀（prefix_auto）</label>' +
-        '<label class="check"><input type="checkbox" id="f-ext"' + (t.extensionAuto !== false ? ' checked' : '') + '> 库名自动加扩展名（extension_auto）</label>' +
+        '<label class="check"><input type="checkbox" id="f-defchk"' + (t.createDefFile ? ' checked' : '') + '> ${i18n.tr('静态/动态库生成 DEF 文件')}</label>' +
+        '<label class="check"><input type="checkbox" id="f-staticchk"' + (t.createStaticLib ? ' checked' : '') + '> ${i18n.tr('动态库生成 import 静态库')}</label>' +
+        '<label class="check"><input type="checkbox" id="f-prefix"' + (t.prefixAuto !== false ? ' checked' : '') + '> ${i18n.tr('库名自动加前缀（prefix_auto）')}</label>' +
+        '<label class="check"><input type="checkbox" id="f-ext"' + (t.extensionAuto !== false ? ' checked' : '') + '> ${i18n.tr('库名自动加扩展名（extension_auto）')}</label>' +
         '</details>';
       document.getElementById('f-type').value = String(t.targetType);
       ['f-title', 'f-type', 'f-output', 'f-object', 'f-compiler', 'f-params', 'f-extdeps', 'f-addout', 'f-envvars',
@@ -879,7 +882,7 @@ export class ProjectPropertiesPanel {
     function renderVTList() {
       const el = document.getElementById('vtlist');
       if (!virtualTargets.length) {
-        el.innerHTML = '<div class="empty">（无虚拟目标）</div>';
+        el.innerHTML = '<div class="empty">${i18n.tr('（无虚拟目标）')}</div>';
         return;
       }
       el.innerHTML = virtualTargets.map((v, i) =>
@@ -899,13 +902,13 @@ export class ProjectPropertiesPanel {
             '<label class="check"><input type="checkbox" data-title="' + escAttr(t.title) + '"' +
             (v.targets.includes(t.title) ? ' checked' : '') + '>' + esc(t.title) + '</label>'
           ).join('') + '</div>'
-        : '<div class="hint">（无物理目标，请先在「构建目标」页添加）</div>';
+        : '<div class="hint">${i18n.tr('（无物理目标，请先在「构建目标」页添加）')}</div>';
       el.innerHTML =
-        '<label><span class="field-name">虚拟目标别名</span>' +
+        '<label><span class="field-name">${i18n.tr('虚拟目标别名')}</span>' +
         '<input id="vt-alias" value="' + escAttr(v.alias) + '">' +
-        '<div class="hint">如 All</div></label>' +
-        '<label><span class="field-name">包含的物理目标</span>' + targetChecks + '</label>' +
-        '<div class="list-actions"><button id="vt-all">全选</button><button id="vt-none">全不选</button></div>';
+        '<div class="hint">${i18n.tr('如 All')}</div></label>' +
+        '<label><span class="field-name">${i18n.tr('包含的物理目标')}</span>' + targetChecks + '</label>' +
+        '<div class="list-actions"><button id="vt-all">${i18n.tr('全选')}</button><button id="vt-none">${i18n.tr('全不选')}</button></div>';
       document.getElementById('vt-alias').addEventListener('change', () => collectVTForm());
       document.getElementById('vt-all').addEventListener('click', () => {
         virtualTargets[selectedVT].targets = targets.map(t => t.title);
@@ -944,7 +947,7 @@ export class ProjectPropertiesPanel {
     function renderFileList() {
       const el = document.getElementById('flist');
       if (!files.length) {
-        el.innerHTML = '<div class="empty">（无文件）</div>';
+        el.innerHTML = '<div class="empty">${i18n.tr('（无文件）')}</div>';
         return;
       }
       el.innerHTML = files.map((f, i) =>
@@ -961,7 +964,7 @@ export class ProjectPropertiesPanel {
       const f = files[selectedFile];
       const varSel =
         '<select id="ff-var">' +
-        '<option value="">自动 (CPP)</option>' +
+        '<option value="">${i18n.tr('自动 (CPP)')}</option>' +
         '<option value="CC"' + (f.compilerVar === 'CC' ? ' selected' : '') + '>CC</option>' +
         '<option value="WINDRES"' + (f.compilerVar === 'WINDRES' ? ' selected' : '') + '>WINDRES</option>' +
         '</select>';
@@ -970,26 +973,26 @@ export class ProjectPropertiesPanel {
             '<label class="check"><input type="checkbox" data-title="' + escAttr(t.title) + '"' +
             (f.buildTargets.includes(t.title) ? ' checked' : '') + '>' + esc(t.title) + '</label>'
           ).join('') + '</div>'
-        : '<div class="hint">（无构建目标，请先在「构建目标」页添加）</div>';
+        : '<div class="hint">${i18n.tr('（无构建目标，请先在「构建目标」页添加）')}</div>';
       el.innerHTML =
-        '<label><span class="field-name">编译变量</span>' + varSel +
-        '<div class="hint">默认 CPP，纯 C 文件可设 CC，资源脚本设 WINDRES</div></label>' +
+        '<label><span class="field-name">${i18n.tr('编译变量')}</span>' + varSel +
+        '<div class="hint">${i18n.tr('默认 CPP，纯 C 文件可设 CC，资源脚本设 WINDRES')}</div></label>' +
         '<label class="check"><input type="checkbox" id="ff-compile"' + (f.compile ? ' checked' : '') + '>' +
-        '<span class="field-name" style="display:inline">编译此文件</span></label>' +
+        '<span class="field-name" style="display:inline">${i18n.tr('编译此文件')}</span></label>' +
         '<label class="check"><input type="checkbox" id="ff-link"' + (f.link ? ' checked' : '') + '>' +
-        '<span class="field-name" style="display:inline">链接此文件</span></label>' +
-        '<label><span class="field-name">自定义构建命令</span>' +
-        '<textarea id="ff-cmd" placeholder="留空 = 使用默认编译规则">' + esc(f.buildCommand) + '</textarea>' +
-        '<div class="hint">留空则按编译变量自动生成命令；非空则替换默认编译器的编译命令</div></label>' +
-        '<label><span class="field-name">编译权重（Weight）</span>' +
+        '<span class="field-name" style="display:inline">${i18n.tr('链接此文件')}</span></label>' +
+        '<label><span class="field-name">${i18n.tr('自定义构建命令')}</span>' +
+        '<textarea id="ff-cmd" placeholder="${i18n.tr('留空 = 使用默认编译规则')}">' + esc(f.buildCommand) + '</textarea>' +
+        '<div class="hint">${i18n.tr('留空则按编译变量自动生成命令；非空则替换默认编译器的编译命令')}</div></label>' +
+        '<label><span class="field-name">${i18n.tr('编译权重（Weight）')}</span>' +
         '<input type="number" id="ff-weight" min="0" max="100" step="1" value="' + f.weight + '">' +
-        '<div class="hint">0-100，默认 50；值越小越先编译（并行编译调度用）</div></label>' +
-        '<label><span class="field-name">虚拟文件夹归属</span>' +
-        '<input id="ff-vfolder" placeholder="留空 = 根" value="' + escAttr(f.virtualFolder) + '">' +
-        '<div class="hint">虚拟文件夹名，如 Headers / Sources</div></label>' +
-        '<label><span class="field-name">归属构建目标</span>' + targetChecks +
-        '<div class="hint">勾选全部 = 归属所有目标（不写 target）；不勾选 = 不归属任何目标</div></label>' +
-        '<div class="list-actions"><button id="ff-all">全选</button><button id="ff-none">全不选</button></div>';
+        '<div class="hint">0-100，${i18n.tr('默认 50；值越小越先编译（并行编译调度用）')}</div></label>' +
+        '<label><span class="field-name">${i18n.tr('虚拟文件夹归属')}</span>' +
+        '<input id="ff-vfolder" placeholder="${i18n.tr('留空 = 根')}" value="' + escAttr(f.virtualFolder) + '">' +
+        '<div class="hint">${i18n.tr('虚拟文件夹名，如 Headers / Sources')}</div></label>' +
+        '<label><span class="field-name">${i18n.tr('归属构建目标')}</span>' + targetChecks +
+        '<div class="hint">${i18n.tr('勾选全部 = 归属所有目标（不写 target）；不勾选 = 不归属任何目标')}</div></label>' +
+        '<div class="list-actions"><button id="ff-all">${i18n.tr('全选')}</button><button id="ff-none">${i18n.tr('全不选')}</button></div>';
       ['ff-var', 'ff-compile', 'ff-link', 'ff-cmd', 'ff-weight', 'ff-vfolder'].forEach(id => {
         document.getElementById(id).addEventListener('change', () => collectFileForm());
       });
@@ -1031,10 +1034,10 @@ export class ProjectPropertiesPanel {
     function relSel(id, val, label) {
       return '<label><span class="field-name">' + label + '</span>' +
         '<select id="' + id + '">' +
-        '<option value="0"' + (val === 0 ? ' selected' : '') + '>仅用父级选项</option>' +
-        '<option value="1"' + (val === 1 ? ' selected' : '') + '>仅用目标选项</option>' +
-        '<option value="2"' + (val === 2 ? ' selected' : '') + '>前置到父级选项前</option>' +
-        '<option value="3"' + (val === 3 ? ' selected' : '') + '>追加到父级选项后（默认）</option>' +
+        '<option value="0"' + (val === 0 ? ' selected' : '') + '>${i18n.tr('仅用父级选项')}</option>' +
+        '<option value="1"' + (val === 1 ? ' selected' : '') + '>${i18n.tr('仅用目标选项')}</option>' +
+        '<option value="2"' + (val === 2 ? ' selected' : '') + '>${i18n.tr('前置到父级选项前')}</option>' +
+        '<option value="3"' + (val === 3 ? ' selected' : '') + '>${i18n.tr('追加到父级选项后（默认）')}</option>' +
         '</select></label>';
     }
 
@@ -1042,28 +1045,28 @@ export class ProjectPropertiesPanel {
       const el = document.getElementById('oform');
       const scopeSel =
         '<select id="opt-scope">' +
-        '<option value="project">项目级（所有目标的基础）</option>' +
+        '<option value="project">${i18n.tr('项目级（所有目标的基础）')}</option>' +
         targets.map((t, i) => '<option value="' + i + '">' + esc(t.title) + '</option>').join('') +
         '</select>';
       if (selectedScope !== 'project' && selectedScope >= targets.length) selectedScope = 'project';
       const cur = selectedScope === 'project' ? projOpts : targetOpts[selectedScope];
       const relBlock = selectedScope === 'project' ? '' :
-        relSel('opt-rel-compiler', cur.relations.compiler, '编译器选项关系') +
-        relSel('opt-rel-linker', cur.relations.linker, '链接器选项关系') +
-        relSel('opt-rel-include', cur.relations.include, 'Include 目录关系') +
-        relSel('opt-rel-lib', cur.relations.lib, 'Lib 目录关系') +
-        relSel('opt-rel-res', cur.relations.res, '资源目录关系');
+        relSel('opt-rel-compiler', cur.relations.compiler, '${i18n.tr('编译器选项关系')}') +
+        relSel('opt-rel-linker', cur.relations.linker, '${i18n.tr('链接器选项关系')}') +
+        relSel('opt-rel-include', cur.relations.include, 'Include ${i18n.tr('目录关系')}') +
+        relSel('opt-rel-lib', cur.relations.lib, 'Lib ${i18n.tr('目录关系')}') +
+        relSel('opt-rel-res', cur.relations.res, '${i18n.tr('资源目录关系')}');
       el.innerHTML =
-        '<label><span class="field-name">作用域</span>' + scopeSel + '</label>' +
-        '<label><span class="field-name">编译选项</span>' +
+        '<label><span class="field-name">${i18n.tr('作用域')}</span>' + scopeSel + '</label>' +
+        '<label><span class="field-name">${i18n.tr('编译选项')}</span>' +
         '<textarea id="opt-compiler">' + esc(cur.compilerOptions.join('\\n')) + '</textarea>' +
-        '<div class="hint">每行一个选项，如 -g、-Wall、-std=c11</div></label>' +
-        '<label><span class="field-name">链接选项</span>' +
+        '<div class="hint">${i18n.tr('每行一个选项，如 -g、-Wall、-std=c11')}</div></label>' +
+        '<label><span class="field-name">${i18n.tr('链接选项')}</span>' +
         '<textarea id="opt-linker">' + esc(cur.linkerOptions.join('\\n')) + '</textarea>' +
-        '<div class="hint">每行一个链接器选项</div></label>' +
-        '<label><span class="field-name">链接库</span>' +
+        '<div class="hint">${i18n.tr('每行一个链接器选项')}</div></label>' +
+        '<label><span class="field-name">${i18n.tr('链接库')}</span>' +
         '<textarea id="opt-libs">' + esc(cur.linkLibs.join('\\n')) + '</textarea>' +
-        '<div class="hint">每行一个库名，如 m、pthread</div></label>' +
+        '<div class="hint">${i18n.tr('每行一个库名，如 m、pthread')}</div></label>' +
         relBlock;
       document.getElementById('opt-scope').value = String(selectedScope);
       document.getElementById('opt-scope').addEventListener('change', () => {
@@ -1103,22 +1106,22 @@ export class ProjectPropertiesPanel {
       const el = document.getElementById('dform');
       const scopeSel =
         '<select id="dir-scope">' +
-        '<option value="project">项目级（所有目标的基础）</option>' +
+        '<option value="project">${i18n.tr('项目级（所有目标的基础）')}</option>' +
         targets.map((t, i) => '<option value="' + i + '">' + esc(t.title) + '</option>').join('') +
         '</select>';
       if (selectedDirScope !== 'project' && selectedDirScope >= targets.length) selectedDirScope = 'project';
       const cur = selectedDirScope === 'project' ? projDirs : targetDirs[selectedDirScope];
       el.innerHTML =
-        '<label><span class="field-name">作用域</span>' + scopeSel + '</label>' +
-        '<label><span class="field-name">编译器搜索目录（Include）</span>' +
+        '<label><span class="field-name">${i18n.tr('作用域')}</span>' + scopeSel + '</label>' +
+        '<label><span class="field-name">${i18n.tr('编译器搜索目录（Include）')}</span>' +
         '<textarea id="dir-include">' + esc(cur.includeDirs.join('\\n')) + '</textarea>' +
-        '<div class="hint">每行一个目录，如 ../include、$(SDK)/inc</div></label>' +
-        '<label><span class="field-name">链接器搜索目录（Lib）</span>' +
+        '<div class="hint">${i18n.tr('每行一个目录，如 ../include、$(SDK)/inc')}</div></label>' +
+        '<label><span class="field-name">${i18n.tr('链接器搜索目录（Lib）')}</span>' +
         '<textarea id="dir-lib">' + esc(cur.libDirs.join('\\n')) + '</textarea>' +
-        '<div class="hint">每行一个库搜索目录</div></label>' +
-        '<label><span class="field-name">资源编译器搜索目录</span>' +
+        '<div class="hint">${i18n.tr('每行一个库搜索目录')}</div></label>' +
+        '<label><span class="field-name">${i18n.tr('资源编译器搜索目录')}</span>' +
         '<textarea id="dir-res">' + esc(cur.resourceDirs.join('\\n')) + '</textarea>' +
-        '<div class="hint">每行一个资源搜索目录</div></label>';
+        '<div class="hint">${i18n.tr('每行一个资源搜索目录')}</div></label>';
       document.getElementById('dir-scope').value = String(selectedDirScope);
       document.getElementById('dir-scope').addEventListener('change', () => {
         collectDirsForm();
@@ -1144,41 +1147,41 @@ export class ProjectPropertiesPanel {
     function renderSettingsForm() {
       const el = document.getElementById('sform');
       el.innerHTML =
-        '<label><span class="field-name">项目标题</span>' +
+        '<label><span class="field-name">${i18n.tr('项目标题')}</span>' +
         '<input id="set-title" value="' + escAttr(projSettings.title) + '"></label>' +
-        '<label><span class="field-name">默认编译器 ID</span>' +
+        '<label><span class="field-name">${i18n.tr('默认编译器 ID')}</span>' +
         '<input id="set-compiler" value="' + escAttr(projSettings.compilerId) + '">' +
-        '<div class="hint">如 gcc、clang；目标未指定编译器时使用该值</div></label>' +
-        '<label><span class="field-name">虚拟文件夹</span>' +
+        '<div class="hint">${i18n.tr('如 gcc、clang；目标未指定编译器时使用该值')}</div></label>' +
+        '<label><span class="field-name">${i18n.tr('虚拟文件夹')}</span>' +
         '<textarea id="set-vfolders">' + esc(projSettings.virtualFolders.join('\\n')) + '</textarea>' +
-        '<div class="hint">每行一个虚拟文件夹名，如 Headers、Sources</div></label>' +
-        '<label><span class="field-name">项目自定义变量（每行 name=value）</span>' +
+        '<div class="hint">${i18n.tr('每行一个虚拟文件夹名，如 Headers、Sources')}</div></label>' +
+        '<label><span class="field-name">${i18n.tr('项目自定义变量（每行 name=value）')}</span>' +
         '<textarea id="set-vars">' + esc(projSettings.customVariables.map(v => v.name + '=' + v.value).join('\\n')) + '</textarea>' +
-        '<div class="hint">构建/运行宏 $(name) 使用（扩展增强：写入 Extensions 节点；变量名不能含空格）</div></label>' +
-        '<label><span class="field-name">环境变量（每行 name=value）</span>' +
+        '<div class="hint">${i18n.tr('构建/运行宏 $(name) 使用（扩展增强：写入 Extensions 节点；变量名不能含空格）')}</div></label>' +
+        '<label><span class="field-name">${i18n.tr('环境变量（每行 name=value）')}</span>' +
         '<textarea id="set-envvars">' + esc((projSettings.envVars || []).map(v => v.name + '=' + v.value).join('\\n')) + '</textarea>' +
-        '<div class="hint">写入 &lt;Environment&gt;：构建/运行宏 $(NAME)（对齐 Code::Blocks Build options → Custom variables）</div></label>' +
-        '<details class="fg"><summary>工程编译与输出</summary>' +
-        '<label><span class="field-name">工程平台</span>' +
+        '<div class="hint">${i18n.tr('写入')} &lt;Environment&gt;：${i18n.tr('构建/运行宏 $(NAME)（对齐 Code::Blocks Build options → Custom variables）')}</div></label>' +
+        '<details class="fg"><summary>${i18n.tr('工程编译与输出')}</summary>' +
+        '<label><span class="field-name">${i18n.tr('工程平台')}</span>' +
         '<span class="checks">' +
         '<label class="check"><input type="checkbox" id="set-pwin"' + ((projSettings.platforms & 4) ? ' checked' : '') + '> Windows</label>' +
         '<label class="check"><input type="checkbox" id="set-punix"' + ((projSettings.platforms & 2) ? ' checked' : '') + '> Unix</label>' +
         '<label class="check"><input type="checkbox" id="set-pmac"' + ((projSettings.platforms & 1) ? ' checked' : '') + '> Mac</label>' +
-        '</span><div class="hint">全选 = All（0xff）；工程不支持当前平台时整个工程跳过构建</div></label>' +
-        '<label><span class="field-name">PCH 生成策略</span>' +
+        '</span><div class="hint">${i18n.tr('全选 = All（0xff）；工程不支持当前平台时整个工程跳过构建')}</div></label>' +
+        '<label><span class="field-name">PCH ${i18n.tr('生成策略')}</span>' +
         '<select id="set-pch">' +
-        '<option value="0">与源文件同目录（pchSourceDir）</option>' +
-        '<option value="1">与对象文件同目录（pchObjectDir，默认）</option>' +
-        '<option value="2">与源文件同名 .gch（pchSourceFile）</option>' +
+        '<option value="0">${i18n.tr('与源文件同目录（pchSourceDir）')}</option>' +
+        '<option value="1">${i18n.tr('与对象文件同目录（pchObjectDir，默认）')}</option>' +
+        '<option value="2">${i18n.tr('与源文件同名 .gch（pchSourceFile）')}</option>' +
         '</select></label>' +
-        '<label class="check"><input type="checkbox" id="set-extobj"' + (projSettings.extendedObjNames ? ' checked' : '') + '> 扩展对象命名（foo.c → foo.c.o）</label>' +
+        '<label class="check"><input type="checkbox" id="set-extobj"' + (projSettings.extendedObjNames ? ' checked' : '') + '> ${i18n.tr('扩展对象命名（foo.c → foo.c.o）')}</label>' +
         '</details>' +
-        '<details class="fg"><summary>Makefile 模式</summary>' +
-        '<label class="check"><input type="checkbox" id="set-mkcustom"' + (projSettings.makefileIsCustom ? ' checked' : '') + '> 使用自定义 Makefile（构建/重建/清理走 make 命令）</label>' +
-        '<label><span class="field-name">Makefile 文件名</span>' +
-        '<input id="set-mkfile" value="' + escAttr(projSettings.makefile || '') + '"><div class="hint">默认 Makefile</div></label>' +
-        '<label><span class="field-name">执行目录</span>' +
-        '<input id="set-mkdir" value="' + escAttr(projSettings.executionDir || '') + '"><div class="hint">留空 = 项目根（对齐 GetMakefileExecutionDir）</div></label>' +
+        '<details class="fg"><summary>Makefile ${i18n.tr('模式')}</summary>' +
+        '<label class="check"><input type="checkbox" id="set-mkcustom"' + (projSettings.makefileIsCustom ? ' checked' : '') + '> ${i18n.tr('使用自定义 Makefile（构建/重建/清理走 make 命令）')}</label>' +
+        '<label><span class="field-name">Makefile ${i18n.tr('文件名')}</span>' +
+        '<input id="set-mkfile" value="' + escAttr(projSettings.makefile || '') + '"><div class="hint">${i18n.tr('默认 Makefile')}</div></label>' +
+        '<label><span class="field-name">${i18n.tr('执行目录')}</span>' +
+        '<input id="set-mkdir" value="' + escAttr(projSettings.executionDir || '') + '"><div class="hint">${i18n.tr('留空 = 项目根（对齐 GetMakefileExecutionDir）')}</div></label>' +
         '</details>';
       document.getElementById('set-pch').value = String(projSettings.pchMode);
       ['set-title', 'set-compiler', 'set-vfolders', 'set-vars', 'set-envvars',
@@ -1211,23 +1214,23 @@ export class ProjectPropertiesPanel {
       const el = document.getElementById('scrform');
       const scopeSel =
         '<select id="scr-scope">' +
-        '<option value="project">项目级（所有目标）</option>' +
+        '<option value="project">${i18n.tr('项目级（所有目标）')}</option>' +
         targets.map((t, i) => '<option value="' + i + '">' + esc(t.title) + '</option>').join('') +
         '</select>';
       if (selectedScriptScope !== 'project' && selectedScriptScope >= targets.length) selectedScriptScope = 'project';
       const cur = selectedScriptScope === 'project' ? projScripts : targetScripts[selectedScriptScope];
       el.innerHTML =
-        '<label><span class="field-name">作用域</span>' + scopeSel + '</label>' +
-        '<label><span class="field-name">构建脚本</span>' +
+        '<label><span class="field-name">${i18n.tr('作用域')}</span>' + scopeSel + '</label>' +
+        '<label><span class="field-name">${i18n.tr('构建脚本')}</span>' +
         '<textarea id="scr-list">' + esc(cur.scripts.join('\\n')) + '</textarea>' +
-        '<div class="hint">每行一个脚本文件路径，构建时依次执行</div></label>' +
-        '<label><span class="field-name">构建前命令</span>' +
+        '<div class="hint">${i18n.tr('每行一个脚本文件路径，构建时依次执行')}</div></label>' +
+        '<label><span class="field-name">${i18n.tr('构建前命令')}</span>' +
         '<textarea id="scr-before">' + esc(cur.before.join('\\n')) + '</textarea>' +
-        '<div class="hint">每行一条命令，构建前执行</div></label>' +
-        '<label><span class="field-name">构建后命令</span>' +
+        '<div class="hint">${i18n.tr('每行一条命令，构建前执行')}</div></label>' +
+        '<label><span class="field-name">${i18n.tr('构建后命令')}</span>' +
         '<textarea id="scr-after">' + esc(cur.after.join('\\n')) + '</textarea>' +
-        '<div class="hint">每行一条命令，构建后执行</div></label>' +
-        '<label class="check"><input type="checkbox" id="scr-always"' + (cur.always ? ' checked' : '') + '> 无构建命令时也执行 post-build（Mode after=always，对齐 CB Pre/post 页）</label>';
+        '<div class="hint">${i18n.tr('每行一条命令，构建后执行')}</div></label>' +
+        '<label class="check"><input type="checkbox" id="scr-always"' + (cur.always ? ' checked' : '') + '> ${i18n.tr('无构建命令时也执行 post-build（Mode after=always，对齐 CB Pre/post 页）')}</label>';
       document.getElementById('scr-scope').value = String(selectedScriptScope);
       document.getElementById('scr-scope').addEventListener('change', () => {
         collectScriptsForm();
@@ -1254,10 +1257,10 @@ export class ProjectPropertiesPanel {
     function renderNotesForm() {
       const el = document.getElementById('ntform');
       el.innerHTML =
-        '<label><span class="field-name">项目备注</span>' +
+        '<label><span class="field-name">${i18n.tr('项目备注')}</span>' +
         '<textarea id="nt-text" style="min-height:180px">' + esc(notes.notes) + '</textarea></label>' +
         '<label class="check"><input type="checkbox" id="nt-show"' + (notes.showNotesOnLoad ? ' checked' : '') + '>' +
-        '<span class="field-name" style="display:inline">加载项目时显示备注</span></label>';
+        '<span class="field-name" style="display:inline">${i18n.tr('加载项目时显示备注')}</span></label>';
       document.getElementById('nt-text').addEventListener('change', () => collectNotesForm());
       document.getElementById('nt-show').addEventListener('change', () => collectNotesForm());
     }
@@ -1282,31 +1285,31 @@ export class ProjectPropertiesPanel {
     function renderDebugForm() {
       const el = document.getElementById('dbgform');
       if (selectedDebugScope !== '' && Number(selectedDebugScope) >= targets.length) selectedDebugScope = '';
-      const scopes = [{ v: '', label: '项目级默认' }].concat(targets.map((t, i) => ({ v: String(i), label: t.title })));
+      const scopes = [{ v: '', label: '${i18n.tr('项目级默认')}' }].concat(targets.map((t, i) => ({ v: String(i), label: t.title })));
       const scopeSel = '<select id="dbg-scope">' + scopes.map(s => '<option value="' + s.v + '">' + esc(s.label) + '</option>').join('') + '</select>';
       const scopeName = selectedDebugScope === '' ? '' : targets[Number(selectedDebugScope)].title;
       const r = selectedDebugScope === '' ? dbgRemoteFor('') : dbgRemoteFor(scopeName);
-      const connSel = [[0, 'TCP (IP:端口)'], [1, 'UDP (IP:端口)'], [2, '串口 Serial']]
+      const connSel = [[0, 'TCP (IP:${i18n.tr('端口)')}'], [1, 'UDP (IP:${i18n.tr('端口)')}'], [2, '${i18n.tr('串口 Serial')}']]
         .map(c => '<option value="' + c[0] + '">' + c[1] + '</option>').join('');
       el.innerHTML =
-        '<label><span class="field-name">作用域</span>' + scopeSel +
-        '<div class="hint">项目级默认 = 未单独配置的目标共用（对齐 CB 的 &lt;Project&gt; 行）；同名时目标覆盖项目</div></label>' +
-        '<label><span class="field-name">源搜索目录（每行一个）</span>' +
+        '<label><span class="field-name">${i18n.tr('作用域')}</span>' + scopeSel +
+        '<div class="hint">${i18n.tr('项目级默认 = 未单独配置的目标共用（对齐 CB 的')} &lt;Project&gt; ${i18n.tr('行）；同名时目标覆盖项目')}</div></label>' +
+        '<label><span class="field-name">${i18n.tr('源搜索目录（每行一个）')}</span>' +
         '<textarea id="dbg-paths">' + esc(dbg.searchPaths.join('\\n')) + '</textarea>' +
-        '<div class="hint">调试会话向 GDB 发 directory 命令（对齐 CB debugger search paths；支持 $(VAR) 宏与相对项目根路径）</div></label>' +
-        '<details open class="fg"><summary>远程目标（' + esc(scopeName || '项目级默认') + '）</summary>' +
-        '<label><span class="field-name">连接类型</span><select id="dbg-conn">' + connSel + '</select></label>' +
-        '<label><span class="field-name">串口</span><input id="dbg-serial" value="' + escAttr(r.serialPort) + '" placeholder="COM3 / /dev/ttyUSB0"></label>' +
-        '<label><span class="field-name">波特率</span><input id="dbg-baud" value="' + escAttr(r.serialBaud) + '"></label>' +
-        '<label><span class="field-name">IP 地址</span><input id="dbg-ip" value="' + escAttr(r.ip) + '"></label>' +
-        '<label><span class="field-name">端口</span><input id="dbg-port" value="' + escAttr(r.ipPort) + '"></label>' +
-        '<label class="check"><input type="checkbox" id="dbg-ext"' + (r.extendedRemote ? ' checked' : '') + '> 使用 extended-remote</label>' +
-        '<label class="check"><input type="checkbox" id="dbg-skip"' + (r.skipLDpath ? ' checked' : '') + '> 跳过 PATH/LD_LIBRARY_PATH 注入</label>' +
-        '<label><span class="field-name">连接前命令（每行一条，任意调试均执行）</span><textarea id="dbg-before">' + esc(r.additionalCmdsBefore) + '</textarea></label>' +
-        '<label><span class="field-name">连接前 shell 命令（每行一条）</span><textarea id="dbg-before-shell">' + esc(r.additionalShellCmdsBefore) + '</textarea></label>' +
-        '<label><span class="field-name">连接后命令（每行一条）</span><textarea id="dbg-after">' + esc(r.additionalCmds) + '</textarea></label>' +
-        '<label><span class="field-name">连接后 shell 命令（每行一条）</span><textarea id="dbg-after-shell">' + esc(r.additionalShellCmdsAfter) + '</textarea></label>' +
-        '<div class="hint">连接顺序（对齐 CB）：连接前命令 → 连接前 shell → [set remotebaud] → target [extended-]remote → 连接后命令 → 连接后 shell；有效连接（串口需端口+波特率；TCP/UDP 需 IP+端口）时启动用 continue 而非 run</div>' +
+        '<div class="hint">${i18n.tr('调试会话向 GDB 发 directory 命令（对齐 CB debugger search paths；支持 $(VAR) 宏与相对项目根路径）')}</div></label>' +
+        '<details open class="fg"><summary>${i18n.tr('远程目标（')}' + esc(scopeName || '${i18n.tr('项目级默认')}') + '）</summary>' +
+        '<label><span class="field-name">${i18n.tr('连接类型')}</span><select id="dbg-conn">' + connSel + '</select></label>' +
+        '<label><span class="field-name">${i18n.tr('串口')}</span><input id="dbg-serial" value="' + escAttr(r.serialPort) + '" placeholder="COM3 / /dev/ttyUSB0"></label>' +
+        '<label><span class="field-name">${i18n.tr('波特率')}</span><input id="dbg-baud" value="' + escAttr(r.serialBaud) + '"></label>' +
+        '<label><span class="field-name">IP ${i18n.tr('地址')}</span><input id="dbg-ip" value="' + escAttr(r.ip) + '"></label>' +
+        '<label><span class="field-name">${i18n.tr('端口')}</span><input id="dbg-port" value="' + escAttr(r.ipPort) + '"></label>' +
+        '<label class="check"><input type="checkbox" id="dbg-ext"' + (r.extendedRemote ? ' checked' : '') + '> ${i18n.tr('使用 extended-remote')}</label>' +
+        '<label class="check"><input type="checkbox" id="dbg-skip"' + (r.skipLDpath ? ' checked' : '') + '> ${i18n.tr('跳过 PATH/LD_LIBRARY_PATH 注入')}</label>' +
+        '<label><span class="field-name">${i18n.tr('连接前命令（每行一条，任意调试均执行）')}</span><textarea id="dbg-before">' + esc(r.additionalCmdsBefore) + '</textarea></label>' +
+        '<label><span class="field-name">${i18n.tr('连接前 shell 命令（每行一条）')}</span><textarea id="dbg-before-shell">' + esc(r.additionalShellCmdsBefore) + '</textarea></label>' +
+        '<label><span class="field-name">${i18n.tr('连接后命令（每行一条）')}</span><textarea id="dbg-after">' + esc(r.additionalCmds) + '</textarea></label>' +
+        '<label><span class="field-name">${i18n.tr('连接后 shell 命令（每行一条）')}</span><textarea id="dbg-after-shell">' + esc(r.additionalShellCmdsAfter) + '</textarea></label>' +
+        '<div class="hint">${i18n.tr('连接顺序（对齐 CB）：连接前命令 → 连接前 shell → [set remotebaud] → target [extended-]remote → 连接后命令 → 连接后 shell；有效连接（串口需端口+波特率；TCP/UDP 需 IP+端口）时启动用 continue 而非 run')}</div>' +
         '</details>';
       document.getElementById('dbg-scope').value = selectedDebugScope;
       document.getElementById('dbg-conn').value = String(r.connType);
@@ -1368,9 +1371,9 @@ export class ProjectPropertiesPanel {
 
     window.addEventListener('message', e => {
       if (e.data.type === 'saved') {
-        document.getElementById('status').textContent = '已保存 ✔️';
+        document.getElementById('status').textContent = '${i18n.tr('已保存 ✔️')}';
       } else if (e.data.type === 'error') {
-        document.getElementById('status').textContent = '保存失败: ' + e.data.message;
+        document.getElementById('status').textContent = '${i18n.tr('保存失败:')} ' + e.data.message;
       }
     });
 

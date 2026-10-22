@@ -1,18 +1,13 @@
 // 验证 buildHtml 生成的 WebView HTML 中 <script> 语法是否合法
 const fs = require('fs');
 const path = require('path');
+const { extractTemplate, neutralizeInterpolations } = require('./_harness/panelTemplate');
 
 // 1. 从 dist 提取 buildHtml 的模板字符串字面量
 const distPath = path.resolve(__dirname, '../dist/ui/projectPropertiesPanel.js');
 const dist = fs.readFileSync(distPath, 'utf-8');
-const startMarker = 'return `';
-const s = dist.indexOf(startMarker);
-if (s < 0) { console.error('未找到 return `'); process.exit(1); }
-const tplStart = s + startMarker.length;
-const endMarker = '`;';
-const e = dist.indexOf(endMarker, tplStart);
-if (e < 0) { console.error('未找到模板结尾'); process.exit(1); }
-const htmlTemplate = dist.slice(tplStart, e);
+const htmlTemplate = extractTemplate(dist);
+if (!htmlTemplate) { console.error('未找到 return `…`; 模板'); process.exit(1); }
 
 // 2. 生成插值数据（用 parser 解析 hello-cb）
 const { ProjectParser } = require('../dist/model/parser');
@@ -27,10 +22,12 @@ const targetDirs = project.buildTargets.map(t => ({ includeDirs: [...t.includeDi
 const projectSettings = { title: project.title, compilerId: project.compilerId, virtualFolders: [...project.virtualFolders] };
 const typeOptions = Object.entries({ 0:'可执行文件 (Executable)',1:'控制台程序 (Console application)',2:'静态库 (Static library)',3:'动态库 (Dynamic library)',4:'仅命令 (Commands only)',5:'本机 (Native)' })
   .map(([v,name]) => `<option value="${v}">${name}</option>`).join('');
+// 3. 插值（注入真实数据后，中和其余插值：模板文案插桩 i18n.tr('…') 见 docs/国际化.md 批次 2）
 const data = JSON.stringify({ title: project.title, compilerId: cmp, targets, files, projectOpts, targetOpts, projectDirs, targetDirs, projectSettings }).replace(/</g, '\\u003c');
-
-// 3. 插值
-let html = htmlTemplate.replace('${data}', data).replace('${typeOptions}', typeOptions).replace('${initialTabJs}', JSON.stringify('targets')).replace('${focusFileJs}', JSON.stringify(null));
+let html = neutralizeInterpolations(
+  htmlTemplate.replace('${data}', data).replace('${typeOptions}', typeOptions)
+    .replace('${initialTabJs}', JSON.stringify('targets')).replace('${focusFileJs}', JSON.stringify(null)),
+);
 
 // 4. 提取 script 内容
 const sm = html.match(/<script>([\s\S]*?)<\/script>/);
@@ -51,8 +48,10 @@ try {
 }
 
 // 5b. M3：focusFile 注入（带文件名的场景语法仍合法，且定位块先于 switchTab 执行）
-const htmlFocus = htmlTemplate.replace('${data}', data).replace('${typeOptions}', typeOptions)
-  .replace('${initialTabJs}', JSON.stringify('files')).replace('${focusFileJs}', JSON.stringify('src/main.c'));
+const htmlFocus = neutralizeInterpolations(
+  htmlTemplate.replace('${data}', data).replace('${typeOptions}', typeOptions)
+    .replace('${initialTabJs}', JSON.stringify('files')).replace('${focusFileJs}', JSON.stringify('src/main.c')),
+);
 const focusScript = htmlFocus.match(/<script>([\s\S]*?)<\/script>/)[1];
 try {
   new Function(focusScript);

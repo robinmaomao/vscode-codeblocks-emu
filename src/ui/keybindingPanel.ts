@@ -139,7 +139,7 @@ export class KeybindingPanel {
     } as KeybindingPanelState);
 
     return `<!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="${i18n.htmlLang()}">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -177,16 +177,16 @@ export class KeybindingPanel {
 </style>
 </head>
 <body>
-<h2>Code::Blocks 快捷键设置</h2>
+<h2>Code::Blocks ${i18n.tr('快捷键设置')}</h2>
 <div class="top">
   <div class="row">
-    <input type="search" id="search" placeholder="搜索命令 / id / 命令 ID…">
-    <button id="btnApply" class="secondary">应用</button>
-    <button id="btnReset" class="secondary">全部重置</button>
-    <button id="btnCheck" class="secondary">检查冲突</button>
-    <button id="btnOpen" class="secondary">打开 keybindings.json</button>
-    <button id="btnExport" class="secondary">导出方案</button>
-    <button id="btnImport" class="secondary">导入方案</button>
+    <input type="search" id="search" placeholder="${i18n.tr('搜索命令 / id / 命令 ID…')}">
+    <button id="btnApply" class="secondary">${i18n.tr('应用')}</button>
+    <button id="btnReset" class="secondary">${i18n.tr('全部重置')}</button>
+    <button id="btnCheck" class="secondary">${i18n.tr('检查冲突')}</button>
+    <button id="btnOpen" class="secondary">${i18n.tr('打开 keybindings.json')}</button>
+    <button id="btnExport" class="secondary">${i18n.tr('导出方案')}</button>
+    <button id="btnImport" class="secondary">${i18n.tr('导入方案')}</button>
   </div>
   <div id="bar"></div>
   <div id="notices"></div>
@@ -206,20 +206,20 @@ export class KeybindingPanel {
     return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
   }
   var GROUP_TITLES = {
-    builtin: '构建 / 运行 / 工程（默认启用）',
-    alias: '外部命令别名',
-    cbStyle: 'Code::Blocks 保真键位（受 cbStyle 批量开关控制）'
+    builtin: '${i18n.tr('构建 / 运行 / 工程（默认启用）')}',
+    alias: '${i18n.tr('外部命令别名')}',
+    cbStyle: 'Code::Blocks ${i18n.tr('保真键位（受 cbStyle 批量开关控制）')}'
   };
 
   function statusTag(r) {
-    if (r.status === 'default') return '<span class="tag dim">默认</span>';
-    if (r.status === 'unbound') return '<span class="tag warn">已解绑</span>';
-    return '<span class="tag cust">自定义</span>';
+    if (r.status === 'default') return '<span class="tag dim">${i18n.tr('默认')}</span>';
+    if (r.status === 'unbound') return '<span class="tag warn">${i18n.tr('已解绑')}</span>';
+    return '<span class="tag cust">${i18n.tr('自定义')}</span>';
   }
   function rowHtml(r) {
-    var okBadge = r.ok ? '<span class="tag ok">已生效</span>' : '<span class="tag warn">未写入</span>';
+    var okBadge = r.ok ? '<span class="tag ok">${i18n.tr('已生效')}</span>' : '<span class="tag warn">${i18n.tr('未写入')}</span>';
     var note = r.note ? '<div class="note">⚠️ ' + esc(r.note) + '</div>' : '';
-    var defShow = r.status === 'default' ? '' : '<div class="def">默认: ' + esc(r.defaultsLabel) + '</div>';
+    var defShow = r.status === 'default' ? '' : '<div class="def">${i18n.tr('默认:')} ' + esc(r.defaultsLabel) + '</div>';
     return '<tr data-id="' + esc(r.id) + '">'
       + '<td><div class="name">' + esc(r.label) + '</div>'
       + '<div class="cmd">' + esc(r.id) + ' · ' + esc(r.command) + (r.when ? ' · when: ' + esc(r.when) : '') + '</div>'
@@ -227,10 +227,10 @@ export class KeybindingPanel {
       + '<td><code>' + esc(r.effective) + '</code></td>'
       + '<td>' + statusTag(r) + '<br>' + okBadge + '</td>'
       + '<td class="ops">'
-      + '<button data-op="capture">录入</button>'
-      + '<button data-op="manual" class="secondary">手动</button>'
-      + '<button data-op="unbind" class="secondary">解绑</button>'
-      + '<button data-op="clear" class="secondary">默认</button>'
+      + '<button data-op="capture">${i18n.tr('录入')}</button>'
+      + '<button data-op="manual" class="secondary">${i18n.tr('手动')}</button>'
+      + '<button data-op="unbind" class="secondary">${i18n.tr('解绑')}</button>'
+      + '<button data-op="clear" class="secondary">${i18n.tr('默认')}</button>'
       + '</td></tr>';
   }
   function render() {
@@ -248,17 +248,17 @@ export class KeybindingPanel {
       }
       html += '<details open class="grp"><summary>' + esc(GROUP_TITLES[g]) + '（' + rows.length + '）</summary>';
       if (!rows.length) {
-        html += '<div class="hint">无匹配项</div></details>';
+        html += '<div class="hint">${i18n.tr('无匹配项')}</div></details>';
         return;
       }
-      html += '<table class="tb"><thead><tr><th>命令</th><th>当前键位</th><th>状态</th><th>操作</th></tr></thead><tbody>';
+      html += '<table class="tb"><thead><tr><th>${i18n.tr('命令')}</th><th>${i18n.tr('当前键位')}</th><th>${i18n.tr('状态')}</th><th>${i18n.tr('操作')}</th></tr></thead><tbody>';
       rows.forEach(function (r) { html += rowHtml(r); });
       html += '</tbody></table></details>';
     });
     document.getElementById('list').innerHTML = html;
-    document.getElementById('footer').textContent = 'keybindings.json: ' + (state.path || '(未定位)')
-      + ' · cbStyle: ' + (state.cbStyle ? '已启用' : '未启用')
-      + ' · 修改立即写入设置并应用；「全部重置」清除全部自定义';
+    document.getElementById('footer').textContent = 'keybindings.json: ' + (state.path || '(${i18n.tr('未定位)')}')
+      + ' · cbStyle: ' + (state.cbStyle ? '${i18n.tr('已启用')}' : '${i18n.tr('未启用')}')
+      + ' · ${i18n.tr('修改立即写入设置并应用；「全部重置」清除全部自定义')}';
     bind();
   }
   function bind() {
@@ -293,15 +293,15 @@ export class KeybindingPanel {
   }
   function startCapture(row) {
     pending = row;
-    showBar('<b>录入键位</b> — ' + esc(row.label)
-      + '：请按下组合键（Esc 取消 · Backspace = 解绑 · 仅按修饰键无效）'
-      + '<div class="hint">被 VS Code / 系统优先占用的组合（如 Ctrl+W、Ctrl+Tab）可能无法捕获，请改用「手动」输入</div>');
+    showBar('<b>${i18n.tr('录入键位')}</b> — ' + esc(row.label)
+      + '：${i18n.tr('请按下组合键（Esc 取消 · Backspace = 解绑 · 仅按修饰键无效）')}'
+      + '<div class="hint">${i18n.tr('被 VS Code / 系统优先占用的组合（如 Ctrl+W、Ctrl+Tab）可能无法捕获，请改用「手动」输入')}</div>');
   }
   function startManual(row) {
     pending = row;
-    showBar('<b>手动输入</b> — ' + esc(row.label)
-      + '：<input id="manualInput" placeholder="如 ctrl+alt+b / f7 / ctrl+k ctrl+c（空 = 解绑）">'
-      + '<button id="manualOk">确定</button> <button id="manualCancel" class="secondary">取消</button>');
+    showBar('<b>${i18n.tr('手动输入')}</b> — ' + esc(row.label)
+      + '：<input id="manualInput" placeholder="${i18n.tr('如 ctrl+alt+b / f7 / ctrl+k ctrl+c（空 = 解绑）')}">'
+      + '<button id="manualOk">${i18n.tr('确定')}</button> <button id="manualCancel" class="secondary">${i18n.tr('取消')}</button>');
     var input = document.getElementById('manualInput');
     input.value = row.status === 'custom' ? row.effective : '';
     input.focus();
@@ -375,7 +375,7 @@ export class KeybindingPanel {
     if (!m) return;
     if (m.type === 'state') { state = m.state; render(); }
     else if (m.type === 'status') { document.getElementById('status').textContent = m.message || ''; }
-    else if (m.type === 'error') { document.getElementById('status').textContent = '错误: ' + (m.message || ''); }
+    else if (m.type === 'error') { document.getElementById('status').textContent = '${i18n.tr('错误:')} ' + (m.message || ''); }
   });
   render();
   vscode.postMessage({ type: 'ready' });

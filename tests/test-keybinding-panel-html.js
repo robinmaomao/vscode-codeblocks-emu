@@ -1,18 +1,13 @@
 // 验证快捷键设置面板 buildHtml 生成的 WebView <script> 语法是否合法
-// （与 test-html-syntax.js 同模式：从 dist 提取模板字面量 + 替换 ${data} 占位符 + new Function 语法检查）
+// （与 test-html-syntax.js 同模式：从 dist 提取模板字面量 + 注入数据 + 中和其余插值 + new Function 语法检查）
 const fs = require('fs');
 const path = require('path');
+const { extractTemplate, neutralizeInterpolations } = require('./_harness/panelTemplate');
 
 const distPath = path.resolve(__dirname, '../dist/ui/keybindingPanel.js');
 const dist = fs.readFileSync(distPath, 'utf-8');
-const startMarker = 'return `';
-const s = dist.indexOf(startMarker);
-if (s < 0) { console.error('未找到 return `'); process.exit(1); }
-const tplStart = s + startMarker.length;
-const endMarker = '`;';
-const e = dist.indexOf(endMarker, tplStart);
-if (e < 0) { console.error('未找到模板结尾'); process.exit(1); }
-const htmlTemplate = dist.slice(tplStart, e);
+const htmlTemplate = extractTemplate(dist);
+if (!htmlTemplate) { console.error('未找到 return `…`; 模板'); process.exit(1); }
 
 // 面板数据（构造覆盖三种分组 / 自定义 / 解绑 / 注解的 fixture）
 const fixture = {
@@ -27,7 +22,7 @@ const fixture = {
   notices: ['测试告警: 设置中含未知键名 xyz'],
 };
 const data = JSON.stringify(fixture).replace(/</g, '\\u003c');
-let html = htmlTemplate.replace('${data}', data);
+let html = neutralizeInterpolations(htmlTemplate.replace('${data}', data));
 
 const sm = html.match(/<script>([\s\S]*?)<\/script>/);
 if (!sm) { console.error('未找到 <script>'); process.exit(1); }

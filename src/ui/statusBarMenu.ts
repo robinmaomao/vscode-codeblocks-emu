@@ -46,7 +46,7 @@ function buildHoverMenu(): vscode.MarkdownString {
       const item = findMenuItem(label);
       if (!item?.command) continue;
       const icon = CHILD_ICONS[label];
-      links.push(`[${icon ? `$(${icon}) ` : ''}${label}](command:${item.command})`);
+      links.push(`[${icon ? `$(${icon}) ` : ''}${i18n.t(label)}](command:${item.command})`);
     }
     if (links.length) lines.push(links.join('　'));
   }
@@ -77,7 +77,7 @@ export function registerStatusBarMenu(
       const firstLevel: MenuPick[] = [];
       if (dyn.order.length) {
         firstLevel.push({
-          label: 'Workspace',
+          label: i18n.t('Workspace'),
           kindTag: 'workspace',
           description: i18n.t('build order'),
           iconPath: new vscode.ThemeIcon('layers'),
@@ -85,7 +85,7 @@ export function registerStatusBarMenu(
       }
       if (dyn.recents.length) {
         firstLevel.push({
-          label: 'Recent Projects',
+          label: i18n.t('Recent Projects'),
           kindTag: 'recent',
           description: i18n.t('{0} items', dyn.recents.length),
           iconPath: new vscode.ThemeIcon('history'),
@@ -93,7 +93,7 @@ export function registerStatusBarMenu(
       }
       for (const m of MENU_STRUCTURE) {
         firstLevel.push({
-          label: m.label,
+          label: i18n.t(m.label),
           kindTag: 'menu',
           menu: m,
           iconPath: m.icon ? new vscode.ThemeIcon(m.icon) : undefined,
@@ -119,7 +119,7 @@ export function registerStatusBarMenu(
       if (picked.menu) {
         await showMenuLevel(
           picked.menu.children,
-          i18n.t('{0} — select a command', picked.menu.label),
+          i18n.t('{0} — select a command', i18n.t(picked.menu.label)),
           dyn,
           picked.menu.label === 'Tools' ? dyn.tools : undefined,
         );
@@ -137,7 +137,7 @@ async function showRecentPick(dyn: MenuDynamicData): Promise<void> {
     description: path.dirname(r.file),
     file: r.file,
   }));
-  items.push({ label: '$(trash) Clear Recent Projects', description: i18n.t('Clear the recent projects list'), file: '', clear: true });
+  items.push({ label: `$(trash) ${i18n.t('Clear Recent Projects')}`, description: i18n.t('Clear the recent projects list'), file: '', clear: true });
   const sel = await vscode.window.showQuickPick(items, { placeHolder: i18n.t('Recent Projects — open a project') });
   if (!sel) return;
   if (sel.clear) {
@@ -179,7 +179,7 @@ async function showMenuLevel(
     if (c.needsProject && !dyn.hasProjects) desc.push(i18n.t('(no project)'));
     const icon = CHILD_ICONS[c.label];
     items.push({
-      label: c.label,
+      label: i18n.t(c.label),
       description: desc.length ? desc.join(' · ') : undefined,
       iconPath: icon ? new vscode.ThemeIcon(icon) : undefined,
       def: c,
@@ -200,7 +200,7 @@ async function showMenuLevel(
   if (!sel?.def) return;
   const def = sel.def;
   if (!def.command) {
-    if (def.children?.length) await showMenuLevel(def.children, i18n.t('{0} — select a command', def.label), dyn);
+    if (def.children?.length) await showMenuLevel(def.children, i18n.t('{0} — select a command', i18n.t(def.label)), dyn);
     return;
   }
   try {

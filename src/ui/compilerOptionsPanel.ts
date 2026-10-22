@@ -85,7 +85,7 @@ export class CompilerOptionsPanel {
     }
 
     return `<!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="${i18n.htmlLang()}">
 <head>
   <meta charset="UTF-8">
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline';">
@@ -108,8 +108,8 @@ export class CompilerOptionsPanel {
 </head>
 <body>
   <div class="toolbar">
-    <button id="apply">应用</button>
-    <button id="reset">重置</button>
+    <button id="apply">${i18n.tr('应用')}</button>
+    <button id="reset">${i18n.tr('重置')}</button>
     <span id="status"></span>
   </div>
   <div id="groups">${groupsHtml}</div>
@@ -121,11 +121,11 @@ export class CompilerOptionsPanel {
     });
     document.getElementById('reset').addEventListener('click', () => {
       document.querySelectorAll('input[type=checkbox]').forEach(c => c.checked = false);
-      document.getElementById('status').textContent = '已重置（点击应用生效）';
+      document.getElementById('status').textContent = '${i18n.tr('已重置（点击应用生效）')}';
     });
     window.addEventListener('message', e => {
       if (e.data.type === 'applied') {
-        document.getElementById('status').textContent = '已应用 ✔️';
+        document.getElementById('status').textContent = '${i18n.tr('已应用 ✔️')}';
       }
     });
   </script>

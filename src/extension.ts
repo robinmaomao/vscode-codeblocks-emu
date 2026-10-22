@@ -5538,7 +5538,7 @@ function updateCompilerStatusBar(): void {
 function buildStatusHoverTooltip(): vscode.MarkdownString {
   const md = new vscode.MarkdownString(undefined, true);
   md.isTrusted = true;
-  const l = (icon: string, label: string, command: string): string => `[${icon} ${label}](command:${command})`;
+  const l = (icon: string, label: string, command: string): string => `[${icon} ${i18n.t(label)}](command:${command})`;
   md.value = [
     i18n.t('**Build menu**'),
     [l('$(package)', 'Build', 'codeblocks.build'), l('$(sync)', 'Rebuild', 'codeblocks.rebuild')].join('　'),
