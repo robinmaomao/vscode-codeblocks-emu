@@ -15,6 +15,7 @@ import * as path from 'path';
 import { XMLParser } from 'fast-xml-parser';
 import { Project, ProjectFile, TargetType } from '../model/types';
 import { makeFile, makeTarget } from './newProject';
+import * as i18n from '../i18n';
 
 export interface ImportedProject {
   title: string;
@@ -374,7 +375,7 @@ export function buildProjectFromImport(
     commandsBeforeBuild: [],
     commandsAfterBuild: [],
     buildScripts: [],
-    notes: `由 ${path.basename(srcFile)} 导入（Code::Blocks 扩展 C5）`,
+    notes: i18n.t('Imported from {0} (Code::Blocks extension C5)', path.basename(srcFile)),
     showNotesOnLoad: false,
     envVars: [],
     alwaysRunPostBuildSteps: false,

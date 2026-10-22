@@ -12,6 +12,7 @@
  * 纯函数（无 vscode 依赖），供命令与回归测试共用。
  */
 import { Project, BuildTarget } from '../model/types';
+import * as i18n from '../i18n';
 
 /** 深拷贝目标（数组/映射字段至少浅拷贝；files 由导出流程重建） */
 function cloneTarget(t: BuildTarget): BuildTarget {
@@ -41,7 +42,7 @@ function cloneTarget(t: BuildTarget): BuildTarget {
 /** 构造「仅包含指定目标」的新工程对象（不写盘；由调用方 serializeProject 输出） */
 export function buildTargetExportProject(project: Project, targetTitle: string): Project {
   const target = project.buildTargets.find((t) => t.title === targetTitle);
-  if (!target) throw new Error(`目标不存在：${targetTitle}`);
+  if (!target) throw new Error(i18n.t('Target not found: {0}', targetTitle));
 
   const exportedTarget = cloneTarget(target);
   const files = project.files

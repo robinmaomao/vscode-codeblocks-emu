@@ -34,11 +34,14 @@ export function isUiLanguageSetting(value: unknown): value is UiLanguageSetting 
 /**
  * 由设置值与 VS Code 显示语言解析生效语言。
  * `auto`：显示语言以 `zh` 开头（zh-cn / zh-tw / zh-hans…）取 `zh-cn`，其余一律 `en`。
+ * 显示语言**缺失**（无宿主 stub / headless 单测未提供 `env.language`）时取 `zh-cn`：
+ * 生产环境 VS Code 一定有值，此分支只影响测试基线（与既有中文断言、中文优先文档一致）。
  */
 export function resolveLanguage(setting: unknown, envLanguage: unknown): UiLanguage {
   const value = isUiLanguageSetting(setting) ? setting : 'auto';
   if (value !== 'auto') return value;
   const env = String(envLanguage ?? '').toLowerCase();
+  if (!env) return 'zh-cn';
   return env.startsWith('zh') ? 'zh-cn' : 'en';
 }
 

@@ -5,6 +5,7 @@
  * 不使用 launch.json 预配置，也不依赖 cppdbg/CodeLLDB。
  */
 import * as vscode from 'vscode';
+import * as i18n from '../i18n';
 import { GdbMiSession, MiResult, MiAsync } from './gdbMiSession';
 import {
   AsmInsn, base64ToHex, breakpointLocation, hexToBase64, isExitReason, isPendingBreakpoint,
@@ -259,7 +260,7 @@ export class GdbDebugAdapter implements vscode.DebugAdapter {
 
   /** Send user command：MI（- 开头）原样执行；否则按 GDB CLI 执行（对齐 CB Debug → Send user command） */
   async sendUserCommand(text: string): Promise<string> {
-    if (!this.session) throw new Error('调试会话未启动');
+    if (!this.session) throw new Error(i18n.t('Debug session not started'));
     const t = text.trim();
     if (!t) return '';
     const line = t.startsWith('-') ? t : `-interpreter-exec console ${this.session.quote(t)}`;
@@ -270,7 +271,7 @@ export class GdbDebugAdapter implements vscode.DebugAdapter {
 
   /** Set next statement（GDB jump file:line） */
   async setNextStatement(file: string, line: number): Promise<void> {
-    if (!this.session) throw new Error('调试会话未启动');
+    if (!this.session) throw new Error(i18n.t('Debug session not started'));
     const r = await this.session.sendExact(`-interpreter-exec console ${this.session.quote(`jump ${file}:${line}`)}`);
     this.sendOutput('console', r.raw);
   }
@@ -283,7 +284,7 @@ export class GdbDebugAdapter implements vscode.DebugAdapter {
    * 分离后被调试进程**继续运行**，会话结束（attach 为 CB 语义，launch 为保护性扩展）。
    */
   async detach(): Promise<void> {
-    if (!this.session) throw new Error('调试会话未启动');
+    if (!this.session) throw new Error(i18n.t('Debug session not started'));
     if (this.detached) return;
     const r = await this.session.sendExact('-target-detach');
     this.sendOutput('console', r.raw);
@@ -306,12 +307,12 @@ export class GdbDebugAdapter implements vscode.DebugAdapter {
    * 本实现为**可用版**（保护性差异）：地址必填 + 输出写 Debug Console。
    */
   async addSymbolFile(file: string, address?: string): Promise<string> {
-    if (!this.session) throw new Error('调试会话未启动');
+    if (!this.session) throw new Error(i18n.t('Debug session not started'));
     const f = file.trim();
     const a = (address ?? '').trim();
-    if (!f) throw new Error('未指定符号文件');
-    if (!a) throw new Error('需要 .text 加载地址（GDB 对 add-symbol-file 要求地址参数；可从「已加载库」列表取）');
-    if (!/^0x[0-9a-f]+$/i.test(a) && !/^\d+$/.test(a)) throw new Error(`地址格式无效: ${a}`);
+    if (!f) throw new Error(i18n.t('No symbol file specified'));
+    if (!a) throw new Error(i18n.t('The .text load address is required (GDB requires an address argument for add-symbol-file; take it from the Loaded Libraries list)'));
+    if (!/^0x[0-9a-f]+$/i.test(a) && !/^\d+$/.test(a)) throw new Error(i18n.t('Invalid address format: {0}', a));
     const r = await this.session.sendExact(
       `-interpreter-exec console ${this.session.quote(`add-symbol-file ${this.session.quote(f)} ${a}`)}`,
     );
@@ -354,7 +355,7 @@ export class GdbDebugAdapter implements vscode.DebugAdapter {
 
   /** 运行中降级结果的统一中文说明（响应 message，便于用户与测试识别） */
   private static readonly RUNNING_HINT =
-    '程序正在运行：GDB 不响应同步 MI 请求（本机 GDB 8.1 限制），已返回缓存/占位结果而非等待超时';
+    i18n.t('The program is running: GDB does not respond to synchronous MI requests (local GDB 8.1 limitation); a cached/placeholder result was returned instead of waiting for a timeout');
 
   /**
    * 请求在目标运行期间无法经 MI 完成时立即回失败响应（避免 DAP 请求悬挂 30s）。
@@ -363,7 +364,7 @@ export class GdbDebugAdapter implements vscode.DebugAdapter {
   private rejectWhileRunning(req: DapRequest, what: string): boolean {
     if (!this.session || !this.targetRunning) return false;
     this.sendResponse(req, false, {},
-      `${what}不可用：程序正在运行，GDB 不响应同步 MI 请求（本机 GDB 8.1 限制）；请先命中断点或暂停后再试`);
+      i18n.t('{0} is unavailable: the program is running and GDB does not respond to synchronous MI requests (local GDB 8.1 limitation); hit a breakpoint or pause first, then retry', what));
     return true;
   }
 
@@ -396,8 +397,8 @@ export class GdbDebugAdapter implements vscode.DebugAdapter {
       supportsModulesRequest: true,
       supportsLoadedSourcesRequest: true,
       exceptionBreakpointFilters: [
-        { filter: 'throw', label: 'C++ 抛出异常（throw）', default: false },
-        { filter: 'catch', label: 'C++ 捕获异常（catch）', default: false },
+        { filter: 'throw', label: i18n.t('C++ thrown exception (throw)'), default: false },
+        { filter: 'catch', label: i18n.t('C++ caught exception (catch)'), default: false },
       ],
     });
   }
@@ -409,7 +410,7 @@ export class GdbDebugAdapter implements vscode.DebugAdapter {
     this.cwd = args.cwd ?? '';
 
     if (!this.program) {
-      this.sendResponse(req, false, {}, '未指定调试程序');
+      this.sendResponse(req, false, {}, i18n.t('No program to debug specified'));
       return;
     }
 
@@ -451,7 +452,7 @@ export class GdbDebugAdapter implements vscode.DebugAdapter {
       this.sendEvent('initialized', {});
     } catch (err) {
       // D-05：先回失败响应再销毁（销毁后适配器不再推送消息）
-      this.sendResponse(req, false, {}, `GDB 启动失败: ${(err as Error).message}`);
+      this.sendResponse(req, false, {}, i18n.t('Failed to start GDB: {0}', (err as Error).message));
       this.dispose();
     }
   }
@@ -461,7 +462,7 @@ export class GdbDebugAdapter implements vscode.DebugAdapter {
     const args = (req as any).arguments ?? {};
     const pid = args.pid ?? args.processId;
     if (!pid) {
-      this.sendResponse(req, false, {}, '未指定进程号');
+      this.sendResponse(req, false, {}, i18n.t('No process ID specified'));
       return;
     }
     this.gdbPath = args.gdbPath ?? 'gdb';
@@ -475,7 +476,7 @@ export class GdbDebugAdapter implements vscode.DebugAdapter {
     this.stopOnEntry = false;
     this.entryBpNum = null;
     if (args.stopOnEntry === true) {
-      this.sendOutput('console', '提示：附加会话不支持 stopOnEntry（目标进程已在运行，无入口首停语义）');
+      this.sendOutput('console', i18n.t('Notice: stopOnEntry is not supported in an attach session (the target process is already running, with no entry first-stop semantics)'));
     }
     this.currentThreadId = 0;
     this.searchDirs = Array.isArray(args.searchDirs) ? (args.searchDirs as unknown[]).filter((d): d is string => typeof d === 'string' && !!d) : [];
@@ -503,7 +504,7 @@ export class GdbDebugAdapter implements vscode.DebugAdapter {
       this.sendEvent('initialized', {});
     } catch (err) {
       // D-05：先回失败响应再销毁（销毁后适配器不再推送消息）
-      this.sendResponse(req, false, {}, `附加进程失败: ${(err as Error).message}`);
+      this.sendResponse(req, false, {}, i18n.t('Failed to attach to the process: {0}', (err as Error).message));
       this.dispose();
     }
   }
@@ -525,8 +526,8 @@ export class GdbDebugAdapter implements vscode.DebugAdapter {
         this.ended = true;
         // 第五十轮修复 6：GDB 异常退出时给出可读诊断（如读取寄存器导致 0xC0000005 崩溃）
         if (code !== null && code !== 0) {
-          const crash = code === 3221225477 ? '，0xC0000005 访问违规' : '';
-          this.sendOutput('stderr', `GDB 进程异常退出（退出码 ${code}${crash}）。若刚启用过 codeblocks.debug.registers，请关闭后重试`);
+          const crash = code === 3221225477 ? i18n.t(', 0xC0000005 access violation') : '';
+          this.sendOutput('stderr', i18n.t('GDB process exited unexpectedly (exit code {0}{1}). If you just enabled codeblocks.debug.registers, turn it off and retry', code, crash));
         }
         this.sendEvent('exited', { exitCode: code ?? 0 });
       }
@@ -602,7 +603,7 @@ export class GdbDebugAdapter implements vscode.DebugAdapter {
         await this.session.sendExact(`-interpreter-exec console ${this.session.quote(cli)}`);
       } catch (err) {
         // 连接失败等必须可见（对齐 CB GdbCmd_RemoteTarget ParseOutput 的提示路径）
-        this.sendOutput('stderr', `远程调试命令失败（${cli}）: ${(err as Error).message}`);
+        this.sendOutput('stderr', i18n.t('Remote debug command failed ({0}): {1}', cli, (err as Error).message));
       }
     }
   }
@@ -622,7 +623,7 @@ export class GdbDebugAdapter implements vscode.DebugAdapter {
         breakpoints: requested.map((b) => ({
           verified: false,
           line: b.line,
-          message: '程序正在运行：断点未下发给 GDB（运行时不响应同步 MI 请求），请在暂停后重新设置',
+          message: i18n.t('The program is running: breakpoints were not sent to GDB (it does not respond to synchronous MI requests while running); set them again after pausing'),
         })),
       }, GdbDebugAdapter.RUNNING_HINT);
       return;
@@ -677,7 +678,7 @@ export class GdbDebugAdapter implements vscode.DebugAdapter {
       breakpoints: result.map((b) => ({
         verified: b.verified,
         line: b.line,
-        message: b.verified ? undefined : '断点未解析（源码不在已加载的调试信息中）',
+        message: b.verified ? undefined : i18n.t('Breakpoint not resolved (the source file is not in the loaded debug information)'),
       })),
     });
   }
@@ -695,7 +696,7 @@ export class GdbDebugAdapter implements vscode.DebugAdapter {
       this.sendResponse(req, true, {
         breakpoints: requested.map(() => ({
           verified: false,
-          message: '程序正在运行：函数断点未下发给 GDB（运行时不响应同步 MI 请求），请在暂停后重新设置',
+          message: i18n.t('The program is running: function breakpoints were not sent to GDB (it does not respond to synchronous MI requests while running); set them again after pausing'),
         })),
       });
       return;
@@ -743,9 +744,9 @@ export class GdbDebugAdapter implements vscode.DebugAdapter {
     const ref: number = args.variablesReference ?? 0;
     const name: string = args.name ?? '';
     const value: string = args.value ?? '';
-    if (this.rejectWhileRunning(req, '变量修改')) return;
+    if (this.rejectWhileRunning(req, i18n.t('Variable modification'))) return;
     if (!this.session || !name) {
-      this.sendResponse(req, false, {}, '未提供变量名');
+      this.sendResponse(req, false, {}, i18n.t('No variable name provided'));
       return;
     }
 
@@ -765,7 +766,7 @@ export class GdbDebugAdapter implements vscode.DebugAdapter {
         // 子节点成员（含深层 a.b.c）：直接按 parent.member 链赋值；中间节点未物化时逐层 -var-list-children 定位
         const parentVar = this.varRefToName.get(ref);
         if (!parentVar) {
-          this.sendResponse(req, false, {}, '找不到变量引用');
+          this.sendResponse(req, false, {}, i18n.t('Variable reference not found'));
           return;
         }
         const segs = name.split('.').filter(Boolean);
@@ -787,7 +788,7 @@ export class GdbDebugAdapter implements vscode.DebugAdapter {
               }
             }
             if (!found) {
-              this.sendResponse(req, false, {}, `找不到成员: ${seg}`);
+              this.sendResponse(req, false, {}, i18n.t('Member not found: {0}', seg));
               return;
             }
             target = found.name;
@@ -797,7 +798,7 @@ export class GdbDebugAdapter implements vscode.DebugAdapter {
         this.sendResponse(req, true, { value });
       }
     } catch (err) {
-      this.sendResponse(req, false, {}, `修改变量失败: ${(err as Error).message}`);
+      this.sendResponse(req, false, {}, i18n.t('Failed to modify the variable: {0}', (err as Error).message));
     }
   }
 
@@ -808,7 +809,7 @@ export class GdbDebugAdapter implements vscode.DebugAdapter {
       const err = await this.startTarget();
       if (err) {
         // 启动失败必须可见（如 GDB 与目标架构不匹配：not in executable format，第五十轮 D9）
-        this.sendOutput('stderr', `无法启动程序: ${err}`);
+        this.sendOutput('stderr', i18n.t('Failed to start the program: {0}', err));
       }
     }
     this.sendResponse(req, true, {});
@@ -837,7 +838,7 @@ export class GdbDebugAdapter implements vscode.DebugAdapter {
       try {
         await this.session!.send(cmd);
         this.targetRunning = true;
-        this.sendOutput('console', `提示：stopOnEntry 未能生效（${msg}），已撤销入口断点并重新启动程序`);
+        this.sendOutput('console', i18n.t('Notice: stopOnEntry did not take effect ({0}); the entry breakpoint was removed and the program was restarted', msg));
         return undefined;
       } catch (err2) {
         return (err2 as Error).message;
@@ -872,7 +873,7 @@ export class GdbDebugAdapter implements vscode.DebugAdapter {
     // targetRunning 守卫：重复 configurationDone 时不再插断点（运行中插入会触发 D-07 同款无回执）
     if (!this.stopOnEntry || !this.session || this.targetRunning) return;
     if (this.isRemoteDebugging) {
-      this.sendOutput('console', '提示：远程调试目标在连接时已在运行，stopOnEntry 不适用，程序将直接继续');
+      this.sendOutput('console', i18n.t('Notice: the remote debug target is already running when connected, stopOnEntry does not apply, and the program will continue directly'));
       return;
     }
 
@@ -903,12 +904,12 @@ export class GdbDebugAdapter implements vscode.DebugAdapter {
     //    非 PE（如 Linux ELF）不受影响：GDB 默认禁用 ASLR（`set disable-randomization on`）。
     let detail: string;
     if (this.programRelocatable() === true) {
-      detail = '程序为可重定位镜像（PE DYNAMICBASE，加载后基址可能变化），入口地址在加载前不可知；带调试符号编译即可用 stopOnEntry';
+      detail = i18n.t('The program is a relocatable image (PE DYNAMICBASE; the base address may change after loading), so the entry address is unknown before loading; compile with debug symbols to use stopOnEntry');
     } else {
-      detail = '未取到程序入口地址（GDB 的 info files 无 Entry point 行）';
+      detail = i18n.t('Could not obtain the program entry address (GDB "info files" has no Entry point line)');
       const entryAddr = await this.programEntryAddress();
       if (entryAddr) {
-        detail = `程序入口地址 ${entryAddr} 的断点未生效`;
+        detail = i18n.t('The breakpoint at the program entry address {0} did not take effect', entryAddr);
         try {
           const r = await this.session.sendExact(`-break-insert -t *${entryAddr}`);
           const bkpt = r.attrs['bkpt'] ?? '';
@@ -916,18 +917,18 @@ export class GdbDebugAdapter implements vscode.DebugAdapter {
           if (gdbNum && !isPendingBreakpoint(bkpt)) {
             this.entryBpNum = gdbNum;
             this.entryStopLabel = entryAddr;
-            this.sendOutput('console', `提示：未找到用户入口符号（main/WinMain/wWinMain），stopOnEntry 改为停在程序入口 ${entryAddr}（该位置无源码信息）`);
+            this.sendOutput('console', i18n.t('Notice: no user entry symbol (main/WinMain/wWinMain) was found; stopOnEntry now stops at the program entry {0} (no source information at that location)', entryAddr));
             return;
           }
           if (gdbNum) { try { await this.session.sendExact(`-break-delete ${gdbNum}`); } catch { /* 已失效等 */ } }
         } catch (err) {
-          detail = `程序入口地址 ${entryAddr} 的断点设置失败：${(err as Error).message}`;
+          detail = i18n.t('Failed to set the breakpoint at the program entry address {0}: {1}', entryAddr, (err as Error).message);
         }
       }
     }
 
     // 3) 失败回退：明确说明（带具体原因，便于用户判断是符号缺失还是地址不可用），程序照常运行
-    this.sendOutput('console', `提示：stopOnEntry 无法生效（${detail}），程序将直接运行`);
+    this.sendOutput('console', i18n.t('Notice: stopOnEntry cannot take effect ({0}); the program will run directly', detail));
   }
 
   /** 程序是否为「可重定位基址」的 PE 镜像（`DYNAMICBASE`；非 PE/不可读 → false，按固定地址处理） */
@@ -974,7 +975,7 @@ export class GdbDebugAdapter implements vscode.DebugAdapter {
       if (cur) this.currentThreadId = cur; // 与 GDB 实际选中线程对齐（-thread-select 前置条件）
       const threads = r.attrs['threads'] ?? '';
       // 第五十一轮 E2：逐 tuple 解析（旧惰性可选组正则的 name 永不捕获，与 D3 同款缺陷）
-      this.threads = parseThreadTuples(threads).map((t) => ({ id: t.id, name: t.name ?? `线程 ${t.id}` }));
+      this.threads = parseThreadTuples(threads).map((t) => ({ id: t.id, name: t.name ?? i18n.t('Thread {0}', t.id) }));
     } catch { /* ignore */ }
     this.sendResponse(req, true, {
       threads: this.threads.map((t) => ({ id: t.id, name: t.name })),
@@ -985,7 +986,7 @@ export class GdbDebugAdapter implements vscode.DebugAdapter {
     const args = (req as any).arguments;
     const threadId = Number(args?.threadId ?? 0) || 0;
     if (!this.session) { this.sendResponse(req, true, { stackFrames: [] }); return; }
-    if (this.rejectWhileRunning(req, '调用栈读取')) return;
+    if (this.rejectWhileRunning(req, i18n.t('Call stack read'))) return;
     try {
       // 多线程：GDB 的 -stack-list-frames 作用于选中线程 → 请求的线程不同则先切换
       await this.selectThread(threadId);
@@ -1011,8 +1012,8 @@ export class GdbDebugAdapter implements vscode.DebugAdapter {
     const frameId = Number((req as any).arguments?.frameId ?? 0) || 0;
     this.sendResponse(req, true, {
       scopes: [
-        { name: frameId > 0 ? `本地变量 (帧 ${frameId})` : '本地变量', variablesReference: LOCALS_REF_BASE + frameId, expensive: false },
-        { name: '全局', variablesReference: 2000, expensive: false },
+        { name: frameId > 0 ? i18n.t('Locals (frame {0})', frameId) : i18n.t('Locals'), variablesReference: LOCALS_REF_BASE + frameId, expensive: false },
+        { name: i18n.t('Global'), variablesReference: 2000, expensive: false },
       ],
     });
   }
@@ -1021,7 +1022,7 @@ export class GdbDebugAdapter implements vscode.DebugAdapter {
     const args = (req as any).arguments;
     const ref = args.variablesReference ?? 0;
     if (!this.session) { this.sendResponse(req, true, { variables: [] }); return; }
-    if (this.rejectWhileRunning(req, '变量读取')) return;
+    if (this.rejectWhileRunning(req, i18n.t('Variable read'))) return;
 
     let vars: DapVariable[] = [];
     try {
@@ -1070,14 +1071,14 @@ export class GdbDebugAdapter implements vscode.DebugAdapter {
    */
   private async onStepOut(req: DapRequest): Promise<void> {
     if (!this.session) { this.sendResponse(req, true, {}); return; }
-    if (this.rejectWhileRunning(req, '步出')) return;
+    if (this.rejectWhileRunning(req, i18n.t('Step Out'))) return;
     try {
       const r = await this.session.sendExact('-stack-list-frames');
       const frames = parseStackFrameTuples(r.attrs['stack'] ?? '');
       const caller = frames.find((f) => f.level === 1);
       if (!caller || !caller.addr) {
         // 最外层帧：GDB 自身也不支持 finish，给用户可读提示而不结束会话
-        this.sendOutput('console', '已处于最外层函数，无法 Step Out（如要结束程序请按“继续”运行到退出）');
+        this.sendOutput('console', i18n.t('Already in the outermost function, cannot Step Out (to end the program, press "Continue" and run to exit)'));
         this.sendResponse(req, true, {});
         return;
       }
@@ -1087,7 +1088,7 @@ export class GdbDebugAdapter implements vscode.DebugAdapter {
       this.targetRunning = true;
       this.sendResponse(req, true, {});
     } catch (err) {
-      this.sendResponse(req, false, {}, `Step Out 失败: ${(err as Error).message}`);
+      this.sendResponse(req, false, {}, i18n.t('Step Out failed: {0}', (err as Error).message));
     }
   }
 
@@ -1098,7 +1099,7 @@ export class GdbDebugAdapter implements vscode.DebugAdapter {
     // 直接回「不支持」并保持会话可用；远程目标与其它平台（中断有效）维持原行为。
     if (process.platform === 'win32' && !this.isRemoteDebugging) {
       this.sendResponse(req, false, {},
-        '当前调试目标不支持暂停：Windows 原生 GDB 无法中断运行中的进程（请使用断点或「停止」结束会话）');
+        i18n.t('The current debug target does not support pause: native Windows GDB cannot interrupt a running process (use a breakpoint, or "Stop" to end the session)'));
       return;
     }
     this.session.sendAsync('-exec-interrupt');
@@ -1147,7 +1148,7 @@ export class GdbDebugAdapter implements vscode.DebugAdapter {
       }
       // P3 运行中防护：非 MI 透传的表达式求值运行时无回执 → 立即失败并说明
       //（`-` 前缀的显式用户命令保持原样执行，见上）
-      if (this.rejectWhileRunning(req, '表达式求值')) return;
+      if (this.rejectWhileRunning(req, i18n.t('Expression evaluation'))) return;
       // 帧作用域：按 frameId 切换到「指定线程的指定帧」再求值（多线程/多帧下求值上下文与客户端一致；
       // DAP 的 frameId 与本地作用域 variablesReference 同为「帧引用」，此处补基址后统一经 ensureFrame）
       if (args.frameId) await this.ensureFrame(LOCALS_REF_BASE + Number(args.frameId));
@@ -1156,7 +1157,7 @@ export class GdbDebugAdapter implements vscode.DebugAdapter {
       this.sendResponse(req, true, { result: value, variablesReference: 0 });
     } catch (err) {
       // 求值失败应当可见（Debug Console / Watch，第五十轮 D11）
-      this.sendResponse(req, false, {}, `求值失败: ${(err as Error).message}`);
+      this.sendResponse(req, false, {}, i18n.t('Evaluation failed: {0}', (err as Error).message));
     }
   }
 
@@ -1203,7 +1204,7 @@ export class GdbDebugAdapter implements vscode.DebugAdapter {
   private async onDisassemble(req: DapRequest): Promise<void> {
     const args = (req as any).arguments ?? {};
     if (!this.session) { this.sendResponse(req, true, { instructions: [] }); return; }
-    if (this.rejectWhileRunning(req, '反汇编')) return;
+    if (this.rejectWhileRunning(req, i18n.t('Disassembly'))) return;
     const want = Math.max(1, Number(args.instructionCount ?? 100));
     const byteOffset = Number(args.offset ?? 0) || 0;
     const instrOffset = Number(args.instructionOffset ?? 0) || 0;
@@ -1243,10 +1244,10 @@ export class GdbDebugAdapter implements vscode.DebugAdapter {
   /** Memory 视图读取（-data-read-memory-bytes） */
   private async onReadMemory(req: DapRequest): Promise<void> {
     const args = (req as any).arguments ?? {};
-    if (!this.session) { this.sendResponse(req, false, {}, '调试会话未启动'); return; }
-    if (this.rejectWhileRunning(req, '内存读取')) return;
+    if (!this.session) { this.sendResponse(req, false, {}, i18n.t('Debug session not started')); return; }
+    if (this.rejectWhileRunning(req, i18n.t('Memory read'))) return;
     const base = await this.evalAddress(String(args.memoryReference ?? ''));
-    if (base === null) { this.sendResponse(req, false, {}, '无效的内存引用'); return; }
+    if (base === null) { this.sendResponse(req, false, {}, i18n.t('Invalid memory reference')); return; }
     const addr = base + (Number(args.offset ?? 0) || 0);
     const count = Math.max(0, Math.floor(Number(args.count ?? 0)));
     try {
@@ -1254,17 +1255,17 @@ export class GdbDebugAdapter implements vscode.DebugAdapter {
       const hexStr = parseReadMemory(r.attrs['memory'] ?? '');
       this.sendResponse(req, true, { address: GdbDebugAdapter.hex(addr), data: hexToBase64(hexStr), unencodedData: hexStr });
     } catch (err) {
-      this.sendResponse(req, false, {}, `读取内存失败: ${(err as Error).message}`);
+      this.sendResponse(req, false, {}, i18n.t('Memory read failed: {0}', (err as Error).message));
     }
   }
 
   /** Memory 视图写入（-data-write-memory-bytes） */
   private async onWriteMemory(req: DapRequest): Promise<void> {
     const args = (req as any).arguments ?? {};
-    if (!this.session) { this.sendResponse(req, false, {}, '调试会话未启动'); return; }
-    if (this.rejectWhileRunning(req, '内存写入')) return;
+    if (!this.session) { this.sendResponse(req, false, {}, i18n.t('Debug session not started')); return; }
+    if (this.rejectWhileRunning(req, i18n.t('Memory write'))) return;
     const base = await this.evalAddress(String(args.memoryReference ?? ''));
-    if (base === null) { this.sendResponse(req, false, {}, '无效的内存引用'); return; }
+    if (base === null) { this.sendResponse(req, false, {}, i18n.t('Invalid memory reference')); return; }
     const addr = base + (Number(args.offset ?? 0) || 0);
     const hexData = base64ToHex(String(args.data ?? ''));
     if (!hexData) { this.sendResponse(req, true, { bytesWritten: 0 }); return; }
@@ -1272,7 +1273,7 @@ export class GdbDebugAdapter implements vscode.DebugAdapter {
       await this.session.sendExact(`-data-write-memory-bytes ${GdbDebugAdapter.hex(addr)} ${hexData}`);
       this.sendResponse(req, true, { bytesWritten: Math.floor(hexData.length / 2) });
     } catch (err) {
-      this.sendResponse(req, false, {}, `写入内存失败: ${(err as Error).message}`);
+      this.sendResponse(req, false, {}, i18n.t('Memory write failed: {0}', (err as Error).message));
     }
   }
 
@@ -1296,7 +1297,7 @@ export class GdbDebugAdapter implements vscode.DebugAdapter {
     }
     this.sendResponse(req, true, {
       dataId: `cbdbg:${encodeURIComponent(expr)}`,
-      description: `${expr} 的数据断点（读/写）`,
+      description: i18n.t('{0} data breakpoint (read/write)', expr),
       accessTypes: ['write', 'readWrite', 'read'],
       canPersist: false,
     });
@@ -1310,7 +1311,7 @@ export class GdbDebugAdapter implements vscode.DebugAdapter {
       this.sendResponse(req, true, { breakpoints: requested.map(() => ({ verified: false })) });
       return;
     }
-    if (this.rejectWhileRunning(req, '数据断点设置')) return;
+    if (this.rejectWhileRunning(req, i18n.t('Data breakpoint setup'))) return;
     for (const bp of this.dataBreakpoints) {
       if (bp.gdbNum) { try { await this.session.sendExact(`-break-delete ${bp.gdbNum}`); } catch { /* */ } }
     }
@@ -1347,7 +1348,7 @@ export class GdbDebugAdapter implements vscode.DebugAdapter {
     const args = (req as any).arguments ?? {};
     const requested: { instructionReference?: string; offset?: number; condition?: string; hitCondition?: string; logMessage?: string }[] = args.breakpoints ?? [];
     if (!this.session) { this.sendResponse(req, true, { breakpoints: requested.map(() => ({ verified: false })) }); return; }
-    if (this.rejectWhileRunning(req, '指令断点设置')) return;
+    if (this.rejectWhileRunning(req, i18n.t('Instruction breakpoint setup'))) return;
 
     // 清旧（同步清理条件/日志表）
     for (const bp of this.instructionBreakpoints) {
@@ -1362,7 +1363,7 @@ export class GdbDebugAdapter implements vscode.DebugAdapter {
     const result: { verified: boolean; id?: number; message?: string }[] = [];
     for (const br of requested) {
       const addr = parseInstructionReference(String(br.instructionReference ?? ''), br.offset);
-      if (addr === null) { result.push({ verified: false, message: '无效的指令地址' }); continue; }
+      if (addr === null) { result.push({ verified: false, message: i18n.t('Invalid instruction address') }); continue; }
       try {
         const r = await this.session.sendExact(`-break-insert *${GdbDebugAdapter.hex(addr)}`);
         const gdbNum = r.attrs['bkpt'] ? this.extractField(r.attrs['bkpt'], 'number') : undefined;
@@ -1374,7 +1375,7 @@ export class GdbDebugAdapter implements vscode.DebugAdapter {
           try { await this.session.sendExact(`-break-after ${gdbNum} ${hit - 1}`); } catch { /* 不致命 */ }
         }
         this.instructionBreakpoints.push({ gdbNum, verified });
-        result.push({ verified, id: this.instructionBreakpoints.length, message: verified ? undefined : '指令地址未解析' });
+        result.push({ verified, id: this.instructionBreakpoints.length, message: verified ? undefined : i18n.t('Instruction address not resolved') });
       } catch (err) {
         result.push({ verified: false, message: (err as Error).message });
       }
@@ -1387,7 +1388,7 @@ export class GdbDebugAdapter implements vscode.DebugAdapter {
     const args = (req as any).arguments ?? {};
     const line = Number(args.line ?? 0);
     this.sendResponse(req, true, {
-      targets: line ? [{ id: line, label: `行 ${line}`, line, column: 1 }] : [],
+      targets: line ? [{ id: line, label: i18n.t('Line {0}', line), line, column: 1 }] : [],
     });
   }
 
@@ -1395,16 +1396,16 @@ export class GdbDebugAdapter implements vscode.DebugAdapter {
   private async onGoto(req: DapRequest): Promise<void> {
     const args = (req as any).arguments ?? {};
     const line = Number(args.targetId ?? 0);
-    if (!this.session || !line) { this.sendResponse(req, false, {}, '无效的跳转目标'); return; }
-    if (this.rejectWhileRunning(req, '运行到光标')) return;
+    if (!this.session || !line) { this.sendResponse(req, false, {}, i18n.t('Invalid jump target')); return; }
+    if (this.rejectWhileRunning(req, i18n.t('Run to cursor'))) return;
     const file = this.stackFrames[0]?.file;
-    if (!file) { this.sendResponse(req, false, {}, '无法确定当前源文件'); return; }
+    if (!file) { this.sendResponse(req, false, {}, i18n.t('Cannot determine the current source file')); return; }
     try {
       await this.session.sendExact(`-exec-until ${this.session.quote(`${file}:${line}`)}`);
       this.targetRunning = true;
       this.sendResponse(req, true, {});
     } catch (err) {
-      this.sendResponse(req, false, {}, `运行到光标失败: ${(err as Error).message}`);
+      this.sendResponse(req, false, {}, i18n.t('Run to cursor failed: {0}', (err as Error).message));
     }
   }
 
@@ -1413,7 +1414,7 @@ export class GdbDebugAdapter implements vscode.DebugAdapter {
     const args = (req as any).arguments ?? {};
     const filters: string[] = args.filters ?? [];
     if (!this.session) { this.sendResponse(req, true, {}); return; }
-    if (this.rejectWhileRunning(req, '异常断点设置')) return;
+    if (this.rejectWhileRunning(req, i18n.t('Exception breakpoint setup'))) return;
     for (const n of this.catchpointNums) {
       try { await this.session.sendExact(`-break-delete ${n}`); } catch { /* */ }
     }
@@ -1489,7 +1490,7 @@ export class GdbDebugAdapter implements vscode.DebugAdapter {
     if (!this.session) return;
     let text = template;
     for (const expr of logpointExpressions(template)) {
-      let val = '<求值失败>';
+      let val = i18n.t('<evaluation failed>');
       try {
         const r = await this.session.sendExact(`-data-evaluate-expression ${this.session.quote(expr)}`);
         val = r.attrs['value'] ?? '';
@@ -1520,7 +1521,7 @@ export class GdbDebugAdapter implements vscode.DebugAdapter {
       }
       // 更新线程列表
       if (!this.threads.some((t) => t.id === threadId)) {
-        this.threads.push({ id: threadId, name: `线程 ${threadId}` });
+        this.threads.push({ id: threadId, name: i18n.t('Thread {0}', threadId) });
       }
       // 条件断点客户端求值（第五十轮修复 9）：不成立 → 自动继续，不发 stopped
       const bkptno = rec.attrs['bkptno'];
@@ -1558,14 +1559,14 @@ export class GdbDebugAdapter implements vscode.DebugAdapter {
       if (stopBpNum && this.entryBpNum !== null && stopBpNum === this.entryBpNum) {
         reason = 'entry';
         description = this.entryStopLabel
-          ? `已暂停在程序入口（${this.entryStopLabel}，stopOnEntry）`
-          : '已暂停在程序入口（stopOnEntry）';
+          ? i18n.t('Paused at the program entry ({0}, stopOnEntry)', this.entryStopLabel)
+          : i18n.t('Paused at the program entry (stopOnEntry)');
         this.entryBpNum = null; // 临时断点已被 GDB 自动删除（disp=del），无需再跟踪
       } else if (stopBpNum && this.catchpointNums.includes(stopBpNum)) {
         const filter = this.catchpointFilters.get(stopBpNum);
-        const kind = filter === 'catch' ? '捕获' : '抛出';
+        const kind = filter === 'catch' ? i18n.t('caught') : i18n.t('thrown');
         reason = 'exception';
-        description = `已暂停在异常处（${kind}异常，GDB catchpoint ${stopBpNum}）`;
+        description = i18n.t('Paused on exception ({0} exception, GDB catchpoint {1})', kind, stopBpNum);
       }
       // Step Out（修复 8）：命中“调用者返回地址”临时断点 → 报告为 step；停在其它原因则回收未命中的临时断点
       if (this.stepOutBpNum !== null) {
@@ -1587,7 +1588,7 @@ export class GdbDebugAdapter implements vscode.DebugAdapter {
     } else if (rec.record === 'thread-created') {
       const id = Number(rec.attrs['id'] ?? 0);
       if (id && !this.threads.some((t) => t.id === id)) {
-        this.threads.push({ id, name: `线程 ${id}` });
+        this.threads.push({ id, name: i18n.t('Thread {0}', id) });
         this.sendEvent('thread', { reason: 'started', threadId: id });
       }
     } else if (rec.record === 'thread-exited') {

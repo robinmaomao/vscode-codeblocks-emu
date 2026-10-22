@@ -8,7 +8,6 @@
  * 静态贡献（命令标题 / 设置描述 / 视图名）无法运行时改语言，走 package.nls.*.json
  * 跟随 VS Code 显示语言；两者语义边界见 docs/国际化.md。
  */
-import * as vscode from 'vscode';
 import { LANGUAGE_SETTING, resolveLanguage, translate, UiLanguage, Translations } from './core';
 import zhCn from './strings.zh-cn.json';
 import zhCnWebview from './strings.zh-cn.webview.json';
@@ -22,12 +21,24 @@ const webviewTranslations: Translations = zhCnWebview;
 /** 缓存的生效语言（undefined = 未解析，读取时按当前设置为准） */
 let cached: UiLanguage | undefined;
 
+/**
+ * 解析当前生效语言。
+ * 惰性 `require('vscode')`：纯逻辑模块（model / tools / build）在**无宿主单测**下也会引入 i18n，
+ * 此时 vscode 不存在，回退中文态（与既有中文断言、mock 默认显示语言一致）。
+ */
+function resolveFromHost(): UiLanguage {
+  try {
+    const vs: typeof import('vscode') = require('vscode');
+    const setting = vs.workspace.getConfiguration('codeblocks').get<string>(LANGUAGE_SETTING, 'auto');
+    return resolveLanguage(setting, vs.env.language);
+  } catch {
+    return 'zh-cn';
+  }
+}
+
 /** 当前生效语言（设置 `auto` 时读 VS Code 显示语言） */
 export function uiLanguage(): UiLanguage {
-  if (cached === undefined) {
-    const setting = vscode.workspace.getConfiguration('codeblocks').get<string>(LANGUAGE_SETTING, 'auto');
-    cached = resolveLanguage(setting, vscode.env.language);
-  }
+  if (cached === undefined) cached = resolveFromHost();
   return cached;
 }
 

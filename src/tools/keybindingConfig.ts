@@ -8,6 +8,7 @@
  *   3) 其它条目与注释原样保留（条目级文本手术，不整体重排文件）。
  */
 import { CB_STYLE_WHEN, normalizeKey, parseJsonc, VSCODE_DEFAULT_CONFLICTS } from './keybindingConflicts';
+import * as i18n from '../i18n';
 
 /** 可配置的键位条目（id 稳定，供设置引用） */
 export interface ManagedKeybinding {
@@ -35,38 +36,38 @@ export interface DesiredEntry {
 /** 托管键位表（与 package.json 的一致性由 tests/test-keybinding-config.js 强制） */
 export const MANAGED_KEYBINDINGS: ManagedKeybinding[] = [
   // ---- builtin：默认启用 ----
-  { id: 'build', label: 'Build（构建活动工程）', command: 'codeblocks.build', when: 'editorTextFocus', defaults: ['ctrl+f9'], group: 'builtin' },
-  { id: 'rebuild', label: 'Rebuild（全量重编译）', command: 'codeblocks.rebuild', when: 'editorTextFocus', defaults: ['ctrl+f11'], group: 'builtin' },
-  { id: 'clean', label: 'Clean（清理）', command: 'codeblocks.clean', when: 'editorTextFocus', defaults: [], group: 'builtin' },
-  { id: 'run', label: 'Run（运行）', command: 'codeblocks.run', when: 'editorTextFocus', defaults: ['ctrl+f10'], group: 'builtin' },
-  { id: 'buildAndRun', label: 'Build and Run（构建并运行）', command: 'codeblocks.buildAndRun', when: 'editorTextFocus && !inDebugMode', defaults: ['f9'], group: 'builtin' },
-  { id: 'compileCurrentFile', label: 'Compile Current File（编译当前文件）', command: 'codeblocks.compileCurrentFile', when: 'editorTextFocus', defaults: ['ctrl+shift+f9'], group: 'builtin' },
-  { id: 'debug', label: 'Debug / Continue（调试）', command: 'codeblocks.debug', when: 'editorTextFocus', defaults: ['f8'], group: 'builtin' },
-  { id: 'nextError', label: 'Next Error（下一错误）', command: 'codeblocks.nextError', when: 'editorTextFocus', defaults: ['f4', 'alt+f2'], group: 'builtin' },
-  { id: 'prevError', label: 'Previous Error（上一错误）', command: 'codeblocks.prevError', when: 'editorTextFocus', defaults: ['shift+f4', 'alt+f1'], group: 'builtin' },
-  { id: 'activatePriorProject', label: 'Activate Prior Project（上一个工程）', command: 'codeblocks.activatePriorProject', defaults: ['alt+f5'], group: 'builtin' },
-  { id: 'activateNextProject', label: 'Activate Next Project（下一个工程）', command: 'codeblocks.activateNextProject', defaults: ['alt+f6'], group: 'builtin' },
-  { id: 'moveProjectUp', label: 'Move Project Up（上移工程）', command: 'codeblocks.moveProjectUp', when: 'focusedView == codeblocks.projectTree', defaults: ['ctrl+shift+up'], group: 'builtin' },
-  { id: 'moveProjectDown', label: 'Move Project Down（下移工程）', command: 'codeblocks.moveProjectDown', when: 'focusedView == codeblocks.projectTree', defaults: ['ctrl+shift+down'], group: 'builtin' },
-  { id: 'projectTreeFocus', label: 'Project 视图聚焦（Manager）', command: 'codeblocks.projectTree.focus', defaults: ['shift+f2'], group: 'builtin' },
-  { id: 'buildLogFocus', label: 'Build Log 聚焦', command: 'codeblocks.buildLog.focus', defaults: [], group: 'builtin' },
+  { id: 'build', label: i18n.t('Build (active project)'), command: 'codeblocks.build', when: 'editorTextFocus', defaults: ['ctrl+f9'], group: 'builtin' },
+  { id: 'rebuild', label: i18n.t('Rebuild (full recompile)'), command: 'codeblocks.rebuild', when: 'editorTextFocus', defaults: ['ctrl+f11'], group: 'builtin' },
+  { id: 'clean', label: i18n.t('Clean'), command: 'codeblocks.clean', when: 'editorTextFocus', defaults: [], group: 'builtin' },
+  { id: 'run', label: i18n.t('Run'), command: 'codeblocks.run', when: 'editorTextFocus', defaults: ['ctrl+f10'], group: 'builtin' },
+  { id: 'buildAndRun', label: i18n.t('Build and Run'), command: 'codeblocks.buildAndRun', when: 'editorTextFocus && !inDebugMode', defaults: ['f9'], group: 'builtin' },
+  { id: 'compileCurrentFile', label: i18n.t('Compile Current File'), command: 'codeblocks.compileCurrentFile', when: 'editorTextFocus', defaults: ['ctrl+shift+f9'], group: 'builtin' },
+  { id: 'debug', label: i18n.t('Debug / Continue'), command: 'codeblocks.debug', when: 'editorTextFocus', defaults: ['f8'], group: 'builtin' },
+  { id: 'nextError', label: i18n.t('Next Error'), command: 'codeblocks.nextError', when: 'editorTextFocus', defaults: ['f4', 'alt+f2'], group: 'builtin' },
+  { id: 'prevError', label: i18n.t('Previous Error'), command: 'codeblocks.prevError', when: 'editorTextFocus', defaults: ['shift+f4', 'alt+f1'], group: 'builtin' },
+  { id: 'activatePriorProject', label: i18n.t('Activate Prior Project'), command: 'codeblocks.activatePriorProject', defaults: ['alt+f5'], group: 'builtin' },
+  { id: 'activateNextProject', label: i18n.t('Activate Next Project'), command: 'codeblocks.activateNextProject', defaults: ['alt+f6'], group: 'builtin' },
+  { id: 'moveProjectUp', label: i18n.t('Move Project Up'), command: 'codeblocks.moveProjectUp', when: 'focusedView == codeblocks.projectTree', defaults: ['ctrl+shift+up'], group: 'builtin' },
+  { id: 'moveProjectDown', label: i18n.t('Move Project Down'), command: 'codeblocks.moveProjectDown', when: 'focusedView == codeblocks.projectTree', defaults: ['ctrl+shift+down'], group: 'builtin' },
+  { id: 'projectTreeFocus', label: i18n.t('Project view focus (Manager)'), command: 'codeblocks.projectTree.focus', defaults: ['shift+f2'], group: 'builtin' },
+  { id: 'buildLogFocus', label: i18n.t('Build Log focus'), command: 'codeblocks.buildLog.focus', defaults: [], group: 'builtin' },
   // ---- alias：外部命令别名 ----
-  { id: 'aliasGotoFile', label: 'Goto File（Alt+G → 快速打开）', command: 'workbench.action.quickOpen', defaults: ['alt+g'], group: 'alias' },
+  { id: 'aliasGotoFile', label: i18n.t('Goto File (Alt+G → Quick Open)'), command: 'workbench.action.quickOpen', defaults: ['alt+g'], group: 'alias' },
   { id: 'aliasReplaceInFiles', label: 'Replace in Files', command: 'workbench.action.replaceInFiles', when: '!inSearchEditor', defaults: ['ctrl+shift+r'], group: 'alias' },
-  { id: 'aliasSelectNextMatch', label: 'Select Next Occurrence（选择下一个匹配）', command: 'editor.action.addSelectionToNextFindMatch', when: 'editorTextFocus', defaults: ['ctrl+e'], group: 'alias' },
+  { id: 'aliasSelectNextMatch', label: i18n.t('Select Next Occurrence'), command: 'editor.action.addSelectionToNextFindMatch', when: 'editorTextFocus', defaults: ['ctrl+e'], group: 'alias' },
   // ---- cbStyle：CB 保真模式门控（cbStyle 开关保留为批量启用） ----
-  { id: 'cbToggleBreakpoint', label: '[CB] Toggle breakpoint（切换断点）', command: 'editor.debug.action.toggleBreakpoint', when: `${CB_STYLE_WHEN} && editorTextFocus`, defaults: ['f5'], group: 'cbStyle' },
-  { id: 'cbStopDebugger', label: '[CB] Stop debugger（停止调试）', command: 'workbench.action.debug.stop', when: `${CB_STYLE_WHEN} && inDebugMode`, defaults: ['shift+f8'], group: 'cbStyle' },
-  { id: 'cbBuildLog', label: '[CB] Logs（打开 Build Log）', command: 'codeblocks.buildLog.focus', when: CB_STYLE_WHEN, defaults: ['f2'], group: 'cbStyle' },
-  { id: 'cbReplace', label: '[CB] Replace（替换）', command: 'editor.action.startFindReplaceAction', when: `${CB_STYLE_WHEN} && editorTextFocus`, defaults: ['ctrl+r'], group: 'cbStyle' },
-  { id: 'cbJumpBracket', label: '[CB] Goto matching brace（跳转括号）', command: 'editor.action.jumpToBracket', when: `${CB_STYLE_WHEN} && editorTextFocus`, defaults: ['ctrl+shift+b'], group: 'cbStyle' },
-  { id: 'cbComment', label: '[CB] Comment（注释）', command: 'editor.action.commentLine', when: `${CB_STYLE_WHEN} && editorTextFocus`, defaults: ['ctrl+shift+c'], group: 'cbStyle' },
-  { id: 'cbSaveAll', label: '[CB] Save everything（全部保存）', command: 'workbench.action.files.saveAll', when: CB_STYLE_WHEN, defaults: ['ctrl+shift+s'], group: 'cbStyle' },
-  { id: 'cbQuit', label: '[CB] Quit（退出）', command: 'workbench.action.quit', when: CB_STYLE_WHEN, defaults: ['ctrl+q'], group: 'cbStyle' },
-  { id: 'cbToggleFold', label: '[CB] Toggle fold（折叠当前块）', command: 'editor.toggleFold', when: `${CB_STYLE_WHEN} && editorTextFocus`, defaults: ['f12'], group: 'cbStyle' },
-  { id: 'cbStepOver', label: '[CB] Next line（单步跳过）', command: 'workbench.action.debug.stepOver', when: `${CB_STYLE_WHEN} && inDebugMode`, defaults: ['f7'], group: 'cbStyle' },
-  { id: 'cbStepInto', label: '[CB] Step into（单步进入）', command: 'workbench.action.debug.stepInto', when: `${CB_STYLE_WHEN} && inDebugMode`, defaults: ['shift+f7'], group: 'cbStyle' },
-  { id: 'cbStepOut', label: '[CB] Step out（单步跳出）', command: 'workbench.action.debug.stepOut', when: `${CB_STYLE_WHEN} && inDebugMode`, defaults: ['ctrl+f7'], group: 'cbStyle' },
+  { id: 'cbToggleBreakpoint', label: i18n.t('[CB] Toggle breakpoint'), command: 'editor.debug.action.toggleBreakpoint', when: `${CB_STYLE_WHEN} && editorTextFocus`, defaults: ['f5'], group: 'cbStyle' },
+  { id: 'cbStopDebugger', label: i18n.t('[CB] Stop debugger'), command: 'workbench.action.debug.stop', when: `${CB_STYLE_WHEN} && inDebugMode`, defaults: ['shift+f8'], group: 'cbStyle' },
+  { id: 'cbBuildLog', label: i18n.t('[CB] Logs (open Build Log)'), command: 'codeblocks.buildLog.focus', when: CB_STYLE_WHEN, defaults: ['f2'], group: 'cbStyle' },
+  { id: 'cbReplace', label: i18n.t('[CB] Replace'), command: 'editor.action.startFindReplaceAction', when: `${CB_STYLE_WHEN} && editorTextFocus`, defaults: ['ctrl+r'], group: 'cbStyle' },
+  { id: 'cbJumpBracket', label: i18n.t('[CB] Goto matching brace'), command: 'editor.action.jumpToBracket', when: `${CB_STYLE_WHEN} && editorTextFocus`, defaults: ['ctrl+shift+b'], group: 'cbStyle' },
+  { id: 'cbComment', label: i18n.t('[CB] Comment'), command: 'editor.action.commentLine', when: `${CB_STYLE_WHEN} && editorTextFocus`, defaults: ['ctrl+shift+c'], group: 'cbStyle' },
+  { id: 'cbSaveAll', label: i18n.t('[CB] Save everything'), command: 'workbench.action.files.saveAll', when: CB_STYLE_WHEN, defaults: ['ctrl+shift+s'], group: 'cbStyle' },
+  { id: 'cbQuit', label: i18n.t('[CB] Quit'), command: 'workbench.action.quit', when: CB_STYLE_WHEN, defaults: ['ctrl+q'], group: 'cbStyle' },
+  { id: 'cbToggleFold', label: i18n.t('[CB] Toggle fold'), command: 'editor.toggleFold', when: `${CB_STYLE_WHEN} && editorTextFocus`, defaults: ['f12'], group: 'cbStyle' },
+  { id: 'cbStepOver', label: i18n.t('[CB] Next line (step over)'), command: 'workbench.action.debug.stepOver', when: `${CB_STYLE_WHEN} && inDebugMode`, defaults: ['f7'], group: 'cbStyle' },
+  { id: 'cbStepInto', label: i18n.t('[CB] Step into'), command: 'workbench.action.debug.stepInto', when: `${CB_STYLE_WHEN} && inDebugMode`, defaults: ['shift+f7'], group: 'cbStyle' },
+  { id: 'cbStepOut', label: i18n.t('[CB] Step out'), command: 'workbench.action.debug.stepOut', when: `${CB_STYLE_WHEN} && inDebugMode`, defaults: ['ctrl+f7'], group: 'cbStyle' },
 ];
 
 /** 托管命令集合（含 '-' 移除规则对应命令） */
@@ -78,19 +79,19 @@ const KEY_RE = /^(f([1-9]|1[0-9]|2[0-4])|[a-z0-9`\-=[\]\\;',./]|left|right|up|do
 /** 校验键位串（支持最多两段 chord，如 "ctrl+k ctrl+c"） */
 export function validateChord(value: string): { ok: boolean; error?: string } {
   const v = String(value ?? '').trim().toLowerCase();
-  if (!v) return { ok: false, error: '键位不能为空' };
+  if (!v) return { ok: false, error: i18n.t('Key binding cannot be empty') };
   const parts = v.split(/\s+/);
-  if (parts.length > 2) return { ok: false, error: '最多两段组合键（如 ctrl+k ctrl+c）' };
+  if (parts.length > 2) return { ok: false, error: i18n.t('At most two chord segments (e.g. ctrl+k ctrl+c)') };
   for (const part of parts) {
     const segs = part.split('+');
     const key = segs[segs.length - 1];
     const mods = segs.slice(0, -1);
-    if (!KEY_RE.test(key)) return { ok: false, error: `无法识别的按键: ${key}` };
+    if (!KEY_RE.test(key)) return { ok: false, error: i18n.t('Unrecognized key: {0}', key) };
     for (const m of mods) {
-      if (!MODIFIERS.has(m)) return { ok: false, error: `无法识别的修饰键: ${m}` };
+      if (!MODIFIERS.has(m)) return { ok: false, error: i18n.t('Unrecognized modifier: {0}', m) };
     }
     if (mods.length === 0 && /^[a-z0-9]$/.test(key)) {
-      return { ok: false, error: '单字符键必须搭配修饰键（避免抢占输入）' };
+      return { ok: false, error: i18n.t('A single-character key must be combined with a modifier (to avoid capturing typing)') };
     }
   }
   return { ok: true };
@@ -108,7 +109,7 @@ export function parseOverrides(raw: unknown): { overrides: Map<string, string>; 
     const s = String(value ?? '');
     if (s.trim() === '') { overrides.set(id, ''); continue; } // 解绑
     const v = validateChord(s);
-    if (!v.ok) { invalid.push({ id, value: s, error: v.error ?? '非法' }); continue; }
+    if (!v.ok) { invalid.push({ id, value: s, error: v.error ?? i18n.t('Invalid') }); continue; }
     overrides.set(id, s.trim().toLowerCase());
   }
   return { overrides, invalid, unknown };
@@ -255,8 +256,8 @@ export function buildKeybindingRows(
     const raw = overrides.get(m.id);
     const status: KeybindingRow['status'] = raw === undefined ? 'default' : raw.trim() === '' ? 'unbound' : 'custom';
     const effective = status === 'default'
-      ? (m.defaults.join(' / ') || '（未绑定）')
-      : status === 'unbound' ? '（已解绑）' : raw!.trim();
+      ? (m.defaults.join(' / ') || i18n.t('(not bound)'))
+      : status === 'unbound' ? i18n.t('(unbound)') : raw!.trim();
     const notes: string[] = [];
     let ok = true;
     if (status !== 'default') {
@@ -264,13 +265,13 @@ export function buildKeybindingRows(
       const wanted = desired.filter((d) => !d.command.startsWith('-'));
       const fileHere = fileEntries.filter((e) => e.command === m.command);
       ok = wanted.every((w) => fileHere.some((f) => norm(f, w))) && fileHere.every((f) => wanted.some((w) => norm(f, w)));
-      if (!ok) notes.push('未写入 keybindings.json（点击「应用」同步）');
+      if (!ok) notes.push(i18n.t('Not written to keybindings.json (click Apply to sync)'));
     }
     const keys = status === 'custom' ? [raw!.trim()] : m.defaults;
     for (const k of keys) {
       const def = VSCODE_DEFAULT_CONFLICTS[normalizeKey(k)] ?? [];
       const warn = def.filter((d) => d.severity !== 'info');
-      if (warn.length) notes.push(`与 VS Code 默认冲突：${warn.map((d) => d.note).join('；')}`);
+      if (warn.length) notes.push(i18n.t('Conflicts with VS Code defaults: {0}', warn.map((d) => d.note).join('；')));
     }
     rows.push({
       id: m.id,
@@ -280,9 +281,9 @@ export function buildKeybindingRows(
       group: m.group,
       status,
       effective,
-      defaultsLabel: m.defaults.join(' / ') || '（未绑定）',
+      defaultsLabel: m.defaults.join(' / ') || i18n.t('(not bound)'),
       ok,
-      note: notes.length ? notes.join(' ｜ ') : undefined,
+      note: notes.length ? notes.join(i18n.t(' | ')) : undefined,
     });
   }
   // 跨托管项重复检测（仅自定义键）
@@ -295,7 +296,7 @@ export function buildKeybindingRows(
   for (const r of rows) {
     if (r.status !== 'custom') continue;
     const dup = (byKey.get(normalizeKey(r.effective)) ?? []).filter((x) => x !== r.id);
-    if (dup.length) r.note = `${r.note ? `${r.note} ｜ ` : ''}与其它托管项重复（${dup.join(', ')}）`;
+    if (dup.length) r.note = i18n.t('{0}duplicates another managed entry ({1})', r.note ? `${r.note} ｜ ` : '', dup.join(', '));
   }
   return rows;
 }
@@ -320,14 +321,14 @@ export function parseImportPayload(text: string): {
   try {
     raw = parseJsonc(text);
   } catch (e) {
-    return { overrides: new Map(), invalid: [], unknown: [], error: `JSON 解析失败：${(e as Error).message}` };
+    return { overrides: new Map(), invalid: [], unknown: [], error: i18n.t('Failed to parse JSON: {0}', (e as Error).message) };
   }
   const obj = raw as any;
   const payload = obj && typeof obj === 'object' && !Array.isArray(obj) && obj.overrides && typeof obj.overrides === 'object' && !Array.isArray(obj.overrides)
     ? obj.overrides
     : (obj && typeof obj === 'object' && !Array.isArray(obj) ? obj : undefined);
   if (!payload) {
-    return { overrides: new Map(), invalid: [], unknown: [], error: '未找到 overrides 对象（期望 {"overrides":{…}} 或直接的键名→键位映射）' };
+    return { overrides: new Map(), invalid: [], unknown: [], error: i18n.t('No overrides object found (expected {"overrides":{…}} or a direct key-name → keybinding map)') };
   }
   return parseOverrides(payload);
 }

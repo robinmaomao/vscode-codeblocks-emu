@@ -16,6 +16,7 @@
  */
 import * as fs from 'fs';
 import * as path from 'path';
+import { logT } from './logLang';
 
 export type CompilerCacheKind = 'none' | 'ccache' | 'sccache';
 export type CompilerCacheTool = Exclude<CompilerCacheKind, 'none'>;
@@ -300,24 +301,24 @@ export function buildInstallGuideItems(tool: CompilerCacheTool, wingetAvailable:
   if (wingetAvailable) {
     items.push({
       action: 'winget-copy',
-      label: '$(clippy) 复制 winget 安装命令',
-      description: `${info.wingetCommand}（自行粘贴到终端执行）`,
+      label: logT('$(clippy) Copy the winget install command'),
+      description: logT('{0} (paste it into a terminal yourself to run)', info.wingetCommand),
     });
     items.push({
       action: 'winget-run',
-      label: '$(terminal) 在终端执行 winget 安装',
-      description: `需要确认；可能弹出 UAC 提权提示（id: ${info.wingetId}）`,
+      label: logT('$(terminal) Run the winget install in a terminal'),
+      description: logT('Confirmation required; a UAC elevation prompt may appear (id: {0})', info.wingetId),
     });
   }
   items.push({
     action: 'open-download',
-    label: '$(link-external) 打开官方下载页',
-    description: `${info.downloadUrl}（${info.license}；winget 不可用或需手动指定目录时）`,
+    label: logT('$(link-external) Open the official download page'),
+    description: logT('{0} ({1}; when winget is unavailable or the directory must be given manually)', info.downloadUrl, info.license),
   });
   items.push({
     action: 'redetect',
-    label: '$(refresh) 重新检测并启用',
-    description: '安装完成后选择此项：重新探测工具路径，并可直接启用编译缓存',
+    label: logT('$(refresh) Re-detect and enable'),
+    description: logT('Select this after installation: re-detect tool paths and enable the compiler cache right away'),
   });
   return items;
 }

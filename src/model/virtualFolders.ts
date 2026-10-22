@@ -9,6 +9,7 @@
  * （等于自身或 `prefix + '/'` 前缀），已在报告 §5 记录。
  */
 import { Project, ProjectFile } from './types';
+import * as i18n from '../i18n';
 
 /** 操作结果（供 UI 提示与测试断言） */
 export interface VFChangeResult {
@@ -40,14 +41,14 @@ export function remapVirtualFolder(name: string, oldName: string, newName: strin
  */
 export function validateVirtualFolderPath(path: string, allowSlash: boolean): string | undefined {
   const p = path.trim();
-  if (!p) return '名称不能为空';
-  if (p.includes(';')) return '名称不能包含 “;”';
-  if (p.includes('\\')) return '名称不能包含 “\\”';
-  if (!allowSlash && p.includes('/')) return '名称不能包含 “/”';
-  if (p.startsWith('/') || p.endsWith('/')) return '名称不能以 “/” 开头或结尾';
+  if (!p) return i18n.t('Name cannot be empty');
+  if (p.includes(';')) return i18n.t('Name cannot contain ";"');
+  if (p.includes('\\')) return i18n.t('Name cannot contain "\\"');
+  if (!allowSlash && p.includes('/')) return i18n.t('Name cannot contain "/"');
+  if (p.startsWith('/') || p.endsWith('/')) return i18n.t('Name cannot start or end with "/"');
   const segs = p.split('/');
-  if (segs.some((s) => s === '')) return '不能出现连续的 “/”';
-  if (segs.some((s) => s === '.' || s === '..')) return '不能包含 “.” 或 “..”';
+  if (segs.some((s) => s === '')) return i18n.t('Cannot contain consecutive "/"');
+  if (segs.some((s) => s === '.' || s === '..')) return i18n.t('Cannot contain "." or ".."');
   return undefined;
 }
 
@@ -57,7 +58,7 @@ export function addVirtualFolder(project: Project, path: string): VFChangeResult
   const err = validateVirtualFolderPath(p, true);
   if (err) return { ok: false, reason: err, affectedFiles: 0, changedFolders: 0 };
   if (project.virtualFolders.some((v) => v === p)) {
-    return { ok: false, reason: '该虚拟文件夹已存在', affectedFiles: 0, changedFolders: 0 };
+    return { ok: false, reason: i18n.t('This virtual folder already exists'), affectedFiles: 0, changedFolders: 0 };
   }
   project.virtualFolders.push(p);
   return { ok: true, affectedFiles: 0, changedFolders: 1 };
@@ -68,7 +69,7 @@ export function renameVirtualFolder(project: Project, oldName: string, newName: 
   const n = newName.trim();
   const err = validateVirtualFolderPath(n, true);
   if (err) return { ok: false, reason: err, affectedFiles: 0, changedFolders: 0 };
-  if (n === oldName) return { ok: false, reason: '名称未变化', affectedFiles: 0, changedFolders: 0 };
+  if (n === oldName) return { ok: false, reason: i18n.t('Name is unchanged'), affectedFiles: 0, changedFolders: 0 };
 
   let changedFolders = 0;
   project.virtualFolders = project.virtualFolders.map((v) => {
@@ -97,7 +98,7 @@ export function renameVirtualFolder(project: Project, oldName: string, newName: 
 
 /** 删除虚拟文件夹（含子级；文件回根，绝不删磁盘文件） */
 export function deleteVirtualFolder(project: Project, folder: string): VFChangeResult {
-  if (!folder) return { ok: false, reason: '不能删除根目录', affectedFiles: 0, changedFolders: 0 };
+  if (!folder) return { ok: false, reason: i18n.t('Cannot delete the root folder'), affectedFiles: 0, changedFolders: 0 };
   const before = project.virtualFolders.length;
   project.virtualFolders = project.virtualFolders.filter((v) => !isUnderVirtualFolder(v, folder));
   let affectedFiles = 0;

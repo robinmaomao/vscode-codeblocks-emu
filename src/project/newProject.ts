@@ -16,6 +16,7 @@ import {
   LinkerExecutableOption,
 } from '../model/types';
 import { defaultCompilerVar, defaultCompile, defaultLink } from '../model/fileTypes';
+import * as i18n from '../i18n';
 
 /** 工程模板定义 */
 export interface ProjectTemplate {
@@ -80,14 +81,7 @@ int main(void)
 }
 `;
 
-const GLFW_README = `GLFW 模板说明
-================
-1. 把 GLFW 安装目录的 include 目录加入 Build Options → Search directories
-   （默认已填相对路径 include；GLFW 头文件需位于 <项目>/include/GLFW/glfw3.h）。
-2. 库文件（libglfw3.a）所在目录加入 Linker directories（默认用系统库搜索路径）。
-3. 链接库已预置：glfw3 / opengl32 / gdi32（MinGW 静态库）。
-4. 若使用其它版本 GLFW，可直接在工程属性中修改上述路径。
-`;
+const GLFW_README = i18n.t('GLFW template notes\n================\n1. Add the GLFW installation\'s include directory to Build Options → Search directories\n   (the relative path include is preset; the GLFW header must be at <project>/include/GLFW/glfw3.h).\n2. Add the directory containing the library file (libglfw3.a) to Linker directories (the system library\n   search path is used by default).\n3. Link libraries glfw3 / opengl32 / gdi32 (MinGW static libraries) are preset.\n4. For a different GLFW version, edit those paths directly in the project properties.\n');
 
 const SDL2_MAIN_C = `#include <SDL.h>
 
@@ -125,13 +119,7 @@ int main(int argc, char* argv[])
 }
 `;
 
-const SDL2_README = `SDL2 模板说明
-================
-1. 解压 SDL2-devel（MinGW 版），将其 include 目录加入搜索目录
-   （SDL.h 位于 include/SDL2 时：搜索目录填 include/SDL2）。
-2. 将 x86_64-w64-mingw32/lib（或 i686-w64-mingw32/lib）加入库目录。
-3. 链接库已预置 mingw32 / SDL2main / SDL2；如需无控制台窗口再加 -mwindows。
-`;
+const SDL2_README = i18n.t('SDL2 template notes\n================\n1. Unpack SDL2-devel (MinGW build) and add its include directory to the search directories\n   (if SDL.h is under include/SDL2, use include/SDL2 as the search directory).\n2. Add x86_64-w64-mingw32/lib (or i686-w64-mingw32/lib) to the library directories.\n3. Link libraries mingw32 / SDL2main / SDL2 are preset; add -mwindows if you want no console window.\n');
 
 const WX_MAIN_CPP = `#include <wx/wx.h>
 
@@ -149,15 +137,7 @@ public:
 wxIMPLEMENT_APP(CbApp);
 `;
 
-const WX_README = `wxWidgets 模板说明
-====================
-1. 用 wx-config --cxxflags 的输出核对 include 目录；MinGW 安装通常在
-   <wx>/include 与 <wx>/lib/gcc_lib/mswu（版本相关）。
-2. 链接库名随 wx 版本变化（本模板预置 wx 3.2 Unicode 静态库：
-   wxmsw32u_core / wxbase32u）；使用动态库时改为对应 dll 导入库。
-3. 单个 main.cpp 直接编译不需要 moc；后续添加自定义控件类（使用
-   wxDECLARE_EVENT_TABLE 等）时需要预处理，建议改用 CMake + wxWidgets 官方工具链。
-`;
+const WX_README = i18n.t('wxWidgets template notes\n====================\n1. Check the include directory against the output of wx-config --cxxflags; MinGW installations usually use\n   <wx>/include and <wx>/lib/gcc_lib/mswu (version dependent).\n2. Link library names change with the wx version (this template presets the wx 3.2 Unicode static libraries:\n   wxmsw32u_core / wxbase32u); switch to the matching DLL import libraries when using dynamic libraries.\n3. A single main.cpp compiles directly without moc; custom control classes added later (using\n   wxDECLARE_EVENT_TABLE and the like) need preprocessing; consider CMake + the official wxWidgets toolchain.\n');
 
 const QT_MAIN_CPP = `#include <QApplication>
 #include <QLabel>
@@ -171,71 +151,15 @@ int main(int argc, char* argv[])
 }
 `;
 
-const QT_README = `Qt 模板说明
-=============
-1. 把 Qt 安装目录的 include（如 C:/Qt/6.6.0/mingw_64/include）各子目录加入搜索目录；
-   常用：include、include/QtCore、include/QtGui、include/QtWidgets。
-2. 库目录加入 C:/Qt/6.6.0/mingw_64/lib。
-3. 链接库已预置 Qt6Widgets / Qt6Gui / Qt6Core；链接需要 C++17 及以上。
-4. 自定义 QObject 类（含 Q_OBJECT）需要 moc 预处理；本模板仅 main.cpp 不需要。
-   工程变大后建议改用 CMake（Qt 官方推荐）。
-`;
+const QT_README = i18n.t('Qt template notes\n=============\n1. Add the subdirectories of the Qt installation\'s include directory (e.g. C:/Qt/6.6.0/mingw_64/include)\n   to the search directories; the common ones: include, include/QtCore, include/QtGui, include/QtWidgets.\n2. Add C:/Qt/6.6.0/mingw_64/lib to the library directories.\n3. Link libraries Qt6Widgets / Qt6Gui / Qt6Core are preset; linking requires C++17 or later.\n4. Custom QObject classes (with Q_OBJECT) need moc preprocessing; this template has only main.cpp, so it\n   does not. As the project grows, consider switching to CMake (Qt\'s official recommendation).\n');
 
-const AVR_MAIN_C = `#include <avr/io.h>
-#include <util/delay.h>
+const AVR_MAIN_C = i18n.t('#include <avr/io.h>\n#include <util/delay.h>\n\nint main(void)\n{\n    DDRB |= (1 << PB5);            /* Arduino Uno on-board LED: PB5 */\n\n    while (1)\n    {\n        PORTB ^= (1 << PB5);\n        _delay_ms(500);\n    }\n    return 0;\n}\n');
 
-int main(void)
-{
-    DDRB |= (1 << PB5);            /* Arduino Uno 板载 LED：PB5 */
+const AVR_README = i18n.t('AVR template notes (aligned with the Code::Blocks AVR wizard)\n==================\n1. The AVR toolchain (avr-gcc / avr-objcopy / avrdude) must be installed; in "Compiler settings",\n   point the compiler to avr-gcc (e.g. C:/WinAVR/bin/avr-gcc.exe or the avr-gcc bundled with Arduino).\n2. Compiler options -mmcu=atmega328p -DF_CPU=16000000UL -Os are preset (change -mmcu and F_CPU\n   for your target chip).\n3. Link libraries usually also need -lm; for flashing you can add a custom avrdude tool under Tools → Configure Tools…:\n   avrdude -c arduino -p m328p -P COM3 -b 115200 -U flash:w:$(TARGET_OUTPUT_FILE):i\n4. Hexadecimal output (.hex) can be produced by calling avr-objcopy from a custom tool in Tools:\n   avr-objcopy -O ihex -R .eeprom <project output>.elf app.hex\n');
 
-    while (1)
-    {
-        PORTB ^= (1 << PB5);
-        _delay_ms(500);
-    }
-    return 0;
-}
-`;
+const MSP430_MAIN_C = i18n.t('#include <msp430.h>\n\nint main(void)\n{\n    WDTCTL = WDTPW | WDTHOLD;      /* disable watchdog */\n\n    P1DIR |= BIT0;                 /* P1.0 output (on-board LaunchPad LED) */\n    for (;;)\n    {\n        P1OUT ^= BIT0;\n        __delay_cycles(1000000);\n    }\n    return 0;\n}\n');
 
-const AVR_README = `AVR 模板说明（对齐 Code::Blocks AVR 向导）
-==================
-1. 需安装 AVR 工具链（avr-gcc / avr-objcopy / avrdude），并在「编译器设置」中
-   把编译器指向 avr-gcc（如 C:/WinAVR/bin/avr-gcc.exe 或 Arduino 自带的 avr-gcc）。
-2. 已预置编译选项 -mmcu=atmega328p -DF_CPU=16000000UL -Os（按目标芯片修改
-   -mmcu 与 F_CPU）。
-3. 链接库通常还需 -lm；烧录可用 Tools → Configure Tools… 添加 avrdude 自定义工具：
-   avrdude -c arduino -p m328p -P COM3 -b 115200 -U flash:w:$(TARGET_OUTPUT_FILE):i
-4. 十六进制输出（.hex）可通过 Tools 自定义工具调用 avr-objcopy：
-   avr-objcopy -O ihex -R .eeprom <工程输出>.elf app.hex
-`;
-
-const MSP430_MAIN_C = `#include <msp430.h>
-
-int main(void)
-{
-    WDTCTL = WDTPW | WDTHOLD;      /* 关闭看门狗 */
-
-    P1DIR |= BIT0;                 /* P1.0 输出（LaunchPad 板载 LED） */
-    for (;;)
-    {
-        P1OUT ^= BIT0;
-        __delay_cycles(1000000);
-    }
-    return 0;
-}
-`;
-
-const MSP430_README = `MSP430 模板说明（对齐 Code::Blocks MSP430 向导）
-=====================
-1. 需安装 MSP430 工具链（msp430-gcc / msp430-gdb），并在「编译器设置」中指向
-   msp430-gcc（如 C:/ti/msp430-gcc/bin/msp430-gcc.exe）。
-2. 已预置编译选项 -mmcu=msp430g2553 -Os（LaunchPad MSP-EXP430G2 标配芯片；
-   按实际芯片修改 -mmcu）。
-3. 调试：在「项目属性 → 调试器」中选择 msp430-gdb 并启用远程/串口调试
-   （msp430-gdb 常配 msp430-gdbproxy，或使用板载 eZ430 调试器）。
-4. 烧录可使用 TI UniFlash / mspdebug 单独完成；或在 Tools → Configure Tools… 
-   添加 mspdebug 自定义工具。
-`;
+const MSP430_README = i18n.t('MSP430 template notes (aligned with the Code::Blocks MSP430 wizard)\n=====================\n1. The MSP430 toolchain (msp430-gcc / msp430-gdb) must be installed; point to it in "Compiler settings"\n   (e.g. C:/ti/msp430-gcc/bin/msp430-gcc.exe).\n2. Compiler options -mmcu=msp430g2553 -Os are preset (the chip that ships with the LaunchPad MSP-EXP430G2;\n   change -mmcu for your actual chip).\n3. Debugging: in "Project properties → Debugger", select msp430-gdb and enable remote/serial debugging\n   (msp430-gdb is usually paired with msp430-gdbproxy, or use the on-board eZ430 debugger).\n4. Flashing can be done separately with TI UniFlash / mspdebug; or add a custom mspdebug tool under\n   Tools → Configure Tools… .\n');
 
 const OPENCV_MAIN_CPP = `#include <opencv2/opencv.hpp>
 
@@ -251,133 +175,125 @@ int main()
 }
 `;
 
-const OPENCV_README = `OpenCV 模板说明（对齐 Code::Blocks OpenCV 向导）
-================
-1. 需安装 OpenCV（Windows 官方包或 MSYS2/MinGW 包）；本模板按 MinGW 命名预置链接库：
-   opencv_core / opencv_imgproc / opencv_imgcodecs / opencv_highgui（OpenCV 4 已合并为
-   opencv_world 发行时，可把链接库改为 opencv_world）。
-2. include 目录加入 OpenCV 的 include 与其子目录（OpenCV 4 起头文件平铺在 include/opencv4）。
-3. 库目录加入 OpenCV 的 lib（MinGW 静态库为 libopencv_*.a，动态库为 libopencv_*.dll.a）。
-4. 「链接库」如使用动态库发行包，运行前需把 OpenCV bin 目录加入 PATH。
-`;
+const OPENCV_README = i18n.t('OpenCV template notes (aligned with the Code::Blocks OpenCV wizard)\n================\n1. OpenCV must be installed (the official Windows package or an MSYS2/MinGW package); this template presets\n   link libraries with MinGW names:\n   opencv_core / opencv_imgproc / opencv_imgcodecs / opencv_highgui (when an OpenCV 4 distribution merges them\n   into opencv_world, change the link libraries to opencv_world).\n2. Add OpenCV\'s include directory and its subdirectories to the search directories\n   (from OpenCV 4 onward the headers are flat under include/opencv4).\n3. Add OpenCV\'s lib to the library directories (MinGW static libraries are libopencv_*.a, DLL import\n   libraries are libopencv_*.dll.a).\n4. For "Link libraries": when the dynamic library distribution is used, add OpenCV\'s bin directory to PATH\n   before running.\n');
 
 /** 工程模板列表（对齐 Code::Blocks 常用 New Project 模板） */
 export const PROJECT_TEMPLATES: ProjectTemplate[] = [
   {
     id: 'console-cpp',
     label: 'Console application (C++)',
-    description: '控制台程序（C++，main.cpp）',
+    description: i18n.t('Console application (C++, main.cpp)'),
     targetType: TargetType.ConsoleOnly,
     skeleton: [{ name: 'main.cpp', content: CONSOLE_MAIN_CPP }],
   },
   {
     id: 'console-c',
     label: 'Console application (C)',
-    description: '控制台程序（C，main.c）',
+    description: i18n.t('Console application (C, main.c)'),
     targetType: TargetType.ConsoleOnly,
     skeleton: [{ name: 'main.c', content: CONSOLE_MAIN_C }],
   },
   {
     id: 'static',
     label: 'Static library',
-    description: '静态库（.a）',
+    description: i18n.t('Static library (.a)'),
     targetType: TargetType.StaticLib,
     skeleton: [],
   },
   {
     id: 'shared',
     label: 'Shared library',
-    description: '共享库（.so/.dll）',
+    description: i18n.t('Shared library (.so/.dll)'),
     targetType: TargetType.DynamicLib,
     skeleton: [],
   },
   {
     id: 'empty',
     label: 'Empty project',
-    description: '空工程',
+    description: i18n.t('Empty project'),
     targetType: TargetType.ConsoleOnly,
     skeleton: [],
   },
   {
     id: 'glfw',
     label: 'GLFW application (C)',
-    description: '图形窗口程序（GLFW；include/libs 按安装路径调整，见模板说明）',
+    description: i18n.t('Graphics window application (GLFW; adjust include/libs to your install path; see the template notes)'),
     targetType: TargetType.ConsoleOnly,
     includeDirs: ['include'],
     linkLibs: ['glfw3', 'opengl32', 'gdi32'],
     skeleton: [
       { name: 'main.c', content: GLFW_MAIN_C },
-      { name: 'README-模板说明.txt', content: GLFW_README },
+      { name: i18n.t('README-template.txt'), content: GLFW_README },
     ],
   },
   {
     id: 'sdl2',
     label: 'SDL2 application (C)',
-    description: 'SDL2 窗口程序（MinGW：-lmingw32 -lSDL2main -lSDL2）',
+    description: i18n.t('SDL2 window application (MinGW: -lmingw32 -lSDL2main -lSDL2)'),
     targetType: TargetType.ConsoleOnly,
     includeDirs: ['include'],
     linkLibs: ['mingw32', 'SDL2main', 'SDL2'],
     skeleton: [
       { name: 'main.c', content: SDL2_MAIN_C },
-      { name: 'README-模板说明.txt', content: SDL2_README },
+      { name: i18n.t('README-template.txt'), content: SDL2_README },
     ],
   },
   {
     id: 'wxwidgets',
     label: 'wxWidgets application (C++)',
-    description: 'wxWidgets 最小框架（链接库名按 wx 版本调整，见模板说明）',
+    description: i18n.t('Minimal wxWidgets skeleton (adjust link library names to your wx version; see the template notes)'),
     targetType: TargetType.ConsoleOnly,
     compilerOptions: ['-std=c++17'],
     linkLibs: ['wxmsw32u_core', 'wxbase32u'],
     skeleton: [
       { name: 'main.cpp', content: WX_MAIN_CPP },
-      { name: 'README-模板说明.txt', content: WX_README },
+      { name: i18n.t('README-template.txt'), content: WX_README },
     ],
   },
   {
     id: 'qt',
     label: 'Qt Widgets application (C++)',
-    description: 'Qt6 Widgets 最小程序（需 Qt 头文件/库目录；moc 说明见模板）',
+    description: i18n.t('Minimal Qt6 Widgets application (Qt include/lib directories required; moc notes in the template)'),
     targetType: TargetType.ConsoleOnly,
     compilerOptions: ['-std=c++17'],
     linkLibs: ['Qt6Widgets', 'Qt6Gui', 'Qt6Core'],
     skeleton: [
       { name: 'main.cpp', content: QT_MAIN_CPP },
-      { name: 'README-模板说明.txt', content: QT_README },
+      { name: i18n.t('README-template.txt'), content: QT_README },
     ],
   },
   {
     id: 'avr',
     label: 'AVR application (C, avr-gcc)',
-    description: 'AVR 裸机程序（atmega328p；-mmcu/-DF_CPU 可按芯片修改）',
+    description: i18n.t('AVR bare-metal application (atmega328p; -mmcu/-DF_CPU can be changed for your chip)'),
     targetType: TargetType.ConsoleOnly,
     compilerOptions: ['-mmcu=atmega328p', '-DF_CPU=16000000UL', '-Os'],
     skeleton: [
       { name: 'main.c', content: AVR_MAIN_C },
-      { name: 'README-模板说明.txt', content: AVR_README },
+      { name: i18n.t('README-template.txt'), content: AVR_README },
     ],
   },
   {
     id: 'msp430',
     label: 'MSP430 application (C, msp430-gcc)',
-    description: 'MSP430 裸机程序（msp430g2553；配合 msp430-gdb 调试）',
+    description: i18n.t('MSP430 bare-metal application (msp430g2553; debug with msp430-gdb)'),
     targetType: TargetType.ConsoleOnly,
     compilerOptions: ['-mmcu=msp430g2553', '-Os'],
     skeleton: [
       { name: 'main.c', content: MSP430_MAIN_C },
-      { name: 'README-模板说明.txt', content: MSP430_README },
+      { name: i18n.t('README-template.txt'), content: MSP430_README },
     ],
   },
   {
     id: 'opencv',
     label: 'OpenCV application (C++)',
-    description: 'OpenCV 图像窗口程序（链接库按 OpenCV 4 MinGW 命名预置）',
+    description: i18n.t('OpenCV image window application (link libraries preset with OpenCV 4 MinGW names)'),
     targetType: TargetType.ConsoleOnly,
     compilerOptions: ['-std=c++17'],
     linkLibs: ['opencv_core', 'opencv_imgproc', 'opencv_imgcodecs', 'opencv_highgui'],
     skeleton: [
       { name: 'main.cpp', content: OPENCV_MAIN_CPP },
-      { name: 'README-模板说明.txt', content: OPENCV_README },
+      { name: i18n.t('README-template.txt'), content: OPENCV_README },
     ],
   },
 ];

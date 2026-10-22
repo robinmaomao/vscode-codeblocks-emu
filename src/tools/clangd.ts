@@ -11,6 +11,7 @@ import * as os from 'os';
 import * as vscode from 'vscode';
 import { spawnSync } from 'child_process';
 import { LruCache } from './lru';
+import * as i18n from '../i18n';
 
 const EXE = process.platform === 'win32' ? 'clangd.exe' : 'clangd';
 
@@ -333,9 +334,9 @@ function normSlash(p: string): string {
 export function extraConfigWarnings(text: string): string[] {
   const out: string[] = [];
   if (!text || !text.trim()) return out;
-  if (/^\t/m.test(text) || /^ +\t/m.test(text)) out.push('包含制表符（YAML 缩进不允许 tab）');
-  if (/^---\s*$/m.test(text)) out.push('包含文档分隔行 ---（会打断扩展片段结构，请去掉）');
-  if (/^If:/m.test(text)) out.push('包含顶层 If:（扩展已注入作用域 If，重复会导致 YAML 重复键）');
+  if (/^\t/m.test(text) || /^ +\t/m.test(text)) out.push(i18n.t('Contains tab characters (tabs are not allowed for YAML indentation)'));
+  if (/^---\s*$/m.test(text)) out.push(i18n.t('Contains a document separator line --- (it breaks the extension snippet structure; remove it)'));
+  if (/^If:/m.test(text)) out.push(i18n.t('Contains a top-level If: (the extension already injects a scoped If; a duplicate would create a duplicate YAML key)'));
   return out;
 }
 

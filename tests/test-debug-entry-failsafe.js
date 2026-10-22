@@ -96,7 +96,10 @@ async function makeAdapter() {
   {
     const src = require('fs').readFileSync(path.resolve(__dirname, '../dist/debug/gdbDebugAdapter.js'), 'utf-8');
     check('静态接线：onConfigurationDone 调用 startTarget', /onConfigurationDone\(req\)[\s\S]{0,400}startTarget\(/.test(src), /onConfigurationDone\(req\)[\s\S]{0,400}startTarget\(/.test(src), true);
-    check('静态接线：启动失败仍写 stderr 提示', /无法启动程序: \$\{err\}/.test(src), /无法启动程序: \$\{err\}/.test(src), true);
+    // 文案已 i18n 化（英文源串 + 词条，见 docs/国际化.md）；此处断言接线不变：失败仍写 stderr
+    check('静态接线：启动失败仍写 stderr 提示',
+      /sendOutput\('stderr'[\s\S]{0,120}Failed to start the program/.test(src),
+      /sendOutput\('stderr'[\s\S]{0,120}Failed to start the program/.test(src), true);
   }
 
   console.log(`\nC-01 启动兜底: ${pass} pass, ${fail} fail`);

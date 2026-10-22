@@ -6,6 +6,8 @@
  * - codeblocks.ui.quietSuccess：true 时构建成功不弹 toast（仅日志 + 状态栏徽标）
  * 通过惰性 require('vscode') 读取；无 vscode 宿主（headless 单测）安全回退默认值。
  */
+import * as i18n from '../i18n';
+import { formatSource } from '../i18n/core';
 
 let cache: { plain: boolean; english: boolean; strict: boolean; quiet: boolean } | undefined;
 
@@ -32,6 +34,16 @@ export function buildLogPrefs(): { plain: boolean; english: boolean; strict: boo
 /** 中英文案切换（codeblocks.log.english=true 返回 en，否则 zh） */
 export function msg(zh: string, en: string): string {
   return buildLogPrefs().english ? en : zh;
+}
+
+/**
+ * 构建日志文案（批次 2 起统一入口）：`log.english = true` **恒英文**（对齐 CB 原文），
+ * 否则跟随 `codeblocks.ui.language`；源串为英文，中文译义在 `src/i18n/strings.zh-cn.json`。
+ * `{0}`/`{1}` 为插值占位符（与 `i18n.t` 同规则）。`msg(zh, en)` 仅保留给历史场景，新代码请用 `logT(en)`。
+ */
+export function logT(source: string, ...args: unknown[]): string {
+  if (buildLogPrefs().english) return formatSource(source, args);
+  return i18n.t(source, ...args);
 }
 
 /** 严格引号模式（codeblocks.build.strictQuoting=true 时仅空格加引号，对齐 CB） */

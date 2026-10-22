@@ -8,6 +8,7 @@
  * 数据由 extension 侧从已解析的 Project 模型汇总（零额外文件读取）后注入；本 provider 只负责渲染。
  */
 import * as vscode from 'vscode';
+import * as i18n from '../i18n';
 
 /** 最近一次构建摘要（供分析视图展示） */
 export interface LastBuildMeta {
@@ -194,19 +195,19 @@ export class AnalysisTreeProvider implements vscode.TreeDataProvider<AnalysisNod
 
     // 顶部：最近构建快捷节点
     const lb = d.lastBuild;
-    const lastBuildNode = leaf('最近构建');
+    const lastBuildNode = leaf(i18n.t('Latest build'));
     lastBuildNode.iconPath = this.iconFile('history.svg');
     if (lb) {
-      lastBuildNode.description = `${lb.ok ? '成功' : '失败'} · ${(lb.durationMs / 1000).toFixed(1)}s`;
-      lastBuildNode.tooltip = `编译 ${lb.compiled} · 跳过 ${lb.skipped} · 失败 ${lb.failed} · 错误 ${lb.errors} · 警告 ${lb.warnings}（点击打开 Build Log）`;
-      lastBuildNode.command = { command: 'codeblocks.buildLog.focus', title: '打开 Build Log' };
+      lastBuildNode.description = `${lb.ok ? i18n.t('Succeeded') : i18n.t('Failed')} · ${(lb.durationMs / 1000).toFixed(1)}s`;
+      lastBuildNode.tooltip = i18n.t('Compiled {0} · skipped {1} · failed {2} · errors {3} · warnings {4} (click to open Build Log)', lb.compiled, lb.skipped, lb.failed, lb.errors, lb.warnings);
+      lastBuildNode.command = { command: 'codeblocks.buildLog.focus', title: i18n.t('Open Build Log') };
     } else {
-      lastBuildNode.description = '尚无构建记录';
+      lastBuildNode.description = i18n.t('No build records yet');
     }
     nodes.push(lastBuildNode);
 
     if (!d.projects.length) {
-      const empty = leaf('尚未打开工程', '(.cbp / .workspace)');
+      const empty = leaf(i18n.t('No project open yet'), '(.cbp / .workspace)');
       empty.iconPath = this.iconFile('overview.svg');
       nodes.push(empty);
       return nodes;
@@ -225,53 +226,53 @@ export class AnalysisTreeProvider implements vscode.TreeDataProvider<AnalysisNod
     );
     root.iconPath = this.iconFile('project.svg');
     root.description = p.dirName;
-    root.tooltip = `${p.filename}\n点击打开工程属性面板`;
+    root.tooltip = i18n.t('{0}\nClick to open the project properties panel', p.filename);
     root.command = {
       command: 'codeblocks.projectProperties',
-      title: '工程属性',
+      title: i18n.t('Project properties'),
       arguments: [{ project: { filename: p.filename } }],
     };
 
     // 概要
     const overview = group(
-      '概要',
+      i18n.t('Summary'),
       expanded ? vscode.TreeItemCollapsibleState.Expanded : vscode.TreeItemCollapsibleState.Collapsed,
       [
-        leaf('工程文件', p.filename, {
+        leaf(i18n.t('Project files'), p.filename, {
           xml: `<Project title="${p.title}">`,
           locate: [`title="${p.title}"`, '<Project'],
         }),
-        leaf('基路径', p.basePath, { xml: '（派生值：由 .cbp 所在目录计算，无对应配置）' }),
-        leaf('默认编译器', p.compilerId, {
+        leaf(i18n.t('Base path'), p.basePath, { xml: i18n.t('(derived value: computed from the .cbp directory, no matching config)') }),
+        leaf(i18n.t('Default compiler'), p.compilerId, {
           xml: `<Option compiler="${p.compilerId}" />`,
           locate: locateFor('compiler', p.compilerId),
         }),
-        leaf('平台', p.platformsLabel, {
+        leaf(i18n.t('Platform'), p.platformsLabel, {
           xml: `<Option platforms="${p.platformsLabel}" />`,
           locate: ['platforms='],
         }),
-        leaf('PCH 模式', p.pchLabel, {
+        leaf(i18n.t('PCH mode'), p.pchLabel, {
           xml: `<Option pch_mode="${p.pchMode}" />`,
           locate: locateFor('pch_mode'),
         }),
-        leaf('对象命名', p.objectNamingLabel, {
+        leaf(i18n.t('Object naming'), p.objectNamingLabel, {
           xml: `<Option extended_obj_names="1" />`,
           locate: ['extended_obj_names'],
         }),
-        leaf('文件', `${p.fileCount}（编译 ${p.compileCount} / 链接 ${p.linkCount}）`, {
+        leaf(i18n.t('Files'), i18n.t('{0} (compile {1} / link {2})', p.fileCount, p.compileCount, p.linkCount), {
           xml: `<Unit filename="${p.sampleFileName ?? '…'}" />`,
           locate: ['<Unit filename=', p.sampleFileName ?? ''],
         }),
       ],
     );
     overview.iconPath = this.iconFile('overview.svg');
-    overview.description = `编译器 ${p.compilerId} · 目标 ${p.targets.length} · 文件 ${p.fileCount}`;
+    overview.description = i18n.t('Compiler {0} · targets {1} · files {2}', p.compilerId, p.targets.length, p.fileCount);
     root.children.push(overview);
 
     // 构建目标
-    const targetsGroup = group('构建目标', vscode.TreeItemCollapsibleState.Collapsed);
+    const targetsGroup = group(i18n.t('Build targets'), vscode.TreeItemCollapsibleState.Collapsed);
     targetsGroup.iconPath = this.iconFile('targets.svg');
-    targetsGroup.description = `${p.targets.length} 个`;
+    targetsGroup.description = i18n.t('{0} items', p.targets.length);
     for (const t of p.targets) {
       const tn = new AnalysisNode(t.title, vscode.TreeItemCollapsibleState.Collapsed);
       tn.description = `${t.typeLabel} · ${t.outputFilename || '—'}`;
@@ -280,50 +281,50 @@ export class AnalysisTreeProvider implements vscode.TreeDataProvider<AnalysisNod
       tn.contextValue = 'analysisItem';
       tn.locate = [`<Target title="${t.title}"`, `title="${t.title}"`];
       const compilerDesc = t.compilerId && t.compilerId !== p.compilerId
-        ? `${t.compilerId}（覆盖工程默认）`
-        : (t.compilerId || '（同工程默认）');
+        ? i18n.t('{0} (overrides project default)', t.compilerId)
+        : (t.compilerId || i18n.t('(same as project default)'));
       tn.children.push(
-        leaf('类型', t.typeLabel, {
+        leaf(i18n.t('Type'), t.typeLabel, {
           xml: `<Option type="${t.typeValue}" />`,
           locate: locateFor('type', String(t.typeValue)),
         }),
-        leaf('编译器', compilerDesc, {
+        leaf(i18n.t('Compiler'), compilerDesc, {
           xml: `<Option compiler="${t.compilerId}" />`,
           locate: locateFor('compiler', t.compilerId),
         }),
-        leaf('输出文件名', t.outputFilename || '（默认）', {
+        leaf(i18n.t('Output filename'), t.outputFilename || i18n.t('(default)'), {
           xml: `<Option output="${t.outputFilename}" />`,
           locate: locateFor('output', t.outputFilename),
         }),
-        leaf('对象目录', t.objectOutput || '（默认）', {
+        leaf(i18n.t('Object directory'), t.objectOutput || i18n.t('(default)'), {
           xml: `<Option object_output="${t.objectOutput}" />`,
           locate: locateFor('object_output', t.objectOutput),
         }),
-        leaf('平台', t.platformsLabel, {
+        leaf(i18n.t('Platform'), t.platformsLabel, {
           xml: `<Option platforms="${t.platformsLabel}" />`,
           locate: ['platforms='],
         }),
-        leaf('编译选项', `${t.compilerOptionCount} 条`, {
-          xml: `<Compiler>\n  <Add option="${t.sampleCompilerOption ?? '…'}" />\n  …共 ${t.compilerOptionCount} 条\n</Compiler>`,
+        leaf(i18n.t('Compiler options'), i18n.t('{0} options', t.compilerOptionCount), {
+          xml: i18n.t('<Compiler>\n  <Add option="{0}" />\n  …{1} total\n</Compiler>', t.sampleCompilerOption ?? '…', t.compilerOptionCount),
           locate: locateFor('option', t.sampleCompilerOption),
         }),
-        leaf('链接选项', `${t.linkerOptionCount} 条`, {
-          xml: `<Linker>\n  <Add option="${t.sampleLinkerOption ?? '…'}" />\n  …共 ${t.linkerOptionCount} 条\n</Linker>`,
+        leaf(i18n.t('Linker options'), i18n.t('{0} options', t.linkerOptionCount), {
+          xml: i18n.t('<Linker>\n  <Add option="{0}" />\n  …{1} total\n</Linker>', t.sampleLinkerOption ?? '…', t.linkerOptionCount),
           locate: locateFor('option', t.sampleLinkerOption),
         }),
-        leaf('链接库', `${t.linkLibCount} 个`, {
+        leaf(i18n.t('Link libraries'), i18n.t('{0} items', t.linkLibCount), {
           xml: `<Linker>\n  <Add library="${t.sampleLinkLib ?? '…'}" />\n</Linker>`,
           locate: locateFor('library', t.sampleLinkLib),
         }),
-        leaf('Include 目录', `${t.includeDirCount} 个`, {
+        leaf(i18n.t('Include directories'), i18n.t('{0} items', t.includeDirCount), {
           xml: `<Compiler>\n  <Add directory="${t.sampleIncludeDir ?? '…'}" />\n</Compiler>`,
           locate: locateFor('directory', t.sampleIncludeDir),
         }),
-        leaf('pre-build / post-build', `${t.preBuildCount} / ${t.postBuildCount} 条`, {
+        leaf('pre-build / post-build', i18n.t('{0} / {1}', t.preBuildCount, t.postBuildCount), {
           xml: `<ExtraCommands>\n  <Add before="${t.samplePreBuild ?? '…'}" />\n</ExtraCommands>`,
           locate: locateFor('before', t.samplePreBuild),
         }),
-        leaf('外部依赖', `${t.externalDepsCount} 个`, {
+        leaf(i18n.t('External dependencies'), i18n.t('{0} items', t.externalDepsCount), {
           xml: `external_deps="${t.sampleExternalDep ?? '…'}"`,
           locate: locateFor('external_deps', t.sampleExternalDep),
         }),
@@ -331,44 +332,44 @@ export class AnalysisTreeProvider implements vscode.TreeDataProvider<AnalysisNod
       targetsGroup.children.push(tn);
     }
     if (!targetsGroup.children.length) {
-      targetsGroup.children.push(leaf('（无构建目标）'));
+      targetsGroup.children.push(leaf(i18n.t('(no build targets)')));
     }
     root.children.push(targetsGroup);
 
     // 构建命令
-    const cmdGroup = group('构建命令', vscode.TreeItemCollapsibleState.Collapsed, [
-      leaf('pre-build 命令', `${p.cmd.preBuild} 条`, {
+    const cmdGroup = group(i18n.t('Build commands'), vscode.TreeItemCollapsibleState.Collapsed, [
+      leaf(i18n.t('pre-build commands'), i18n.t('{0} commands', p.cmd.preBuild), {
         xml: '<ExtraCommands>\n  <Add before="…" />\n</ExtraCommands>',
         locate: ['<ExtraCommands', 'before='],
       }),
-      leaf('post-build 命令', `${p.cmd.postBuild} 条`, {
+      leaf(i18n.t('post-build commands'), i18n.t('{0} commands', p.cmd.postBuild), {
         xml: '<ExtraCommands>\n  <Add after="…" />\n</ExtraCommands>',
         locate: ['after='],
       }),
-      leaf('构建脚本', `${p.cmd.scriptCount} 个`, {
+      leaf(i18n.t('Build scripts'), i18n.t('{0} items', p.cmd.scriptCount), {
         xml: `file="${p.sampleScript ?? '…'}"`,
         locate: locateFor('file', p.sampleScript),
       }),
-      leaf('makefile', p.cmd.makefileCustom ? `自定义：${p.cmd.makefile || 'Makefile'}` : '默认（非 makefile 模式）', {
+      leaf('makefile', p.cmd.makefileCustom ? i18n.t('Custom: {0}', p.cmd.makefile || 'Makefile') : i18n.t('Default (non-Makefile mode)'), {
         xml: `<Option makefile_is_custom="1" makefile="${p.cmd.makefile || 'Makefile'}" execution_dir="${p.cmd.executionDir}" />`,
         locate: ['makefile_is_custom', 'makefile=', 'execution_dir'],
       }),
-      leaf('执行目录', p.cmd.executionDir || '（默认）', {
+      leaf(i18n.t('Working directory'), p.cmd.executionDir || i18n.t('(default)'), {
         xml: `execution_dir="${p.cmd.executionDir}"`,
         locate: locateFor('execution_dir', p.cmd.executionDir),
       }),
     ]);
     cmdGroup.iconPath = this.iconFile('commands.svg');
-    cmdGroup.description = `pre ${p.cmd.preBuild} · post ${p.cmd.postBuild} · 脚本 ${p.cmd.scriptCount}`;
+    cmdGroup.description = i18n.t('pre {0} · post {1} · scripts {2}', p.cmd.preBuild, p.cmd.postBuild, p.cmd.scriptCount);
     root.children.push(cmdGroup);
 
     // 搜索目录
-    const dirsGroup = group('搜索目录', vscode.TreeItemCollapsibleState.Collapsed);
+    const dirsGroup = group(i18n.t('Search directories'), vscode.TreeItemCollapsibleState.Collapsed);
     dirsGroup.iconPath = this.iconFile('dirs.svg');
     dirsGroup.description = `include ${p.dirs.include.length} · lib ${p.dirs.lib.length} · resource ${p.dirs.resource.length}`;
     const dirCategory = (label: string, list: string[]): AnalysisNode => {
       const g = group(label, vscode.TreeItemCollapsibleState.Collapsed);
-      g.description = `${list.length} 个`;
+      g.description = i18n.t('{0} items', list.length);
       if (list.length) {
         for (const dir of list) {
           g.children.push(leaf(dir, undefined, {
@@ -377,7 +378,7 @@ export class AnalysisTreeProvider implements vscode.TreeDataProvider<AnalysisNod
           }));
         }
       } else {
-        g.children.push(leaf('（空）'));
+        g.children.push(leaf(i18n.t('(empty)')));
       }
       return g;
     };
@@ -389,35 +390,35 @@ export class AnalysisTreeProvider implements vscode.TreeDataProvider<AnalysisNod
     root.children.push(dirsGroup);
 
     // 文件
-    const filesGroup = group('文件', vscode.TreeItemCollapsibleState.Collapsed, [
-      leaf('编译 / 链接', `${p.compileCount} / ${p.linkCount}`, {
+    const filesGroup = group(i18n.t('Files'), vscode.TreeItemCollapsibleState.Collapsed, [
+      leaf(i18n.t('Compile / Link'), `${p.compileCount} / ${p.linkCount}`, {
         xml: '<Unit filename="…">\n  <Option compile="1" link="1" />\n</Unit>',
         locate: ['<Unit filename=', 'compile=', 'link='],
       }),
-      leaf('自动生成文件', `${p.autoGeneratedCount} 个`, {
+      leaf(i18n.t('Generated files'), i18n.t('{0} items', p.autoGeneratedCount), {
         xml: 'auto_generated_by="…"',
         locate: ['auto_generated_by'],
       }),
-      leaf('虚拟文件夹', `${p.virtualFolderCount} 个`, {
+      leaf(i18n.t('Virtual folders'), i18n.t('{0} items', p.virtualFolderCount), {
         xml: '<Option virtualFolders="…" />',
         locate: ['virtualFolders'],
       }),
-      leaf('自定义构建命令文件', `${p.customCommandFileCount} 个`, {
+      leaf(i18n.t('Files with custom build commands'), i18n.t('{0} items', p.customCommandFileCount), {
         xml: '<Option buildCommand="…" />',
         locate: ['buildCommand='],
       }),
     ]);
     filesGroup.iconPath = this.iconFile('files.svg');
-    filesGroup.description = `${p.fileCount} 个`;
+    filesGroup.description = i18n.t('{0} items', p.fileCount);
     root.children.push(filesGroup);
 
     // 虚拟目标（有则显示）
     if (p.virtualTargets.length) {
-      const vtGroup = group('虚拟目标', vscode.TreeItemCollapsibleState.Collapsed);
+      const vtGroup = group(i18n.t('Virtual targets'), vscode.TreeItemCollapsibleState.Collapsed);
       vtGroup.iconPath = this.iconFile('vtargets.svg');
-      vtGroup.description = `${p.virtualTargets.length} 个`;
+      vtGroup.description = i18n.t('{0} items', p.virtualTargets.length);
       for (const vt of p.virtualTargets) {
-        vtGroup.children.push(leaf(vt.title, `= ${vt.targets.join(';') || '（空）'}`, {
+        vtGroup.children.push(leaf(vt.title, `= ${vt.targets.join(';') || i18n.t('(empty)')}`, {
           xml: `<Add alias="${vt.title}" targets="${vt.targets.join(';')}" />`,
           locate: locateFor('alias', vt.title),
         }));
@@ -427,17 +428,18 @@ export class AnalysisTreeProvider implements vscode.TreeDataProvider<AnalysisNod
 
     // 变量（有则显示）
     if (p.customVariables.length || p.envVarCount) {
-      const varsGroup = group('变量', vscode.TreeItemCollapsibleState.Collapsed);
+      const varsGroup = group(i18n.t('Variables'), vscode.TreeItemCollapsibleState.Collapsed);
       varsGroup.iconPath = this.iconFile('vars.svg');
-      varsGroup.description = `自定义 ${p.customVariables.length} · 环境 ${p.envVarCount}`;
+      varsGroup.description = i18n.t('Custom {0} · env {1}', p.customVariables.length, p.envVarCount);
       for (const v of p.customVariables) {
         varsGroup.children.push(leaf(v.name, v.value, {
-          xml: `<${v.name} value="${v.value}" />\n（Extensions → codeblocks_project_custom_variables）`,
+          // XML 预览（与 .cbp 原文一致，不参与本地化）
+          xml: `<${v.name} value="${v.value}" />\n(Extensions → codeblocks_project_custom_variables)`,
           locate: [`${v.name} value="`, `${v.name}=`],
         }));
       }
       if (p.envVarCount) {
-        varsGroup.children.push(leaf('环境变量', `${p.envVarCount} 个`, {
+        varsGroup.children.push(leaf(i18n.t('Environment variables'), i18n.t('{0} items', p.envVarCount), {
           xml: '<Environment>\n  <Variable name="…" value="…" />\n</Environment>',
           locate: ['<Environment>'],
         }));
@@ -447,7 +449,7 @@ export class AnalysisTreeProvider implements vscode.TreeDataProvider<AnalysisNod
 
     // 备注（有则显示）
     if (p.notes && p.notes.trim()) {
-      const noteNode = leaf('备注', firstLine(p.notes), {
+      const noteNode = leaf(i18n.t('Notes'), firstLine(p.notes), {
         xml: `<Notes>\n  <![CDATA[${firstLine(p.notes, 40)}]]>\n</Notes>`,
         locate: [firstLine(p.notes, 30)],
       });
@@ -462,7 +464,7 @@ export class AnalysisTreeProvider implements vscode.TreeDataProvider<AnalysisNod
         if (c.locate?.length && !c.command) {
           c.command = {
             command: 'codeblocks.analysis.locate',
-            title: '在 .cbp 中定位',
+            title: i18n.t('Locate in .cbp'),
             arguments: [{ filename: p.filename, locate: c.locate }],
           };
           if (!c.contextValue) c.contextValue = 'analysisItem';

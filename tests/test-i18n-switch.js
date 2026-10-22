@@ -94,7 +94,7 @@ const COMMAND = 'codeblocks.ui.switchLanguage';
   await app.invoke(COMMAND);
   const promptEn = app.records.quickPickPrompts[app.records.quickPickPrompts.length - 1];
   check('D1 派发设置变更后 QuickPick 立即变英文（即时生效）',
-    JSON.stringify(promptEn.items) === JSON.stringify(['Follow the VS Code display language', 'English', '中文（简体）']), promptEn.items);
+    JSON.stringify(promptEn.items) === JSON.stringify(['Follow the VS Code display language', 'English', 'Chinese (Simplified)']), promptEn.items);
   check('D2 当前模式标记随设置移动（en）',
     JSON.stringify(promptEn.raw.filter((i) => i.description === 'Current').map((i) => i.value)) === JSON.stringify(['en']),
     promptEn.raw.map((i) => [i.value, i.description]));

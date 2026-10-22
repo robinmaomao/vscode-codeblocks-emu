@@ -43,11 +43,11 @@ const needles = [
   ['解析缓存失效调用', /clearCompilerCacheResolveCache/],
   ['winget 可用性探测', /async function hasWinget/],
   ['启用提示按作用域写入（inspect）', /inspect\('build\.compilerCache'\)/],
-  ['检测结果输出（版本+路径）', /\[Code::Blocks\] 编译缓存: 检测到/],
-  ['启用询问含「不再提示」按钮', /\.\.\.labels, '不再提示'/],
+  ['检测结果输出（版本+路径）', /\[Code::Blocks\] Compiler cache: detected/],
+  ['启用询问含「不再提示」按钮', /\.\.\.labels, i18n\.t\('Don\\'t show again'\)/],
 ];
 for (const [name, re] of needles) check('extension：' + name, re.test(ext), null);
-check('extension：安装提示按钮（如何安装/重新指定路径）', ext.includes('如何安装') && ext.includes('重新指定路径'), null);
+check('extension：安装提示按钮（如何安装/重新指定路径）', ext.includes('Installation guide') && ext.includes('Set the path again'), null);
 
 // ---- 3. dist/build/compilerCache.js 数据 ----
 check('模块：winget id 齐备', mod.includes('Ccache.Ccache') && mod.includes('Mozilla.sccache'), null);
