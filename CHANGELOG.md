@@ -2,6 +2,23 @@
 
 本文件记录**正式版**里程碑；每个 dev 迭代的逐轮发布说明见 [`docs/release/`](docs/release/)（`0.8.xx-dev.md`），版本号与维护约定见 [`docs/release/00-说明.md`](docs/release/00-说明.md)。
 
+## 0.8.133 — 2026-10-22
+
+**构建日志补齐 Code::Blocks 产物体积行**
+
+- **链接/打包成功打印产物体积行**（本版新增，对齐 Code::Blocks `CompilerGCC::OnJobEnd`）：
+  `Output file is bin\Debug\hello.exe with size 478.53 KB`。此前扩展只打印自研摘要行
+  `✔️ [Linked] … (Ns)`，**纯 CB 日志模式（`codeblocks.build.plainCbLog`）下没有任何成功提示**。
+- **格式严格对齐 CB**：`<1024` → `bytes`（小写）、`<1048576` → `KB`、否则 `MB`；一律两位小数
+  （不足 1KB 也是 `512.00 bytes`）；判档用 `<`（1024 字节 ⇒ `1.00 KB`）；**无 GB 档**；产物缺失不打印。
+- **plain 与 enhanced 两种日志模式都输出**（plain 是 CB 原文基线；enhanced 另保留带耗时的摘要行）；
+  文案走 `logT()`，`codeblocks.log.english=true` 恒英文，否则跟随 `codeblocks.ui.language`。
+- 静态库目标 `ar` 打包成功后同样输出（真实 `.a` 路径与体积）。
+- 新增 `src/build/outputFileInfo.ts`（`formatCbFileSize` / `outputFileSizeText`）与
+  `tests/test-output-file-size.js`（22 断言）；E2E 构建矩阵 +4 断言（真实体积一致 / plain 模式 /
+  静态库），共 48 断言。
+- 规模（0.8.133 时点）：分层回归 `contract 2/2`、`unit 162 FAIL=0 SKIP=1`、`e2e 4/4`、`pack 14 pass`、`host 24 pass`。
+
 ## 0.8.132 — 2026-10-22
 
 **中英文界面语言切换（i18n 设施 + 静态贡献全量本地化 + 运行时文案全覆盖）**
