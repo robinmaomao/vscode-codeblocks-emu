@@ -1,5 +1,7 @@
 # Code::Blocks for VS Code
 
+> 语言：**中文** ｜ [English](./README.en.md)
+
 原生移植 Code::Blocks 核心功能到 VS Code 的扩展 —— 一个直接驱动 GCC/GDB 的「迷你 IDE 内核」，**不是** `.cbp` → `tasks.json` 的桥接。
 
 直接在 VS Code 中打开 `.cbp` / `.workspace` 工程，即可获得与 Code::Blocks 对齐的构建、调试与工程浏览体验。
@@ -10,7 +12,7 @@
 
 > **许可证说明**：本扩展的 TypeScript 代码为独立重写（非复制 GPL 源码）；其中错误正则表（`resources/compilers/options_common_re.xml`）与命令模板（`resources/compilers/options_gcc.xml`）源自 GPL v3 的 Code::Blocks `compilergcc` 资源，因此整体按 GPL v3 发布，详见 [LICENSE.md](LICENSE.md)。
 
-> 📖 详细的功能介绍、使用说明与 **RISC-V 交叉编译完整示例**见 [docs/使用说明.md](docs/使用说明.md)；逐项对齐依据见 [docs/对齐对照.md](docs/对齐对照.md)。
+> 📖 详细的功能介绍、使用说明与 **RISC-V 交叉编译完整示例**见 [docs/使用说明.md](docs/使用说明.md)（英文版 [docs/使用说明.en.md](docs/使用说明.en.md)）；逐项对齐依据见 [docs/对齐对照.md](docs/对齐对照.md)。
 
 > **非官方声明**：本扩展是社区个人开发者基于公开资料对 Code::Blocks 功能的**独立重写与移植**，与 Code::Blocks 官方项目及其作者 / 团队**无任何隶属、合作或背书关系**，也不代表其立场；「Code::Blocks」名称与标识版权归其原作者所有，此处仅用于说明所对标的功能与兼容目标。问题反馈请提交到 [本仓库 Issues](https://github.com/robinmaomao/vscode-codeblocks-emu/issues)，**不要**提交给 Code::Blocks 官方。
 >
