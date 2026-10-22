@@ -2,6 +2,18 @@
 
 本文件记录**正式版**里程碑；每个 dev 迭代的逐轮发布说明见 [`docs/release/`](docs/release/)（`0.8.xx-dev.md`），版本号与维护约定见 [`docs/release/00-说明.md`](docs/release/00-说明.md)。
 
+## 0.8.132 — 2026-10-22
+
+**中英文界面语言切换（i18n 设施 + 静态贡献全量本地化 + 运行时文案全覆盖）**
+
+- **i18n 运行时设施**（本版新增）：`src/i18n/core.ts`（纯逻辑：`resolveLanguage` / `formatSource` / `lookupTemplate` / `translate`）+ `src/i18n/index.ts`（`t()` / `tr()` / `htmlLang()` / `uiLanguage()` / `refreshUiLanguage()`）；词条表 `src/i18n/strings.zh-cn.json` 以**英文源串为键**，`{0}`/`{1}` 占位符，词条缺失回退源串；语言为进程内缓存，设置变更即时刷新。
+- **新设置 `codeblocks.ui.language`**（`auto`/`en`/`zh-cn`，默认 `auto`，即时生效）与新命令 **`Code::Blocks: Switch UI Language…`**（`codeblocks.ui.switchLanguage`，三态 QuickPick + 当前项标记 + 一键重载窗口）。
+- **静态贡献全量 nls**（本版新增）：107 命令标题、77 设置描述/枚举说明、5 视图名、2 容器标题、欢迎语、调试器片段描述、`displayName`/`description` 全部改 `%key%`，`package.nls.json`（英文默认）+ `package.nls.zh-cn.json`（中文），共 212 键 —— 跟随 VS Code 显示语言，重载窗口生效。
+- **运行时文案全覆盖**（本版新增，迁移点 290 → **1123**、词条 239 → **1072**）：WebView 三个面板的**内部字段**（源级插桩 `i18n.tr()` + 193 条中文→英文反查表，不翻译工程名等数据）、状态栏菜单与 **148 个菜单标签**、树视图 5 个 provider、调试层（适配器 / MI 会话 / 调试配置）、构建引擎 5 个文件、clangd/键位/统计等工具类与工程/模型 12 个文件、`extension.ts` 剩余日志与 UI。
+- **构建日志新入口 `logT()`**（本版新增）：`codeblocks.log.english=true` 时日志**恒英文**（对齐 Code::Blocks 原文），否则跟随 `ui.language`；`src/build/**` 全面改用 `logT`，历史 `msg(zh, en)` 仅保留 3 处构建结果 toast（守卫禁止新代码在 `build/**` 调用 `msg`）。
+- **守卫**（本版新增/升级）：词条漂移 AST 守卫（含 `logT` 源串、`build/**` 禁 `msg`）、静态 nls 覆盖、**29 个已本地化文件 AST 级禁中文字面量**、WebView 插桩点 ↔ 反查表双向一致、mock 显示语言可覆盖。
+- 规模（0.8.132 时点）：命令 106 → **107** 项、设置 76 → **77** 项；分层回归 `contract 2/2`、`unit 161 FAIL=0 SKIP=1`、`e2e 4/4`、`visual 24 pass`、`perf 13 项 0 fail`、`pack 14 pass`、`host 24 pass`。
+
 ## 0.8.131 — 2026-10-15
 
 **工作区检测开销治理 · clangd 设置改动立即生效**

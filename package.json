@@ -2,7 +2,7 @@
   "name": "codeblocks-vscode",
   "displayName": "%extension.displayName%",
   "description": "%extension.description%",
-  "version": "0.8.131",
+  "version": "0.8.132",
   "icon": "resources/icon.png",
   "publisher": "robinmaomao",
   "author": {
