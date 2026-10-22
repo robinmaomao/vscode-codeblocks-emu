@@ -109,6 +109,7 @@ const I18N_DONE_FILES = [
   'build/compilerCache.ts',
   'build/makefileExporter.ts',
   'build/scriptRunner.ts',
+  'build/outputFileInfo.ts',
 ];
 const UI_CONTEXT_PATTERNS = [
   /showInformationMessage/,

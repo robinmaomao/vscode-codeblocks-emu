@@ -1,4 +1,4 @@
-// L1 真实工程 E2E 构建矩阵（真实 gcc/g++/ar；探针工程在临时目录，测试后清理）
+﻿// L1 真实工程 E2E 构建矩阵（真实 gcc/g++/ar；探针工程在临时目录，测试后清理）
 //
 // 覆盖：全量构建 / 增量 up-to-date / 头文件依赖触发重编 / 单文件编译与清理 / 目标清理 /
 //       对象目录自动创建 / 含空格路径 / 汇编源参与链接 / 链接脚本不参与 / 响应文件 /
@@ -9,6 +9,7 @@
 const fs = require('fs');
 const path = require('path');
 const H = require('./harness');
+const { formatCbFileSize } = require('../../dist/build/outputFileInfo.js');
 
 const args = process.argv.slice(2);
 const filter = args.find((a) => a.startsWith('--filter='))?.split('=')[1]
@@ -54,6 +55,29 @@ async function scenarioHelloCb() {
   const objMain = path.join(dir, 'obj', 'Debug', 'main.o');
   const objUtil = path.join(dir, 'obj', 'Debug', 'util.o');
   check('S1 对象文件落 object_output 目录', fs.existsSync(objMain) && fs.existsSync(objUtil), [fs.existsSync(objMain), fs.existsSync(objUtil)], [true, true]);
+
+  // S1b 对齐 CB：链接成功后打印 `Output file is <输出文件> with size <大小>`
+  //（文案随 ui.language，故只断言「产物路径 + 与真实体积一致的两位小数体积」）
+  const outLines = full.lines.map((l) => String(l.line));
+  const sizeLine = outLines.find((l) => /bin[\\/]Debug[\\/]hello\.exe/.test(l) && /\d+\.\d{2} (bytes|KB|MB)/.test(l)) || '';
+  const wantSize = formatCbFileSize(fs.statSync(exe).size);
+  check('S1b 链接成功输出 CB 体积行（产物路径 + 真实体积）',
+    !!sizeLine && sizeLine.includes(wantSize), { sizeLine, wantSize }, '含体积文本');
+
+  // S1c plain 模式（CB 原文基线）同样输出体积行；enhanced 的 ✔️ [Linked] 摘要行按设计不输出
+  await sleep(1100);
+  H.touch(path.join(dir, 'util.c'));
+  const { resetBuildLogPrefsCache } = require('../../dist/build/logLang.js');  H.setConfig({ 'codeblocks.build.plainCbLog': true });
+  resetBuildLogPrefsCache(); // 偏好为进程内缓存，改设置后需重置才生效
+  const plain = await H.build(ctx, target);
+  const plainLines = plain.lines.map((l) => String(l.line));
+  check('S1c plain 模式仍输出 CB 体积行',
+    plainLines.some((l) => /bin[\\/]Debug[\\/]hello\.exe/.test(l) && /\d+\.\d{2} (bytes|KB|MB)/.test(l)),
+    plainLines.slice(-6), '含体积行');
+  check('S1c plain 模式不输出 ✔️ [Linked] 摘要行',
+    !plainLines.some((l) => l.includes('[Linked]')), plainLines.filter((l) => l.includes('Linked')), []);
+  H.setConfig({ 'codeblocks.build.plainCbLog': false });
+  resetBuildLogPrefsCache();
 
   // S2 增量 up-to-date → 零编译命令
   const second = await H.build(ctx, target);
@@ -251,6 +275,8 @@ async function scenarioWorkspace() {
   const libFile = path.join(dir, 'dep-lib', 'bin', 'Debug', 'libdep_lib.a');
   check('S14 静态库构建成功', libRes.ok && fs.existsSync(libFile), libRes.ok, true);
   check('S14 归档命令使用 ar', libRes.commands.some((c) => /(^|\s)ar(\.exe)?(\s|$)/i.test(c)), libRes.commands.slice(-1), 'ar');
+  const libSizeLine = libRes.lines.map((l) => String(l.line)).find((l) => /\.a\b/.test(l) && /\d+\.\d{2} (bytes|KB|MB)/.test(l)) || '';
+  check('S14 静态库打包成功输出 CB 体积行', !!libSizeLine && libSizeLine.includes(formatCbFileSize(fs.statSync(libFile).size)), libSizeLine, '含体积文本');
 
   const appCtx = H.openProject(path.join(dir, 'dep-app', 'dep-app.cbp'));
   const appRes = await H.build(appCtx, 'Debug');

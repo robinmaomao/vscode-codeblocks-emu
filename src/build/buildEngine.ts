@@ -23,6 +23,7 @@ import { BuildCancelHandle } from './cancelToken';
 import { BuildProfiler } from './buildProfiler';
 import { decodeText } from '../tools/encoding';
 import { isExecutableTargetType, resolveExecutablePath, executableCandidates, withPlatformExtension } from './outputPath';
+import { outputFileSizeText } from './outputFileInfo';
 import { applyResponseFile, compareFilesByWeight, linkRespBase } from './commandLine';
 import { clearCompilerCacheResolveCache, normalizeCompilerCacheKind, resolveCompilerCachePathCached } from './compilerCache';
 import { upperDrive, shortPathWin } from '../tools/pathCase';
@@ -1261,6 +1262,8 @@ export class BuildEngine {
                 outputFilename: target.outputFilename,
               };
             }
+            // CB 对齐：链接成功后打印产物体积行（`Output file is <输出文件> with size <大小>`）
+            this.reportOutputFile(this.expandedOutputFilename(target), outputAbs);
             if (!buildLogPrefs().plain) {
               this.output.info(`✔️ [Linked] ${path.relative(this.project.basePath, outputAbs)} (${linkSec}s)`);
             }
@@ -1370,6 +1373,8 @@ export class BuildEngine {
                 outputFilename: target.outputFilename,
               };
             }
+            // CB 对齐：静态库打包成功后同样打印体积行
+            this.reportOutputFile(staticOut, staticOutAbs);
             if (!buildLogPrefs().plain) {
               this.output.info(`✔️ [Archived] ${staticOut} (${arSec}s)`);
             }
@@ -1459,6 +1464,23 @@ export class BuildEngine {
       case TargetType.Native: return 'native';
       default: return 'executable';
     }
+  }
+
+  /**
+   * 对齐 Code::Blocks 的链接成功体积行（`compilergcc.cpp`）：
+   * `Output file is <输出文件> with size <大小>`。
+   * plain / enhanced 两种日志模式都输出（plain 是 CB 原文基线，本就缺这一行）；
+   * 产物缺失或不可读时只留 debug 提示，不臆造体积。
+   * @param displayPath 展示路径（对齐 CB：配置里的相对输出路径）
+   * @param absPath 输出文件绝对路径
+   */
+  private reportOutputFile(displayPath: string, absPath: string): void {
+    const size = outputFileSizeText(absPath);
+    if (!size) {
+      this.output.debug(`[Code::Blocks] ${logT('Cannot read the output file size: {0}', absPath)}`);
+      return;
+    }
+    this.output.info(logT('Output file is {0} with size {1}', displayPath, size));
   }
 
   /** 编译器 bin 目录（用于把交叉编译器工具加入脚本执行的 PATH） */
