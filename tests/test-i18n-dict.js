@@ -59,11 +59,31 @@ for (const file of files) {
   visit(sf);
 }
 
+// ---- 1b. 间接源串（不走字面量 i18n.t('…')，而是运行时以变量取词条） ----
+// menuStructure 的菜单标签（`i18n.t(label)`）+ WebView 面板反查表（中文原文为键）
+const indirect = new Map(); // source → 出处
+{
+  const menuFile = path.join(SRC, 'ui/menuStructure.ts');
+  const text = fs.readFileSync(menuFile, 'utf-8');
+  const sf = ts.createSourceFile(menuFile, text, ts.ScriptTarget.ES2020, true, ts.ScriptKind.TS);
+  const visit = (node) => {
+    if (
+      ts.isPropertyAssignment(node) && ts.isIdentifier(node.name) && node.name.text === 'label'
+      && ts.isStringLiteral(node.initializer) && node.initializer.text.trim()
+    ) {
+      indirect.set(node.initializer.text, 'ui/menuStructure.ts');
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(sf);
+}
+
 check('S0 扫描到迁移点（>0，说明扫描器有效）', calls.length > 0, calls.length);
 
 // ---- 2. 每个源串必须有词条 ----
-const missing = calls.filter((c) => !dict[c.source]).map((c) => `${c.rel}:${c.line}  "${c.source}"`);
-check('S1 所有 i18n.t() 源串都有 zh-cn 词条', missing.length === 0, missing.slice(0, 10));
+const allSources = [...new Set([...calls.map((c) => c.source), ...indirect.keys()])];
+const missing = allSources.filter((s) => !dict[s]);
+check('S1 所有词条源串（字面量 + 菜单标签）都有 zh-cn 词条', missing.length === 0, missing.slice(0, 10));
 
 // ---- 3. 词条质量 ----
 const NO_CJK_OK = new Set(['Code::Blocks', 'GDB', 'clangd', 'GCC', 'G++', 'MSVC', 'LLVM', 'RISC-V', 'Makefile']);
@@ -83,9 +103,9 @@ const noCjk = Object.entries(dict)
 check('S4 词条值应含中文（专名白名单豁免）', noCjk.length === 0, noCjk.slice(0, 10));
 
 // ---- 4. 孤儿键（词条未被任何调用点引用） ----
-const used = new Set(calls.map((c) => c.source));
+const used = new Set(allSources);
 const orphans = Object.keys(dict).filter((k) => !used.has(k));
-check('S5 词条表无孤儿键（都对应真实调用点）', orphans.length === 0, orphans.slice(0, 20));
+check('S5 词条表无孤儿键（都对应真实来源）', orphans.length === 0, orphans.slice(0, 20));
 
 // ---- 5. 占位符规范 ----
 const idxOf = (s) => [...new Set([...String(s).matchAll(/\{(\d+)\}/g)].map((m) => Number(m[1])))].sort((a, b) => a - b);

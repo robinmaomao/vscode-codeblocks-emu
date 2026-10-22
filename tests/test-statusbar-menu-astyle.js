@@ -20,6 +20,10 @@ async function main() {
   try {
     const { registerStatusBarMenu } = require('../dist/ui/statusBarMenu.js');
     const { MENU_STRUCTURE } = require('../dist/ui/menuStructure.js');
+    const i18n = require('../dist/i18n');
+    // 菜单标签按当前生效语言渲染（i18n.t(label)）：期望值同样经 i18n 解析，避免语言耦合
+    const topLabels = () => TOP_MENUS.map((n) => i18n.t(n));
+    const menuLabels = () => MENU_STRUCTURE.map((m) => i18n.t(m.label));
 
     // ---------- A. 状态栏项与悬停菜单 ----------
     const statusItem = registerStatusBarMenu({ subscriptions: [] }, () => ({ recents: [], order: [], hasProjects: false, tools: [] }));
@@ -40,12 +44,12 @@ async function main() {
       await handlers[0]();
       const first = picks[0] || [];
       const labels = first.map((i) => String(i.label));
-      check('B3 第一级含全部顶级菜单项', TOP_MENUS.every((n) => labels.includes(n)),
-        { missing: TOP_MENUS.filter((n) => !labels.includes(n)) }, []);
-      check('B4 无工程时不含 Workspace 动态项', !labels.some((l) => /Workspace/.test(l)), labels.filter((l) => /Workspace/.test(l)));
+      check('B3 第一级含全部顶级菜单项', topLabels().every((n) => labels.includes(n)),
+        { missing: topLabels().filter((n) => !labels.includes(n)) }, []);
+      check('B4 无工程时不含 Workspace 动态项', !labels.includes(i18n.t('Workspace')), labels);
       check('B5 顶级菜单顺序与 MENU_STRUCTURE 一致',
-        labels.filter((l) => TOP_MENUS.includes(l)).join('|') === TOP_MENUS.join('|'),
-        labels.filter((l) => TOP_MENUS.includes(l)));
+        labels.filter((l) => menuLabels().includes(l)).join('|') === menuLabels().join('|'),
+        labels.filter((l) => menuLabels().includes(l)));
     }
 
     // ---------- C. 动态区（最近工程 / 工作区顺序 / 自定义工具） ----------
@@ -60,8 +64,26 @@ async function main() {
     await handlers2[handlers2.length - 1]();
     const first2 = picks[0] || [];
     const labels2 = first2.map((i) => String(i.label));
-    check('C2 有工程时出现 Workspace 动态项', labels2.some((l) => /Workspace/.test(l)), labels2);
-    check('C3 最近工程入口出现', labels2.some((l) => /Recent Projects/.test(l)), labels2);
+    check('C2 有工程时出现 Workspace 动态项', labels2.includes(i18n.t('Workspace')), labels2);
+    check('C3 最近工程入口出现', labels2.includes(i18n.t('Recent Projects')), labels2);
+
+    // ---------- C2b. 语言切换：菜单标签随 ui.language 切换 ----------
+    mock.configStore['codeblocks.ui.language'] = 'en';
+    i18n.refreshUiLanguage();
+    picks.length = 0;
+    const handlersEn = mock.commandHandlers.get('codeblocks.menu.show') || [];
+    await handlersEn[handlersEn.length - 1]();
+    const labelsEn = (picks[0] || []).map((i) => String(i.label));
+    check('C4 英文态第一级为英文顶级菜单', labelsEn.includes('File') && labelsEn.includes('Build'),
+      labelsEn.slice(0, 12));
+    check('C5 英文态无中文残留', !labelsEn.some((l) => /[\u4e00-\u9fff]/.test(l)), labelsEn);
+    mock.configStore['codeblocks.ui.language'] = 'zh-cn';
+    i18n.refreshUiLanguage();
+    picks.length = 0;
+    const handlersZh = mock.commandHandlers.get('codeblocks.menu.show') || [];
+    await handlersZh[handlersZh.length - 1]();
+    const labelsZh = (picks[0] || []).map((i) => String(i.label));
+    check('C6 切回中文态恢复中文标签', labelsZh.includes('文件') && labelsZh.includes('构建'), labelsZh.slice(0, 12));
 
     // ---------- D. AStyle ----------
     const astyle = require('../dist/tools/astyle.js');
