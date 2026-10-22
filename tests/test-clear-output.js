@@ -166,7 +166,7 @@ check('D5 dist 传 plainCb 判定（纯 CB 模式关闭标记）', ext.includes(
 check('D6 dist 汇总块移到输出末尾（printBuildSummaryBlocks）', ext.includes('printBuildSummaryBlocks'), null);
 check('D7 dist 无任务跳过逻辑已移除', !ext.includes('nothingHappened'), null);
 check('D8 dist 汇总块调用点 ≥2（单项目 + 工作区）', (ext.match(/printBuildSummaryBlocks\(\)/g) || []).length >= 2, null);
-check('D9 dist 汇总块含「编译时间」行（YYYY-MM-DD HH:MM:SS）', ext.includes('🕒 编译时间') && ext.includes('formatDateTime'), null);
+check('D9 dist 汇总块含「编译时间」行（YYYY-MM-DD HH:MM:SS）', ext.includes('🕒 Compile time') && ext.includes('formatDateTime'), null);
 // G1：timestamp 惰性 getter（改设置即时生效）——extension 需传函数而非布尔
 check('D10 dist 传惰性 timestamp getter（G1）', /timestamp:\s*\(\)\s*=>/.test(ext), null);
 // G1 复核修复：逐行读取缓存值 + 配置监听刷新（避免每行 getConfiguration）

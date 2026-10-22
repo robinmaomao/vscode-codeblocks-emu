@@ -10,6 +10,7 @@
  * 移植自 codeblocks-src/src/plugins/debuggergdb/gdb_driver.cpp（GPL v3，逻辑独立重写）。
  */
 import { spawn, ChildProcess } from 'child_process';
+import * as i18n from '../i18n';
 import { decodeText } from '../tools/encoding';
 import { isUnframedLine } from './miParse';
 
@@ -77,7 +78,7 @@ export class GdbMiSession {
       this.proc.on('exit', (code) => {
         this.onExit?.(code);
         // 拒绝所有 pending
-        for (const [, p] of this.pending) p.reject(new Error('GDB 进程已退出'));
+        for (const [, p] of this.pending) p.reject(new Error(i18n.t('GDB process has exited')));
         this.pending.clear();
         this.proc = null;
       });
@@ -91,7 +92,7 @@ export class GdbMiSession {
 
   /** 发送 MI 命令并等待结果记录 */
   send(command: string, rawArgs: Record<string, string> = {}): Promise<MiResult> {
-    if (!this.proc) return Promise.reject(new Error('GDB 未启动'));
+    if (!this.proc) return Promise.reject(new Error(i18n.t('GDB not started')));
     const token = ++this.token;
     const argStr = Object.entries(rawArgs)
       .map(([k, v]) => ` ${k}="${this.escape(v)}"`)
@@ -105,7 +106,7 @@ export class GdbMiSession {
       setTimeout(() => {
         if (this.pending.has(token)) {
           this.pending.delete(token);
-          reject(new Error(`GDB 命令超时: ${command}`));
+          reject(new Error(i18n.t('GDB command timed out: {0}', command)));
         }
       }, this.timeoutMs);
     });
@@ -120,7 +121,7 @@ export class GdbMiSession {
 
   /** 发送带位置参数的 MI 命令（如 -var-create / -var-list-children） */
   sendPositional(command: string, positionalArgs: string[] = []): Promise<MiResult> {
-    if (!this.proc) return Promise.reject(new Error('GDB 未启动'));
+    if (!this.proc) return Promise.reject(new Error(i18n.t('GDB not started')));
     const token = ++this.token;
     const argStr = positionalArgs.map((a) => ` ${this.miQuote(a)}`).join('');
     const line = `${token}${command}${argStr}\n`;
@@ -131,7 +132,7 @@ export class GdbMiSession {
       setTimeout(() => {
         if (this.pending.has(token)) {
           this.pending.delete(token);
-          reject(new Error(`GDB 命令超时: ${command}`));
+          reject(new Error(i18n.t('GDB command timed out: {0}', command)));
         }
       }, this.timeoutMs);
     });
@@ -143,7 +144,7 @@ export class GdbMiSession {
    * 位置参数（如函数名、表达式）序列化为 ` value`。
    */
   sendMi(command: string, options: Record<string, string> = {}, positionalArgs: string[] = []): Promise<MiResult> {
-    if (!this.proc) return Promise.reject(new Error('GDB 未启动'));
+    if (!this.proc) return Promise.reject(new Error(i18n.t('GDB not started')));
     const token = ++this.token;
     const optStr = Object.entries(options)
       .map(([k, v]) => ` -${k} ${this.miQuote(v)}`)
@@ -157,7 +158,7 @@ export class GdbMiSession {
       setTimeout(() => {
         if (this.pending.has(token)) {
           this.pending.delete(token);
-          reject(new Error(`GDB 命令超时: ${command}`));
+          reject(new Error(i18n.t('GDB command timed out: {0}', command)));
         }
       }, this.timeoutMs);
     });
@@ -168,7 +169,7 @@ export class GdbMiSession {
    * 第四十九轮：反汇编/内存/寄存器/用户命令用。
    */
   sendExact(line: string): Promise<MiResult> {
-    if (!this.proc) return Promise.reject(new Error('GDB 未启动'));
+    if (!this.proc) return Promise.reject(new Error(i18n.t('GDB not started')));
     const token = ++this.token;
     this.proc.stdin?.write(`${token}${line}\n`);
 
@@ -177,7 +178,7 @@ export class GdbMiSession {
       setTimeout(() => {
         if (this.pending.has(token)) {
           this.pending.delete(token);
-          reject(new Error(`GDB 命令超时: ${line}`));
+          reject(new Error(i18n.t('GDB command timed out: {0}', line)));
         }
       }, this.timeoutMs);
     });
@@ -214,7 +215,7 @@ export class GdbMiSession {
       if (pending) {
         this.pending.delete(token);
         if (status === 'error') {
-          pending.reject(new Error(attrs['msg'] ?? `GDB 错误: ${line}`));
+          pending.reject(new Error(attrs['msg'] ?? i18n.t('GDB error: {0}', line)));
         } else {
           pending.resolve({ token, status, attrs, raw: line });
         }

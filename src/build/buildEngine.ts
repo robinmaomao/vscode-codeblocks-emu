@@ -18,7 +18,7 @@ import { CbOutput } from './cbChannel';
 import { isCompilerUsable, renderInvalidCompilerMessage, renderTriedCompilerPaths, triedCompilerPaths } from './invalidCompiler';
 import { runScriptCommands } from './scriptRunner';
 import { replaceCbMacros, cbBuiltinVars, envVarMap } from '../compiler/cbMacros';
-import { buildLogPrefs, msg } from './logLang';
+import { buildLogPrefs, logT, msg } from './logLang';
 import { BuildCancelHandle } from './cancelToken';
 import { BuildProfiler } from './buildProfiler';
 import { decodeText } from '../tools/encoding';
@@ -161,7 +161,7 @@ export class BuildEngine {
     if (!this.prof) return this.isUpToDate(file.absolutePath, object, includeDirs, depsCache);
     const t0 = Date.now();
     const r = this.isUpToDate(file.absolutePath, object, includeDirs, depsCache);
-    this.prof.add(`${this.profPrefix}增量判定`, Date.now() - t0);
+    this.prof.add(logT('{0}incremental check', this.profPrefix), Date.now() - t0);
     return r;
   }
 
@@ -170,7 +170,7 @@ export class BuildEngine {
     const prof = this.prof;
     if (!prof) return;
     this.prof = undefined;
-    if (this.profBuildStartMs) prof.mark('总计', this.profBuildStartMs);
+    if (this.profBuildStartMs) prof.mark(logT('Total'), this.profBuildStartMs);
     for (const line of prof.render()) this.output.info(`[Code::Blocks][profile] ${line}`);
   }
 
@@ -219,7 +219,7 @@ export class BuildEngine {
     this.output.info(
       `-------------- ${action}: ${target.title} in ${this.project.title} (compiler: ${this.compiler.name})---------------`,
     );
-    this.output.info(`  编译器程序: ${this.compiler.programs.C}`);
+    this.output.info(logT('  Compiler program: {0}', this.compiler.programs.C));
   }
 
   /** 构建主循环 —— 对应 GetCompileCommands + GetTargetLinkCommands；项目级 pre/post 在目标循环外各执行一次（对齐状态机 bsProjectPreBuild/bsProjectPostBuild） */
@@ -258,7 +258,7 @@ export class BuildEngine {
       return true;
     }).join(sep);
     this.buildEnv = { ...(process.env as NodeJS.ProcessEnv), PATH: merged };
-    this.prof?.mark('环境准备', profEnvT0);
+    this.prof?.mark(logT('Environment preparation'), profEnvT0);
 
     // 无目标标题：只构建纳入 All 的目标（对齐 GetCompileCommands(target=null) 的 includeInTargetAll 过滤）
     const titles = targetTitle ? (Array.isArray(targetTitle) ? targetTitle : [targetTitle]) : undefined;
@@ -294,7 +294,7 @@ export class BuildEngine {
       // 只靠编译器英文报错 `no input files` 兜底。CommandsOnly 目标不需要输出文件，其余类型提前拦截并给出可读错误。
       if (t.targetType !== TargetType.CommandsOnly && !this.expandedOutputFilename(t)) {
         missingOutputSkipped++;
-        this.output.error(`[Code::Blocks] 目标 "${t.title}" 未配置输出文件名（<Target output="…">），已跳过构建`);
+        this.output.error(logT('[Code::Blocks] Target "{0}" has no output file name configured (<Target output="…">), build skipped', t.title));
         continue;
       }
       jobTargets.push(t);
@@ -307,7 +307,7 @@ export class BuildEngine {
       if (invalidCompilerSkipped > 0 || platformSkipped > 0 || missingOutputSkipped > 0) {
         this.output.info('[Code::Blocks] Nothing to be done (all items are up-to-date).');
       }
-      vscode.window.showWarningMessage('没有可构建的目标');
+      vscode.window.showWarningMessage(logT('No buildable targets'));
       this.emitBuildProfile();
       return false;
     }
@@ -317,10 +317,10 @@ export class BuildEngine {
     if (this.project.commandsBeforeBuild.length) {
       const first = targets[0];
       this.switchCompiler(first);
-      this.output.info('[Code::Blocks] 执行项目 pre-build 脚本...');
+      this.output.info(logT('[Code::Blocks] Running project pre-build script...'));
       const preCmds = this.project.commandsBeforeBuild.map((c) => this.expandScriptMacros(first, c));
       this.lastCommands.push(...preCmds);
-      const preOk = await this.profTimeAsync('项目/pre-build', () => runScriptCommands(
+      const preOk = await this.profTimeAsync(logT('project/pre-build'), () => runScriptCommands(
         preCmds,
         this.project.basePath,
         this.targetMacroVars(first),
@@ -334,7 +334,7 @@ export class BuildEngine {
         return false;
       }
       if (!preOk) {
-        this.output.error('[Code::Blocks] 项目 pre-build 脚本失败');
+        this.output.error(logT('[Code::Blocks] Project pre-build script failed'));
         this.lastStats = { success: false, compiledCount: 0, skippedCount: 0, failedCount: 0, linkSuccess: false, linkSkipped: true, hadCommands: false };
         this.emitBuildProfile();
         return false;
@@ -386,10 +386,10 @@ export class BuildEngine {
     if (ok && !cancelled && this.project.commandsAfterBuild.length && (lastHadCommands || this.project.alwaysRunPostBuildSteps)) {
       const last = targets[targets.length - 1];
       this.switchCompiler(last);
-      this.output.info('[Code::Blocks] 执行项目 post-build 脚本...');
+      this.output.info(logT('[Code::Blocks] Running project post-build script...'));
       const postCmds = this.project.commandsAfterBuild.map((c) => this.expandScriptMacros(last, c));
       this.lastCommands.push(...postCmds);
-      const postOk = await this.profTimeAsync('项目/post-build', () => runScriptCommands(
+      const postOk = await this.profTimeAsync(logT('project/post-build'), () => runScriptCommands(
         postCmds,
         this.project.basePath,
         this.targetMacroVars(last),
@@ -400,7 +400,7 @@ export class BuildEngine {
       if (options.cancel?.isCancelled()) {
         cancelled = true;
       } else if (!postOk) {
-        this.output.error('[Code::Blocks] 项目 post-build 脚本失败');
+        this.output.error(logT('[Code::Blocks] Project post-build script failed'));
         ok = false;
       }
     }
@@ -466,9 +466,9 @@ export class BuildEngine {
       lastCompilerCacheWarnAt = now;
       this.compilerCacheWarned = true;
       this.output.warn(
-        `[Code::Blocks] 编译缓存 ${kind} 已启用但未找到可执行文件` +
-        `${explicit ? `（codeblocks.build.compilerCachePath = ${explicit} 无效）` : '（PATH 与常见安装目录均未命中）'}` +
-        `——本次构建回退使用原编译器；可运行命令「Code::Blocks: Install Compiler Cache」获取安装指引，或为 compilerCachePath 设置正确的可执行文件路径。`,
+        logT('[Code::Blocks] Compiler cache {0} is enabled but no executable was found', kind) +
+        `${explicit ? logT(' (codeblocks.build.compilerCachePath = {0} is invalid)', explicit) : logT(' (not found in PATH or common install directories)')}` +
+        logT(' — This build falls back to the original compiler; run the "Code::Blocks: Install Compiler Cache" command for installation guidance, or set compilerCachePath to the correct executable path.'),
       );
     } catch {
       // 无 vscode 宿主（headless 单测）或读取失败：静默（构建不受影响）
@@ -733,7 +733,7 @@ export class BuildEngine {
   async compileFile(targetTitle: string, fileRel: string, options: BuildOptions): Promise<boolean> {
     const target = this.project.buildTargets.find((t) => t.title === targetTitle);
     if (!target) {
-      this.output.error(`[Code::Blocks] 未找到构建目标: ${targetTitle}`);
+      this.output.error(logT('[Code::Blocks] Build target not found: {0}', targetTitle));
       return false;
     }
     // 每目标编译器（对齐 GetCompiler(target->GetCompilerID())）
@@ -742,7 +742,7 @@ export class BuildEngine {
     const files = target.files;
     const file = files.find((f) => f.relativeFilename === fileRel);
     if (!file) {
-      this.output.error(`[Code::Blocks] 文件不在目标 "${targetTitle}" 中: ${fileRel}`);
+      this.output.error(logT('[Code::Blocks] File is not in target "{0}": {1}', targetTitle, fileRel));
       return false;
     }
     // 对齐 GetBuildTargetForFile（compilergcc.cpp:3119-3145）：文件未归属当前目标（或未归属任何目标）→ 拒绝
@@ -752,13 +752,13 @@ export class BuildEngine {
     }
     // CommandsOnly 目标默认不编译文件（对齐扩展默认行为；开启 codeblocks.build.compileCommandsOnlyTargets 时按 CB 空存根编译）
     if (target.targetType === TargetType.CommandsOnly && !this.compileCommandsOnlyTargets()) {
-      this.output.warn(`[Code::Blocks] CommandsOnly 目标 "${targetTitle}" 默认不编译文件（可开启设置 codeblocks.build.compileCommandsOnlyTargets 对齐 CB）`);
+      this.output.warn(logT('[Code::Blocks] CommandsOnly target "{0}" does not compile its files by default (enable the codeblocks.build.compileCommandsOnlyTargets setting to match CB)', targetTitle));
       return false;
     }
     // 单文件编译 Banner —— 对齐 PrintBanner(baBuildFile)（CompileFile:3156）
     this.printBanner('Build file', target);
     if (file.compile === false) {
-      this.output.warn(`[Code::Blocks] 文件被排除编译（compile="0"），跳过: ${fileRel}`);
+      this.output.warn(logT('[Code::Blocks] File excluded from compilation (compile="0"), skipped: {0}', fileRel));
       return false;
     }
     if (!file.compilerVar) {
@@ -770,7 +770,7 @@ export class BuildEngine {
     const hasCpp = files.some((f) => fileUsesCppCompiler(f));
     const made = this.makeCompileUnit(target, file, generator, hasCpp);
     if (made.reason === 'not-compilable') {
-      this.output.info(`[Code::Blocks] 跳过（非可编译文件）: ${fileRel}`);
+      this.output.info(logT('[Code::Blocks] Skipped (not a compilable file): {0}', fileRel));
       return false;
     }
     if (made.reason === 'no-command') {
@@ -782,18 +782,18 @@ export class BuildEngine {
     // 增量判断（对齐 CompileFile 的 IsObjectOutdated 前置检查；deps 目录用关系合并后的有序目录，对齐 DepsSearchStart）
     const object = this.objectPathFor(target, file);
     if (!options.rebuild && this.isUpToDate(file.absolutePath, object, this.getIncludeDirs(target, generator), new Map())) {
-      this.output.info(`[Code::Blocks] ${fileRel} ${msg('已是最新', 'is up to date')}`);
+      this.output.info(`[Code::Blocks] ${fileRel} ${logT('is up to date')}`);
       return true;
     }
 
     // 对象父目录缺失则创建（对齐 CompileFile 的 CreateDirRecursively）
     const objectDir = path.dirname(object);
     if (objectDir && !this.ensureDir(objectDir, 'debug')) {
-      this.output.error(`[Code::Blocks] 创建对象目录失败: ${objectDir}`);
+      this.output.error(logT('[Code::Blocks] Failed to create the object directory: {0}', objectDir));
       return false;
     }
 
-    this.output.info(`[Code::Blocks] ${msg('编译文件', 'Compiling')}: ${fileRel}`);
+    this.output.info(`[Code::Blocks] ${logT('Compiling')}: ${fileRel}`);
     if (this.verboseOutput()) {
       this.output.info(unit.command);
     }
@@ -826,10 +826,10 @@ export class BuildEngine {
         this.output.info(`[Code::Blocks] Deleted: ${objectRel}`);
       } else {
         // D-08：必须用户可见（此前为 debug 级，普通输出通道会丢弃；上层还会先 clear() → 面板空白且零反馈）
-        this.output.info(`[Code::Blocks] 无对象文件可清理: ${fileRel}`);
+        this.output.info(logT('[Code::Blocks] No object files to clean: {0}', fileRel));
       }
     } else {
-      this.output.info(`[Code::Blocks] 无对象文件可清理: ${fileRel}`);
+      this.output.info(logT('[Code::Blocks] No object files to clean: {0}', fileRel));
     }
   }
 
@@ -873,7 +873,7 @@ export class BuildEngine {
     // 构建脚本（<Script file>）：Code::Blocks 用 Squirrel 脚本引擎，扩展暂不支持，明确警告跳过
     const buildScripts = [...this.project.buildScripts, ...target.buildScripts];
     for (const s of buildScripts) {
-      this.output.warn(`[Code::Blocks] 暂不支持 Squirrel 构建脚本，已跳过: ${s}`);
+      this.output.warn(logT('[Code::Blocks] Squirrel build scripts are not supported yet, skipped: {0}', s));
     }
 
     if (target.targetType === TargetType.CommandsOnly && !this.compileCommandsOnlyTargets()) {
@@ -881,12 +881,12 @@ export class BuildEngine {
       // （开启 codeblocks.build.compileCommandsOnlyTargets 时对齐 CB：照常编译文件，命令不带选项/include）
       const runAndCheck = async (cmds: string[], phase: 'pre' | 'post'): Promise<boolean | undefined> => {
         if (!cmds.length) return true;
-        this.output.info(`[Code::Blocks] 执行目标 ${phase}-build 脚本 (${target.title})...`);
+        this.output.info(logT('[Code::Blocks] Running target {0}-build script ({1})...', phase, target.title));
         this.lastCommands.push(...cmds);
         const r = await runScriptCommands(cmds, this.project.basePath, macroVars, (l) => this.output.info(l), this.compilerBinPath(), options.cancel);
         if (r) return true;
         if (options.cancel?.isCancelled()) return undefined;
-        this.output.error(`[Code::Blocks] 目标 "${target.title}" ${phase}-build 脚本失败`);
+        this.output.error(logT('[Code::Blocks] Target "{0}" {1}-build script failed', target.title, phase));
         return false;
       };
       const pre = target.commandsBeforeBuild.map(expandScriptMacros);
@@ -915,15 +915,15 @@ export class BuildEngine {
 
     // 0. pre-build 脚本
     if (preCommands.length) {
-      this.output.info(`[Code::Blocks] 执行目标 pre-build 脚本 (${target.title})...`);
+      this.output.info(logT('[Code::Blocks] Running target pre-build script ({0})...', target.title));
       this.lastCommands.push(...preCommands);
-      const preOk = await this.profTimeAsync(this.profPrefix + '目标 pre-build', () => runScriptCommands(preCommands, this.project.basePath, macroVars, (l) => this.output.info(l), this.compilerBinPath(), options.cancel));
+      const preOk = await this.profTimeAsync(this.profPrefix + logT('target pre-build'), () => runScriptCommands(preCommands, this.project.basePath, macroVars, (l) => this.output.info(l), this.compilerBinPath(), options.cancel));
       if (!preOk) {
         // 取消优先判定（被强杀的脚本进程返回失败，但语义是取消）
         if (options.cancel?.isCancelled()) {
           return this.cancelledStats(target, 0, 0);
         }
-        this.output.error(`[Code::Blocks] 目标 "${target.title}" pre-build 脚本失败`);
+        this.output.error(logT('[Code::Blocks] Target "{0}" pre-build script failed', target.title));
         return { success: false, compiledCount: 0, skippedCount: 0, failedCount: 0, linkSuccess: false, linkSkipped: target.targetType === TargetType.StaticLib, hadCommands: false, outputFilename: target.outputFilename };
       }
     }
@@ -1035,7 +1035,7 @@ export class BuildEngine {
 
       // 过期/强制：生成命令（对齐 GetCompileFileCommand）
       const made = this.prof
-        ? this.prof.time(`${this.profPrefix}命令生成`, () => this.makeCompileUnit(target, file, generator, hasCpp))
+        ? this.prof.time(logT('{0}command generation', this.profPrefix), () => this.makeCompileUnit(target, file, generator, hasCpp))
         : this.makeCompileUnit(target, file, generator, hasCpp);
       if (made.reason === 'not-compilable' || made.reason === 'no-command') {
         // 此处必为过期/强制（up-to-date 已在上方过滤）：仍产生条目 → 计入强制链接（对齐 IsObjectOutdated=true 语义）。
@@ -1056,18 +1056,18 @@ export class BuildEngine {
       else units.push(unit);
     }
     // M0 探针：收集阶段结束（增量判定 + 命令生成 + 过滤的合计）
-    this.profAdd(`${this.profPrefix}收集阶段`, Date.now() - profCollectT0);
+    this.profAdd(logT('{0}collect phase', this.profPrefix), Date.now() - profCollectT0);
     if (this.prof) {
-      this.prof.count(`${this.profPrefix}收集统计(目标文件数)`, sortedFiles.length);
-      this.prof.count(`${this.profPrefix}收集统计(待编译)`, units.length + deferredUnits.length);
-      this.prof.count(`${this.profPrefix}收集统计(跳过)`, skippedCount);
-      this.prof.count(`${this.profPrefix}收集统计(过期noop)`, staleNoopFiles.length);
+      this.prof.count(logT('{0}collect stats (target file count)', this.profPrefix), sortedFiles.length);
+      this.prof.count(logT('{0}collect stats (to compile)', this.profPrefix), units.length + deferredUnits.length);
+      this.prof.count(logT('{0}collect stats (skipped)', this.profPrefix), skippedCount);
+      this.prof.count(logT('{0}collect stats (stale noop)', this.profPrefix), staleNoopFiles.length);
     }
 
     // 创建所有对象文件的父目录（对应 CodeBlocks 的 CreateDirRecursively）
     // 否则 GCC 无法创建 Output\obj\plugin\xxx.o 等子目录下的对象文件
     this.prof
-      ? this.prof.time(`${this.profPrefix}对象目录创建`, () => this.ensureObjectDirs([...units, ...deferredUnits]))
+      ? this.prof.time(logT('{0}object directory creation', this.profPrefix), () => this.ensureObjectDirs([...units, ...deferredUnits]))
       : this.ensureObjectDirs([...units, ...deferredUnits]);
 
     // 无需要编译的文件（且输出已存在）→ 目标已最新；但外部依赖更新仍需重链接（对齐 GetTargetLinkCommands：AreExternalDepsOutdated 先于 !force 返回）
@@ -1120,7 +1120,7 @@ export class BuildEngine {
     }
     const compileSec = ((Date.now() - compileStartMs) / 1000).toFixed(1);
     // M0 探针：编译墙钟（并行调度全程；含宿主输出解析，解析单独另行统计）
-    this.profAdd(`${this.profPrefix}编译墙钟`, Date.now() - compileStartMs);
+    this.profAdd(logT('{0}compile wall clock', this.profPrefix), Date.now() - compileStartMs);
     this.lastCompileTimings = [...this.compileTimings];
 
     // 取消检查点：被强杀的编译进程 close 返回失败，但语义是取消而非失败（failedCount 不计）
@@ -1133,9 +1133,9 @@ export class BuildEngine {
       // 失败即停统计（对齐 CB 清队列）：未派发单元（undefined）不计入失败，仅提示
       const notDispatched = results.filter((r) => r === undefined).length;
       if (notDispatched > 0) {
-        this.output.info(`[Code::Blocks] ${msg(`编译失败，剩余 ${notDispatched} 个单元未派发（失败即停，对齐 CB 清队列）`, `Compilation failed: ${notDispatched} unit(s) not dispatched (fail-fast, CB queue-clear semantics)`)}`);
+        this.output.info(`[Code::Blocks] ${logT('Compilation failed: {0} unit(s) not dispatched (fail-fast, CB queue-clear semantics)', notDispatched)}`);
       }
-      this.output.error(`[Code::Blocks] 目标 "${target.title}" 编译失败`);
+      this.output.error(logT('[Code::Blocks] Target "{0}" compile failed', target.title));
       return {
         success: false,
         compiledCount: results.filter((r) => r === true).length, // 编译成功的文件数（未派发单元不计）
@@ -1148,7 +1148,7 @@ export class BuildEngine {
       };
     }
     // 编译阶段完成耗时（对齐 Code::Blocks 阶段化日志）
-    this.output.info(`[Code::Blocks] ${msg(`编译完成 ${totalUnits} 个文件 (${compileSec}s)`, `Compiled ${totalUnits} files (${compileSec}s)`)}`);
+    this.output.info(`[Code::Blocks] ${logT('Compiled {0} files ({1}s)', totalUnits, compileSec)}`);
 
     // 2. 链接（CommandsOnly/static lib 不链接；CommandsOnly 已在上面 return 或按开关跳过链接）
     let linkSuccess = true;
@@ -1193,14 +1193,14 @@ export class BuildEngine {
         if (newerLinkInput) {
           forceLink = true;
           const rel = path.relative(this.project.basePath, newerLinkInput).replace(/\\/g, '/');
-          this.output.info(`[Code::Blocks] ${msg(`链接输入 "${rel}" 有更新，重新链接`, `Re-linking because '${rel}' is newer`)}`);
+          this.output.info(`[Code::Blocks] ${logT('Re-linking because \'{0}\' is newer', rel)}`);
         }
         // CB 条目计数强制（对齐 GetTargetCompileCommands:585）：过期但无可执行命令的编译文件在 CB 中
         // 产生日志条目 → 每次构建都强制链接（对象永不产生，如 custom.ld 自定义空命令）
         if (staleNoopFiles.length) {
           forceLink = true;
-          const names = staleNoopFiles.slice(0, 3).join('、') + (staleNoopFiles.length > 3 ? '…' : '');
-          this.output.info(`[Code::Blocks] ${msg(`目标 "${target.title}" 含 ${staleNoopFiles.length} 个过期且无可执行命令的编译文件（${names}），强制链接（对齐 CB 条目计数）`, `Target "${target.title}" has ${staleNoopFiles.length} stale compile file(s) without an executable command (${names}); forcing link (CB entry-count parity)`)}`);
+          const names = staleNoopFiles.slice(0, 3).join(logT(', ')) + (staleNoopFiles.length > 3 ? '…' : '');
+          this.output.info(`[Code::Blocks] ${logT('Target "{0}" has {1} stale compile file(s) without an executable command ({2}); forcing link (CB entry-count parity)', target.title, staleNoopFiles.length, names)}`);
         }
         // CB 条目计数补全（同 :585）：编译阶段产生过任何条目即强制——真实自定义命令本身也是条目，
         // 其对象永不产生（如 custom.ld 自定义命令），对象时间戳链路无法触发重链；普通工程零影响（对象已更新→本就强制）。
@@ -1210,7 +1210,7 @@ export class BuildEngine {
         if (forceLink) {
           // 创建输出目录（如 Output\bin），否则链接器无法写 app.elf；失败则中止本目标（对齐 GetTargetLinkCommands 的目录错误提示，用日志替代阻塞弹窗）
           if (!this.ensureDir(path.dirname(outputAbs))) {
-            this.output.error(`[Code::Blocks] 无法创建输出目录，目标 "${target.title}" 中止`);
+            this.output.error(logT('[Code::Blocks] Cannot create output directory, target "{0}" aborted', target.title));
             return {
               success: false,
               compiledCount: totalUnits,
@@ -1243,13 +1243,13 @@ export class BuildEngine {
             const linkOk = await this.runCommand(linkCommand, this.project.basePath, options, respBase);
             const linkSec = ((Date.now() - linkStartMs) / 1000).toFixed(1);
             // M0 探针：链接墙钟
-            this.profAdd(`${this.profPrefix}链接`, Date.now() - linkStartMs);
+            this.profAdd(logT('{0}linking', this.profPrefix), Date.now() - linkStartMs);
             if (!linkOk) {
               // 取消优先判定（被强杀的链接器返回失败，但语义是取消）
               if (options.cancel?.isCancelled()) {
                 return this.cancelledStats(target, totalUnits, skippedCount);
               }
-              this.output.error(`[Code::Blocks] ${msg(`目标 "${target.title}" 链接失败`, `Target "${target.title}" failed to link`)}`);
+              this.output.error(`[Code::Blocks] ${logT('Target "{0}" failed to link', target.title)}`);
               return {
                 success: false,
                 compiledCount: totalUnits,
@@ -1269,7 +1269,7 @@ export class BuildEngine {
             this.output.debug(`[Code::Blocks] Skipping linking (no linker program set): ${outputAbs}`);
           }
         } else {
-          this.output.info(`[Code::Blocks] ${msg(`目标 "${target.title}" 链接已是最新，跳过链接`, `Target "${target.title}" is up to date, linking skipped`)}`);
+          this.output.info(`[Code::Blocks] ${logT('Target "{0}" is up to date, linking skipped', target.title)}`);
         }
       }
     } else if (target.targetType === TargetType.StaticLib) {
@@ -1303,13 +1303,13 @@ export class BuildEngine {
         if (newerArchiveInput) {
           forceArchive = true;
           const rel = path.relative(this.project.basePath, newerArchiveInput).replace(/\\/g, '/');
-          this.output.info(`[Code::Blocks] ${msg(`链接输入 "${rel}" 有更新，重新打包`, `Re-archiving because '${rel}' is newer`)}`);
+          this.output.info(`[Code::Blocks] ${logT('Re-archiving because \'{0}\' is newer', rel)}`);
         }
         // CB 条目计数强制（对齐 GetTargetCompileCommands:585）：过期但无可执行命令的编译文件 → 每次构建都强制重新打包
         if (staleNoopFiles.length) {
           forceArchive = true;
-          const names = staleNoopFiles.slice(0, 3).join('、') + (staleNoopFiles.length > 3 ? '…' : '');
-          this.output.info(`[Code::Blocks] ${msg(`目标 "${target.title}" 含 ${staleNoopFiles.length} 个过期且无可执行命令的编译文件（${names}），强制重新打包（对齐 CB 条目计数）`, `Target "${target.title}" has ${staleNoopFiles.length} stale compile file(s) without an executable command (${names}); forcing archive (CB entry-count parity)`)}`);
+          const names = staleNoopFiles.slice(0, 3).join(logT(', ')) + (staleNoopFiles.length > 3 ? '…' : '');
+          this.output.info(`[Code::Blocks] ${logT('Target "{0}" has {1} stale compile file(s) without an executable command ({2}); forcing archive (CB entry-count parity)', target.title, staleNoopFiles.length, names)}`);
         }
         // CB 条目计数补全（同 :585）：真实自定义命令本身也是条目 → 编译过任何单元即强制重新打包（对象永不产生时同样成立）
         if (totalUnits > 0) forceArchive = true;
@@ -1322,7 +1322,7 @@ export class BuildEngine {
         if (forceArchive) {
           // 创建静态库输出目录（如 bin\Debug），否则 ar 无法写 libdep_lib.a；失败则中止本目标
           if (!this.ensureDir(path.dirname(staticOutAbs))) {
-            this.output.error(`[Code::Blocks] 无法创建输出目录，目标 "${target.title}" 中止`);
+            this.output.error(logT('[Code::Blocks] Cannot create output directory, target "{0}" aborted', target.title));
             return {
               success: false,
               compiledCount: totalUnits,
@@ -1353,7 +1353,7 @@ export class BuildEngine {
             const ok = await this.runCommand(arCmd, this.project.basePath, options, respBase);
             const arSec = ((Date.now() - arStartMs) / 1000).toFixed(1);
             // M0 探针：打包墙钟（ar）
-            this.profAdd(`${this.profPrefix}打包(ar)`, Date.now() - arStartMs);
+            this.profAdd(logT('{0}archiving (ar)', this.profPrefix), Date.now() - arStartMs);
             if (!ok) {
               // 取消优先判定（被强杀的 ar 返回失败，但语义是取消）
               if (options.cancel?.isCancelled()) {
@@ -1378,7 +1378,7 @@ export class BuildEngine {
             this.output.debug(`[Code::Blocks] Skipping linking (no linker program set): ${staticOutAbs}`);
           }
         } else {
-          this.output.info(`[Code::Blocks] ${msg(`目标 "${target.title}" 静态库已是最新，跳过打包`, `Target "${target.title}" is up to date, archiving skipped`)}`);
+          this.output.info(`[Code::Blocks] ${logT('Target "{0}" is up to date, archiving skipped', target.title)}`);
         }
       }
     }
@@ -1428,12 +1428,12 @@ export class BuildEngine {
     const extraPath = this.compilerBinPath();
 
     if (targetPost.length && (hasCommands || target.alwaysRunPostBuildSteps)) {
-      this.output.info(`[Code::Blocks] 执行目标 post-build 脚本 (${target.title})...`);
+      this.output.info(logT('[Code::Blocks] Running target post-build script ({0})...', target.title));
       this.lastCommands.push(...targetPost);
-      const ok = await this.profTimeAsync(`${this.profPrefix}目标 post-build`, () => runScriptCommands(targetPost, this.project.basePath, macroVars, (l) => this.output.info(l), extraPath, options.cancel));
+      const ok = await this.profTimeAsync(logT('{0}target post-build', this.profPrefix), () => runScriptCommands(targetPost, this.project.basePath, macroVars, (l) => this.output.info(l), extraPath, options.cancel));
       if (!ok) {
         if (options.cancel?.isCancelled()) return false;
-        this.output.error(`[Code::Blocks] 目标 "${target.title}" post-build 脚本失败`);
+        this.output.error(logT('[Code::Blocks] Target "{0}" post-build script failed', target.title));
         return false;
       }
     }
@@ -1895,7 +1895,7 @@ export class BuildEngine {
     // 编译器存在但 masterPath 无效仍删除对象（L18）
     const unresolved = !resolved;
     if (unresolved) {
-      this.output.debug(`[Code::Blocks] 目标 "${target.title}" 编译器未注册，跳过对象清理`);
+      this.output.debug(logT('[Code::Blocks] Target "{0}" compiler not registered, skipping object cleanup', target.title));
     } else {
       // 每目标编译器（对齐 GetCompiler(target->GetCompilerID())，needDependencies 随目标编译器取）
       this.switchCompiler(target);
@@ -1975,7 +1975,7 @@ export class BuildEngine {
     }
     // 响应文件清理（保护性增强，codeblocks.build.cleanResponseFiles，默认关；CB 从不清理）
     removed += this.cleanResponseFiles(target);
-    this.output.info(`[Code::Blocks] Cleaned "${this.project.title} - ${target.title}": 删除 ${removed} 个文件`);
+    this.output.info(logT('[Code::Blocks] Cleaned "{0} - {1}": removed {2} file(s)', this.project.title, target.title, removed));
   }
 
   /**
@@ -2022,7 +2022,7 @@ export class BuildEngine {
       fs.rmSync(p, { force: true });
       return true;
     } catch (e) {
-      this.output.error(`[Code::Blocks] 删除失败: ${p}: ${(e as Error).message}`);
+      this.output.error(logT('[Code::Blocks] Delete failed: {0}: {1}', p, (e as Error).message));
       return false;
     }
   }
@@ -2195,7 +2195,7 @@ export class BuildEngine {
       fs.mkdirSync(dir, { recursive: true });
       return true;
     } catch (e) {
-      const msg = `[Code::Blocks] 无法创建目录 ${dir}: ${(e as Error).message}`;
+      const msg = logT('[Code::Blocks] Cannot create directory {0}: {1}', dir, (e as Error).message);
       if (logLevel === 'error') this.output.error(msg);
       else if (logLevel === 'warn') this.output.warn(msg);
       else this.output.debug(msg);
@@ -2266,8 +2266,8 @@ export class BuildEngine {
       }
       // M0 探针：权重组墙钟（评估组屏障/尾延迟占用）
       if (this.prof) {
-        this.prof.add(`${this.profPrefix}权重组(w=${w}) 墙钟`, Date.now() - profGroupT0);
-        this.prof.count(`${this.profPrefix}权重组(w=${w}) 单元数`, groupEnd - groupStart);
+        this.prof.add(logT('{0}weight group(w={1}) wall clock', this.profPrefix, w), Date.now() - profGroupT0);
+        this.prof.count(logT('{0}weight group(w={1}) unit count', this.profPrefix, w), groupEnd - groupStart);
       }
 
       groupStart = groupEnd;
@@ -2351,7 +2351,7 @@ export class BuildEngine {
       }
       const resp = applyResponseFile(command, respBase, cwd);
       if (resp.respFile) {
-        this.output.debug(`[Code::Blocks] 命令行过长，改用响应文件: ${resp.respFile}`);
+        this.output.debug(logT('[Code::Blocks] Command line too long, switching to a response file: {0}', resp.respFile));
       }
       command = resp.command;
       // 第六轮 F8：记录实际执行命令（响应文件改写后，对齐 CB 在队列生成期改写后记录 cmd->command）
@@ -2360,9 +2360,9 @@ export class BuildEngine {
       if (this.prof) {
         if (!this.profFirstSpawnSeen) {
           this.profFirstSpawnSeen = true;
-          this.prof.add(`${this.profPrefix}首编译/链接 spawn 延迟`, Date.now() - this.profTargetStartMs);
+          this.prof.add(logT('{0}first compile/link spawn latency', this.profPrefix), Date.now() - this.profTargetStartMs);
         }
-        this.prof.count(`${this.profPrefix}spawn 次数`);
+        this.prof.count(logT('{0}spawn count', this.profPrefix));
       }
       const proc = spawn(command, {
         cwd: upperDrive(cwd),
@@ -2408,15 +2408,15 @@ export class BuildEngine {
           let bytes = 0;
           for (const c of stdoutChunks) bytes += c.length;
           for (const c of stderrChunks) bytes += c.length;
-          this.prof.count(`${this.profPrefix}输出字节`, bytes);
-          this.prof.add(`${this.profPrefix}宿主输出解析`, Date.now() - profParseT0);
+          this.prof.count(logT('{0}output bytes', this.profPrefix), bytes);
+          this.prof.add(logT('{0}host output parsing', this.profPrefix), Date.now() - profParseT0);
         }
         const success = code !== null && code >= 0 && code <= this.compiler.switches.statusSuccess;
         resolve(success);
       });
       proc.on('error', (err) => {
         options.cancel?.unregister(proc);
-        this.output.error(`[Code::Blocks] ${msg('无法执行', 'Failed to execute')}: ${err.message}`);
+        this.output.error(`[Code::Blocks] ${logT('Failed to execute')}: ${err.message}`);
         resolve(false);
       });
     });

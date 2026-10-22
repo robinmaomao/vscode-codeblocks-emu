@@ -6,6 +6,7 @@
  */
 import * as vscode from 'vscode';
 import * as path from 'path';
+import * as i18n from '../i18n';
 import { SymbolIndex, SymbolEntry } from '../tools/codeCompletion';
 
 /** 符号分组类别 */
@@ -18,11 +19,11 @@ interface GroupDef {
 }
 
 const GROUPS: GroupDef[] = [
-  { kind: 'function', label: '函数', icon: 'symbol-function' },
-  { kind: 'macro', label: '宏', icon: 'symbol-constant' },
-  { kind: 'type', label: '类型', icon: 'symbol-struct' },
-  { kind: 'variable', label: '变量', icon: 'symbol-variable' },
-  { kind: 'other', label: '其它', icon: 'symbol-misc' },
+  { kind: 'function', label: i18n.t('Functions'), icon: 'symbol-function' },
+  { kind: 'macro', label: i18n.t('Macros'), icon: 'symbol-constant' },
+  { kind: 'type', label: i18n.t('Types'), icon: 'symbol-struct' },
+  { kind: 'variable', label: i18n.t('Variables'), icon: 'symbol-variable' },
+  { kind: 'other', label: i18n.t('Other'), icon: 'symbol-misc' },
 ];
 
 function groupOf(e: SymbolEntry): SymbolGroupKind {
@@ -126,7 +127,7 @@ export class SymbolTreeProvider implements vscode.TreeDataProvider<SymbolNode> {
     node.tooltip = e.detail ? `${e.detail}\n${e.file}:${e.line}` : `${e.file}:${e.line}`;
     node.command = {
       command: 'vscode.open',
-      title: '打开符号定义',
+      title: i18n.t('Open symbol definition'),
       arguments: [
         vscode.Uri.file(e.file),
         { selection: new vscode.Range(e.line - 1, 0, e.line - 1, 0), preview: true },

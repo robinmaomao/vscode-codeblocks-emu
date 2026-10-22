@@ -24,6 +24,7 @@ import {
 import { fileTypeOf, defaultCompilerVar, defaultCompile, defaultLink } from './fileTypes';
 import { upperDrive } from '../tools/pathCase';
 import { LruCache } from '../tools/lru';
+import * as i18n from '../i18n';
 
 /** XML 解析结果缓存条目 */
 interface XmlCacheEntry {
@@ -49,8 +50,8 @@ function parseXmlText(parser: XMLParser, raw: string): any {
   const validity = XMLValidator.validate(raw);
   if (validity !== true) {
     const err = validity.err;
-    const at = err && err.line ? `，第 ${err.line} 行` : '';
-    throw new Error(`不是有效的 .cbp 文件：XML 结构错误（${(err && err.msg) || '未知'}${at}）`);
+    const at = err && err.line ? i18n.t(', line {0}', err.line) : '';
+    throw new Error(i18n.t('Not a valid .cbp file: malformed XML ({0}{1})', (err && err.msg) || i18n.t('unknown'), at));
   }
   return parser.parse(raw);
 }
@@ -198,7 +199,7 @@ export class ProjectParser {
     const result = parseXmlCached(filename, this.parser, projectXmlCache);
 
     const root = result.CodeBlocks_project_file;
-    if (!root) throw new Error('不是有效的 .cbp 文件：缺少 <CodeBlocks_project_file> 根节点');
+    if (!root) throw new Error(i18n.t('Not a valid .cbp file: missing the <CodeBlocks_project_file> root node'));
 
     const basePath = path.dirname(filename);
     const project: Project = {
@@ -788,7 +789,7 @@ export class WorkspaceParser {
   parse(filename: string): Workspace {
     const result = parseXmlCached(filename, this.parser, workspaceXmlCache);
     const root = result.CodeBlocks_workspace_file;
-    if (!root) throw new Error('不是有效的 .workspace 文件');
+    if (!root) throw new Error(i18n.t('Not a valid .workspace file'));
 
     const basePath = path.dirname(filename);
     const ws: Workspace = {

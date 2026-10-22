@@ -5,11 +5,13 @@
  * 基于 Map 的插入顺序实现：get 命中时 delete + set 把条目移到末尾（最新），
  * 因此 Map 第一个 key 即最久未使用项。
  */
+import * as i18n from '../i18n';
+
 export class LruCache<K, V> {
   private map = new Map<K, V>();
 
   constructor(private readonly capacity: number) {
-    if (capacity < 1) throw new Error('LruCache 容量必须 ≥ 1');
+    if (capacity < 1) throw new Error(i18n.t('LruCache capacity must be ≥ 1'));
   }
 
   get(key: K): V | undefined {

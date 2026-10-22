@@ -334,7 +334,7 @@ check('dist 监听 codeblocks.clangd 设置变化（自动重新生成，免重�
 check('dist 监听编译器设置变化（G1：状态栏刷新 + 按新编译器重生成，免重开工程）',
   ["'codeblocks.compilerId'", "'codeblocks.masterPath'", "'codeblocks.compilerPrograms'"]
     .every((k) => ext.includes(`affectsConfiguration(${k})`))
-  && ext.includes('编译器设置已变更，按新编译器重新生成 clangd 编译数据库')
+  && ext.includes('Compiler settings changed; regenerating the clangd compile database')
   && ext.includes('updateCompilerStatusBar();'), null);
 check('dist 编译器设置变化后无条件重启 clangd（restartClangdReason = compiler 不走开关）',
   ext.includes("restartClangdReason = 'compiler'") && ext.includes("restartReason === 'compiler'"), null);
@@ -342,7 +342,7 @@ check('dist 含 build.persistLog 变更重载提示（G3）',
   ext.includes('promptReloadForPersistLog') && ext.includes('workbench.action.reloadWindow'), null);
 check('dist 含 clangd.enabled 关闭遗留片段提示（G4）',
   ext.includes('promptClangdDisabledLeftover')
-  && ext.includes('打开 clangd 配置')
+  && ext.includes('Open clangd Config')
   && /listManagedFragments\)\(\(0, clangd_\d+\.readClangdUserConfigText\)\(\)\)/.test(ext)
   && ext.includes('clangdEnabledLast'), null);
 check('dist 含字符串数组设置容错读取（readStringArraySetting）', ext.includes('readStringArraySetting'), null);

@@ -7,6 +7,7 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
+import * as i18n from '../i18n';
 import { Project, ProjectFile } from '../model/types';
 import { upperDrive } from '../tools/pathCase';
 import { LruCache } from '../tools/lru';
@@ -40,7 +41,7 @@ class TreeNode extends vscode.TreeItem {
     if (kind === 'file') {
       this.command = {
         command: 'vscode.open',
-        title: '打开文件',
+        title: i18n.t('Open file'),
         arguments: [resourceUri],
       };
       // contextValue 编码 compile/link 状态，供右键菜单区分勾选状态
@@ -52,7 +53,7 @@ class TreeNode extends vscode.TreeItem {
       this.contextValue = 'project';
       this.command = {
         command: 'codeblocks.setActiveProject',
-        title: '设为活动项目',
+        title: i18n.t('Set as active project'),
         arguments: [project?.filename],
       };
     }
@@ -286,7 +287,7 @@ export class ProjectTreeProvider implements vscode.TreeDataProvider<TreeNode> {
       node.iconPath = kind === 'virtualFolder'
         ? (this.iconUri('vfolder.svg') ?? new vscode.ThemeIcon('folder-library'))
         : (this.iconUri('folder.svg') ?? new vscode.ThemeIcon('folder'));
-      node.tooltip = kind === 'virtualFolder' ? `虚拟文件夹: ${dirKey}` : dirKey;
+      node.tooltip = kind === 'virtualFolder' ? i18n.t('Virtual folder: {0}', dirKey) : dirKey;
       node.contextValue = kind === 'virtualFolder' ? 'virtualFolder' : 'folder';
       node.dirKey = dirKey;
       node.scopeKey = scopeKey;
@@ -302,7 +303,7 @@ export class ProjectTreeProvider implements vscode.TreeDataProvider<TreeNode> {
     if (!node) {
       node = new TreeNode(name, vscode.TreeItemCollapsibleState.Collapsed, 'fileGroup', project);
       node.iconPath = this.iconUri('vfolder.svg') ?? new vscode.ThemeIcon('folder-library');
-      node.tooltip = `文件分组: ${name}`;
+      node.tooltip = i18n.t('File group: {0}', name);
       node.contextValue = 'fileGroup';
       node.scopeKey = `group:${name}`;
       this.nodeCache.set(key, node);
@@ -627,16 +628,16 @@ export class ProjectTreeProvider implements vscode.TreeDataProvider<TreeNode> {
     if (!allTitles.length) return;
     const belongs = f.buildTargets.filter((t) => allTitles.includes(t));
     if (missing) {
-      node.description = '缺失'; // 对应 ProjectFile::fvsMissing
+      node.description = i18n.t('Missing'); // 对应 ProjectFile::fvsMissing
     } else if (belongs.length === 0) {
-      node.description = '（未归属任何目标）';
+      node.description = i18n.t('(not in any target)');
     } else if (belongs.length < allTitles.length) {
       node.description = belongs.join(', ');
     } else {
       node.description = undefined; // 全目标归属：无描述（含异步复查后从「缺失」恢复的场景）
     }
     if (belongs.length) {
-      node.tooltip = `目标: ${belongs.join(', ')}`;
+      node.tooltip = i18n.t('Targets: {0}', belongs.join(', '));
     }
   }
 

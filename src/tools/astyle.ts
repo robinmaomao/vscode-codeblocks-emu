@@ -8,6 +8,7 @@ import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
 import { spawn } from 'child_process';
+import * as i18n from '../i18n';
 
 /** 定位 astyle 可执行文件 */
 export function locateAstyle(): string | null {
@@ -76,13 +77,13 @@ export async function formatActiveDocument(): Promise<void> {
     await editor.edit((editBuilder) => {
       editBuilder.replace(fullRange, formatted);
     });
-    vscode.window.showInformationMessage('已用 AStyle 格式化');
+    vscode.window.showInformationMessage(i18n.t('Formatted with AStyle'));
   } else if (formatted === null) {
     // 回退：VS Code 内置格式化
     try {
       await vscode.commands.executeCommand('editor.action.formatDocument');
     } catch {
-      vscode.window.showWarningMessage('未找到 AStyle，且内置格式化不可用');
+      vscode.window.showWarningMessage(i18n.t('Cannot find AStyle, and the built-in formatter is unavailable'));
     }
   }
 }

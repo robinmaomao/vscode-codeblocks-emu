@@ -15,6 +15,7 @@
  * `/c` 改写成 `C:\`，导致目录创建失败（缺陷 D-06，CI runner 已复现）。
  */
 import * as path from 'path';
+import { logT } from './logLang';
 
 export interface MakefileTargetData {
   targetTitle: string;
@@ -61,17 +62,17 @@ export function generateMakefile(opts: MakefileExportOptions): string {
     return win ? `cmd /c if not exist "${w}" mkdir "${w}"` : `mkdir -p "${dir}"`;
   };
   const rmCmd = (p: string): string => (win ? `-cmd /c del /q "${p.replace(/\//g, '\\')}"` : `-rm -f "${p}"`);
-  L.push('# Code::Blocks Makefile 导出（自动生成，勿手工编辑）');
-  L.push(`# 工程: ${opts.projectTitle}（${opts.projectFile}）`);
-  L.push(`# 生成时间: ${opts.generatedAt}`);
+  L.push(logT('# Code::Blocks Makefile export (auto-generated, do not edit by hand)'));
+  L.push(logT('# Project: {0} ({1})', opts.projectTitle, opts.projectFile));
+  L.push(logT('# Generated at: {0}', opts.generatedAt));
   L.push('#');
-  L.push('# 用法: mingw32-make -f <本文件> [all | <目标输出> | clean]');
-  L.push('# 说明: 命令为 Code::Blocks 展开后的字面量；头文件依赖未跟踪，强制全量重建请用 make -B。');
+  L.push(logT('# Usage: mingw32-make -f <this file> [all | <target output> | clean]'));
+  L.push(logT('# Note: the commands are the literals expanded by Code::Blocks; header dependencies are not tracked, use make -B to force a full rebuild.'));
   L.push('');
   if (win) {
     // 显式固定 make 的 SHELL：否则 PATH 中一旦存在 sh.exe（Git/MSYS），make 会用 sh 执行 `cmd /c …` 配方，
     // MSYS 把 `/c` 改写为 `C:\` ⇒ 目录创建/删除失效（缺陷 D-06）
-    L.push('# 固定 shell 为 cmd.exe：Windows 配方使用 `cmd /c`，若 make 改用 sh 会因 MSYS 路径改写而失效');
+    L.push(logT('# Shell is fixed to cmd.exe: the Windows recipe uses `cmd /c`; if make switches to sh it breaks because MSYS rewrites the paths'));
     L.push('SHELL := cmd.exe');
     L.push('');
   }

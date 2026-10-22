@@ -36,6 +36,11 @@ function isI18nCall(node) {
   return ts.isPropertyAccessExpression(e) && ts.isIdentifier(e.expression) && e.expression.text === 'i18n' && e.name.text === 't';
 }
 
+/** 是否是 logT(...) 调用（构建日志文案；`log.english=true` 恒英文，否则跟随 ui.language） */
+function isLogCall(node) {
+  return ts.isCallExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === 'logT';
+}
+
 const calls = [];
 const dynamicTemplates = [];
 for (const file of files) {
@@ -44,7 +49,7 @@ for (const file of files) {
   const text = fs.readFileSync(file, 'utf-8');
   const sf = ts.createSourceFile(file, text, ts.ScriptTarget.ES2020, true, ts.ScriptKind.TS);
   const visit = (node) => {
-    if (isI18nCall(node)) {
+    if (isI18nCall(node) || isLogCall(node)) {
       const arg = node.arguments[0];
       const line = sf.getLineAndCharacterOfPosition(node.getStart(sf)).line + 1;
       if (arg && (ts.isStringLiteral(arg) || ts.isNoSubstitutionTemplateLiteral(arg))) {
@@ -98,9 +103,10 @@ const sameAsEnglish = Object.entries(dict)
 check('S3 词条值不得与英文源串完全相同（专名白名单豁免）', sameAsEnglish.length === 0, sameAsEnglish.slice(0, 10));
 
 const noCjk = Object.entries(dict)
-  .filter(([k, v]) => !/[\u4e00-\u9fff]/.test(v) && !NO_CJK_OK.has(k))
+  // 允许：专名白名单；或值里含中文标点（如「｜」「；」，纯分隔符词条本身无汉字）
+  .filter(([k, v]) => !/[\u4e00-\u9fff]/.test(v) && !NO_CJK_OK.has(k) && !/[\u3000-\u303f\uff00-\uffef]/.test(v))
   .map(([k, v]) => `${k} → ${v}`);
-check('S4 词条值应含中文（专名白名单豁免）', noCjk.length === 0, noCjk.slice(0, 10));
+check('S4 词条值应含中文（专名白名单与中文标点豁免）', noCjk.length === 0, noCjk.slice(0, 10));
 
 // ---- 4. 孤儿键（词条未被任何调用点引用） ----
 const used = new Set(allSources);
@@ -121,6 +127,23 @@ for (const [k, v] of Object.entries(dict)) {
   if (idxOf(k).join(',') !== idxOf(v).join(',')) mismatch.push(`${k}  →  ${v}`);
 }
 check('S7 词条占位符集合 == 英文源串占位符集合', mismatch.length === 0, mismatch.slice(0, 10));
+
+// ---- 5b. 构建日志：build/** 不得再直接调用 msg(zh, en)（统一走 logT(英文源串)） ----
+const msgLeft = [];
+for (const file of files) {
+  const rel = path.relative(SRC, file).replace(/\\/g, '/');
+  if (!rel.startsWith('build/') || rel === 'build/logLang.ts') continue;
+  const text = fs.readFileSync(file, 'utf-8');
+  const sf = ts.createSourceFile(file, text, ts.ScriptTarget.ES2020, true, ts.ScriptKind.TS);
+  const visit = (node) => {
+    if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === 'msg') {
+      msgLeft.push(`${rel}:${sf.getLineAndCharacterOfPosition(node.getStart(sf)).line + 1}`);
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(sf);
+}
+check('S8b build/** 不再直接调用 msg()（改用 logT）', msgLeft.length === 0, msgLeft.slice(0, 10));
 
 check('S8 消息模板不得内插 ${}（用 {N} 占位符 + 独立实参）', dynamicTemplates.length === 0,
   dynamicTemplates.map((d) => `${d.rel}:${d.line} ${d.source.slice(0, 40)}`).slice(0, 10));

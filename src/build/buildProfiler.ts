@@ -9,6 +9,7 @@
  * - 数据仅驻留内存，构建结束时由 BuildEngine.emitBuildProfile() 渲染为输出通道的 `[profile]` 块；
  * - 键名约定 `'<组>/<相位>'`：组为空 = 全局；`'项目/…'` = 项目级；`'<目标名>/…'` = 目标级。
  */
+import { logT } from './logLang';
 
 /** 单条时序/计数条目（插入顺序即渲染顺序） */
 interface ProfileEntry {
@@ -102,13 +103,13 @@ export class BuildProfiler {
       const i = e.key.indexOf('/');
       const group = i < 0 ? '' : e.key.slice(0, i);
       const name = i < 0 ? e.key : e.key.slice(i + 1);
-      rows.push({ group, name, value: `${e.ms.toFixed(1)} ms${e.count > 1 ? `（×${e.count}）` : ''}` });
+      rows.push({ group, name, value: `${e.ms.toFixed(1)} ms${e.count > 1 ? logT('(×{0})', e.count) : ''}` });
     }
     for (const [key, n] of this.counters) {
       const i = key.indexOf('/');
       const group = i < 0 ? '' : key.slice(0, i);
       const name = i < 0 ? key : key.slice(i + 1);
-      rows.push({ group, name, value: name.includes('字节') ? formatBytes(n) : String(n) });
+      rows.push({ group, name, value: name.includes(logT('bytes')) ? formatBytes(n) : String(n) });
     }
     const groups = new Map<string, Row[]>();
     for (const r of rows) {
@@ -116,7 +117,7 @@ export class BuildProfiler {
       if (list) list.push(r);
       else groups.set(r.group, [r]);
     }
-    const out: string[] = ['构建阶段计时（CB_BUILD_PROFILE=1）'];
+    const out: string[] = [logT('Build phase timings (CB_BUILD_PROFILE=1)')];
     const orderedGroups = [...groups.keys()].sort((a, b) => (a === '' ? -1 : b === '' ? 1 : 0));
     for (const g of orderedGroups) {
       if (g) out.push(`── ${g} ──`);

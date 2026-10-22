@@ -16,7 +16,7 @@ import { getWindowsSystemPath } from '../tools/windowsPath';
 import { upperDrive } from '../tools/pathCase';
 import { BuildCancelHandle, killProcessTree, reapOrphans, snapshotDescendantPids } from './cancelToken';
 import { replaceCbMacros } from '../compiler/cbMacros';
-import { buildLogPrefs } from './logLang';
+import { buildLogPrefs, logT } from './logLang';
 
 /** 展开命令中的宏（Code::Blocks 变量风格） */
 export function expandMacros(cmd: string, vars: Record<string, string>): string {
@@ -354,8 +354,8 @@ export async function runScriptCommands(
         heartbeatCount++;
         const secs = ((Date.now() - t0) / 1000).toFixed(0);
         onLog(heartbeatCount === 1
-          ? `  ${numbered} 仍在运行 (${secs}s)…（若是网络盘/服务等待：可在脚本内设置超时，或点「停止构建」终止）`
-          : `  ${numbered} 仍在运行 (${secs}s)…`);
+          ? logT('  {0} still running ({1}s)… (if waiting on a network drive/service: set a timeout inside the script, or click "Stop Build" to terminate)', numbered, secs)
+          : logT('  {0} still running ({1}s)…', numbered, secs));
       }, SCRIPT_HEARTBEAT_MS);
       heartbeatTimer.unref?.();
     }
@@ -369,13 +369,13 @@ export async function runScriptCommands(
     // 可诊断性（plainCbLog 模式保持纯 CB 输出）：超时 / 后台进程 / 慢命令各给一行说明
     if (enhanced) {
       if (r.timedOut) {
-        onLog(`  ${numbered} 超时（${(elapsed / 1000).toFixed(1)}s > ${(scriptCommandTimeoutMs() / 1000).toFixed(1)}s），已终止该命令`);
+        onLog(logT('  {0} timed out ({1}s > {2}s), the command was terminated', numbered, (elapsed / 1000).toFixed(1), (scriptCommandTimeoutMs() / 1000).toFixed(1)));
       }
       if (r.trailingBackground) {
-        onLog(`  ${numbered} 后台进程仍在运行（不阻塞构建；如需等待请改用前台命令或 start /wait）`);
+        onLog(logT('  {0} background process is still running (it does not block the build; use a foreground command or start /wait if you want to wait)', numbered));
       }
       if (elapsed >= SCRIPT_SLOW_HINT_MS) {
-        onLog(`  ${numbered} 耗时 ${(elapsed / 1000).toFixed(1)}s（命令自身运行时）`);
+        onLog(logT('  {0} took {1}s (the command\'s own runtime)', numbered, (elapsed / 1000).toFixed(1)));
       }
     }
     if (!r.success) ok = false;

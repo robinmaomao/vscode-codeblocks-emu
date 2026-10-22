@@ -7,6 +7,7 @@
  */
 import * as vscode from 'vscode';
 import * as path from 'path';
+import * as i18n from '../i18n';
 
 /** 诊断严重程度（仅收集 error/warning，info 噪音大不展示） */
 export type BuildLogSeverity = 'error' | 'warning';
@@ -196,12 +197,12 @@ export class BuildLogTreeProvider implements vscode.TreeDataProvider<BuildLogNod
   private buildRootNode(s: BuildLogSummary): BuildLogNode {
     const node = new BuildLogNode(
       'root',
-      s.success ? '构建成功' : '构建失败',
+      s.success ? i18n.t('Build succeeded') : i18n.t('Build failed'),
       vscode.TreeItemCollapsibleState.Expanded,
       s.success ? this.icon('log-success.svg', 'check') : this.icon('log-error.svg', 'error'),
     );
-    const start = s.startTime !== undefined ? `开始 ${formatTime(s.startTime)} · ` : '';
-    node.description = `${start}用时 ${(s.durationMs / 1000).toFixed(1)}s · ${s.errorCount} 错误 · ${s.warningCount} 警告${s.truncated ? '（已截断）' : ''}`;
+    const start = s.startTime !== undefined ? i18n.t('Started {0} · ', formatTime(s.startTime)) : '';
+    node.description = i18n.t('{0}took {1}s · {2} errors · {3} warnings{4}', start, (s.durationMs / 1000).toFixed(1), s.errorCount, s.warningCount, s.truncated ? i18n.t('(truncated)') : '');
     node.tooltip = node.description;
     node.children = s.projects.map((p) => this.buildProjectNode(p));
     return node;
@@ -216,8 +217,8 @@ export class BuildLogTreeProvider implements vscode.TreeDataProvider<BuildLogNod
     );
     const errCount = p.diagnostics.filter((d) => d.severity === 'error').length;
     node.errorCount = errCount;
-    node.description = `${p.targetName} · ${p.success ? '成功' : '失败'} · ${(p.durationMs / 1000).toFixed(1)}s`;
-    node.tooltip = `${p.projectName} · 目标 ${p.targetName}`;
+    node.description = `${p.targetName} · ${p.success ? i18n.t('Succeeded') : i18n.t('Failed')} · ${(p.durationMs / 1000).toFixed(1)}s`;
+    node.tooltip = i18n.t('{0} · target {1}', p.projectName, p.targetName);
 
     const children: BuildLogNode[] = [];
 
@@ -226,7 +227,7 @@ export class BuildLogTreeProvider implements vscode.TreeDataProvider<BuildLogNod
       const errors = p.diagnostics.filter((d) => d.severity === 'error');
       const errorGroup = new BuildLogNode(
         'group',
-        `错误 (${errors.length})`,
+        i18n.t('Errors ({0})', errors.length),
         errors.length > 0 ? vscode.TreeItemCollapsibleState.Expanded : vscode.TreeItemCollapsibleState.None,
         this.icon('log-error.svg', 'error'),
       );
@@ -243,7 +244,7 @@ export class BuildLogTreeProvider implements vscode.TreeDataProvider<BuildLogNod
     // 编译统计
     const statsNode = new BuildLogNode(
       'info',
-      `编译 ${p.compiledCount} · 跳过 ${p.skippedCount} · 失败 ${p.failedCount}`,
+      i18n.t('Compiled {0} · skipped {1} · failed {2}', p.compiledCount, p.skippedCount, p.failedCount),
       vscode.TreeItemCollapsibleState.None,
       this.icon('log-stats.svg', 'file-code'),
     );
@@ -253,7 +254,7 @@ export class BuildLogTreeProvider implements vscode.TreeDataProvider<BuildLogNod
     if (!p.linkSkipped) {
       const linkNode = new BuildLogNode(
         'info',
-        p.linkSuccess ? '链接成功' : '链接失败',
+        p.linkSuccess ? i18n.t('Link succeeded') : i18n.t('Link failed'),
         vscode.TreeItemCollapsibleState.None,
         p.linkSuccess ? this.icon('log-link.svg', 'link') : this.icon('log-error.svg', 'error'),
       );
@@ -267,7 +268,7 @@ export class BuildLogTreeProvider implements vscode.TreeDataProvider<BuildLogNod
 
     const errorGroup = new BuildLogNode(
       'group',
-      `错误 (${errors.length})`,
+      i18n.t('Errors ({0})', errors.length),
       errors.length > 0 ? vscode.TreeItemCollapsibleState.Expanded : vscode.TreeItemCollapsibleState.None,
       this.icon('log-error.svg', 'error'),
     );
@@ -276,7 +277,7 @@ export class BuildLogTreeProvider implements vscode.TreeDataProvider<BuildLogNod
 
     const warningGroup = new BuildLogNode(
       'group',
-      `警告 (${warnings.length})`,
+      i18n.t('Warnings ({0})', warnings.length),
       warnings.length > 0 ? vscode.TreeItemCollapsibleState.Collapsed : vscode.TreeItemCollapsibleState.None,
       this.icon('log-warning.svg', 'warning'),
     );
@@ -326,7 +327,7 @@ export class BuildLogTreeProvider implements vscode.TreeDataProvider<BuildLogNod
       const range = new vscode.Range(line0, col0, line0, col0);
       node.command = {
         command: 'vscode.open',
-        title: '打开文件',
+        title: i18n.t('Open file'),
         arguments: [vscode.Uri.file(d.file), { selection: range, preview: true }],
       };
     }

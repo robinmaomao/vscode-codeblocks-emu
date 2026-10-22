@@ -11,6 +11,8 @@
  */
 
 /** 单条键位定义（任意来源） */
+import * as i18n from '../i18n';
+
 export interface KeybindingDef {
   key: string;
   command: string;
@@ -39,22 +41,22 @@ export const CB_STYLE_WHEN = 'config.codeblocks.keybindings.cbStyle';
 
 /** VS Code 默认冲突表（key = 归一化键位；severity=info 表示上下文受限、真实冲突概率低） */
 export const VSCODE_DEFAULT_CONFLICTS: Record<string, { command: string; note: string; severity?: 'high' | 'info' }[]> = {
-  'f9': [{ command: 'editor.debug.action.toggleBreakpoint', note: 'VS Code 默认：切换断点', severity: 'high' }],
-  'f8': [{ command: 'editor.action.marker.nextInFiles', note: 'VS Code 默认：下一错误/警告（Shift+F8 为上一个）', severity: 'high' }],
-  'shift+f8': [{ command: 'editor.action.marker.prevInFiles', note: 'VS Code 默认：上一错误/警告', severity: 'high' }],
-  'f5': [{ command: 'workbench.action.debug.start / debug.continue', note: 'VS Code 默认：启动/继续调试', severity: 'high' }],
-  'f2': [{ command: 'editor.action.rename', note: 'VS Code 默认：重命名符号', severity: 'high' }],
-  'f12': [{ command: 'editor.action.revealDefinition', note: 'VS Code 默认：转到定义', severity: 'high' }],
-  'shift+f12': [{ command: 'editor.action.goToReferences', note: 'VS Code 默认：查找所有引用', severity: 'high' }],
-  'ctrl+r': [{ command: 'workbench.action.openRecent', note: 'VS Code 默认：打开最近', severity: 'high' }],
-  'ctrl+shift+b': [{ command: 'workbench.action.tasks.build', note: 'VS Code 默认：运行生成任务', severity: 'high' }],
-  'ctrl+shift+c': [{ command: 'workbench.action.terminal.openNativeConsole', note: 'VS Code 默认：打开新命令行', severity: 'high' }],
-  'ctrl+q': [{ command: 'workbench.action.quickOpenView', note: 'VS Code 默认：快速打开视图', severity: 'high' }],
-  'ctrl+shift+s': [{ command: 'workbench.action.files.saveAs', note: 'VS Code 默认：另存为', severity: 'high' }],
-  'ctrl+shift+r': [{ command: 'rerunSearchEditorSearch', note: '仅 Search Editor 内生效；扩展绑定以 !inSearchEditor 规避', severity: 'info' }],
-  'f4': [{ command: 'search.action.focusNextSearchResult', note: '仅搜索视图聚焦时生效；扩展绑定为 editorTextFocus，上下文不重叠', severity: 'info' }],
-  'shift+f4': [{ command: 'search.action.focusPreviousSearchResult', note: '仅搜索视图聚焦时生效；上下文不重叠', severity: 'info' }],
-  'ctrl+e': [{ command: '(未见官方默认表)', note: '官方默认表未列出；若有其他绑定将被检测命令报告', severity: 'info' }],
+  'f9': [{ command: 'editor.debug.action.toggleBreakpoint', note: i18n.t('VS Code default: Toggle breakpoint'), severity: 'high' }],
+  'f8': [{ command: 'editor.action.marker.nextInFiles', note: i18n.t('VS Code default: Next error/warning (Shift+F8 for the previous one)'), severity: 'high' }],
+  'shift+f8': [{ command: 'editor.action.marker.prevInFiles', note: i18n.t('VS Code default: Previous error/warning'), severity: 'high' }],
+  'f5': [{ command: 'workbench.action.debug.start / debug.continue', note: i18n.t('VS Code default: Start/Continue debugging'), severity: 'high' }],
+  'f2': [{ command: 'editor.action.rename', note: i18n.t('VS Code default: Rename Symbol'), severity: 'high' }],
+  'f12': [{ command: 'editor.action.revealDefinition', note: i18n.t('VS Code default: Go to Definition'), severity: 'high' }],
+  'shift+f12': [{ command: 'editor.action.goToReferences', note: i18n.t('VS Code default: Go to References'), severity: 'high' }],
+  'ctrl+r': [{ command: 'workbench.action.openRecent', note: i18n.t('VS Code default: Open Recent'), severity: 'high' }],
+  'ctrl+shift+b': [{ command: 'workbench.action.tasks.build', note: i18n.t('VS Code default: Run Build Task'), severity: 'high' }],
+  'ctrl+shift+c': [{ command: 'workbench.action.terminal.openNativeConsole', note: i18n.t('VS Code default: Open New Terminal'), severity: 'high' }],
+  'ctrl+q': [{ command: 'workbench.action.quickOpenView', note: i18n.t('VS Code default: Quick Open View'), severity: 'high' }],
+  'ctrl+shift+s': [{ command: 'workbench.action.files.saveAs', note: i18n.t('VS Code default: Save As'), severity: 'high' }],
+  'ctrl+shift+r': [{ command: 'rerunSearchEditorSearch', note: i18n.t('Applies only inside the Search Editor; the extension binding avoids it with !inSearchEditor'), severity: 'info' }],
+  'f4': [{ command: 'search.action.focusNextSearchResult', note: i18n.t('Applies only when the Search view is focused; the extension binds to editorTextFocus, so contexts do not overlap'), severity: 'info' }],
+  'shift+f4': [{ command: 'search.action.focusPreviousSearchResult', note: i18n.t('Applies only when the Search view is focused; contexts do not overlap'), severity: 'info' }],
+  'ctrl+e': [{ command: i18n.t('(not listed in the official default table)'), note: i18n.t('Not listed in the official default table; any other binding will be reported by the detection command'), severity: 'info' }],
 };
 
 /** 键位归一化：小写 + 压缩空白（空格是 cord 分隔符，需保留单空格） */
@@ -94,8 +96,8 @@ export function parseJsonc(text: string): unknown {
   return JSON.parse(out.replace(/,\s*([}\]])/g, '$1'));
 }
 
-const USER_SOURCE = '用户 keybindings.json';
-const DEFAULT_SOURCE = 'VS Code 默认';
+const USER_SOURCE = i18n.t('User keybindings.json');
+const DEFAULT_SOURCE = i18n.t('VS Code default');
 
 /** 汇总冲突：own = 扩展自身键位；user = 用户；others = 其他扩展 */
 export function collectConflicts(
@@ -142,7 +144,7 @@ export function collectConflicts(
       gated,
       findings,
       level,
-      note: defaults.map((d) => d.note).join('；') || undefined,
+      note: defaults.map((d) => d.note).join(i18n.t('; ')) || undefined,
     });
   }
   return out;

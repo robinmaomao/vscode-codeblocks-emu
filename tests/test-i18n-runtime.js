@@ -20,9 +20,11 @@ check('A1 auto + zh-cn → zh-cn', core.resolveLanguage('auto', 'zh-cn') === 'zh
 check('A2 auto + zh-TW（大小写/地区）→ zh-cn', core.resolveLanguage('auto', 'zh-TW') === 'zh-cn', core.resolveLanguage('auto', 'zh-TW'));
 check('A3 auto + zh-hans → zh-cn', core.resolveLanguage('auto', 'zh-hans') === 'zh-cn', core.resolveLanguage('auto', 'zh-hans'));
 check('A4 auto + en → en', core.resolveLanguage('auto', 'en') === 'en', core.resolveLanguage('auto', 'en'));
-check('A5 auto + 空/undefined → en（英文为默认回退）',
-  core.resolveLanguage('auto', '') === 'en' && core.resolveLanguage('auto', undefined) === 'en',
+check('A5 auto + 空/undefined → zh-cn（无宿主/未知显示语言时保持中文基线）',
+  core.resolveLanguage('auto', '') === 'zh-cn' && core.resolveLanguage('auto', undefined) === 'zh-cn',
   [core.resolveLanguage('auto', ''), core.resolveLanguage('auto', undefined)]);
+check('A5b auto + 非中文显示语言（en/ja）→ en', core.resolveLanguage('auto', 'ja') === 'en' && core.resolveLanguage('auto', 'en-US') === 'en',
+  [core.resolveLanguage('auto', 'ja'), core.resolveLanguage('auto', 'en-US')]);
 check('A6 显式 en 覆盖中文显示语言', core.resolveLanguage('en', 'zh-cn') === 'en', core.resolveLanguage('en', 'zh-cn'));
 check('A7 显式 zh-cn 覆盖英文显示语言', core.resolveLanguage('zh-cn', 'en') === 'zh-cn', core.resolveLanguage('zh-cn', 'en'));
 check('A8 非法设置值按 auto 处理', core.resolveLanguage('jp', 'zh-cn') === 'zh-cn' && core.resolveLanguage(undefined, 'en') === 'en',

@@ -19,6 +19,7 @@
  */
 import * as fs from 'fs';
 import * as path from 'path';
+import * as i18n from '../i18n';
 
 /** 清单 schema 版本（后续格式变更时递增并做兼容判断） */
 export const TEMPLATE_SCHEMA = 1;
@@ -157,10 +158,10 @@ export function getUserTemplate(root: string, id: string): UserTemplateManifest 
  */
 export function saveAsUserTemplate(opts: SaveTemplateOptions): UserTemplateManifest {
   const name = String(opts.name ?? '').trim();
-  if (!name) throw new Error('模板名称不能为空');
+  if (!name) throw new Error(i18n.t('Template name cannot be empty'));
   const id = slugifyTemplateId(name);
   const tplDir = path.join(opts.root, id);
-  if (fs.existsSync(tplDir) && !opts.overwrite) throw new Error(`模板已存在：${name}（${id}）`);
+  if (fs.existsSync(tplDir) && !opts.overwrite) throw new Error(i18n.t('Template already exists: {0} ({1})', name, id));
 
   const xml = fs.readFileSync(opts.cbpPath, 'utf-8');
   const files: string[] = [];
@@ -216,8 +217,8 @@ export interface InstantiateResult {
 /** 校验新工程名（与新建向导同一口径） */
 export function isValidProjectName(name: string): string | undefined {
   const v = String(name ?? '');
-  if (!v.trim()) return '工程名不能为空';
-  if (/[<>:"/\\|?*\x00-\x1f]/.test(v)) return '工程名含非法字符';
+  if (!v.trim()) return i18n.t('Project name cannot be empty');
+  if (/[<>:"/\\|?*\x00-\x1f]/.test(v)) return i18n.t('Project name contains invalid characters');
   return undefined;
 }
 
@@ -229,7 +230,7 @@ export function instantiateUserTemplate(
   basePath: string,
 ): InstantiateResult {
   const manifest = getUserTemplate(root, id);
-  if (!manifest) throw new Error(`模板不存在：${id}`);
+  if (!manifest) throw new Error(i18n.t('Template not found: {0}', id));
   const bad = isValidProjectName(newName);
   if (bad) throw new Error(bad);
   const name = newName.trim();
@@ -248,7 +249,7 @@ export function instantiateUserTemplate(
     copied++;
   }
   const cbpSrc = path.join(tplDir, manifest.cbp);
-  if (!fs.existsSync(cbpSrc)) throw new Error(`模板工程文件缺失：${manifest.cbp}`);
+  if (!fs.existsSync(cbpSrc)) throw new Error(i18n.t('Missing template project file: {0}', manifest.cbp));
   const cbpPath = path.join(projectDir, `${name}.cbp`);
   fs.writeFileSync(cbpPath, applyTemplateNameToXml(fs.readFileSync(cbpSrc, 'utf-8'), name), 'utf-8');
   return { manifest, projectDir, cbpPath, copiedFiles: copied, missingFiles: missing };

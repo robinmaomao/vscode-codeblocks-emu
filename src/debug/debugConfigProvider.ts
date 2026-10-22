@@ -17,6 +17,7 @@
  */
 import * as fs from 'fs';
 import * as vscode from 'vscode';
+import * as i18n from '../i18n';
 
 /** 推导结果：成功给出完整启动配置；失败给出可直接展示的中文错误文案 */
 export type DerivedLaunchConfig = { config: vscode.DebugConfiguration } | { error: string };
@@ -75,7 +76,7 @@ export function createDebugConfigurationProviders(host: DebugConfigProviderHost)
   async function provideConfigs(): Promise<vscode.DebugConfiguration[]> {
     const derived = await host.deriveLaunchConfig();
     if ('error' in derived) {
-      host.log?.(`调试配置推导失败：${derived.error}（回退到占位模板）`);
+      host.log?.(i18n.t('Failed to derive the debug configuration: {0} (falling back to the placeholder template)', derived.error));
       return [host.fallbackLaunchConfig()];
     }
     return [derived.config];
@@ -109,13 +110,13 @@ export function createDebugConfigurationProviders(host: DebugConfigProviderHost)
       if (program && exists(program)) return config;
       const derived = await host.deriveLaunchConfig();
       if ('error' in derived) {
-        host.log?.(`program 不存在（${program || '未设置'}）且无法从活动工程推导，交由调试适配器处理`);
+        host.log?.(i18n.t('program does not exist ({0}) and cannot be derived from the active project; leaving it to the debug adapter', program || i18n.t('not set')));
         return config;
       }
       const next: vscode.DebugConfiguration = { ...config, program: derived.config.program };
       if (!next.cwd) next.cwd = derived.config.cwd;
       if (!next.gdbPath) next.gdbPath = derived.config.gdbPath;
-      host.log?.(`program 不存在（${program || '未设置'}）→ 已回退到活动工程目标输出：${derived.config.program}`);
+      host.log?.(i18n.t('program does not exist ({0}) → fell back to the active project target output: {1}', program || i18n.t('not set'), derived.config.program));
       return next;
     },
   };

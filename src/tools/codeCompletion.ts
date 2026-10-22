@@ -7,6 +7,7 @@
  */
 import * as vscode from 'vscode';
 import * as fs from 'fs';
+import * as i18n from '../i18n';
 
 export interface SymbolEntry {
   name: string;
@@ -266,7 +267,7 @@ export class SymbolIndex {
           entries.push({
             name: vr[1],
             kind: vscode.CompletionItemKind.Variable,
-            detail: `${vr[1]} (变量)`,
+            detail: i18n.t('{0} (variable)', vr[1]),
             file,
             line: lineNo,
           });

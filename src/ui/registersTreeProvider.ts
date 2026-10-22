@@ -5,6 +5,7 @@
  * 运行中/无会话时显示占位说明；刷新由调试状态变化驱动（另有刷新命令）。
  */
 import * as vscode from 'vscode';
+import * as i18n from '../i18n';
 import { debugStateChanged, getActiveAdapter } from '../debug/debugRegistry';
 
 type RegNode = { name: string; value: string } | vscode.TreeItem;
@@ -60,11 +61,11 @@ export class RegistersTreeProvider implements vscode.TreeDataProvider<RegNode> {
   getChildren(): RegNode[] {
     const adapter = getActiveAdapter();
     if (!vscode.workspace.getConfiguration('codeblocks').get<boolean>('debug.registers', false)) {
-      return [placeholder('寄存器读取已禁用 — 在设置 codeblocks.debug.registers 中启用（部分 GDB 读取寄存器会崩溃）')];
+      return [placeholder(i18n.t('Register reading disabled — enable it in the codeblocks.debug.registers setting (some GDB builds crash when reading registers)'))];
     }
-    if (!adapter || !adapter.isActive()) return [placeholder('调试会话未启动（F8 开始调试）')];
-    if (!adapter.isStopped()) return [placeholder('目标运行中 — 中断后显示寄存器')];
-    if (!this.values.length) return [placeholder('寄存器不可用')];
+    if (!adapter || !adapter.isActive()) return [placeholder(i18n.t('Debug session not started (F8 to start debugging)'))];
+    if (!adapter.isStopped()) return [placeholder(i18n.t('Target is running — registers shown after interrupt'))];
+    if (!this.values.length) return [placeholder(i18n.t('Registers unavailable'))];
     return this.values;
   }
 }
