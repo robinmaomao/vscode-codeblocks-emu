@@ -91,6 +91,14 @@ fs.writeFileSync(path.join(cacheDir, 'ccache.exe'), 'x');
 check('缓存：文件出现但键未变 → 仍返回缓存值（性能语义）', resolveCompilerCachePathCached('ccache', '', 'win32', envA) === undefined, null);
 clearCompilerCacheResolveCache();
 check('缓存：主动失效后重探 → 命中', resolveCompilerCachePathCached('ccache', '', 'win32', envA) === path.resolve(path.join(cacheDir, 'ccache.exe')), null);
+// 反例：缓存的命中路径被删除（卸载/移动）→ 自动重扫，不返回失效路径
+fs.rmSync(path.join(cacheDir, 'ccache.exe'));
+check('缓存：命中路径消失 → 自动重扫为 undefined（不返回失效路径）',
+  resolveCompilerCachePathCached('ccache', '', 'win32', envA) === undefined, null);
+// 未命中负缓存沿用旧语义：文件重新出现但键未变 → 仍走缓存（由调用方 clear 后重探）
+fs.writeFileSync(path.join(cacheDir, 'ccache.exe'), 'x');
+check('缓存：未命中负缓存沿用旧语义（需 clear 才重探）',
+  resolveCompilerCachePathCached('ccache', '', 'win32', envA) === undefined, null);
 
 // ---- 5. 提示矩阵 ----
 const noFlags = { notFoundShown: false, missingShown: false, dontAsk: false };
@@ -127,6 +135,22 @@ check('安装信息：winget 命令/下载页/许可', COMPILER_CACHE_INSTALL.cc
   && COMPILER_CACHE_INSTALL.sccache.downloadUrl.startsWith('https://')
   && COMPILER_CACHE_INSTALL.ccache.license === 'GPL-3.0-or-later'
   && COMPILER_CACHE_INSTALL.sccache.license === 'Apache-2.0', COMPILER_CACHE_INSTALL);
+
+// ---- 7. POSIX 可执行位：无 x 位的同名普通文件不能当工具用（应视为「未找到」并回退原编译器） ----
+if (process.platform === 'win32') {
+  console.log('SKIP POSIX 可执行位（Windows 不适用）');
+} else {
+  const posixDir = path.join(tmp, 'posix');
+  fs.mkdirSync(posixDir, { recursive: true });
+  const plain = path.join(posixDir, 'ccache');
+  fs.writeFileSync(plain, 'not a program');
+  fs.chmodSync(plain, 0o644);
+  check('POSIX：无执行位 → 未找到（显式路径）', resolveCompilerCachePath('ccache', plain, 'linux', {}) === undefined, null);
+  check('POSIX：无执行位 → PATH 扫描也不命中', resolveCompilerCachePath('ccache', '', 'linux', { PATH: posixDir }) === undefined, null);
+  check('POSIX：目录（无执行位但对目录 X_OK 恒真）不会被当成工具', resolveCompilerCachePath('ccache', posixDir, 'linux', {}) === undefined, null);
+  fs.chmodSync(plain, 0o755);
+  check('POSIX：补上执行位 → 命中', resolveCompilerCachePath('ccache', plain, 'linux', {}) === path.resolve(plain), null);
+}
 
 console.log(`编译缓存模块回归: ${pass} pass, ${fail} fail`);
 process.exit(fail ? 1 : 0);

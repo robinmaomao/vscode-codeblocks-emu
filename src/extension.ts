@@ -44,7 +44,7 @@ import {
   CompilerCachePromptFlags,
   CompilerCacheTool,
   normalizeCompilerCacheKind,
-  parseToolVersion,
+  queryToolVersion,
   resolveCompilerCachePath,
 } from './build/compilerCache';
 import { createCbOutput, CbOutput } from './build/cbChannel';
@@ -63,7 +63,7 @@ import { OutputParser } from './build/outputParser';
 import { isCompilerUsable, renderInvalidCompilerMessage, renderTriedCompilerPaths, triedCompilerPaths } from './build/invalidCompiler';
 import { collectClangdEntries, writeClangdDatabase, CompileCommandEntry } from './build/compileCommands';
 import { DiagnosticPublisher } from './build/diagnosticPublisher';
-import { detectClangd, queryCompilerSystemIncludes, queryCompilerTarget, updateClangdUserConfig, clangdUserConfigPath, clearClangdDetectionCache, extraConfigWarnings, findStaleClangdFragments, listManagedFragments, cleanStaleClangdFragments, readClangdUserConfigText } from './tools/clangd';
+import { detectClangd, queryCompilerSystemIncludes, queryCompilerTarget, resolveCompilerProgram, updateClangdUserConfig, clangdUserConfigPath, clearClangdDetectionCache, extraConfigWarnings, findStaleClangdFragments, listManagedFragments, cleanStaleClangdFragments, readClangdUserConfigText, preferClangdSource } from './tools/clangd';
 import { SymbolIndex, registerFallbackIntelliSense } from './tools/codeCompletion';
 import { GdbDebugAdapter } from './debug/gdbDebugAdapter';
 import { debugStateChanged, getActiveAdapter, setDebugTraceEnabled, setDebugTraceSink } from './debug/debugRegistry';
@@ -134,6 +134,13 @@ let maxErrorsReached = false;
 let currentBuildCancel: BuildCancelSource | undefined;
 /** 构建进行中互斥标志（防止双开构建进程打架） */
 let buildInProgress = false;
+/**
+ * 构建期间被推迟的 clangd 重启（见 scheduleClangdRestart）。
+ * 构建中切换活动工程/改编译器会重建 compile_commands.json 并要求 clangd 重启；
+ * 若立刻重启，clangd 的整库重索引会与编译进程抢 CPU（用户反馈「构建时 CPU 100%」的叠加因素之一）。
+ * 延迟到构建结束再重启：索引峰值与编译峰值错开，DB 内容不变时（skipped）本就不会重启。
+ */
+let pendingClangdRestart = false;
 
 /** 底部状态栏构建目标项 */
 let targetStatusBar: vscode.StatusBarItem | undefined;
@@ -187,6 +194,36 @@ let clangdGenPendingInteractive = false;
 let restartClangdReason: 'project' | 'compiler' | undefined;
 /** clangd.enabled 的上次取值（只在「开 → 关」时提醒既有片段仍在生效，避免其它设置变更重复弹窗） */
 let clangdEnabledLast = true;
+
+/** clangd 扩展 ID（检测“是否接管 Problems 诊断”与扩展安装状态变化） */
+const CLANGD_EXTENSION_ID = 'llvm-vs-code-extensions.vscode-clangd';
+/** 上次看到的 clangd 扩展安装状态（用于只在状态真的变化时重新探测/重建） */
+let clangdExtensionPresent = false;
+
+/**
+ * 参与 clangd 用户配置 / 编译数据库生成的设置键（任一变化都需要重建）。
+ * 其余 `codeblocks.clangd.*` 键不改变产物，不应触发整库重建：
+ *  - buildLogDiagnostics：只决定 Build Log 展示来源
+ *  - restartOnActiveProjectSwitch：只决定切换工程时是否重启 clangd
+ *  - queryDriver：只影响输出通道的一次性提示
+ */
+const CLANGD_GENERATED_KEYS = [
+  'codeblocks.clangd.enabled',
+  'codeblocks.clangd.forcedIncludes',
+  'codeblocks.clangd.suppressedWarnings',
+  'codeblocks.clangd.suppressHeaderDiagnostics',
+  'codeblocks.clangd.unusedIncludes',
+  'codeblocks.clangd.headerInsertion',
+  'codeblocks.clangd.indexBackground',
+  'codeblocks.clangd.indexStandardLibrary',
+  'codeblocks.clangd.clangTidy',
+  'codeblocks.clangd.completionAllScopes',
+  'codeblocks.clangd.inlayHints',
+  'codeblocks.clangd.documentationCommentFormat',
+  'codeblocks.clangd.excludeDirs',
+  'codeblocks.clangd.builtinHeaders',
+  'codeblocks.clangd.extraConfig',
+] as const;
 /** 汇编注释动态覆盖的 Disposable（设置开启 `#` 时注册；释放后回退静态 `//`） */
 let asmCommentOverride: vscode.Disposable | undefined;
 
@@ -238,12 +275,29 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   context.subscriptions.push(vscode.workspace.onDidChangeConfiguration((e) => {
     if (e.affectsConfiguration('clangd.path')) clearClangdDetectionCache();
   }));
+  // clangd 扩展安装/启用/禁用/卸载：clangd 是否可用、是否接管 Problems 诊断都会变化 ⇒ 重新探测并按需重建。
+  // 扩展内「Download language server」不会写 clangd.path，只能靠这里及时生效。
+  clangdExtensionPresent = !!vscode.extensions.getExtension(CLANGD_EXTENSION_ID);
+  context.subscriptions.push(vscode.extensions.onDidChange(() => {
+    const now = !!vscode.extensions.getExtension(CLANGD_EXTENSION_ID);
+    if (now === clangdExtensionPresent) return;
+    clangdExtensionPresent = now;
+    clearClangdDetectionCache();
+    outputChannel.info(now
+      ? logT('[Code::Blocks] clangd extension installed/enabled; re-detecting and regenerating the compile database')
+      : logT('[Code::Blocks] clangd extension uninstalled/disabled; re-detecting and regenerating the compile database'));
+    if (openProjects.length) void generateClangdForWorkspace();
+  }));
   // clangd 用户配置（config.yaml 片段）由 codeblocks.clangd.* 设置驱动：变更后自动重新生成一次
   // （去抖合并；clangd 自己会重载 config.yaml），免去「改完设置还得重开工程/手动跑一次生成」的困惑。
   // 未打开工程时无从确定作用域 ⇒ 跳过，下次打开工程按新设置生成。
+  // 只影响展示/提示的键（buildLogDiagnostics / restartOnActiveProjectSwitch / queryDriver）不改变产物
+  // ⇒ 不触发整库重建（大工程重新收集编译命令代价高）；clangd 已关闭时也不生成（关闭已有 G4 提示）。
   context.subscriptions.push(vscode.workspace.onDidChangeConfiguration((e) => {
     if (!e.affectsConfiguration('codeblocks.clangd')) return;
     if (!openProjects.length) return;
+    if (!vscode.workspace.getConfiguration('codeblocks').get<boolean>('clangd.enabled', true)) return;
+    if (!CLANGD_GENERATED_KEYS.some((k) => e.affectsConfiguration(k))) return;
     outputChannel.info(logT('[Code::Blocks] codeblocks.clangd settings changed; regenerating the clangd user config from the new settings'));
     void generateClangdForWorkspace();
   }));
@@ -3196,6 +3250,27 @@ async function restartClangd(): Promise<void> {
 }
 
 /**
+ * 请求重启 clangd：构建进行中只登记，构建结束（flushPendingClangdRestart）再执行。
+ * 目的：避免 clangd 整库重索引与编译进程同时跑，拉高构建期 CPU 峰值。
+ */
+function scheduleClangdRestart(): void {
+  if (buildInProgress) {
+    pendingClangdRestart = true;
+    outputChannel.info(logT('[Code::Blocks] Build in progress; deferring the clangd restart until it finishes (avoids index/compile CPU contention)'));
+    return;
+  }
+  void restartClangd();
+}
+
+/** 构建结束：补执行构建期间被推迟的 clangd 重启（无待处理项时零操作） */
+function flushPendingClangdRestart(): void {
+  if (!pendingClangdRestart || buildInProgress) return;
+  pendingClangdRestart = false;
+  outputChannel.info(logT('[Code::Blocks] Build finished; restarting clangd to apply the new compile database'));
+  void restartClangd();
+}
+
+/**
  * G3：codeblocks.build.persistLog 变更提醒。
  * 输出通道类型在激活期创建（普通通道 ⇄ 日志通道），中途切换需重建通道且会清空当前输出，
  * 故不做热切换，只提示重载窗口（给一键重载按钮，避免用户以为设置没生效）。
@@ -3559,7 +3634,8 @@ async function applyClangdQueryDriverInteractive(): Promise<void> {
   }
   const compilerId = project.buildTargets[0]?.compilerId ?? project.compilerId;
   const compiler = getCompiler(compilerId);
-  const cPath = compiler.programs.C || compiler.programs.CPP;
+  // 裸程序名 + masterPath → 完整路径（否则 dirname('gcc.exe') = '.'，写出的 --query-driver=./* 无效）
+  const cPath = resolveCompilerProgram(compiler.programs.C || compiler.programs.CPP, compiler.masterPath);
   if (!cPath) {
     vscode.window.showWarningMessage(i18n.t('Compiler "{0}" has no usable compiler program path, cannot derive --query-driver', compiler.name));
     return;
@@ -3645,12 +3721,14 @@ async function generateClangdForWorkspaceInternal(interactive: boolean): Promise
       return;
     }
 
+    // 手动生成（命令/交互式）：顺手清掉检测缓存 —— 刚通过 clangd 扩展下载/安装完时也能立刻被检测到
+    if (interactive) clearClangdDetectionCache();
     const clangd = detectClangd();
     fallbackEnabled = !clangd; // 检测到 clangd 则禁用兜底补全，避免重复提示
     // D-10：仅当 clangd **扩展**已安装时才让出 Problems 诊断——只有 clangd 二进制（例如仅装了 LLVM）而扩展
     // 未安装/被禁用时，构建引擎必须继续写 Problems，否则编译警告/错误对用户完全不可见
     // （实测：日志有 warning 而 Problems 0 条）。vscode.extensions.getExtension 对未安装/被禁用的扩展返回 undefined。
-    clangdDiagnosticsEnabled = !!clangd && !!vscode.extensions.getExtension('llvm-vs-code-extensions.vscode-clangd');
+    clangdDiagnosticsEnabled = !!clangd && !!vscode.extensions.getExtension(CLANGD_EXTENSION_ID);
 
     if (!openProjects.length) return;
 
@@ -3672,15 +3750,18 @@ async function generateClangdForWorkspaceInternal(interactive: boolean): Promise
       try {
         const targetCompilerId = p.buildTargets[0]?.compilerId ?? p.compilerId;
         const compiler = getCompiler(targetCompilerId);
-        const cacheKey = compiler.programs.C || compiler.name;
-        if (!firstCompilerPath && compiler.programs.C) firstCompilerPath = compiler.programs.C;
+        // 裸程序名（gcc.exe）+ masterPath 解析为完整路径：宿主 PATH 未含工具链时也能探测系统头/目标三元组
+        const cPath = resolveCompilerProgram(compiler.programs.C, compiler.masterPath);
+        const cppPath = resolveCompilerProgram(compiler.programs.CPP, compiler.masterPath);
+        const cacheKey = cPath || compiler.name;
+        if (!firstCompilerPath && cPath) firstCompilerPath = cPath;
         let systemIncludes = includeCache.get(cacheKey);
         if (!systemIncludes && clangd) {
           // 带上目标架构 flag（-march 等），让 GCC 选择正确的 multilib 系统头目录
           const multilibFlags = extractMultilibFlags(p, p.buildTargets[0]);
-          systemIncludes = queryCompilerSystemIncludes(compiler.programs.C, compiler.programs.CPP, multilibFlags);
+          systemIncludes = queryCompilerSystemIncludes(cPath, cppPath, multilibFlags);
           includeCache.set(cacheKey, systemIncludes);
-          if (!targetTriple) targetTriple = queryCompilerTarget(compiler.programs.C);
+          if (!targetTriple) targetTriple = queryCompilerTarget(cPath);
         }
         if (systemIncludes) {
           for (const d of systemIncludes) systemIncludesAll.add(path.normalize(d));
@@ -3721,7 +3802,7 @@ async function generateClangdForWorkspaceInternal(interactive: boolean): Promise
       outputChannel.info(restartReason === 'compiler'
         ? logT('[Code::Blocks] Compiler settings changed; restarting clangd to refresh the open files')
         : logT('[Code::Blocks] Active project switched; restarting clangd to refresh the open files'));
-      void restartClangd();
+      scheduleClangdRestart();
     }
 
     if (clangd) {
@@ -3807,7 +3888,7 @@ async function generateClangdForWorkspaceInternal(interactive: boolean): Promise
           i18n.t('Learn how to install'),
         );
         if (pick === i18n.t('Open the Marketplace')) {
-          vscode.commands.executeCommand('workbench.extensions.search', 'llvm-vs-code-extensions.vscode-clangd');
+          vscode.commands.executeCommand('workbench.extensions.search', CLANGD_EXTENSION_ID);
         } else if (pick === i18n.t('Learn how to install')) {
           vscode.env.openExternal(vscode.Uri.parse('https://clangd.llvm.org/installation.html'));
         }
@@ -5009,6 +5090,7 @@ function ccPromptFlags(): CompilerCachePromptFlags {
 async function resetCompilerCachePromptFlags(): Promise<void> {
   try {
     await extContext?.globalState.update(CC_FLAG_MISSING, false);
+    await extContext?.globalState.update(CC_FLAG_NOT_FOUND, false);
     await extContext?.globalState.update(CC_FLAG_DONT_ASK, false);
   } catch { /* 非关键 */ }
 }
@@ -5019,18 +5101,6 @@ function ccCurrentConfig(): { kind: CompilerCacheKind; explicit: string } {
     kind: normalizeCompilerCacheKind(cfg.get<string>('build.compilerCache', 'none')),
     explicit: cfg.get<string>('build.compilerCachePath', '') || '',
   };
-}
-
-function queryToolVersion(exePath: string): Promise<string | undefined> {
-  return new Promise((resolve) => {
-    try {
-      execFile(exePath, ['--version'], { timeout: 3000, windowsHide: true }, (err, stdout) => {
-        resolve(err ? undefined : parseToolVersion(String(stdout || '')));
-      });
-    } catch {
-      resolve(undefined);
-    }
-  });
 }
 
 let ccDetectionCache: CompilerCacheDetection | undefined;
@@ -5822,6 +5892,8 @@ async function buildWorkspace(rebuild: boolean, clearLog = true): Promise<boolea
   } finally {
     buildInProgress = false;
     currentBuildCancel = undefined;
+    // 构建期间被推迟的 clangd 重启（活动工程切换触发 DB 重建）在构建结束后补执行
+    flushPendingClangdRestart();
   }
 }
 
@@ -5942,6 +6014,7 @@ async function buildSingleProject(filename: string, rebuild: boolean): Promise<b
   } finally {
     buildInProgress = false;
     currentBuildCancel = undefined;
+    flushPendingClangdRestart();
   }
 }
 
@@ -6042,6 +6115,7 @@ async function buildSingleFile(project: Project, file: ProjectFile): Promise<voi
   } finally {
     buildInProgress = false;
     currentBuildCancel = undefined;
+    flushPendingClangdRestart();
   }
 }
 
@@ -6322,7 +6396,10 @@ function buildLogUsesClangdDiagnostics(): boolean {
 function collectClangdDiagnostics(files: string[]): BuildLogDiagnostic[] {
   const out: BuildLogDiagnostic[] = [];
   for (const f of files) {
-    const diags = vscode.languages.getDiagnostics(vscode.Uri.file(f));
+    // 只取 clangd 来源（source = clang / clang-tidy / clangd）：getDiagnostics 会返回该文件的**所有**
+    // 诊断提供者（cpptools、其它 linter、以及本扩展的 Code::Blocks 构建诊断），不过滤会混进 Build Log。
+    // 该文件没有 clangd 来源时保留全部（clangd 尚未分析 / 老版本未设置 source），避免 Build Log 变空。
+    const diags = preferClangdSource(vscode.languages.getDiagnostics(vscode.Uri.file(f)));
     for (const d of diags) {
       const sev = d.severity === vscode.DiagnosticSeverity.Error
         ? 'error'
@@ -7202,6 +7279,7 @@ async function runMakeBuild(project: Project, command: string, targetTitle: stri
   } finally {
     buildInProgress = false;
     currentBuildCancel = undefined;
+    flushPendingClangdRestart();
   }
 }
 
@@ -7277,6 +7355,7 @@ async function rebuildWorkspace(): Promise<void> {
       }
     } finally {
       buildInProgress = false;
+      flushPendingClangdRestart();
     }
     return;
   }

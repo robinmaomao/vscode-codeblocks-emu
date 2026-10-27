@@ -75,6 +75,10 @@ function createVscodeMock(opts = {}) {
   const statusBarItems = [];
   /** onDidChangeConfiguration 监听器（供 emitConfigChange 派发设置变更事件） */
   const configChangeListeners = [];
+  /** vscode.extensions.onDidChange 监听器（供 emitExtensionsChange 派发安装/启用状态变化） */
+  const extensionChangeListeners = [];
+  /** 模拟已安装扩展：id → 扩展对象（默认空；clangd 扩展检测回归用） */
+  const installedExtensions = new Map();
   /** 命令处理器注册表：commandId → 处理器数组（供测试直接调用） */
   const commandHandlers = new Map();
 
@@ -145,8 +149,12 @@ function createVscodeMock(opts = {}) {
     EndOfLine: { LF: 1, CRLF: 2 },
     ExtensionMode: { Production: 1, Development: 2, Test: 3 },
     extensions: {
-      getExtension: () => undefined,
+      getExtension: (id) => installedExtensions.get(id),
       all: [],
+      onDidChange: (listener) => {
+        extensionChangeListeners.push(listener);
+        return new Disposable();
+      },
     },
     env: {
       appName: 'Visual Studio Code',
@@ -322,6 +330,15 @@ function createVscodeMock(opts = {}) {
         };
         for (const l of [...configChangeListeners]) l(event);
       }
+    },
+    /** 测试用：设置/清除“已安装扩展”（传 null/undefined 表示卸载） */
+    setInstalledExtension(id, ext) {
+      if (ext === undefined || ext === null) installedExtensions.delete(id);
+      else installedExtensions.set(id, ext);
+    },
+    /** 测试用：派发扩展安装/启用状态变化（vscode.extensions.onDidChange） */
+    emitExtensionsChange() {
+      for (const l of [...extensionChangeListeners]) l();
     },
   };
 }

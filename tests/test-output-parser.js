@@ -91,6 +91,16 @@ try {
   check('B4b 回退路径支持无列号 warning → Warning', !!fwNoCol && fwNoCol.type === LT.Warning && fwNoCol.file === 'src/render.cpp' && fwNoCol.line === 23, fwNoCol, { file: 'src/render.cpp', line: 23 });
   const flink = pf.parseLine('C:\\mingw\\bin\\ld.exe: cannot find -lnope');
   check('B5 回退路径 ld 找不到库 → Error', !!flink && flink.type === LT.Error && /cannot find -lnope/.test(flink.message), flink);
+
+  // ---------- C. 无冒号快路径（性能优化）不改变自定义正则行为 ----------
+  // 常规编译器正则都要求 ':'（file:line:col / Error: / Warning:）→ 无冒号行直接返回 null；
+  // 自定义正则不要求 ':' 时快路径自动关闭，仍能解析（避免优化改变用户自定义编译器的行为）。
+  check('C1 默认正则：无冒号行直接返回 null', pf.parseLine('compiling foo bar') === null, null);
+  const noColon = new OutputParser([
+    { desc: 'custom', lt: 'error', msg: [2], filename: 0, line: 0, regex: '^BUG (\\S+) (.*)$' },
+  ]);
+  const c1 = noColon.parseLine('BUG something broke');
+  check('C2 自定义正则不含冒号：仍能解析（快路径关闭）', !!c1 && c1.type === LT.Error && /broke/.test(c1.message), c1);
 } finally {
   mock.restore();
 }

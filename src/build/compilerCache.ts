@@ -16,6 +16,7 @@
  */
 import * as fs from 'fs';
 import * as path from 'path';
+import { exec, execFile } from 'child_process';
 import { logT } from './logLang';
 
 export type CompilerCacheKind = 'none' | 'ccache' | 'sccache';
@@ -57,9 +58,12 @@ export function commonInstallDirs(
   return dirs;
 }
 
-function isRunnableFile(p: string): boolean {
+function isRunnableFile(p: string, platform: NodeJS.Platform = process.platform): boolean {
   try {
-    return fs.statSync(p).isFile();
+    if (!fs.statSync(p).isFile()) return false;
+    // POSIX：没有执行位（例如同名普通文本文件）不能当工具用 —— 视为「未找到」，由调用方回退原编译器
+    if (platform !== 'win32') fs.accessSync(p, fs.constants.X_OK);
+    return true;
   } catch {
     return false;
   }
@@ -73,7 +77,7 @@ export function findToolInDir(
 ): string | undefined {
   for (const name of exeNameCandidates(tool, platform)) {
     const p = path.join(dir, name);
-    if (isRunnableFile(p)) return path.resolve(p);
+    if (isRunnableFile(p, platform)) return path.resolve(p);
   }
   return undefined;
 }
@@ -158,7 +162,7 @@ export function resolveCompilerCachePath(
   const explicit = (explicitPath || '').trim();
   if (explicit) {
     const p = path.isAbsolute(explicit) ? explicit : path.resolve(explicit);
-    return isRunnableFile(p) ? p : undefined;
+    return isRunnableFile(p, platform) ? p : undefined;
   }
   const pathEnv = env.PATH || env.Path || '';
   for (const dir of pathEnv.split(path.delimiter)) {
@@ -181,6 +185,9 @@ export function resolveCompilerCachePath(
  * 会话级解析缓存（命令生成热路径：全量构建数百次调用只做一轮磁盘探测）。
  * 键含 kind|显式路径|PATH；设置变化 / 安装动作 / 重新检测后由调用方
  * 调用 clearCompilerCacheResolveCache() 主动失效。
+ *
+ * 性能（2026-10-27）：缓存命中时若路径已失效（工具被卸载/移动）才重新全盘扫描，
+ * 命中且文件仍在 → 只做一次 stat，避免每个构建都重复扫描 PATH / 常见目录 / WinGet Packages。
  */
 let resolveCacheKey = '';
 let resolveCacheVal: string | undefined;
@@ -191,7 +198,10 @@ export function resolveCompilerCachePathCached(
   env: Record<string, string | undefined> = process.env,
 ): string | undefined {
   const key = `${kind}\u0000${explicitPath}\u0000${env.PATH || env.Path || ''}\u0000${platform}`;
-  if (key === resolveCacheKey) return resolveCacheVal;
+  if (key === resolveCacheKey) {
+    if (resolveCacheVal === undefined || isRunnableFile(resolveCacheVal, platform)) return resolveCacheVal;
+    // 缓存路径已不存在（卸载/移动）→ 落到下方重新解析
+  }
   resolveCacheVal = resolveCompilerCachePath(kind, explicitPath, platform, env);
   resolveCacheKey = key;
   return resolveCacheVal;
@@ -259,6 +269,28 @@ export function decideCompilerCachePrompt(
 export function parseToolVersion(stdout: string): string | undefined {
   const m = /(\d+\.\d+(?:\.\d+)?)/.exec(stdout || '');
   return m ? m[1] : undefined;
+}
+
+/**
+ * 查询工具版本（`<tool> --version`）。
+ * `.cmd` / `.bat`（Scoop shim 等）不能由 execFile 直接启动（ENOENT/EINVAL），必须经 cmd.exe 执行；
+ * 失败统一返回 undefined（版本号只用于展示，不影响检测/启用）。
+ */
+export function queryToolVersion(toolPath: string): Promise<string | undefined> {
+  return new Promise((resolve) => {
+    const opts = { timeout: 3000, windowsHide: true };
+    const done = (err: Error | null, stdout: string | Buffer): void =>
+      resolve(err ? undefined : parseToolVersion(String(stdout || '')));
+    try {
+      if (process.platform === 'win32' && /\.(cmd|bat)$/i.test(toolPath)) {
+        exec(`"${toolPath}" --version`, opts, done);
+      } else {
+        execFile(toolPath, ['--version'], opts, done);
+      }
+    } catch {
+      resolve(undefined);
+    }
+  });
 }
 
 // ---------------- 引导安装（仅引导：复制命令 / 直接执行 / 打开下载页；无静默安装） ----------------

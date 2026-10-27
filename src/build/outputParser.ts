@@ -65,6 +65,12 @@ function normalizeLineType(lt: string | number): CompilerLineType {
 /** 编译输出解析器 */
 export class OutputParser {
   private regexes: { re: RegExp; struct: RegExStruct }[];
+  /**
+   * 是否所有正则都要求行内至少出现一个 ':'（POSIX 字符类 `[:blank:]` 等不算）。
+   * 成立时 parseLine 可用「无冒号直接返回」的快路径跳过十几次正则尝试；
+   * 用户自定义编译器若含不要求冒号的正则，则自动关闭快路径（行为与优化前一致）。
+   */
+  private readonly colonOnly: boolean;
 
   constructor(regexes: RegExStruct[] = getDefaultRegexes()) {
     this.regexes = regexes
@@ -76,10 +82,16 @@ export class OutputParser {
         }
       })
       .filter((x): x is { re: RegExp; struct: RegExStruct } => x !== null);
+    const withoutPosixClasses = (src: string): string => src.replace(/\[:[a-z]+:\]/gi, '');
+    this.colonOnly = this.regexes.length > 0
+      && this.regexes.every(({ struct }) => withoutPosixClasses(struct.regex).includes(':'));
   }
 
   /** 解析一行编译输出 */
   parseLine(line: string): ParsedLine | null {
+    // 快路径：常规编译器正则都要求至少一个 ':'（`file:line:col:` 或 `Error:` / `Warning:`），
+    // 命令行回显、进度行等占多数的输出可在此直接返回，省去十几次正则尝试。
+    if (this.colonOnly && !line.includes(':')) return null;
     for (const { re, struct } of this.regexes) {
       const m = line.match(re);
       if (!m) continue;
@@ -114,6 +126,15 @@ export class OutputParser {
   toDiagnostic(line: string, cwd: string): vscode.Diagnostic | null {
     const parsed = this.parseLine(line);
     if (!parsed) return null;
+    return this.toDiagnosticFrom(parsed);
+  }
+
+  /**
+   * 由已解析结果构造 Diagnostic —— 构建引擎每行只调一次 parseLine，
+   * 诊断/URI/结构化上报共用同一份解析结果（此前每条输出最多解析 4 次，正则开销 ×4）。
+   */
+  toDiagnosticFrom(parsed: ParsedLine | null): vscode.Diagnostic | null {
+    if (!parsed) return null;
 
     const sev = parsed.type === CompilerLineType.Error
       ? vscode.DiagnosticSeverity.Error
@@ -139,7 +160,11 @@ export class OutputParser {
 
   /** 解析诊断对应的文件绝对路径（供 Problems 面板分组） */
   resolveFileUri(line: string, cwd: string): vscode.Uri | undefined {
-    const parsed = this.parseLine(line);
+    return this.resolveFileUriFrom(this.parseLine(line), cwd);
+  }
+
+  /** 由已解析结果解析文件绝对路径（与 toDiagnosticFrom 共用同一次 parseLine） */
+  resolveFileUriFrom(parsed: ParsedLine | null, cwd: string): vscode.Uri | undefined {
     if (!parsed?.file) return undefined;
     const absFile = path.isAbsolute(parsed.file) ? parsed.file : path.join(cwd, parsed.file);
     return vscode.Uri.file(absFile);

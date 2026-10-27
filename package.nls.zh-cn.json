@@ -176,7 +176,7 @@
   "configuration.codeblocks.log.english.description": "构建日志输出英文文案（汇总/状态类消息对齐 Code::Blocks 原文）",
   "configuration.codeblocks.masterPath.description": "编译器安装根目录（留空则从 PATH 探测）",
   "configuration.codeblocks.maxReportedErrors.description": "单次构建最多收集的错误数（0 = 不限制）。对齐 Code::Blocks 的 max_reported_errors，防止错误过多导致 Build Log 卡顿",
-  "configuration.codeblocks.parallelJobs.description": "并行编译任务数（0 = 自动：逻辑核数 × 2，最多 32）。实测 Windows 下编译单元存在大量非 CPU 停顿（gcc→cc1→as 进程链 + 杀软扫描），超额订阅可显著缩短全量构建（基准实测：4C/8T 机器 8→16 并发全量构建约快 35%）；并发越高 CPU 占用越接近 100%，且每个编译进程链常驻几十至几百 MB，需要更省 CPU/内存时可显式指定较小值（含 1 = 串行）",
+  "configuration.codeblocks.parallelJobs.description": "并行编译任务数（默认 8；0 = 自动：逻辑核数 × 2，最多 32）。并发越高全量构建越快，但 CPU 占用越接近 100%，且每条编译进程链常驻几十至几百 MB；默认保持 8 以给编辑器与其它扩展留出余量，需要更省 CPU/内存可显式调小（含 1 = 串行）",
   "configuration.codeblocks.projectTree.categorize.description": "工程树按文件类型分组显示（Sources / Headers / ASM Sources / Resources / Others，对齐 Code::Blocks）。关闭后按物理目录显示。",
   "configuration.codeblocks.saveBeforeBuild.description": "构建/运行/清理前自动保存工作区中未保存的文件（对齐 Code::Blocks 的 Save all files before build）",
   "configuration.codeblocks.todo.keywords.description": "TODO 关键字（列表命令扫描 + Add TODO Item 类型选项；对齐 CB todo 插件关键字设置）",

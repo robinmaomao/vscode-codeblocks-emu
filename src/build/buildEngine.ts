@@ -13,7 +13,7 @@ import { Project, BuildTarget, ProjectFile, TargetType, CommandType, CompilerLin
 import { FileType, fileTypeOf, fileExt, isCompilableFileType, isLinkableFileType, isCppSource, isClangdIndexable } from '../model/fileTypes';
 import { Compiler } from '../compiler/compiler';
 import { CommandGenerator, computeStaticOutput, quoteIfNeeded, clearBackticksCache } from '../compiler/commandGenerator';
-import { OutputParser } from './outputParser';
+import { OutputParser, ParsedLine } from './outputParser';
 import { CbOutput } from './cbChannel';
 import { isCompilerUsable, renderInvalidCompilerMessage, renderTriedCompilerPaths, triedCompilerPaths } from './invalidCompiler';
 import { runScriptCommands } from './scriptRunner';
@@ -83,14 +83,49 @@ interface CompileUnit {
   respBase?: string;
 }
 
-/** 跨构建持久化的 include 依赖缓存（BuildEngine 每次构建新建实例，故用模块级静态缓存；LRU 上限防无界增长） */
-const depsIncludeCache = new LruCache<string, { srcMtimeMs: number; srcSize: number; dirsKey: string; includes: string[] }>(2000);
+/**
+ * 跨构建持久化的 include 依赖缓存（BuildEngine 每次构建新建实例，故用模块级静态缓存；LRU 上限防无界增长）。
+ *
+ * 容量 2026-10-27 由 2000 提到 8192：大工程（源码 + 头文件）很容易超过 2000 条，
+ * 一旦越界，每次构建都要重新读取并剥离注释扫描被淘汰的文件——按实测约 64ms/MB
+ * （147KB 文件 ≈ 9ms），1000 个被重扫的文件就是数秒的扩展宿主 CPU（构建开始阶段的卡顿）。
+ */
+const depsIncludeCache = new LruCache<string, { srcMtimeMs: number; srcSize: number; dirsKey: string; includes: string[] }>(8192);
 
 /**
- * 自动并行上限（`codeblocks.parallelJobs = 0` 时生效；显式设置值不受此限制，仅受设置项范围约束）。
+ * 并行编译任务数默认值（`codeblocks.parallelJobs` 未配置时生效）。
+ * 2026-10-27 由「0 = 自动（逻辑核数 × 2，上限 32）」改为固定默认 8：
+ * 用户侧反馈编译期间 CPU 长时间跑满 100%——自动值在 8 线程机上为 16、16 核机器上为 32，
+ * 远超编译器实际吃满的能力，只增加争抢；默认 8 让峰值 CPU 与内存回落，
+ * 需要更快可显式调大（1–32），需要「按机器自动」仍可显式设为 0。
+ */
+export const DEFAULT_PARALLEL_JOBS = 8;
+
+/**
+ * 并行任务数上限（`codeblocks.parallelJobs = 0` 自动值，以及显式值的截断上限）。
  * 2026-10-13 由 64 收到 32：并发越高宿主 CPU 越接近 100%，且每条编译进程链常驻内存较大。
  */
 export const MAX_PARALLEL_JOBS = 32;
+
+/**
+ * 有效并行任务数（BuildEngine 与单元测试共用，保证「设置 → 实际并发」可验证）。
+ * - 数值 ≥1：显式值（向下取整；大于 32 按 32 截断，兼容旧版本写入的 64；纯数字字符串同样接受）
+ * - 0：自动 = min(逻辑核数 × 2, 32)
+ * - 其它（未配置 / null / 负数 / 非数值）：回退默认值 8
+ */
+export function resolveParallelJobs(configured: unknown, logicalCpus?: number): number {
+  // 只接受数值（含纯数字字符串）；null/undefined/布尔/其它 → 回退默认值（避免 Number(null)=0 被误当成「自动」）
+  const n = typeof configured === 'number'
+    ? configured
+    : (typeof configured === 'string' && configured.trim() !== '' ? Number(configured) : Number.NaN);
+  if (!Number.isFinite(n)) return DEFAULT_PARALLEL_JOBS;
+  if (n >= 1) return Math.min(Math.floor(n), MAX_PARALLEL_JOBS);
+  if (n === 0) {
+    const logical = Math.max(1, logicalCpus ?? os.cpus().length ?? 1);
+    return Math.min(logical * 2, MAX_PARALLEL_JOBS);
+  }
+  return DEFAULT_PARALLEL_JOBS; // 负数
+}
 
 /** 正斜杠归一化（供 PCH 对象路径等使用） */
 function toUnix(p: string): string {
@@ -129,6 +164,12 @@ export class BuildEngine {
   private profTargetStartMs = 0;
   /** 探针：当前目标是否已记录首个 spawn */
   private profFirstSpawnSeen = false;
+  /**
+   * 本次构建的设置快照（`build.skipIncludeDeps` / `build.verboseOutput`）。
+   * 二者在逐文件增量检查、逐单元完成行中被读取——直接调 getConfiguration 会产生
+   * 「文件数 × 次数」的配置查找开销（大工程数千次），改为每次 build()/compileFile() 入口取一次。
+   */
+  private cfgSnapshot: { skipIncludeDeps: boolean; verboseOutput: boolean } | undefined;
 
   constructor(
     private project: Project,
@@ -227,6 +268,8 @@ export class BuildEngine {
   async build(targetTitle?: string | string[], options: BuildOptions = {}): Promise<boolean> {
     // 对齐 Build()/Rebuild()/BuildWorkspace()：每轮构建清空反引号缓存（cbClearBackticksCache，Clean 单命令不清）
     clearBackticksCache();
+    // 设置快照按轮刷新（构建中改设置 → 下一次构建生效）
+    this.cfgSnapshot = undefined;
     // 第六轮 F8：命令记录按每轮构建重置（HTML 日志 full_command_line）
     this.lastCommands = [];
     // R4：编译缓存已启用但工具缺失 → 每轮构建告警一次（命令生成回退原编译器，构建行为不受影响）
@@ -444,9 +487,11 @@ export class BuildEngine {
 
   /**
    * R4：编译缓存工具缺失告警（每引擎一次；跨引擎 10s 去抖——工作区构建逐项目建引擎）。
-   * 每次构建先清一次解析缓存再探测：工具在 VS Code 运行期间被安装/补齐时，
-   * **下一个构建**即可生效（无需重载窗口或运行「重新检测」）；未解析到时命令生成
-   * 静默回退原编译器，这里在输出通道说明原因与出路（安装引导 / compilerCachePath）。
+   * 探测语义：已找到时复用会话缓存（只校验一次路径存在性）；**未找到时清空缓存**，
+   * 让下一个构建重新扫描 —— 运行中安装工具后，下一构建即生效（无需重载窗口/重新检测）。
+   * 这样既保留「运行中安装可被检测」，又避免 ccache 已启用时每个构建都全盘扫描
+   * PATH / 常见安装目录 / WinGet Packages（后者是同步递归目录遍历）。
+   * 未解析到时命令生成静默回退原编译器，这里在输出通道说明原因与出路（安装引导 / compilerCachePath）。
    */
   private compilerCacheWarned = false;
   private warnCompilerCacheMissing(): void {
@@ -456,9 +501,9 @@ export class BuildEngine {
       const kind = normalizeCompilerCacheKind(cfg.get<string>('build.compilerCache', 'none'));
       if (kind === 'none') return;
       const explicit = cfg.get<string>('build.compilerCachePath', '') || '';
-      // 每构建重探（清会话缓存）：运行中安装工具 → 下一构建自动生效
-      clearCompilerCacheResolveCache();
       if (resolveCompilerCachePathCached(kind, explicit)) return;
+      // 未找到：清空缓存供下一构建重扫（本次构建已回退原编译器）
+      clearCompilerCacheResolveCache();
       // 跨引擎去抖：工作区构建 = 每项目一个引擎 → 同一配置窗口期内只告警一次
       const now = Date.now();
       const warnKey = `${kind}\u0000${explicit}`;
@@ -732,6 +777,8 @@ export class BuildEngine {
    * （自定义 buildCommand 文件同样支持；增量判断与整目标构建一致）。返回是否成功。
    */
   async compileFile(targetTitle: string, fileRel: string, options: BuildOptions): Promise<boolean> {
+    // 设置快照按轮刷新（与整目标构建一致）
+    this.cfgSnapshot = undefined;
     const target = this.project.buildTargets.find((t) => t.title === targetTitle);
     if (!target) {
       this.output.error(logT('[Code::Blocks] Build target not found: {0}', targetTitle));
@@ -1550,7 +1597,7 @@ export class BuildEngine {
     }
     if (objStat.mtimeMs < srcStat.mtimeMs) return false; // 源文件比对象新 → 需编译
     // skip_include_deps：跳过 include 依赖扫描（对齐 CodeBlocks /skip_include_deps 设置）
-    if (vscode.workspace.getConfiguration('codeblocks').get<boolean>('build.skipIncludeDeps', false)) {
+    if (this.buildSettings().skipIncludeDeps) {
       return true;
     }
     // 扫描 #include 依赖，头文件更新也触发重编译（对应 depsScanForHeaders + depsGetNewest）
@@ -2051,8 +2098,24 @@ export class BuildEngine {
 
   /** 详细输出开关（codeblocks.build.verboseOutput，默认 false；编译器 XML logging=full 时强制，对齐 CB clogFull） */
   private verboseOutput(): boolean {
-    return vscode.workspace.getConfiguration('codeblocks').get<boolean>('build.verboseOutput', false)
-      || this.compiler.switches.logging === 'full';
+    return this.buildSettings().verboseOutput || this.compiler.switches.logging === 'full';
+  }
+
+  /** 工程作用域的设置读取（多根工作区按工程文件 URI 解析，文件夹级覆盖可生效） */
+  private scopeConfig(): vscode.WorkspaceConfiguration {
+    return vscode.workspace.getConfiguration('codeblocks', vscode.Uri.file(this.project.filename));
+  }
+
+  /** 本次构建的设置快照（首次读取时填充；build()/compileFile() 入口重置，避免逐文件 getConfiguration） */
+  private buildSettings(): { skipIncludeDeps: boolean; verboseOutput: boolean } {
+    if (!this.cfgSnapshot) {
+      const cfg = this.scopeConfig();
+      this.cfgSnapshot = {
+        skipIncludeDeps: cfg.get<boolean>('build.skipIncludeDeps', false) === true,
+        verboseOutput: cfg.get<boolean>('build.verboseOutput', false) === true,
+      };
+    }
+    return this.cfgSnapshot;
   }
 
   /** 对象文件的绝对路径（增量判断用） */
@@ -2244,25 +2307,19 @@ export class BuildEngine {
   }
 
   /**
-   * 并行任务数：显式设置为准；0 = 自动。
+   * 并行任务数：显式设置为准；0 = 自动；未配置 = 默认 8（见 resolveParallelJobs）。
    *
-   * 自动值 = min(逻辑核数 × 2, 32)（R1，M0 实测 2026-10-08；上限 2026-10-13 由 64 收到 32）：
-   * 编译单元墙钟远大于其 CPU 占用（gcc→cc1→as 进程链 + Windows 杀软扫描停顿），
-   * 按核数并行只能填满线程、大量停顿被浪费；2× 超额订阅把停顿重叠——
-   * 大型工程（487 文件/248 单元）全量构建：8 并发 ~70s → 16 并发 ~44s（-35%），
-   * 24 并发回退（~52s，开始争抢）。
-   * 上限收到 32 的原因：并发越高 CPU 越接近 100%（用户侧「编译时占用大量 CPU」的反馈），
-   * 且每个编译进程链常驻几十至几百 MB（巨型 TU 的 cc1 可达 1–2GB）——32 兼顾吞吐与资源占用。
-   * 需要更快/更省可显式设置 `codeblocks.parallelJobs`（1–32）。
+   * 默认值 2026-10-27 由「0 = 自动」改为 8：逻辑核数 × 2 的超额订阅让编译期 CPU 长期跑满
+   * （8 线程机 16 并发、16 核机 32 并发），宿主卡顿/风扇狂转的反馈集中在此。
+   * 仍保留 0 = 自动（min(逻辑核数 × 2, 32)）供需要极限吞吐的场景显式开启。
+   *
+   * 作用域：按工程文件 URI 读取，多根工作区里工程所在文件夹的覆盖值也能生效
+   *（此前不带 URI 只读工作区级值，文件夹级 `codeblocks.parallelJobs` 被静默忽略）。
    * （CB 对照：cbthreadpool.cpp:32-39 线程数 ≤0 → wxThread::GetCPUCount()；
    * 本项为保护性性能增强，显式设置值仍优先、可一键回退。）
    */
   private maxJobs(): number {
-    const cfg = vscode.workspace.getConfiguration('codeblocks');
-    const n = cfg.get<number>('parallelJobs', 0);
-    if (n && n > 0) return n;
-    const logical = Math.max(1, os.cpus().length || 2);
-    return Math.min(logical * 2, MAX_PARALLEL_JOBS);
+    return resolveParallelJobs(this.scopeConfig().get<number>('parallelJobs', DEFAULT_PARALLEL_JOBS));
   }
 
   private async runInParallel(units: CompileUnit[], maxJobs: number, options: BuildOptions, totalCount: number): Promise<(boolean | undefined)[]> {
@@ -2389,6 +2446,8 @@ export class BuildEngine {
       const proc = spawn(command, {
         cwd: upperDrive(cwd),
         shell: true,
+        // 不弹控制台窗口（Windows 下每个编译单元都会派生 cmd.exe；隐藏可省去窗口创建/销毁开销）
+        windowsHide: true,
         // PATH 前置编译器 bin 目录（对齐 CodeBlocks Init 的 PATH 重构），仅 win32 时已由 build() 计算
         env: this.buildEnv,
       });
@@ -2402,6 +2461,10 @@ export class BuildEngine {
       const stderrChunks: Buffer[] = [];
 
       const processLines = (text: string) => {
+        // 每行只解析一次：严重级别 / Diagnostic / 文件 URI / 结构化上报共用同一份解析结果
+        // （此前最多 4 次 parseLine ⇒ 4 倍正则开销，是大量输出时扩展宿主 CPU 的主要来源之一）
+        const wantDiagnostic = !!options.onDiagnostic;
+        const wantStructured = !!options.onStructuredDiagnostic;
         for (const line of text.split(/\r?\n/)) {
           if (!line) continue;
           const parsed = parser.parseLine(line);
@@ -2409,11 +2472,12 @@ export class BuildEngine {
             ? 'error' as const
             : parsed?.type === CompilerLineType.Warning ? 'warning' as const : 'info' as const;
           options.onLine?.(line, severity);
-          const diag = parser.toDiagnostic(line, cwd);
-          if (diag) {
-            options.onDiagnostic?.(diag, parser.resolveFileUri(line, cwd));
-            this.emitStructuredDiagnostic(line, cwd, options);
+          if (!parsed) continue;
+          if (wantDiagnostic) {
+            const diag = parser.toDiagnosticFrom(parsed);
+            if (diag) options.onDiagnostic?.(diag, parser.resolveFileUriFrom(parsed, cwd));
           }
+          if (wantStructured) this.emitStructuredDiagnosticFrom(parsed, cwd, options);
         }
       };
 
@@ -2444,10 +2508,9 @@ export class BuildEngine {
     });
   }
 
-  /** 解析一行输出，若为 error/warning 则通过 onStructuredDiagnostic 上报（文件解析为绝对路径） */
-  private emitStructuredDiagnostic(line: string, cwd: string, options: BuildOptions): void {
+  /** 由已解析结果上报结构化诊断（与 Problems 诊断共用同一次 parseLine） */
+  private emitStructuredDiagnosticFrom(parsed: ParsedLine | null, cwd: string, options: BuildOptions): void {
     if (!options.onStructuredDiagnostic) return;
-    const parsed = this.parser.parseLine(line);
     if (!parsed) return;
     if (parsed.type !== CompilerLineType.Error && parsed.type !== CompilerLineType.Warning) return;
 

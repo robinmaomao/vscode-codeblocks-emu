@@ -210,7 +210,10 @@ async function activate(opts = {}) {
   vscode.debug.registerDebugConfigurationProvider = () => new MockDisposable();
   vscode.debug.registerDebugAdapterDescriptorFactory = () => new MockDisposable();
   vscode.debug.onDidReceiveDebugSessionCustomEvent = () => new MockDisposable();
-  vscode.extensions.getExtension = () => ({ id: 'robinmaomao.codeblocks-vscode', extensionPath: ROOT, packageJSON: require(path.join(ROOT, 'package.json')), exports: undefined });
+  // 自身扩展（版本号等）；其它 id 交给 mock 的安装表（clangd 扩展安装/卸载回归用）
+  const selfExtension = { id: 'robinmaomao.codeblocks-vscode', extensionPath: ROOT, packageJSON: require(path.join(ROOT, 'package.json')), exports: undefined };
+  const mockGetExtension = vscode.extensions.getExtension;
+  vscode.extensions.getExtension = (id) => (id === selfExtension.id ? selfExtension : mockGetExtension(id));
 
   const ctx = {
     subscriptions: [],
