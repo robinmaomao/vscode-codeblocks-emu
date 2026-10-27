@@ -226,6 +226,8 @@ export class CommandGenerator {
   private cache = new Map<string, PregenCache>();
   /** 反引号派生搜索目录（SearchDirsFromBackticks 语义，供 deps 扫描） */
   private backtickDirs = new Map<string, { inc: string[]; lib: string[] }>();
+  /** 编译缓存前缀记忆化（undefined = 尚未解析；'' = 未启用/未找到） */
+  private cachePrefixMemo: string | undefined;
 
   constructor(project: Project, compiler: Compiler) {
     this.project = project;
@@ -752,21 +754,28 @@ export class CommandGenerator {
    * - 仅标准编译命令注入（noCompilerCache 排除 clangd/脚本/自定义命令场景）
    * - 设置 none / 未解析到工具 → 空串（回退原编译器；构建开始由 buildEngine 输出一次告警）
    * - 解析结果按 kind|显式路径|PATH 会话缓存；设置变化/安装动作由 extension 主动清缓存
+   * - **本实例记忆化**：全量构建每单元都会展开 $compiler，避免每单元两次 getConfiguration
+   *   （千文件工程约 2000 次配置查找）；设置变化后的下一次构建由新生成器实例读取
    */
   private compilerCachePrefix(params: GenerateParams): string {
     if (params.noCompilerCache) return '';
+    if (this.cachePrefixMemo !== undefined) return this.cachePrefixMemo;
+    let prefix = '';
     try {
       // 惰性 require：headless 单测无 vscode 宿主时回退默认（与 asmUsesCompilerVar 同款）
       const vs: typeof import('vscode') = require('vscode');
       const cfg = vs.workspace.getConfiguration('codeblocks');
       const kind = normalizeCompilerCacheKind(cfg.get<string>('build.compilerCache', 'none'));
-      if (kind === 'none') return '';
-      const explicit = cfg.get<string>('build.compilerCachePath', '') || '';
-      const resolved = resolveCompilerCachePathCached(kind, explicit);
-      return resolved ? quoteIfNeeded(this.fixSep(resolved)) + ' ' : '';
+      if (kind !== 'none') {
+        const explicit = cfg.get<string>('build.compilerCachePath', '') || '';
+        const resolved = resolveCompilerCachePathCached(kind, explicit);
+        if (resolved) prefix = quoteIfNeeded(this.fixSep(resolved)) + ' ';
+      }
     } catch {
-      return '';
+      prefix = '';
     }
+    this.cachePrefixMemo = prefix;
+    return prefix;
   }
 
   /** 核心：将命令模板展开为最终命令行 */

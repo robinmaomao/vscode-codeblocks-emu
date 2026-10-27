@@ -6,11 +6,19 @@
 //  - buildEngine：已启用未找到 → 每引擎一次告警（输出通道）
 const Module = require('module');
 const settings = {};
+const cfgReads = {};
 const origLoad = Module._load;
 Module._load = function (request, parent, isMain) {
   if (request === 'vscode') {
     return {
-      workspace: { getConfiguration: () => ({ get: (k, d) => (k in settings ? settings[k] : d) }) },
+      workspace: {
+        getConfiguration: () => ({
+          get: (k, d) => {
+            cfgReads[k] = (cfgReads[k] || 0) + 1;
+            return k in settings ? settings[k] : d;
+          },
+        }),
+      },
       window: { showWarningMessage: () => {} },
       env: {},
       Uri: { file: (p) => ({ fsPath: p }) },
@@ -93,26 +101,37 @@ fs.writeFileSync(wrapper, '@echo off\n');
 settings['build.compilerCache'] = 'ccache';
 settings['build.compilerCachePath'] = wrapper;
 clearCompilerCacheResolveCache();
-const withPrefix = generator.generate(CommandType.CompileObjectCmd, params);
+// 新构建 = 新 CommandGenerator 实例（前缀按实例记忆化；设置变更由下一次构建生效）
+const generatorCc = new CommandGenerator(project, compiler);
+const withPrefix = generatorCc.generate(CommandType.CompileObjectCmd, params);
 const prefix = withPrefix.slice(0, withPrefix.length - baseline.length);
 check('启用后：基线命令不变，仅前置 wrapper', withPrefix !== baseline && withPrefix.endsWith(baseline), withPrefix);
 check('前缀 = 引号包裹的 wrapper 路径 + 空格', prefix.startsWith('"') && prefix.endsWith('" ') && prefix.includes('fake ccache.cmd'), prefix);
-const withPrefix2 = generator.generate(CommandType.CompileObjectCmd, params);
+const withPrefix2 = generatorCc.generate(CommandType.CompileObjectCmd, params);
 check('解析缓存命中：多次生成同结果', withPrefix2 === withPrefix, null);
-const noCacheParam = generator.generate(CommandType.CompileObjectCmd, { ...params, noCompilerCache: true });
+const noCacheParam = generatorCc.generate(CommandType.CompileObjectCmd, { ...params, noCompilerCache: true });
 check('noCompilerCache=true（clangd/脚本/自定义命令）不注入', noCacheParam === baseline, noCacheParam);
-const linkCmd = generator.generate(CommandType.LinkExeCmd, params);
+const linkCmd = generatorCc.generate(CommandType.LinkExeCmd, params);
 check('链接命令生成成功（前置条件）', linkCmd.length > 0, linkCmd);
 check('链接命令不注入缓存前缀（$linker 展开点）', linkCmd.length > 0 && !linkCmd.includes('fake ccache'), linkCmd);
+
+// 记忆化：同一实例内只解析一次设置（千文件工程避免每单元 2 次 getConfiguration）
+for (const k of Object.keys(cfgReads)) delete cfgReads[k];
+const genMemo = new CommandGenerator(project, compiler);
+genMemo.generate(CommandType.CompileObjectCmd, params);
+genMemo.generate(CommandType.CompileObjectCmd, params);
+genMemo.generate(CommandType.CompileObjectCmd, params);
+check('记忆化：同一实例 3 次生成只读 1 次 kind / 1 次 path',
+  cfgReads['build.compilerCache'] === 1 && cfgReads['build.compilerCachePath'] === 1, cfgReads);
 
 // ---- 3. 显式路径无效 → 静默回退 ----
 settings['build.compilerCachePath'] = path.join(dir, 'no-such-dir', 'ccache.exe');
 clearCompilerCacheResolveCache();
-const fallback = generator.generate(CommandType.CompileObjectCmd, params);
+const fallback = new CommandGenerator(project, compiler).generate(CommandType.CompileObjectCmd, params);
 check('wrapper 路径无效 → 回退基线命令（不静默用 PATH）', fallback === baseline, fallback);
 settings['build.compilerCache'] = 'sccache';
 clearCompilerCacheResolveCache();
-check('sccache 同样回退', generator.generate(CommandType.CompileObjectCmd, params) === baseline, null);
+check('sccache 同样回退', new CommandGenerator(project, compiler).generate(CommandType.CompileObjectCmd, params) === baseline, null);
 
 // ---- 4. buildEngine 告警（每引擎一次） ----
 function makeOut(logs) {
@@ -151,7 +170,8 @@ engine1c.warnCompilerCacheMissing();
 Date.now = realNow;
 check('每构建重探：补齐工具后下一构建无告警（无需重载/重新检测）', logs1c.filter((l) => l.startsWith('w|')).length === 0, logs1c);
 check('每构建重探：生成命令立即前置（下一个构建即生效）',
-  generator.generate(CommandType.CompileObjectCmd, params) === path.resolve(settings['build.compilerCachePath']) + ' ' + baseline, null);
+  new CommandGenerator(project, compiler).generate(CommandType.CompileObjectCmd, params)
+    === path.resolve(settings['build.compilerCachePath']) + ' ' + baseline, null);
 
 // ---- 5. 静态接线（dist 源码断言） ----
 const beText = fs.readFileSync(path.resolve(__dirname, '../dist/build/buildEngine.js'), 'utf-8');

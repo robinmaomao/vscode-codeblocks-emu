@@ -76,6 +76,10 @@ check('头文件子片段含 --target 回退', text.includes('- --target=riscv32
 check('头文件子片段含 -include 基础头', text.includes('- -include'), null);
 check('头文件子片段含 -isystem', text.includes('- -isystem'), null);
 check('片段标记成对', text.includes('codeblocks-vscode') && /begin <<<[\s\S]*end <<</.test(text), null);
+// 原子写（临时文件 + 重命名）：clangd 监听 config.yaml，避免读到半截内容；写入后不应残留 .tmp
+check('原子写：配置目录不残留临时文件',
+  fs.readdirSync(path.dirname(cfgPath)).every((n) => !n.endsWith('.tmp')),
+  fs.readdirSync(path.dirname(cfgPath)));
 
 // 补全不自动插入头文件（clangd 默认 IWYU ⇒ 接受补全时插入 #include）
 check('主片段含 Completion 块', text.includes('Completion:'), null);
@@ -282,6 +286,38 @@ check('空作用域调用不误删既有片段', text4.includes('HeaderInsertion
   check('自动清理：生效于文件', !autoText.includes('prune-gone'), null);
   check('自动清理：新作用域已写入', autoText.includes('prune-unchanged'), null);
   check('自动清理：用户内容保留', autoText.includes('# user own'), null);
+}
+
+// ---------- 用户自有的 --- 分隔符不得被清理逻辑改写（FIX-C2：多片段 If 条件不能合并） ----------
+{
+  const userTwoFragments = 'CompileFlags:\n  Add: -Wall\n\n---\nIf:\n  PathMatch: .*\nCompileFlags:\n  Add: -Wextra\n';
+  const cfgScope = path.join(tmp, 'user-sep-scope');
+  const cfgDb = path.join(tmp, 'user-sep-db');
+  fs.mkdirSync(cfgScope, { recursive: true });
+  fs.mkdirSync(cfgDb, { recursive: true });
+  fs.writeFileSync(cfgPath, userTwoFragments, 'utf-8');
+  updateClangdUserConfig([{ dir: cfgScope, databaseDir: cfgDb }]);
+  const withUserSep = fs.readFileSync(cfgPath, 'utf-8');
+  check('用户自有的 --- 分隔符保留（即使前一行是空行）', withUserSep.includes('\n\n---\nIf:\n  PathMatch: .*'), withUserSep);
+
+  // 清理失效片段（悬空 --- 仍需合并掉，但不能动上面的用户分隔符）
+  const goneScope = path.join(tmp, 'gone-scope');
+  const goneDb = cfgDb; // 已存在 ⇒ 只触发 scope-missing
+  const esc = (s) => s.replace(/\\/g, '/').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  fs.writeFileSync(cfgPath,
+    userTwoFragments
+    + '\n---\n# >>> codeblocks-vscode 0123456789ab begin <<<\n'
+    + 'If:\n'
+    + `  PathMatch: '${esc(goneScope)}/.*'\n`
+    + 'CompileFlags:\n'
+    + `  CompilationDatabase: '${esc(goneDb)}'\n`
+    + '# <<< codeblocks-vscode 0123456789ab end <<<\n', 'utf-8');
+  const cleaned = cleanStaleClangdFragments();
+  const afterUserSep = fs.readFileSync(cfgPath, 'utf-8');
+  check('清理失效片段：移除 1 个片段', cleaned.removed.length === 1, cleaned.removed.map((r) => r.reason));
+  check('清理失效片段：用户 --- 分隔符仍在', afterUserSep.includes('\n\n---\nIf:\n  PathMatch: .*'), afterUserSep);
+  check('清理失效片段：无悬空 --- 结尾', !/---\s*$/.test(afterUserSep), JSON.stringify(afterUserSep.slice(-40)));
+  check('清理失效片段：用户两段内容完整', afterUserSep.includes('Add: -Wall') && afterUserSep.includes('Add: -Wextra'), afterUserSep);
 }
 
 // 设置默认值 / 接线

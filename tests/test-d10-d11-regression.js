@@ -58,8 +58,10 @@ const CBP = `<?xml version="1.0" encoding="UTF-8" standalone="yes" ?>
   const src = fs.readFileSync(path.join(__dirname, '..', 'src', 'extension.ts'), 'utf-8');
   const gates = src.match(/clangdDiagnosticsEnabled\s*=[^;]{0,300}?;/g) || [];
   check('D-10：诊断让出需同时满足「检测到 clangd」与「clangd 扩展已安装」',
-    gates.some((g) => /detectClangd\(\)|!!clangd/.test(g) && /extensions\.getExtension\(/.test(g) && /vscode-clangd/.test(g)),
+    gates.some((g) => /detectClangd\(\)|!!clangd/.test(g) && /extensions\.getExtension\(/.test(g) && /vscode-clangd|CLANGD_EXTENSION_ID/.test(g)),
     gates.map((g) => g.replace(/\s+/g, ' ').trim().slice(0, 90)), '含 clangd 检测 + getExtension(vscode-clangd)');
+  check('D-10：CLANGD_EXTENSION_ID 指向 clangd 扩展',
+    /CLANGD_EXTENSION_ID\s*=\s*'llvm-vs-code-extensions\.vscode-clangd'/.test(src), null);
 
   await app.deactivate().catch(() => undefined);
   console.log(`\nD-10/D-11 回归: ${pass} pass, ${fail} fail${failures.length ? '  [' + failures.join(', ') + ']' : ''}`);

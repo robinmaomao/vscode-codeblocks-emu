@@ -105,7 +105,11 @@ check('scope machine-overridable ×3（路径类设置）',
 check('gdbPath 描述无「第 N 轮」内部标记', !String(nlsText(byKey['codeblocks.debug.gdbPath']?.description) || '').includes('第'), null);
 check('compilerPrograms 含 DBGconfig 属性', !!byKey['codeblocks.compilerPrograms']?.properties?.DBGconfig, null);
 
-check('parallelJobs 0–32', byKey['codeblocks.parallelJobs']?.minimum === 0 && byKey['codeblocks.parallelJobs']?.maximum === 32, null);
+check('parallelJobs 0–32 且默认 8（0 = 自动）',
+  byKey['codeblocks.parallelJobs']?.minimum === 0
+  && byKey['codeblocks.parallelJobs']?.maximum === 32
+  && byKey['codeblocks.parallelJobs']?.default === 8,
+  byKey['codeblocks.parallelJobs']);
 check('gdbTimeoutMs minimum 1000', byKey['codeblocks.gdbTimeoutMs']?.minimum === 1000, null);
 check('maxReportedErrors minimum 0', byKey['codeblocks.maxReportedErrors']?.minimum === 0, null);
 check('printElements minimum 0', byKey['codeblocks.debug.printElements']?.minimum === 0, null);

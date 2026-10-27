@@ -118,6 +118,28 @@ const sameItems = (got, want) => JSON.stringify(got) === JSON.stringify(want);
     logHas(/codeblocks\.clangd 设置已变更/), channel && channel.lines.slice(-6));
   check('合法数组值：不产生取值类型告警', !logHas(TYPE_WARN), channel && channel.lines.filter((l) => TYPE_WARN.test(l)));
 
+  // ---------- 2b) 只影响展示的键（buildLogDiagnostics）不触发整库重建 ----------
+  const beforeDisplayOnly = channel ? channel.lines.length : 0;
+  app.setConfig('codeblocks.clangd.buildLogDiagnostics', 'clangd');
+  mock.emitConfigChange('codeblocks.clangd.buildLogDiagnostics');
+  await new Promise((r) => setTimeout(r, 400));
+  check('展示类设置（buildLogDiagnostics）不触发 clangd 配置重建',
+    !logHas(/codeblocks\.clangd 设置已变更/, beforeDisplayOnly),
+    channel && channel.lines.slice(beforeDisplayOnly));
+
+  // ---------- 2c) clangd 扩展安装/卸载 → 重新探测并重建（扩展内下载不写 clangd.path） ----------
+  const beforeExtChange = channel ? channel.lines.length : 0;
+  mock.setInstalledExtension('llvm-vs-code-extensions.vscode-clangd', { id: 'llvm-vs-code-extensions.vscode-clangd', isActive: true });
+  mock.emitExtensionsChange();
+  check('clangd 扩展安装/启用 → 重新探测并重建',
+    await waitFor(() => logHas(/clangd 扩展已安装\/已启用/, beforeExtChange)),
+    channel && channel.lines.slice(beforeExtChange));
+  mock.setInstalledExtension('llvm-vs-code-extensions.vscode-clangd', null);
+  mock.emitExtensionsChange();
+  check('clangd 扩展卸载/禁用 → 重新探测',
+    await waitFor(() => logHas(/clangd 扩展已卸载\/已禁用/, beforeExtChange)),
+    channel && channel.lines.slice(beforeExtChange));
+
   // ---------- 3) 值写成字符串（手改 settings.json 常见）→ 按分隔符拆分写入 ----------
   app.setConfig('codeblocks.clangd.suppressedWarnings', ' -Wunused-function , -Wempty-body ');
   mock.emitConfigChange('codeblocks.clangd.suppressedWarnings');

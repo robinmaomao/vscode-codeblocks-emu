@@ -2,6 +2,30 @@
 
 本文件记录**正式版**里程碑；每个 dev 迭代的逐轮发布说明见 [`docs/release/`](docs/release/)（`0.8.xx-dev.md`），版本号与维护约定见 [`docs/release/00-说明.md`](docs/release/00-说明.md)。
 
+## 0.8.134 — 2026-10-27
+
+**构建并发/CPU 守卫 · clangd 与 ccache 缺陷修复**
+
+- **并行编译默认 8**：`codeblocks.parallelJobs` 默认 `0`（自动 = 逻辑核数 × 2）→ `8`，并加 `scope: resource`
+  （支持文件夹级覆盖）；`0` 仍为自动、`1` = 串行。默认值给编辑器/其它扩展留出 CPU 余量；数值字符串按数字
+  解析，`null`/布尔等类型回退默认值。
+- **构建期不再重启 clangd**：构建进行中触发的编译数据库重建只登记，构建结束后再 `clangd.restart`，避免
+  整库重索引与编译进程抢 CPU。
+- **逐行解析开销**：构建输出每行只 `parseLine` 一次（此前最多 4 次），`OutputParser` 增加「无 `:` 行」快路径；
+  编译子进程统一 `windowsHide`；设置快照按轮刷新。
+- **ccache**：`$compiler` 前缀按生成器实例记忆化；解析缓存命中只 `stat` 一次、失效才重扫；仅「未找到」时
+  清缓存。另修 POSIX 可执行位校验、`.cmd`/`.bat` 版本探测、提示标记重置。
+- **clangd 配置不再被改写**：清理失效片段只合并连续 `---`，用户自有的 `---` 分隔符保留（旧实现会合并
+  片段、丢 `If` 条件，甚至让 clangd 丢弃整个 `config.yaml`）。
+- **compile_commands 逐字保留参数**：`-DNAME="My App"`、`-I"C:/Program Files/..."` 不再被拆成两个参数；
+  裸程序名先按 `masterPath/bin` 解析再探测系统头/`--target`，`--query-driver` 建议值修正。
+- **clangd 检测时效**：负结果 TTL 30 秒、手动生成清缓存、监听扩展安装状态；下载目录覆盖 Insiders /
+  VSCodium / Cursor / 远程 server；`clangd.path` 必须是文件；只影响展示的设置不再重建数据库；原子写
+  `config.yaml` / `compile_commands.json`；Build Log 的 clangd 模式只取 clangd 来源诊断。
+- 规模（0.8.134 时点）：分层回归 `contract 2/2`、`unit 166 FAIL=0 SKIP=1`、`e2e 4/4`；新增
+  `test-build-cpu-guards.js`、`test-parallel-jobs.js`、`test-clangd-compile-flags.js`、
+  `test-compiler-cache-version.js`。
+
 ## 0.8.133 — 2026-10-22
 
 **构建日志补齐 Code::Blocks 产物体积行**

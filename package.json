@@ -2,7 +2,7 @@
   "name": "codeblocks-vscode",
   "displayName": "%extension.displayName%",
   "description": "%extension.description%",
-  "version": "0.8.133",
+  "version": "0.8.134",
   "icon": "resources/icon.png",
   "publisher": "robinmaomao",
   "author": {
@@ -651,9 +651,10 @@
           },
           "codeblocks.parallelJobs": {
             "type": "number",
-            "default": 0,
+            "default": 8,
             "minimum": 0,
             "maximum": 32,
+            "scope": "resource",
             "description": "%configuration.codeblocks.parallelJobs.description%"
           },
           "codeblocks.build.compilerCache": {

@@ -24,7 +24,8 @@ const targetCache = new LruCache<string, string | undefined>(64);
 function findOnPath(): string | undefined {
   const cmd = process.platform === 'win32' ? 'where' : 'which';
   try {
-    const r = spawnSync(cmd, ['clangd'], { encoding: 'utf8' });
+    // 超时保护：扩展宿主主线程被同步子进程阻塞会冻结全部扩展能力（where/which 正常 <50ms）
+    const r = spawnSync(cmd, ['clangd'], { encoding: 'utf8', timeout: 3000, windowsHide: true });
     if (r.status === 0 && r.stdout) {
       const first = r.stdout.split(/\r?\n/)[0].trim();
       if (first) return first;
@@ -56,37 +57,66 @@ function findClangdUnder(dir: string, depth = 0): string | undefined {
   return undefined;
 }
 
+/** 是否为普通文件（目录/不存在 → false） */
+function isFile(p: string): boolean {
+  try {
+    return fs.statSync(p).isFile();
+  } catch {
+    return false;
+  }
+}
+
+/** VS Code 家族的用户级目录（桌面版 + 远程 server），用于定位 clangd 扩展下载的二进制 */
+function vscodeUserRoots(): string[] {
+  const roots: string[] = [];
+  const push = (base: string | undefined): void => {
+    if (base) roots.push(base);
+  };
+  const apps = ['Code', 'Code - Insiders', 'VSCodium', 'Cursor'];
+  const servers = ['.vscode-server', '.vscode-server-insiders', '.vscodium-server', '.cursor-server'];
+  if (process.platform === 'win32') {
+    const appData = process.env['APPDATA'];
+    for (const app of apps) push(appData && path.join(appData, app, 'User'));
+    const profile = process.env['USERPROFILE'];
+    for (const server of servers) push(profile && path.join(profile, server, 'data', 'User'));
+  } else {
+    const home = process.env['HOME'];
+    if (process.platform === 'darwin') {
+      const appSupport = home && path.join(home, 'Library', 'Application Support');
+      for (const app of apps) push(appSupport && path.join(appSupport, app, 'User'));
+    } else {
+      const xdg = process.env['XDG_CONFIG_HOME'] || (home && path.join(home, '.config'));
+      for (const app of apps) push(xdg && path.join(xdg, app, 'User'));
+    }
+    for (const server of servers) push(home && path.join(home, server, 'data', 'User'));
+  }
+  return roots;
+}
+
 /** 常见安装目录（含 VS Code clangd 扩展自行下载的安装位置） */
 function commonLocations(): string[] {
   const locs: string[] = [];
   if (process.platform === 'win32') {
     const pf = process.env['ProgramFiles'];
     const localAppData = process.env['LOCALAPPDATA'];
-    const appData = process.env['APPDATA'];
     if (pf) locs.push(path.join(pf, 'LLVM', 'bin', EXE));
     if (localAppData) locs.push(path.join(localAppData, 'Programs', 'LLVM', 'bin', EXE));
-    if (appData) {
-      // clangd 扩展下载目录：%APPDATA%\Code\User\globalStorage\llvm-vs-code-extensions.vscode-clangd\install\<ver>\clangd_<ver>\bin\clangd.exe
-      const gs = path.join(appData, 'Code', 'User', 'globalStorage', 'llvm-vs-code-extensions.vscode-clangd', 'install');
-      const found = findClangdUnder(gs);
-      if (found) locs.push(found);
-    }
   } else {
     locs.push('/usr/bin/clangd', '/usr/local/bin/clangd', '/opt/homebrew/bin/clangd');
+  }
+  // clangd 扩展下载目录：<User>/globalStorage/llvm-vs-code-extensions.vscode-clangd/install/<ver>/clangd_<ver>/bin/clangd[.exe]
+  // <User> 随发行版（Code / Insiders / VSCodium / Cursor）与远程 server 布局不同，逐一尝试。
+  for (const userRoot of vscodeUserRoots()) {
+    const found = findClangdUnder(path.join(userRoot, 'globalStorage', 'llvm-vs-code-extensions.vscode-clangd', 'install'));
+    if (found) locs.push(found);
+  }
+  if (process.platform !== 'win32') {
     const home = process.env['HOME'];
     if (home) {
-      // Linux/macOS 下 clangd 扩展下载目录：~/.config/clangd 或 ~/.local/share/... 等
-      const candidates = [
-        path.join(home, '.config', 'clangd'),
-        path.join(home, '.clangd'),
-        path.join(home, '.local', 'share', 'clangd'),
-      ];
-      for (const c of candidates) {
+      // 旧版本/手工放置的候选目录
+      for (const c of [path.join(home, '.config', 'clangd'), path.join(home, '.clangd'), path.join(home, '.local', 'share', 'clangd')]) {
         const found = findClangdUnder(c);
-        if (found) {
-          locs.push(found);
-          break;
-        }
+        if (found) locs.push(found);
       }
     }
   }
@@ -96,16 +126,19 @@ function commonLocations(): string[] {
 /** 检测结果缓存（P7：避免每次生成 compile_commands 都 spawnSync where + 递归目录扫描；含负结果） */
 let detectClangdCache: { value: string | undefined; at: number } | undefined;
 const DETECT_CLANGD_CACHE_TTL_MS = 5 * 60 * 1000;
+/** 负结果（未找到）缓存更短：运行中通过 clangd 扩展下载/安装后能更快被检测到 */
+const DETECT_CLANGD_NEGATIVE_TTL_MS = 30 * 1000;
 
-/** 清除 clangd 检测缓存（clangd.path 配置变化 / 测试场景） */
+/** 清除 clangd 检测缓存（clangd.path 配置变化 / 扩展安装状态变化 / 手动生成 / 测试场景） */
 export function clearClangdDetectionCache(): void {
   detectClangdCache = undefined;
 }
 
 /** 检测 clangd 可执行文件路径（未找到返回 undefined；结果带 TTL 缓存，含负结果） */
 export function detectClangd(): string | undefined {
-  if (detectClangdCache && Date.now() - detectClangdCache.at < DETECT_CLANGD_CACHE_TTL_MS) {
-    return detectClangdCache.value;
+  if (detectClangdCache) {
+    const ttl = detectClangdCache.value ? DETECT_CLANGD_CACHE_TTL_MS : DETECT_CLANGD_NEGATIVE_TTL_MS;
+    if (Date.now() - detectClangdCache.at < ttl) return detectClangdCache.value;
   }
   const value = detectClangdUncached();
   detectClangdCache = { value, at: Date.now() };
@@ -119,7 +152,8 @@ function detectClangdUncached(): string | undefined {
     const configured = vscode.workspace.getConfiguration('clangd').get<string>('path', '');
     if (configured) {
       const expanded = configured.trim().replace(/\$\{userHome\}/gi, os.homedir());
-      if (expanded && fs.existsSync(expanded)) return expanded;
+      // 必须是文件：配置成目录时不能当成 clangd 可执行文件
+      if (expanded && isFile(expanded)) return expanded;
     }
   } catch {
     // 忽略：配置读取失败时回退到 PATH / 常见目录
@@ -127,7 +161,7 @@ function detectClangdUncached(): string | undefined {
   const onPath = findOnPath();
   if (onPath) return onPath;
   for (const p of commonLocations()) {
-    if (fs.existsSync(p)) return p;
+    if (isFile(p)) return p;
   }
   return undefined;
 }
@@ -152,8 +186,11 @@ export function queryCompilerIncludes(compilerPath: string, lang: 'c' | 'c++', e
 
   let r: ReturnType<typeof spawnSync>;
   try {
-    // extraFlags（如 -march=...）用于让 GCC 选择正确的 multilib 系统头目录
-    r = spawnSync(compilerPath, ['-E', '-x', lang, '-', '-v', ...extraFlags], { encoding: 'utf8', input: '' });
+    // extraFlags（如 -march=...）用于让 GCC 选择正确的 multilib 系统头目录。
+    // 超时保护：编译器路径错误/网络盘/包装脚本挂起时，同步 spawn 会冻结扩展宿主。
+    r = spawnSync(compilerPath, ['-E', '-x', lang, '-', '-v', ...extraFlags], {
+      encoding: 'utf8', input: '', timeout: 5000, windowsHide: true,
+    });
   } catch {
     includesCache.set(key, []);
     return [];
@@ -204,7 +241,7 @@ export function queryCompilerTarget(compilerPath: string): string | undefined {
 
   let r: ReturnType<typeof spawnSync>;
   try {
-    r = spawnSync(compilerPath, ['-dumpmachine'], { encoding: 'utf8' });
+    r = spawnSync(compilerPath, ['-dumpmachine'], { encoding: 'utf8', timeout: 5000, windowsHide: true });
   } catch {
     targetCache.set(compilerPath, undefined);
     return undefined;
@@ -212,6 +249,31 @@ export function queryCompilerTarget(compilerPath: string): string | undefined {
   const triple = String(r.stdout ?? '').trim() || undefined;
   targetCache.set(compilerPath, triple);
   return triple;
+}
+
+/**
+ * 解析编译器可执行文件：裸程序名（如 `gcc.exe`）且配置了 masterPath 时，
+ * 优先用 `<masterPath>/bin/<program>`（与构建期 PATH 注入口径一致；也兼容 masterPath 直接指向 bin）。
+ *
+ * 背景：queryCompilerIncludes / queryCompilerTarget 用 spawnSync 直接启动编译器，而扩展宿主
+ * 的 PATH 通常不含工具链 bin —— 只配 masterPath（未把工具链加入系统 PATH）时探测会静默失败，
+ * clangd 就缺少 `-isystem` / `--target`。已是路径的 program 原样返回。
+ */
+export function resolveCompilerProgram(program: string, masterPath?: string): string {
+  const p = (program || '').trim();
+  if (!p) return '';
+  if (p.includes('/') || p.includes('\\')) return p;
+  const mp = (masterPath || '').trim();
+  if (!mp) return p;
+  for (const dir of [path.join(mp, 'bin'), mp]) {
+    const candidate = path.join(dir, p);
+    try {
+      if (fs.statSync(candidate).isFile()) return candidate;
+    } catch {
+      // 该候选不存在 → 试下一个
+    }
+  }
+  return p; // 未命中 masterPath → 仍按裸名交给 PATH
 }
 
 /** 转义正则特殊字符（用于 If.PathMatch） */
@@ -248,18 +310,24 @@ function removeBlock(text: string, beginMark: string, endMark: string): string {
   return text.slice(0, begin) + text.slice(end + endMark.length);
 }
 
-/** 清理移除片段后残留的孤立 --- 分隔符（合并连续、去首尾），避免生成空 YAML 文档 */
+/**
+ * 清理移除片段后残留的孤立 --- 分隔符：只合并**连续**的分隔符（中间只有空行）并去掉首尾。
+ *
+ * 注意：用户自有的单个 `---` 必须保留 —— clangd 用 `---` 分隔不同 `If` 条件的片段，
+ * 删掉会把两篇文档合并（`If` 条件丢失，甚至出现重复键让 clangd 丢弃整个 config.yaml）。
+ * 旧实现「前一行是空行就删」会误删这种分隔符（用户内容被改写）。
+ */
 function sanitizeRemainder(text: string): string {
   const lines = text.replace(/\r\n/g, '\n').split('\n');
   const out: string[] = [];
   for (const line of lines) {
     const trimmed = line.trim();
     if (trimmed === '---') {
-      // 与前一个 --- 或空行连续时跳过（去重）
-      if (out.length) {
-        const prev = out[out.length - 1].trim();
-        if (prev === '---' || prev === '') continue;
-      }
+      // 向前跳过空行找上一个非空行
+      let prev = out.length - 1;
+      while (prev >= 0 && out[prev].trim() === '') prev--;
+      if (prev < 0) continue; // 文件开头（前面只有空行）→ 悬空分隔符
+      if (out[prev].trim() === '---') continue; // 与上一个分隔符连续（删片段留下的空文档）→ 合并
     }
     out.push(line);
   }
@@ -530,6 +598,31 @@ export function pruneStaleClangdFragments(text: string): { text: string; removed
   return { text: out, removed };
 }
 
+/**
+ * 原子写文件（临时文件 + 重命名）：clangd 会监听 config.yaml / compile_commands.json，
+ * 直接覆盖存在「读到半截内容」的窗口（大文件/慢盘上尤其明显），可能让 clangd 短暂丢弃配置或索引。
+ */
+export function writeFileAtomic(file: string, content: string): void {
+  const dir = path.dirname(file);
+  fs.mkdirSync(dir, { recursive: true });
+  const tmp = path.join(dir, `.${path.basename(file)}.${process.pid}.${Date.now()}.tmp`);
+  fs.writeFileSync(tmp, content, 'utf-8');
+  try {
+    fs.renameSync(tmp, file);
+  } catch {
+    // 个别文件系统/杀毒软件会拒绝「覆盖式重命名」→ 回退直接写（至少保证最终内容正确）
+    try {
+      fs.writeFileSync(file, content, 'utf-8');
+    } finally {
+      try {
+        fs.rmSync(tmp, { force: true });
+      } catch {
+        // 清理失败不影响主流程
+      }
+    }
+  }
+}
+
 /** 读取用户级 clangd 配置文本（不存在/不可读 → 空串） */
 export function readClangdUserConfigText(): string {
   try {
@@ -549,9 +642,17 @@ export function writeClangdUserConfig(out: string): boolean {
     old = '';
   }
   if (old === out) return false; // 内容未变则跳过写入，避免 clangd 无谓地重新加载配置
-  fs.mkdirSync(path.dirname(cfgPath), { recursive: true });
-  fs.writeFileSync(cfgPath, out, 'utf-8');
+  writeFileAtomic(cfgPath, out);
   return true;
+}
+
+/**
+ * 只保留 clangd 来源的诊断（clangd 发布时 `source` 为 `clang` / `clang-tidy` / `clangd`）。
+ * 该文件没有任何 clangd 来源时保留全部（clangd 尚未分析 / 老版本未设置 source），避免 Build Log 变空。
+ */
+export function preferClangdSource<T extends { source?: string }>(diags: readonly T[]): T[] {
+  const isClangd = (d: T): boolean => (d.source ?? '').toLowerCase().startsWith('clang');
+  return diags.some(isClangd) ? diags.filter(isClangd) : [...diags];
 }
 
 /**

@@ -13,6 +13,7 @@ import { Project } from '../model/types';
 import { Compiler } from '../compiler/compiler';
 import { BuildEngine } from './buildEngine';
 import { CbOutput } from './cbChannel';
+import { writeFileAtomic } from '../tools/clangd';
 
 export interface CompileCommandEntry {
   directory: string;
@@ -29,15 +30,47 @@ const CLANG_INCOMPATIBLE_FLAGS = [
   '-mlong-calls',
 ];
 
-/** 按空白切分命令行，但保留引号内的路径（含空格） */
-function tokenize(command: string): string[] {
-  const tokens: string[] = [];
-  // 裸 token 排除引号：形如 -I"path with space" 的粘连引号会被拆成 -I 与 "path with space" 两个 token，
-  // 而非被 \S+ 贪婪匹配成 -I"path 这种坏 token
-  const re = /"([^"]*)"|([^\s"]+)/g;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(command)) !== null) {
-    tokens.push(m[1] !== undefined ? m[1] : m[2]);
+/** 命令行 token：raw = 原始文本（含引号，原样输出）；value = 去引号后的值（仅用于 flag 判定） */
+interface RawToken {
+  raw: string;
+  value: string;
+}
+
+/**
+ * 按空白切分命令行，但**保留每个 token 的原始文本**（只剥离引号用于比较）。
+ *
+ * 不能用「去引号 → 重新加引号」的实现：`-DMSG="hello world"` 会被拆成 `-DMSG=` 与
+ * `hello world` 两个参数（宏值丢失，`hello world` 还被当成输入文件）。保留原文即可逐字复用，
+ * 含空格的路径（`-I"C:/Program Files/sdk"`）也天然正确。
+ */
+function tokenize(command: string): RawToken[] {
+  const tokens: RawToken[] = [];
+  const len = command.length;
+  let i = 0;
+  while (i < len) {
+    while (i < len && /\s/.test(command[i])) i++;
+    if (i >= len) break;
+    const start = i;
+    let value = '';
+    let inQuotes = false;
+    while (i < len) {
+      const ch = command[i];
+      // 转义引号（Code::Blocks 会把含空格的选项整体加引号并转义内部引号：\"..."）→ 字面引号
+      if (ch === '\\' && command[i + 1] === '"') {
+        value += '"';
+        i += 2;
+        continue;
+      }
+      if (ch === '"') {
+        inQuotes = !inQuotes;
+        i++;
+        continue;
+      }
+      if (!inQuotes && /\s/.test(ch)) break;
+      value += ch;
+      i++;
+    }
+    tokens.push({ raw: command.slice(start, i), value });
   }
   return tokens;
 }
@@ -49,15 +82,17 @@ function quoteIfNeeded(t: string): string {
 
 /** 对单条编译命令做 clang 兼容化：剔除不兼容 flag + 追加 -isystem */
 function bakeCommand(command: string, systemIncludes: string[]): string {
-  const tokens = tokenize(command).filter((t) => {
-    if (t.startsWith('-march=')) return false;
-    if (CLANG_INCOMPATIBLE_FLAGS.includes(t)) return false;
-    return true;
-  });
+  const parts = tokenize(command)
+    .filter((t) => {
+      if (t.value.startsWith('-march=')) return false;
+      if (CLANG_INCOMPATIBLE_FLAGS.includes(t.value)) return false;
+      return true;
+    })
+    .map((t) => t.raw);
   for (const inc of systemIncludes) {
-    tokens.push('-isystem', inc);
+    parts.push('-isystem', quoteIfNeeded(inc));
   }
-  return tokens.map(quoteIfNeeded).join(' ');
+  return parts.join(' ');
 }
 
 /** 收集单个项目的编译单元（已做 clang 兼容化） */
@@ -90,6 +125,7 @@ export function writeClangdDatabase(entries: CompileCommandEntry[], outDir: stri
     // 文件不存在，正常写入
   }
 
-  fs.writeFileSync(outPath, content, 'utf-8');
+  // 原子写：clangd 监听该文件，直接覆盖可能让它读到半个 JSON（索引短暂报错/清空）
+  writeFileAtomic(outPath, content);
   return { outPath, count: entries.length, skipped: false };
 }
