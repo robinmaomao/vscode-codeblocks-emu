@@ -95,11 +95,27 @@ check('D3 source 缺失 → 保留全部（老版本 clangd 未设置 source）'
   fs.writeFileSync(exe, 'x');
   const savedPath = process.env.PATH;
   process.env.PATH = ''; // 排除 PATH 上的真实 clangd，确保走常见目录
+  // CI runner 常自带 C:\Program Files\LLVM\bin\clangd.exe（先于扩展下载目录被找到）⇒ 把系统常见目录也指向空目录，
+  // 让断言只考验「Insiders 下载目录能被发现」，与本机是否装了 LLVM 无关。
+  const savedPf = process.env['ProgramFiles'];
+  const savedLocalAppData = process.env['LOCALAPPDATA'];
+  if (process.platform === 'win32') {
+    process.env['ProgramFiles'] = path.join(dir, 'empty-program-files');
+    process.env['LOCALAPPDATA'] = path.join(dir, 'empty-local-appdata');
+  }
   clangdPathStub = '';
   clearClangdDetectionCache();
   const found = detectClangd();
   check('A7 找到 Insiders 下 clangd 扩展下载的二进制（不硬编码 Code 目录）', found === exe, found, exe);
   process.env.PATH = savedPath;
+  const restoreEnv = (key, value) => {
+    if (value === undefined) delete process.env[key];
+    else process.env[key] = value;
+  };
+  if (process.platform === 'win32') {
+    restoreEnv('ProgramFiles', savedPf);
+    restoreEnv('LOCALAPPDATA', savedLocalAppData);
+  }
 }
 
 // ---- 6. clangd.js 静态断言（TTL 与负缓存结构在编译产物中） ----
