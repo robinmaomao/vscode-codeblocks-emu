@@ -173,6 +173,15 @@ function isGccLike(compilerPath: string): boolean {
   return /gcc|g\+\+|clang|(^|[^a-z])cc([^a-z]|$)/.test(base);
 }
 
+/** 编译器可执行文件的「时间戳指纹」——让系统头/三元组缓存随工具链升级自动失效 */
+function compilerStamp(compilerPath: string): string {
+  try {
+    return String(Math.trunc(fs.statSync(compilerPath).mtimeMs));
+  } catch {
+    return '';
+  }
+}
+
 /**
  * 查询 GCC/Clang 风格编译器的默认 include 搜索路径。
  * 通过 `<compiler> -E -x <lang> - -v` 的 stderr 输出解析
@@ -180,7 +189,7 @@ function isGccLike(compilerPath: string): boolean {
  */
 export function queryCompilerIncludes(compilerPath: string, lang: 'c' | 'c++', extraFlags: string[] = []): string[] {
   if (!isGccLike(compilerPath)) return [];
-  const key = `${compilerPath}|${lang}|${extraFlags.join('\u0000')}`;
+  const key = `${compilerPath}|${compilerStamp(compilerPath)}|${lang}|${extraFlags.join('\u0000')}`;
   const cached = includesCache.get(key);
   if (cached) return cached;
 
@@ -237,17 +246,18 @@ export function queryCompilerSystemIncludes(cPath?: string, cppPath?: string, ex
 /** 查询编译器目标三元组（`<compiler> -dumpmachine`，如 riscv32-elf），失败返回 undefined */
 export function queryCompilerTarget(compilerPath: string): string | undefined {
   if (!isGccLike(compilerPath)) return undefined;
-  if (targetCache.has(compilerPath)) return targetCache.get(compilerPath);
+  const cacheKey = `${compilerPath}|${compilerStamp(compilerPath)}`;
+  if (targetCache.has(cacheKey)) return targetCache.get(cacheKey);
 
   let r: ReturnType<typeof spawnSync>;
   try {
     r = spawnSync(compilerPath, ['-dumpmachine'], { encoding: 'utf8', timeout: 5000, windowsHide: true });
   } catch {
-    targetCache.set(compilerPath, undefined);
+    targetCache.set(cacheKey, undefined);
     return undefined;
   }
   const triple = String(r.stdout ?? '').trim() || undefined;
-  targetCache.set(compilerPath, triple);
+  targetCache.set(cacheKey, triple);
   return triple;
 }
 

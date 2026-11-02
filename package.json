@@ -2,7 +2,7 @@
   "name": "codeblocks-vscode",
   "displayName": "%extension.displayName%",
   "description": "%extension.description%",
-  "version": "0.8.134",
+  "version": "0.8.135",
   "icon": "resources/icon.png",
   "publisher": "robinmaomao",
   "author": {
@@ -182,6 +182,11 @@
         "command": "codeblocks.workspaceScanReport",
         "title": "%command.codeblocks.workspaceScanReport.title%",
         "icon": "$(pulse)"
+      },
+      {
+        "command": "codeblocks.excludeBuildOutputs",
+        "title": "%command.codeblocks.excludeBuildOutputs.title%",
+        "icon": "$(eye-closed)"
       },
       {
         "command": "codeblocks.compilerOptions",
@@ -709,6 +714,26 @@
             "type": "boolean",
             "default": false,
             "description": "%configuration.codeblocks.build.profile.description%"
+          },
+          "codeblocks.build.traceProcesses": {
+            "type": "boolean",
+            "default": false,
+            "description": "%configuration.codeblocks.build.traceProcesses.description%"
+          },
+          "codeblocks.build.lowerCompilerPriority": {
+            "type": "boolean",
+            "default": false,
+            "description": "%configuration.codeblocks.build.lowerCompilerPriority.description%"
+          },
+          "codeblocks.build.autoExcludeOutputs": {
+            "type": "boolean",
+            "default": true,
+            "description": "%configuration.codeblocks.build.autoExcludeOutputs.description%"
+          },
+          "codeblocks.build.sampleSystem": {
+            "type": "boolean",
+            "default": false,
+            "description": "%configuration.codeblocks.build.sampleSystem.description%"
           },
           "codeblocks.build.compileCommandsOnlyTargets": {
             "type": "boolean",

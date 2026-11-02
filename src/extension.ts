@@ -63,6 +63,7 @@ import { OutputParser } from './build/outputParser';
 import { isCompilerUsable, renderInvalidCompilerMessage, renderTriedCompilerPaths, triedCompilerPaths } from './build/invalidCompiler';
 import { collectClangdEntries, writeClangdDatabase, CompileCommandEntry } from './build/compileCommands';
 import { DiagnosticPublisher } from './build/diagnosticPublisher';
+import { collectOutputDirs, excludeGlobsFor, mergeExcludePatterns } from './build/watcherExclude';
 import { detectClangd, queryCompilerSystemIncludes, queryCompilerTarget, resolveCompilerProgram, updateClangdUserConfig, clangdUserConfigPath, clearClangdDetectionCache, extraConfigWarnings, findStaleClangdFragments, listManagedFragments, cleanStaleClangdFragments, readClangdUserConfigText, preferClangdSource } from './tools/clangd';
 import { SymbolIndex, registerFallbackIntelliSense } from './tools/codeCompletion';
 import { GdbDebugAdapter } from './debug/gdbDebugAdapter';
@@ -141,6 +142,13 @@ let buildInProgress = false;
  * 延迟到构建结束再重启：索引峰值与编译峰值错开，DB 内容不变时（skipped）本就不会重启。
  */
 let pendingClangdRestart = false;
+/**
+ * 构建期间被推迟的编译数据库（compile_commands.json）生成。
+ * 生成链路要同步 spawn 交叉编译器取系统头（`-E -v` / `-dumpmachine`，单次可达数百 ms），
+ * 构建期间跑会与编译进程抢 CPU、并阻塞扩展宿主 —— 统一推迟到构建结束。
+ */
+let pendingClangdGeneration = false;
+let pendingClangdGenerationInteractive = false;
 
 /** 底部状态栏构建目标项 */
 let targetStatusBar: vscode.StatusBarItem | undefined;
@@ -165,7 +173,7 @@ let projectScanCacheAt = 0;
 let projectScanInFlight: Promise<string[]> | undefined;
 /** 工作区工程扫描的重目录排除（.cbp/.workspace 不会出现在这些目录；显式传 exclude 会覆盖 files.exclude，故把默认项写回） */
 const PROJECT_SCAN_EXCLUDE =
-  '**/{node_modules,.git,.svn,.hg,CVS,Output,obj,bin,build,out,dist,Debug,Release,.vs,__pycache__}/**';
+  '**/{node_modules,.git,.svn,.hg,CVS,Output,obj,bin,build,out,dist,Debug,Release,.objs,.deps,.vs,__pycache__}/**';
 /** 工程扫描结果缓存有效期（毫秒） */
 const PROJECT_SCAN_TTL_MS = 30_000;
 /** 工程扫描结果上限（历史：两次 findFiles 各 500，合并为一次后放宽到 1000） */
@@ -1896,6 +1904,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     }),
   );
 
+  context.subscriptions.push(
+    vscode.commands.registerCommand('codeblocks.excludeBuildOutputs', async () => {
+      await excludeBuildOutputsFromWatch();
+    }),
+  );
+
   // 恢复上次会话打开的项目（.workspace 或项目列表）
   await restorePersistedProjects();
 
@@ -2164,16 +2178,168 @@ function commonParentDir(dirs: string[]): string {
   return first.slice(0, i).join(path.sep) || path.parse(dirs[0]).root;
 }
 
+/** 需要写入排除项的设置键（对象型设置，按 key 合并） */
+const EXCLUDE_SETTING_KEYS = ['files.watcherExclude', 'search.exclude'] as const;
+
 /**
- * 工作区扫描诊断报告（命令 codeblocks.workspaceScanReport）：
- * 量化"全量扫描成本 + 当前 ripgrep 并发 + 是否属于父目录多工程工作区"，供现场自查（对齐修复简报的验证方法）。
+ * 把产物目录排除项写入**用户设置**（`ConfigurationTarget.Global`），不再写入工作区
+ * `.vscode/settings.json`。
+ *
+ * 为什么放用户级：这些 glob 是「本机对构建产物的通用防御」，与具体工程内容无关；
+ * 写进工作区会把它们提交到仓库（公共区），影响同一工程的其它人，也会在
+ * `.vscode/settings.json` 里与用户自己的条目混在一起难以分辨。
+ *
+ * 同时清理旧版本写进工作区的同名条目（仅限值为 `true` 且键完全一致的项），
+ * 让升级后的仓库不再残留产物排除项；用户自己添加的其它条目原样保留。
+ *
+ * @returns added = 本次新增到用户设置的 glob（已按 key 去重）；removed = 从工作区清掉的条目
  */
+async function applyBuildOutputExcludes(globs: readonly string[]): Promise<{ added: string[]; removed: string[] }> {
+  const cfg = vscode.workspace.getConfiguration();
+  const added = new Set<string>();
+  const removed: string[] = [];
+  for (const key of EXCLUDE_SETTING_KEYS) {
+    const inspected = cfg.inspect<Record<string, unknown>>(key);
+    const merged = mergeExcludePatterns(inspected?.globalValue ?? undefined, globs);
+    if (merged.added.length) {
+      await cfg.update(key, merged.value, vscode.ConfigurationTarget.Global);
+      for (const g of merged.added) added.add(g);
+    }
+    // 迁移：清掉旧版本写进工作区（公共区）的同名条目；其它键（用户自己的）不动
+    const wsRaw = inspected?.workspaceValue;
+    const wsValue = wsRaw && typeof wsRaw === 'object' && !Array.isArray(wsRaw)
+      ? wsRaw as Record<string, unknown>
+      : undefined;
+    if (wsValue) {
+      const next: Record<string, unknown> = { ...wsValue };
+      const gone: string[] = [];
+      for (const g of globs) {
+        if (next[g] === true) {
+          delete next[g];
+          gone.push(g);
+        }
+      }
+      if (gone.length) {
+        // 空对象 → 传 undefined 直接删除该设置键（避免留下 "files.watcherExclude": {}）
+        await cfg.update(key, Object.keys(next).length ? next : undefined, vscode.ConfigurationTarget.Workspace);
+        removed.push(...gone.map((g) => `${key}: ${g}`));
+      }
+    }
+  }
+  return { added: [...added], removed };
+}
+
+/**
+ * 构建前**自动**把产物目录写入用户设置的 `files.watcherExclude` / `search.exclude`
+ * （默认开启，`codeblocks.build.autoExcludeOutputs` 可关）。
+ *
+ * 为什么在构建前做：现场实测（RISC-V SDK，56 个单元）构建期会在工程内创建
+ * 几十个 `.o`/`.bin`，VS Code 的文件监视/搜索索引会因此反复全工作区枚举：
+ * 隔离实验中 `rg.exe` 峰值达 **281**（每个 rg 还带一个 conhost），磁盘与 CPU 同时被吃满；
+ * 加上排除后 rg 峰值为 **0**。Code::Blocks 没有监视器，所以同一个工程它只吃 5% CPU。
+ *
+ * 为什么不弹窗确认：它只向**用户设置**追加 glob（不改源码、不改构建行为，也不进仓库），
+ * 属于「保护性增强」；仅首次真正添加时提示一次（带「重载窗口」按钮）。
+ */
+async function autoExcludeBuildOutputs(opts?: { notify?: boolean }): Promise<void> {
+  try {
+    if (vscode.workspace.getConfiguration('codeblocks').get<boolean>('build.autoExcludeOutputs', true) === false) return;
+    if (openProjects.length === 0) return;
+    const dirs = collectOutputDirs(openProjects);
+    const globs = dirs.flatMap((d) => excludeGlobsFor(d));
+    if (globs.length === 0) return;
+    const { added, removed } = await applyBuildOutputExcludes(globs);
+    if (added.length === 0 && removed.length === 0) return;
+    if (added.length) {
+      outputChannel.info(logT(
+        '[Code::Blocks] Auto-excluded {0} build-output glob(s) from file watching/search to keep the build from flooding the watcher: {1}',
+        added.length, added.join(', '),
+      ));
+    }
+    if (removed.length) {
+      outputChannel.info(logT(
+        '[Code::Blocks] Moved {0} build-output exclusion(s) out of the workspace settings (.vscode/settings.json) into your user settings: {1}',
+        removed.length, removed.join(', '),
+      ));
+    }
+    if (!added.length) return; // 只做了工作区清理：无需提升重载
+    if (opts?.notify === false) return;
+    const reload = i18n.t('Reload Window');
+    const pick = await vscode.window.showInformationMessage(
+      i18n.t('Excluded build outputs from file watching and search so the build does not flood VS Code with file events (user settings; reload the window to apply)'),
+      reload,
+    );
+    if (pick === reload) void vscode.commands.executeCommand('workbench.action.reloadWindow');
+  } catch (e) {
+    // 自动排除失败不影响构建，但不能静默：设置被策略锁定/只读时，
+    // 用户会看到「排除项没生效、构建仍然触发 rg 风暴」，这里留下可定位的日志。
+    outputChannel.warn(`[Code::Blocks] ${i18n.t('Failed to update user settings: {0}', (e as Error).message)}`);
+  }
+}
+
+/**
+ * 把构建产物目录写进**用户设置**的 `files.watcherExclude` / `search.exclude`
+ * （命令 `codeblocks.excludeBuildOutputs`）。与构建前自动排除共用同一实现，
+ * 区别只在于这里会报错并提示「已排除」。
+ */
+async function excludeBuildOutputsFromWatch(): Promise<void> {
+  if (openProjects.length === 0) {
+    vscode.window.showWarningMessage(i18n.t('Open a Code::Blocks project (.cbp) first'));
+    return;
+  }
+  const dirs = collectOutputDirs(openProjects);
+  const globs = dirs.flatMap((d) => excludeGlobsFor(d));
+  if (globs.length === 0) {
+    vscode.window.showInformationMessage(i18n.t('No build output directory was found in the opened projects'));
+    return;
+  }
+  let added: string[] = [];
+  let removed: string[] = [];
+  try {
+    ({ added, removed } = await applyBuildOutputExcludes(globs));
+  } catch (e) {
+    vscode.window.showErrorMessage(i18n.t('Failed to update user settings: {0}', (e as Error).message));
+    return;
+  }
+  if (added.length) {
+    outputChannel.info(logT(
+      '[Code::Blocks] Added {0} build-output glob(s) to the user settings files.watcherExclude / search.exclude: {1}',
+      added.length, added.join(', '),
+    ));
+  }
+  if (removed.length) {
+    outputChannel.info(logT(
+      '[Code::Blocks] Removed {0} build-output exclusion(s) from the workspace settings (.vscode/settings.json): {1}',
+      removed.length, removed.join(', '),
+    ));
+  }
+  if (added.length === 0) {
+    vscode.window.showInformationMessage(removed.length
+      ? i18n.t('Build outputs are now excluded in your user settings (cleaned {0} workspace entr(y/ies))', removed.length)
+      : i18n.t('Build outputs are already excluded from file watching and search in your user settings'));
+    return;
+  }
+  const reload = i18n.t('Reload Window');
+  const pick = await vscode.window.showInformationMessage(
+    i18n.t('Excluded {0} build output path(s) from file watching and search in your user settings (reload the window for it to take effect)', dirs.length),
+    reload,
+  );
+  if (pick === reload) void vscode.commands.executeCommand('workbench.action.reloadWindow');
+}
+
 async function showWorkspaceScanReport(): Promise<void> {
   const roots = (vscode.workspace.workspaceFolders ?? []).map((f) => f.uri.fsPath);
   const startedAt = Date.now();
   const files = await findProjectFiles(true);
   const scanMs = Date.now() - startedAt;
   const rgCount = await countRipgrepProcesses();
+  // 3 秒采样 rg 峰值：区分「一次性扫描」与「持续风暴」（构建期进程暴增的常见真因）
+  let rgPeak = rgCount;
+  for (let i = 0; i < 10; i++) {
+    await new Promise((r) => setTimeout(r, 300));
+    const n = await countRipgrepProcesses();
+    if (n > rgPeak) rgPeak = n;
+  }
   const mode = detectAutoOpenMode();
   const threshold = detectAutoOpenThreshold();
   const lines: string[] = [];
@@ -2182,6 +2348,16 @@ async function showWorkspaceScanReport(): Promise<void> {
   lines.push(i18n.t('  Project files detected: {0} (.cbp/.workspace; a single findFiles with heavy-directory exclusion)', files.length));
   lines.push(i18n.t('  Duration of this full scan: {0}ms', scanMs));
   lines.push(i18n.t('  Current rg (ripgrep) process count: {0}', rgCount));
+  lines.push(i18n.t('  rg (ripgrep) peak over a 3s sample: {0}', rgPeak));
+  if (rgPeak >= 10) {
+    lines.push(
+      i18n.t('  Note: ripgrep processes keep piling up — some extension is re-enumerating the whole workspace (workspace.findFiles) on every file change,') +
+        i18n.t('during a build each object/bin file triggers another full scan, which is what makes Task Manager show hundreds of rg.exe/conhost.exe and pushes CPU to 100%.'),
+    );
+    lines.push(
+      i18n.t('Disable the offending extension for this workspace (typical culprits: search-history / whole-workspace regex-search / AI workspace indexing), or run the repro script release/repro-rg-storm.ps1 to bisect.'),
+    );
+  }
   lines.push(i18n.t('  Auto-open mode: {0} (threshold {1})', mode, threshold));
   lines.push(i18n.t('  Opened projects: {0}; pending: {1}', openProjects.length, pendingCbpFiles.length));
   const projectDirs = [...new Set(files.map((f) => path.dirname(f)))];
@@ -2654,6 +2830,9 @@ async function openProject(filename: string): Promise<void> {
       const persisted = extContext?.workspaceState.get<string>('codeblocks.activeProject', '');
       activeProject = (persisted && openProjects.find((p) => p.filename === persisted)) || project;
     }
+    // ????????????????/??????????? .o/.d ???????
+    // ???????????? VS Code ????????????????
+    void autoExcludeBuildOutputs({ notify: false });
     outputChannel.info(logT('[Code::Blocks] Project opened: {0}', project.title));
     outputChannel.info(logT('  Targets: {0}', project.buildTargets.map((t) => t.title).join(', ')));
 
@@ -3264,8 +3443,20 @@ function scheduleClangdRestart(): void {
 
 /** 构建结束：补执行构建期间被推迟的 clangd 重启（无待处理项时零操作） */
 function flushPendingClangdRestart(): void {
-  if (!pendingClangdRestart || buildInProgress) return;
+  if (buildInProgress) return;
+  const restart = pendingClangdRestart;
+  const regen = pendingClangdGeneration;
+  const regenInteractive = pendingClangdGenerationInteractive;
   pendingClangdRestart = false;
+  pendingClangdGeneration = false;
+  pendingClangdGenerationInteractive = false;
+  if (regen) {
+    // 生成链路自身会在数据库变化时调度重启，这里不再额外重启（避免整库重复索引）
+    outputChannel.info(logT('[Code::Blocks] Build finished; generating the compile database deferred during the build'));
+    void runClangdGeneration(regenInteractive);
+    return;
+  }
+  if (!restart) return;
   outputChannel.info(logT('[Code::Blocks] Build finished; restarting clangd to apply the new compile database'));
   void restartClangd();
 }
@@ -3683,6 +3874,14 @@ async function applyClangdQueryDriverInteractive(): Promise<void> {
 }
 
 async function runClangdGeneration(interactive: boolean): Promise<void> {
+  // 构建进行中：只登记，构建结束（flushPendingClangdRestart）再生成。
+  // 理由见 pendingClangdGeneration 注释（同步 spawn 交叉编译器 + 与编译抢 CPU）。
+  if (buildInProgress) {
+    pendingClangdGeneration = true;
+    pendingClangdGenerationInteractive = pendingClangdGenerationInteractive || interactive;
+    outputChannel.info(logT('[Code::Blocks] Build in progress; deferring compile-database generation until it finishes'));
+    return;
+  }
   // 生成进行中：记下待重跑（合并为一次），跑完后再执行一次，避免「生成期间改设置」被静默丢弃
   if (clangdGenRunning) {
     clangdGenPending = true;
@@ -4860,7 +5059,7 @@ async function findFileCommand(node?: any): Promise<void> {
     }
     // 工作区内的 .cbp（未打开的项目）：选中即打开工程
     try {
-      const cbps = await vscode.workspace.findFiles('**/*.cbp', '**/{obj,bin,node_modules,.git}/**', 500);
+      const cbps = await vscode.workspace.findFiles('**/*.cbp', '**/{obj,bin,node_modules,.git,.objs,.deps}/**', 500);
       for (const uri of cbps) {
         if (openProjects.some((p) => normPath(p.filename) === normPath(uri.fsPath))) continue;
         entries.push({
@@ -5868,6 +6067,10 @@ async function build(rebuild: boolean): Promise<boolean> {
     return false;
   }
 
+  // 构建前先把产物目录排除出监视/搜索：否则构建中写出的几十个目标文件
+  // 会让 VS Code 反复全工作区枚举（实测 rg 峰值 281），磁盘/CPU 被监视器抢光
+  await autoExcludeBuildOutputs();
+
   let project = activeProject && openProjects.includes(activeProject)
     ? activeProject
     : openProjects.length === 1 ? openProjects[0] : undefined;
@@ -5916,6 +6119,9 @@ async function buildWorkspaceLocked(rebuild: boolean, clearLog: boolean): Promis
 
   // 构建前自动保存工作区未保存文件
   await saveAllBeforeBuild();
+
+  // 与主 Build 一致：先排除产物目录，避免构建写文件触发全工作区枚举
+  await autoExcludeBuildOutputs();
 
   if (clearLog) {
     diagnosticCollection.clear();
@@ -6038,6 +6244,9 @@ async function buildSingleProjectLocked(filename: string, rebuild: boolean): Pro
   // 单工程编译时，活动工程也切换为该工程（状态栏 / 后续构建 / clangd 随之更新）
   setActiveProject(project, { persist: true });
   await saveAllBeforeBuild();
+  // 右键「Build/Rebuild」不经过主 Build 命令：这里同样要先排除产物目录，
+  // 否则单工程构建写出的 .o/.objs 仍会触发 VS Code 的全工作区枚举（rg 风暴）。
+  await autoExcludeBuildOutputs();
 
   // 项目级平台过滤（对齐 compilergcc.cpp:2724）
   if (!supportsCurrentPlatform(project.platforms)) {
@@ -6125,6 +6334,8 @@ async function buildSingleFileLocked(project: Project, file: ProjectFile): Promi
     setActiveProject(project, { persist: true });
   }
   await saveAllBeforeBuild();
+  // 单文件编译同样会写对象/响应文件：先排除产物目录，避免触发监视器全量枚举
+  await autoExcludeBuildOutputs();
 
   // 项目级平台过滤（对齐 compilergcc.cpp:2724）
   if (!supportsCurrentPlatform(project.platforms)) {
@@ -7151,6 +7362,8 @@ async function clean(): Promise<void> {
   }
   // 清理前自动保存
   await saveAllBeforeBuild();
+  // 清理会批量删除产物，同样会触发 VS Code 全工作区枚举 —— 先排除产物目录
+  await autoExcludeBuildOutputs();
   // 输出清理核查 C：清理开头清空输出（对齐 CB OnClean 语义）
   outputChannel.clear();
   outputChannel.show(true);
@@ -7294,6 +7507,7 @@ async function cleanWorkspace(): Promise<void> {
     return;
   }
   await saveAllBeforeBuild();
+  await autoExcludeBuildOutputs();
   outputChannel.show(true);
   for (const project of topologicalBuildOrder(openProjects)) {
     if (!supportsCurrentPlatform(project.platforms)) {
@@ -7332,6 +7546,8 @@ async function rebuildWorkspace(): Promise<void> {
   if (choice !== i18n.t('Rebuild All')) return;
   if (!(await stopDebuggerIfRunning())) return;
   await saveAllBeforeBuild();
+  // Rebuild All 的 clean 遍会批量删除、build 遍会批量写入产物：先排除产物目录
+  await autoExcludeBuildOutputs();
   clearBackticksCache();
   outputChannel.clear();
   outputChannel.show(true);
