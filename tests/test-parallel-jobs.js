@@ -15,11 +15,31 @@ function check(name, cond, got, want) {
 }
 
 // ---- 假 spawn：编译命令（含 -c）按 COMPILE_DELAY_MS 延迟，统计并发峰值 ----
+// 说明：引擎对编译/链接命令已改为「去 shell 直接派生」= spawn(program, args, opts)，
+// 因此这里要把 program + args 拼回完整命令行再判定 -c/-o（与旧版 spawn(command, opts) 等价）。
 const COMPILE_DELAY_MS = 80;
 const probe = { active: 0, max: 0, compileSpawns: 0, commands: [] };
-function fakeSpawn(command) {
-  const isCompile = /(^|\s)-c(\s|$)/.test(String(command));
-  probe.commands.push(String(command));
+/** 模拟「直接派生 ENOENT」（PATH 上只有 gcc.cmd / Scoop shim 之类） */
+let directEnoent = false;
+let shellSpawns = 0;
+function fakeSpawn(command, argsOrOpts) {
+  const full = Array.isArray(argsOrOpts) ? `${command} ${argsOrOpts.join(' ')}` : String(command);
+  const isCompile = /(^|\s)-c(\s|$)/.test(full);
+  probe.commands.push(full);
+  if (!Array.isArray(argsOrOpts)) shellSpawns++;
+  if (directEnoent && Array.isArray(argsOrOpts)) {
+    const failed = new EventEmitter();
+    failed.stdout = new EventEmitter();
+    failed.stderr = new EventEmitter();
+    failed.pid = undefined;
+    failed.kill = () => {};
+    setImmediate(() => {
+      failed.emit('error', Object.assign(new Error('spawn ENOENT'), { code: 'ENOENT' }));
+      // Node 在 spawn 失败后可能补发 close：引擎必须忽略（否则会提前判定失败/释放槽位）
+      setImmediate(() => failed.emit('close', -1));
+    });
+    return failed;
+  }
   if (isCompile) {
     probe.compileSpawns++;
     probe.active++;
@@ -79,7 +99,7 @@ Module._load = function (request, parent, isMain) {
 };
 
 const { ProjectParser } = require('../dist/model/parser.js');
-const { BuildEngine, resolveParallelJobs, DEFAULT_PARALLEL_JOBS, MAX_PARALLEL_JOBS } = require('../dist/build/buildEngine.js');
+const { BuildEngine, resolveParallelJobs, resolveJobBudget, processBudget, estimatePhysicalCores, DEFAULT_PARALLEL_JOBS, MAX_PARALLEL_JOBS } = require('../dist/build/buildEngine.js');
 const { createGccCompiler } = require('../dist/compiler/compiler.js');
 
 function makeProject(count) {
@@ -152,6 +172,16 @@ async function buildWith(files, jobs, buildOptions, onEngine) {
   check('A12 数字字符串 "6" → 6', resolveParallelJobs('6') === 6, resolveParallelJobs('6'));
   check('A13 空字符串 → 默认 8', resolveParallelJobs('') === 8, resolveParallelJobs(''));
 
+  // ---------- A2. 进程预算（processBudget / resolveJobBudget） ----------
+  check('A14 进程预算不低于默认 8（模拟 2 核 → 8）', processBudget(2) === 8, processBudget(2));
+  check('A15 进程预算 = 逻辑核数（模拟 16 核 → 16）', processBudget(16) === 16, processBudget(16));
+  check('A16 默认 8 不受预算影响（模拟 16 核）', resolveJobBudget(undefined, 16) === 8, resolveJobBudget(undefined, 16));
+  check('A17 0=自动 受预算收敛（模拟 16 核 → 16）', resolveJobBudget(0, 16) === 16, resolveJobBudget(0, 16));
+  check('A18 0=自动 在低核机按核数自动（模拟 2 核 → 4，预算只是上限不是下限）', resolveJobBudget(0, 2) === 4, resolveJobBudget(0, 2));
+  check('A19 显式 32 在高核机保留（模拟 64 核 → 32）', resolveJobBudget(32, 64) === 32, resolveJobBudget(32, 64));
+  check('A20 显式 32 在低核机被收敛（模拟 4 核 → 8）', resolveJobBudget(32, 4) === 8, resolveJobBudget(32, 4));
+  check('A21 显式 1 恒为串行（模拟 64 核）', resolveJobBudget(1, 64) === 1, resolveJobBudget(1, 64));
+
   // ---------- B. 设置 → 实际并发 ----------
   {
     const r = await buildWith(12, undefined); // 未配置 → 默认 8
@@ -169,12 +199,23 @@ async function buildWith(files, jobs, buildOptions, onEngine) {
     check('B3 显式 1：串行（峰值 = 1）', r.maxActive === 1, { maxActive: r.maxActive });
   }
   {
-    const expectedAuto = Math.min(Math.max(1, os.cpus().length || 1) * 2, MAX_PARALLEL_JOBS);
+    // 0 = 自动，但同时受「进程预算」（并发 ≤ max(默认 8, 逻辑核数)）收敛
+    const cores = Math.max(1, os.cpus().length || 1);
+    const budget = Math.max(DEFAULT_PARALLEL_JOBS, cores);
+    const expectedAuto = Math.min(Math.min(cores * 2, MAX_PARALLEL_JOBS), budget);
     const units = expectedAuto + 8;
     const r = await buildWith(units, 0);
-    check(`B4 显式 0：自动并发 = ${expectedAuto}（本机逻辑核 ${os.cpus().length}）`, r.maxActive === expectedAuto, {
+    check(`B4 显式 0：自动并发 = ${expectedAuto}（本机逻辑核 ${cores}，预算 ${budget}）`, r.maxActive === expectedAuto, {
       maxActive: r.maxActive, expectedAuto,
     });
+  }
+  {
+    // 显式大值同样被进程预算收敛（32 只在核数 ≥32 的机器上才可能达到）
+    const cores = Math.max(1, os.cpus().length || 1);
+    const expected = Math.min(32, Math.max(DEFAULT_PARALLEL_JOBS, cores));
+    const units = expected + 8;
+    const r = await buildWith(units, 32);
+    check(`B5 显式 32：按进程预算收敛到 ${expected}`, r.maxActive === expected, { maxActive: r.maxActive, expected });
   }
 
   // ---------- C. 每条输出只解析一次（CPU 收口回归） ----------
@@ -220,6 +261,53 @@ async function buildWith(files, jobs, buildOptions, onEngine) {
     delete configOverrides['build.compilerCache'];
     delete configOverrides['build.compilerCachePath'];
     fs.rmSync(wrapper, { force: true });
+  }
+
+    // ---------- E. 编译器子进程优先级（codeblocks.build.lowerCompilerPriority） ----------
+  {
+    check('E0 estimatePhysicalCores(8) = 4（超线程机型 4 物理核 / 8 逻辑核）',
+      estimatePhysicalCores(8) === 4, estimatePhysicalCores(8));
+    check('E1 estimatePhysicalCores(16) = 8', estimatePhysicalCores(16) === 8, estimatePhysicalCores(16));
+    check('E2 estimatePhysicalCores(4) = 4（无超线程按原值）', estimatePhysicalCores(4) === 4, estimatePhysicalCores(4));
+    check('E3 estimatePhysicalCores(2) = 2', estimatePhysicalCores(2) === 2, estimatePhysicalCores(2));
+    check('E4 estimatePhysicalCores 下限 1', estimatePhysicalCores(1) === 1 && estimatePhysicalCores(0) === 1,
+      [estimatePhysicalCores(1), estimatePhysicalCores(0)]);
+
+    const PRIO = os.constants.priority.PRIORITY_BELOW_NORMAL;
+    const calls = [];
+    const origSetPriority = os.setPriority;
+    os.setPriority = (pid, prio) => { calls.push([pid, prio]); };
+    try {
+      // 默认关闭（实测：降级会让 I/O 瓶颈型构建上的编译器饿死，反而更慢）
+      const r1 = await buildWith(3, 2);
+      check('E5 默认不降级（不调用 setPriority）', calls.length === 0 && r1.ok === true, calls.length);
+      check('E6 不降级不影响构建结果', r1.ok === true, r1.ok);
+
+      calls.length = 0;
+      configOverrides['build.lowerCompilerPriority'] = true;
+      const r2 = await buildWith(3, 2);
+      check('E7 显式开启后每个子进程都降到 BELOW_NORMAL',
+        calls.length === probe.commands.length && calls.length > 0 && calls.every((c) => c[1] === PRIO),
+        { calls: calls.length, spawns: probe.commands.length });
+      delete configOverrides['build.lowerCompilerPriority'];
+
+      os.setPriority = () => { throw new Error('EPERM'); };
+      const r3 = await buildWith(2, 1);
+      check('E8 setPriority 抛错不影响构建（静默忽略）', r3.ok === true, r3.ok);
+    } finally {
+      os.setPriority = origSetPriority;
+    }
+  }
+
+  // ---------- F. 直接派生失败 → 回退 shell 重试（Scoop shim / 只有 .cmd 的裸程序名） ----------
+  {
+    directEnoent = true;
+    shellSpawns = 0;
+    const r = await buildWith(2, 1);
+    directEnoent = false;
+    check('F1 直接派生 ENOENT 时回退 shell 重试并构建成功', r.ok === true, r.ok);
+    check('F2 确实发生了 shell 回退派生', shellSpawns > 0, shellSpawns);
+    check('F3 旧进程迟到的 close(-1) 未被误判为失败', r.log.filter((l) => /Failed to execute/.test(l)).length === 0, r.log);
   }
 
   console.log(`并行任务数回归: ${pass} pass, ${fail} fail`);

@@ -25,6 +25,10 @@ function check(name, cond, got, want) {
 const SETTINGS = [
   ['codeblocks.saveBeforeBuild', 'src/extension.ts', 'dist/extension.js', '构建/清理前 saveAll（saveAllBeforeBuild）'],
   ['codeblocks.build.profile', 'src/build/buildEngine.ts', 'dist/build/buildEngine.js', '构建阶段计时探针开关（BuildEngine.build）'],
+  ['codeblocks.build.traceProcesses', 'src/build/buildEngine.ts', 'dist/build/buildEngine.js', '构建子进程统计开关（BuildEngine.traceProcessSummary）'],
+  ['codeblocks.build.lowerCompilerPriority', 'src/build/buildEngine.ts', 'dist/build/buildEngine.js', '编译子进程降级开关（BuildEngine.demoteChild）'],
+  ['codeblocks.build.sampleSystem', 'src/build/buildEngine.ts', 'dist/build/buildEngine.js', '系统 CPU 归属采样开关（BuildEngine.sampleSystemEnabled）'],
+  ['codeblocks.build.autoExcludeOutputs', 'src/extension.ts', 'dist/extension.js', '构建前自动排除产物目录（autoExcludeBuildOutputs）'],
   ['codeblocks.debug.initCommands', 'src/debug/gdbDebugAdapter.ts', 'dist/debug/gdbDebugAdapter.js', '调试启动后注入的用户命令（applyDebugSettings）'],
   ['codeblocks.debug.instructionSet', 'src/debug/gdbDebugAdapter.ts', 'dist/debug/gdbDebugAdapter.js', '自定义反汇编指令集（applyDebugSettings）'],
   ['codeblocks.debug.charset', 'src/debug/gdbDebugAdapter.ts', 'dist/debug/gdbDebugAdapter.js', '目标字符集（applyDebugSettings）'],

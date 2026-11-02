@@ -169,6 +169,9 @@ export function runScriptCommand(
     const proc = spawn(expanded, {
       cwd: upperDrive(cwd),
       shell: true,
+      // 不建控制台窗口：pre/post-build 脚本在 Windows 上同样会派生 cmd.exe，
+      // 隐藏窗口可省去控制台创建/销毁（并避免任务管理器里出现一堆「控制台窗口主机」）
+      windowsHide: true,
       env,
     });
     // 注册进取消源：cancel() 时强杀整棵进程树

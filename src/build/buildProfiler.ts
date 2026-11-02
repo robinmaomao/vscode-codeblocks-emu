@@ -52,6 +52,7 @@ export class BuildProfiler {
   private entries: ProfileEntry[] = [];
   private byKey = new Map<string, ProfileEntry>();
   private counters = new Map<string, number>();
+  private peaks = new Map<string, number>();
 
   /** 累加一个相位的耗时（count 自增；同键多次调用自动累计） */
   add(key: string, ms: number): void {
@@ -73,6 +74,12 @@ export class BuildProfiler {
   /** 计数类条目累加（spawn 次数 / 输出字节等） */
   count(key: string, n = 1): void {
     this.counters.set(key, (this.counters.get(key) ?? 0) + n);
+  }
+
+  /** 峰值条目（保留最大值；用于并发子进程峰值这类「取最大」的指标） */
+  max(key: string, n: number): void {
+    if (!Number.isFinite(n)) return;
+    this.peaks.set(key, Math.max(this.peaks.get(key) ?? 0, n));
   }
 
   /** 同步代码块计时（返回块内结果，异常同样计入） */
@@ -110,6 +117,12 @@ export class BuildProfiler {
       const group = i < 0 ? '' : key.slice(0, i);
       const name = i < 0 ? key : key.slice(i + 1);
       rows.push({ group, name, value: name.includes(logT('bytes')) ? formatBytes(n) : String(n) });
+    }
+    for (const [key, n] of this.peaks) {
+      const i = key.indexOf('/');
+      const group = i < 0 ? '' : key.slice(0, i);
+      const name = i < 0 ? key : key.slice(i + 1);
+      rows.push({ group, name, value: String(n) });
     }
     const groups = new Map<string, Row[]>();
     for (const r of rows) {

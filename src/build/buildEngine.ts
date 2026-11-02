@@ -8,7 +8,7 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
 import * as os from 'os';
-import { spawn } from 'child_process';
+import { spawn, ChildProcess } from 'child_process';
 import { Project, BuildTarget, ProjectFile, TargetType, CommandType, CompilerLineType, supportsCurrentPlatform } from '../model/types';
 import { FileType, fileTypeOf, fileExt, isCompilableFileType, isLinkableFileType, isCppSource, isClangdIndexable } from '../model/fileTypes';
 import { Compiler } from '../compiler/compiler';
@@ -25,6 +25,11 @@ import { decodeText } from '../tools/encoding';
 import { isExecutableTargetType, resolveExecutablePath, executableCandidates, withPlatformExtension } from './outputPath';
 import { outputFileSizeText } from './outputFileInfo';
 import { applyResponseFile, compareFilesByWeight, linkRespBase } from './commandLine';
+import { splitCommandLine } from './shellSplit';
+import {
+  aggregateSamples, encodePowerShellCommand, parseSampleLine, SAMPLE_SCRIPT,
+  type SystemSample, type SystemSummary,
+} from './systemSampler';
 import { clearCompilerCacheResolveCache, normalizeCompilerCacheKind, resolveCompilerCachePathCached } from './compilerCache';
 import { upperDrive, shortPathWin } from '../tools/pathCase';
 import { getWindowsSystemPath } from '../tools/windowsPath';
@@ -79,6 +84,14 @@ interface CompileUnit {
   cwd: string;
   /** 是否为 PCH 头文件（需先于同组其它文件编译） */
   isPch: boolean;
+  /**
+   * PCH 头文件编译前要删除的旧 `.gch` 绝对路径。
+   *
+   * 只在**实际派发**该单元时删除（`runSingleCommand`）。命令收集 / Makefile 导出 /
+   * compile_commands.json 生成同样走 `makeCompileUnit`，不能产生文件系统副作用
+   * （否则「导出 Makefile」「显示编译命令」会静默删掉 PCH 产物，导致下次全量重编）。
+   */
+  pchGchPath?: string;
   /** 响应文件基础路径（对齐 CheckForToLongCommandLine 命名：对象目录/源文件名） */
   respBase?: string;
 }
@@ -91,6 +104,15 @@ interface CompileUnit {
  * （147KB 文件 ≈ 9ms），1000 个被重扫的文件就是数秒的扩展宿主 CPU（构建开始阶段的卡顿）。
  */
 const depsIncludeCache = new LruCache<string, { srcMtimeMs: number; srcSize: number; dirsKey: string; includes: string[] }>(8192);
+
+/**
+ * `#include` 解析命中缓存（键 = 搜索目录签名 + 引用方式 + 源目录 + include 名）。
+ *
+ * 每轮构建开始时清空：负结果（未找到）只在同一轮内复用，避免「构建中新增头文件」
+ * 被旧负缓存挡住而漏判依赖。收益：同一 SDK 里 50+ 源文件共享同一份头文件图时，
+ * 不再为每个 include 逐个目录 `existsSync`（本工程 10+ 个搜索目录 → 每 include 10+ 次系统调用）。
+ */
+const includeResolveCache = new LruCache<string, string>(8192);
 
 /**
  * 并行编译任务数默认值（`codeblocks.parallelJobs` 未配置时生效）。
@@ -127,9 +149,46 @@ export function resolveParallelJobs(configured: unknown, logicalCpus?: number): 
   return DEFAULT_PARALLEL_JOBS; // 负数
 }
 
+/**
+ * 进程预算上限 —— 并发单元数不超过「逻辑核数」，且不低于默认值 8。
+ *
+ * 为什么按「单元数」而不是「进程数」：Windows 上一条 GCC 编译命令至少派生
+ * `cmd.exe → gcc → cc1 → as`（去 shell 后仍有三层），上限 32 意味着同时存活
+ * 100~190 个子进程 —— 任务管理器里就是「进程/线程暴增 + CPU 100%」。
+ * 默认值 8 保持不变（用户已确认），这里只收敛 `0`（自动 = 核数×2）与历史写入的大值。
+ */
+export function processBudget(logicalCpus?: number): number {
+  const cores = Math.max(1, Math.floor(logicalCpus ?? os.cpus().length ?? 1));
+  return Math.max(DEFAULT_PARALLEL_JOBS, cores);
+}
+
+/** 请求值 → 实际并发（先按 resolveParallelJobs 归一，再用 MAX_PARALLEL_JOBS 与进程预算收敛） */
+export function resolveJobBudget(configured: unknown, logicalCpus?: number): number {
+  const requested = resolveParallelJobs(configured, logicalCpus);
+  return Math.max(1, Math.min(requested, MAX_PARALLEL_JOBS, processBudget(logicalCpus)));
+}
+
+/**
+ * 物理核数估算（Node 只暴露逻辑核数，不引第三方库也不起子进程）。
+ *
+ * 用途仅限「建议值」文案：超线程机型（本机 i3-10105 = 4 物理核 / 8 逻辑核）上把并发设成
+ * 逻辑核数会让 8 个编译器抢 4 个物理核，宿主只能靠超线程的空隙调度 —— 这正是 88% 事件
+ * 循环滞后的成因之一。经验规则：>4 逻辑核时物理核约为一半，≤4 时按无超线程处理。
+ * 只用于提示，不参与 resolveJobBudget 的硬上限计算。
+ */
+export function estimatePhysicalCores(logicalCpus?: number): number {
+  const cores = Math.max(1, Math.floor(logicalCpus ?? os.cpus().length ?? 1));
+  return cores > 4 ? Math.max(2, Math.floor(cores / 2)) : cores;
+}
+
 /** 正斜杠归一化（供 PCH 对象路径等使用） */
 function toUnix(p: string): string {
   return p.replace(/\\/g, '/');
+}
+
+/** 让出扩展宿主主线程一轮（同步增量扫描分片用） */
+function yieldToHost(): Promise<void> {
+  return new Promise<void>((resolve) => setImmediate(resolve));
 }
 
 /** hasCppFilesToLink 判定 —— 对齐 CB GenerateCommandLine:258-288/585 + directcommands.cpp:772/903：按 compilerVar（CPP→C++，CC→C），扩展名仅回退（L8） */
@@ -143,6 +202,21 @@ export class BuildEngine {
   private parser: OutputParser;
   /** 编译/链接子进程环境（PATH 前置编译器 bin 目录，对齐 CodeBlocks Init 的 PATH 重构） */
   private buildEnv: NodeJS.ProcessEnv | undefined;
+  /** 子进程统计（profile / traceProcesses 用）：累计 spawn 次数、当前存活数、峰值 */
+  private spawnCount = 0;
+  private liveSpawns = 0;
+  private peakSpawns = 0;
+  /** 成功降级优先级的子进程数（profile / traceProcesses 用） */
+  private demotedSpawns = 0;
+  /** 派发空档：worker 在上一个单元结束到下一个单元 spawn 之间的累计等待（宿主卡顿的直接代价） */
+  private dispatchWaitMs = 0;
+  private dispatchWaitMaxMs = 0;
+  /** 最近一个目标/组的编译墙钟（毫秒；用于报告里区分「等宿主」与「编译器本身慢」） */
+  private profTotalCompileMs = 0;
+  /** 慢单元诊断已输出次数（profile 模式下最多 3 条，避免刷屏） */
+  private slowUnitReports = 0;
+  /** 进程预算截断提示只提示一次（工作区构建每个项目一个引擎） */
+  private budgetNoticeShown = false;
   /** 最近一次 build() 的累计统计（供 Build Log 视图读取） */
   lastStats: BuildTargetStats | undefined;
   /** 最近一次构建的单文件编译耗时（供汇总「最慢 Top 3」） */
@@ -169,7 +243,7 @@ export class BuildEngine {
    * 二者在逐文件增量检查、逐单元完成行中被读取——直接调 getConfiguration 会产生
    * 「文件数 × 次数」的配置查找开销（大工程数千次），改为每次 build()/compileFile() 入口取一次。
    */
-  private cfgSnapshot: { skipIncludeDeps: boolean; verboseOutput: boolean } | undefined;
+  private cfgSnapshot: { skipIncludeDeps: boolean; verboseOutput: boolean; lowerCompilerPriority: boolean } | undefined;
 
   constructor(
     private project: Project,
@@ -210,10 +284,361 @@ export class BuildEngine {
   /** M0 探针：渲染 [profile] 块到输出通道（构建收尾调用；仅探针启用时输出） */
   private emitBuildProfile(): void {
     const prof = this.prof;
-    if (!prof) return;
+    const lagMax = this.lagMaxMs;
+    const lagSum = this.lagSumMs;
+    const lagSamples = this.lagSamples;
+    this.stopHostLagSampler();
+    // 系统 CPU 归属（采样进程在构建收尾统一收割，避免它自己的 CPU 混进统计）
+    const sys = this.stopSystemSampler();
+    // 峰值并发子进程：无论 profile 是否开启都先记录，traceProcesses 也复用同一份数据
+    if (prof) prof.max(logT('spawn peak (live child processes)'), this.peakSpawns);
+    this.traceProcessSummary();
+    this.reportHostStalls(lagSum, lagMax, lagSamples);
+    this.reportSecurityCpu(sys);
+    this.reportWatcherStorm(sys);
+    this.reportMeasuredSaturation(sys);
+    if (!prof) {
+      // 只开采样、不开 profile：仍然输出归属结果（否则设置看起来没生效）
+      this.renderSystemSummary(sys, (s) => this.output.info(s));
+      return;
+    }
     this.prof = undefined;
     if (this.profBuildStartMs) prof.mark(logT('Total'), this.profBuildStartMs);
+    if (lagSamples > 0) {
+      const windowMs = this.lagWindowStartMs ? Date.now() - this.lagWindowStartMs : 0;
+      prof.max(logT('host event loop lag max'), lagMax);
+      prof.add(logT('host event loop lag total'), lagSum);
+      prof.count(logT('host event loop lag samples'), lagSamples);
+      if (windowMs > 0) prof.max(logT('host stalled ratio (%)'), Math.round((lagSum / windowMs) * 100));
+    }
+    if (this.spawnCount > 0) {
+      prof.add(logT('{0}dispatch wait (worker idle between units)', this.profPrefix), this.dispatchWaitMs);
+      prof.max(logT('{0}dispatch wait max', this.profPrefix), this.dispatchWaitMaxMs);
+      prof.count(logT('{0}spawn priority demoted', this.profPrefix), this.demotedSpawns);
+    }
+    this.addSystemProfileEntries(prof, sys);
     for (const line of prof.render()) this.output.info(`[Code::Blocks][profile] ${line}`);
+  }
+
+  // ———— 系统 CPU 归属采样（codeblocks.build.sampleSystem） ————
+
+  private sysSampler: ChildProcess | undefined;
+  private sysSamples: SystemSample[] = [];
+  private sysBuf = '';
+
+  /** 采样开关：显式设置，或已开启构建性能探针时自动跟随（profile 的价值就是解释耗时的归属） */
+  private sampleSystemEnabled(): boolean {
+    if (process.platform !== 'win32') return false;
+    try {
+      return this.scopeConfig().get<boolean>('build.sampleSystem', false) === true;
+    } catch {
+      // 读配置失败按未开启处理
+      return false;
+    }
+  }
+
+  /** 构建开始：派生一个隐藏的 PowerShell 采样进程（失败静默忽略，绝不影响构建） */
+  private startSystemSampler(): void {
+    this.sysSampler = undefined;
+    this.sysSamples = [];
+    this.sysBuf = '';
+    if (!this.sampleSystemEnabled()) return;
+    try {
+      const proc = spawn('powershell.exe', [
+        '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
+        '-EncodedCommand', encodePowerShellCommand(SAMPLE_SCRIPT),
+      ], { windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'] });
+      proc.stdout?.setEncoding('utf8');
+      proc.stdout?.on('data', (chunk: string) => {
+        this.sysBuf += chunk;
+        let nl = this.sysBuf.indexOf('\n');
+        while (nl >= 0) {
+          const line = this.sysBuf.slice(0, nl);
+          this.sysBuf = this.sysBuf.slice(nl + 1);
+          const sample = parseSampleLine(line);
+          if (sample) this.sysSamples.push(sample);
+          nl = this.sysBuf.indexOf('\n');
+        }
+      });
+      proc.on('error', () => { this.sysSampler = undefined; });
+      this.sysSampler = proc;
+    } catch {
+      this.sysSampler = undefined;
+    }
+  }
+
+  /** 构建结束：收割最后一批采样行并结束采样进程（幂等） */
+  private stopSystemSampler(): SystemSummary | undefined {
+    const proc = this.sysSampler;
+    this.sysSampler = undefined;
+    if (proc) {
+      // 冲刷残留缓冲（进程被 kill 时最后一行可能完整，也可能半行 —— 半行会被解析丢弃）
+      for (const line of this.sysBuf.split('\n')) {
+        const sample = parseSampleLine(line);
+        if (sample) this.sysSamples.push(sample);
+      }
+      this.sysBuf = '';
+      try {
+        proc.kill();
+      } catch {
+        // 已退出
+      }
+    }
+    const samples = this.sysSamples;
+    this.sysSamples = [];
+    if (!samples.length) return undefined;
+    return aggregateSamples(samples);
+  }
+
+  /** 采样结果写入 [profile]（只在实际采到窗口时输出） */
+  private addSystemProfileEntries(prof: BuildProfiler, summary: SystemSummary | undefined): void {
+    if (!summary || !summary.samples) return;
+    prof.count(logT('system samples'), summary.samples);
+    prof.max(logT('system CPU avg (total %)'), Math.round(summary.totalPct));
+    prof.max(logT('system CPU avg (editor + helpers %)'), Math.round(summary.groupPct.editor));
+    prof.max(logT('system CPU avg (third-party security %)'), Math.round(summary.groupPct.security));
+    prof.max(logT('system CPU avg (VS Code file scanner %)'), Math.round(summary.groupPct.scanner));
+    prof.max(logT('system CPU avg (toolchain + other apps + system %)'), Math.round(summary.groupPct.other));
+    if (summary.top.length) {
+      prof.max(
+        logT('system CPU top process'),
+        Math.round(summary.top[0].pct),
+      );
+    }
+  }
+
+  /** 采样结果的文本块（只开 sampleSystem、不开 profile 时使用） */
+  private renderSystemSummary(summary: SystemSummary | undefined, emit: (line: string) => void): void {
+    if (!summary || !summary.samples) return;
+    emit(`[Code::Blocks] ${logT('System CPU during this build (sampled {0}s)', Math.round(summary.elapsedMs / 1000))}`);
+    emit(`[Code::Blocks]   ${logT('total')}  ${summary.totalPct.toFixed(0)} %`);
+    emit(`[Code::Blocks]   ${logT('editor + helpers')}  ${summary.groupPct.editor.toFixed(0)} %`);
+    emit(`[Code::Blocks]   ${logT('third-party security')}  ${summary.groupPct.security.toFixed(0)} %`);
+    emit(`[Code::Blocks]   ${logT('VS Code file scanner (rg + conhost)')}  ${summary.groupPct.scanner.toFixed(0)} %`);
+    emit(`[Code::Blocks]   ${logT('toolchain + other apps + system')}  ${summary.groupPct.other.toFixed(0)} %`);
+    if (summary.top.length) {
+      const top = summary.top.map((t) => `${t.name} ${t.pct.toFixed(0)}%`).join(', ');
+      emit(`[Code::Blocks]   ${logT('top processes')}  ${top}`);
+    }
+  }
+
+  /**
+   * 实测 CPU 饱和归因：并非所有 100% CPU 都是异常。
+   *
+   * 现场数据（RISC-V SDK，8 逻辑核）：`total 97%`、`editor 14%`、`security 2%`，
+   * 剩下 79% 是 8 路编译器链与其它程序。也就是说：构建期间 CPU 跑满是
+   * **编译本身的合理负载**，不是扩展在空转（否则 editor 组会飙升）。
+   * 这里把实测归因直接说清楚，避免用户把「CPU 满」当成故障反复排查。
+   */
+  private reportMeasuredSaturation(summary: SystemSummary | undefined): void {
+    if (!summary || !summary.samples) return;
+    if (summary.totalPct < 85) return;
+    const editorPlusSecurity = summary.groupPct.editor + summary.groupPct.security + summary.groupPct.scanner;
+    if (editorPlusSecurity > 40) return; // 编辑器/杀软/扫描器占大头 → 已有其它告警
+    this.output.info(logT(
+      '[Code::Blocks] CPU was saturated ({0}% machine-wide) while the editor used {1}%, security software {2}% and the VS Code file scanner {3}%. The remaining {4}% is this build\'s compiler toolchain plus other applications/system — a {5}-job rebuild on {6} logical CPUs ({7} physical cores) is expected to keep every core busy. Lower codeblocks.parallelJobs if you prefer a responsive machine over the shortest build time.',
+      Math.round(summary.totalPct), Math.round(summary.groupPct.editor),
+      Math.round(summary.groupPct.security), Math.round(summary.groupPct.scanner),
+      Math.round(summary.groupPct.other),
+      this.maxJobs(), os.cpus().length, estimatePhysicalCores(),
+    ));
+  }
+
+  /**
+   * VS Code 文件扫描器（`rg` + `conhost`）归因告警。
+   *
+   * 现场（RISC-V SDK，56 单元）：开启采纳前的隔离实验里 `rg.exe` 峰值 **281**、`conhost.exe` 峰值 **282**；
+   * 把产物目录加入 `files.watcherExclude` 后峰值 **0**。这些进程是 `Code.exe` 的子进程，
+   * 在任务管理器里就显示为「Visual Studio Code」一组上百个进程 —— 用户看到的「线程暴增 + CPU 100%」。
+   * 它们既不是 `Code.exe` 主进程（旧口径算进「其它」），也不是编译器，必须单列才能定位。
+   */
+  private reportWatcherStorm(summary: SystemSummary | undefined): void {
+    if (!summary || !summary.samples) return;
+    if (summary.groupPct.scanner < 8) return;
+    const names = summary.top
+      .filter((t) => t.name === 'rg' || t.name === 'conhost')
+      .map((t) => `${t.name} ${t.pct.toFixed(0)}%`)
+      .join(', ');
+    this.output.warn(logT(
+      '[Code::Blocks] VS Code file scanners used {0}% of the CPU during this build ({1}). Every object file written inside the workspace makes VS Code re-enumerate the whole workspace (one rg + one conhost per refresh); these show up as the Code.exe process group growing by hundreds of processes. Enable codeblocks.build.autoExcludeOutputs (on by default) and reload the window, or add the object/output directories to files.watcherExclude yourself — this is the single biggest difference from Code::Blocks, which has no file watcher at all.',
+      summary.groupPct.scanner.toFixed(0), names || logT('unknown'),
+    ));
+  }
+
+  /**
+   * 第三方实时防护 CPU 归因告警。
+   *
+   * 现场（RISC-V SDK / 8 逻辑核）：任务管理器里「腾讯电脑管家-实时防护」稳定占 26.7% CPU，
+   * 与 4 路 gcc 抢同一批核心；`gcc` 每写一个 `.o`、每读一个头文件都要被扫一遍，
+   * 编译墙钟因此在 HDD 上被放大数倍。这类开销扩展无法消除，只能明确指出来并给出排除方法。
+   */
+  private reportSecurityCpu(summary: SystemSummary | undefined): void {
+    if (!summary || !summary.samples) return;
+    if (summary.groupPct.security < 10) return;
+    const names = summary.security.map((s) => s.name).join(', ') || logT('unknown');
+    this.output.warn(logT(
+      '[Code::Blocks] Third-party real-time protection consumed {0}% of the CPU during this build ({1}). This is the most common reason a build feels several times slower than Code::Blocks in the same project: every written object file and every header read is scanned. Add the project folder, the object output directory and the compiler/toolchain directory to its real-time-scanning exclusion list.',
+      summary.groupPct.security.toFixed(0), names,
+    ));
+  }
+
+  /** 扩展宿主事件循环滞后采样（构建期；用于区分「编译器慢」与「宿主被饿死」） */
+  private lagTimer: ReturnType<typeof setInterval> | undefined;
+  private lagActive = false;
+  private lagSamples = 0;
+  private lagSumMs = 0;
+  private lagMaxMs = 0;
+  private readonly lagPeriodMs = 100;
+  private lagWindowStartMs = 0;
+
+  private startHostLagSampler(): void {
+    this.stopHostLagSampler();
+    const period = this.lagPeriodMs;
+    let last = Date.now();
+    this.lagActive = true;
+    this.lagSamples = 0;
+    this.lagSumMs = 0;
+    this.lagMaxMs = 0;
+    this.lagWindowStartMs = last;
+    this.lagTimer = setInterval(() => {
+      if (!this.lagActive) {
+        this.stopHostLagSampler();
+        return;
+      }
+      const now = Date.now();
+      const lag = Math.max(0, now - last - period);
+      last = now;
+      this.lagSamples += 1;
+      this.lagSumMs += lag;
+      if (lag > this.lagMaxMs) this.lagMaxMs = lag;
+    }, period);
+    // 不阻止进程退出（headless 单测等场景）
+    this.lagTimer.unref?.();
+  }
+
+  /**
+   * 宿主卡顿判定与建议。
+   *
+   * 实测判据（RISC-V SDK 现场）：一次 40 s 的构建里 `lag total` 35.2 s、仅 41 次采样、
+   * `lag max` 2.9 s —— 说明扩展宿主主线程约 87% 的时间被别的扩展的同步工作或换页占住。
+   * 此时**编译吞吐是被「派发延迟」拖慢的**：一个编译进程结束后，其结果事件要等主线程空闲
+   * 才被处理，worker 才能派发下一个单元（56 单元 / 8 并发 = 7 轮，每轮被拖 2~3 s，
+   * 就是十几秒的纯等待），所以「命令行 12 s、编辑器内 30~70 s」。
+   */
+  private reportHostStalls(lagSum: number, lagMax: number, lagSamples: number): void {
+    const windowMs = this.lagWindowStartMs ? Date.now() - this.lagWindowStartMs : 0;
+    if (windowMs < 5_000 || lagSamples <= 0) return;
+    const ratio = lagSum / windowMs;
+    if (ratio < 0.2 || lagMax < 500) return;
+    const pct = Math.round(ratio * 100);
+    this.output.warn(logT(
+      '[Code::Blocks] The extension host was stalled for {0}% of this build (longest single stall {1} ms). Compilation throughput is limited by these stalls, not by the compiler: each finished compiler process waits for the host to process its completion event before the next unit is dispatched. Common causes: another extension doing synchronous work, heavy memory paging (commit charge above physical RAM), or an antivirus scanning every written object file.',
+      pct, Math.round(lagMax),
+    ));
+    this.output.warn(logT(
+      'Suggestions: close memory-hungry applications / add RAM, keep the project (and page file) on an SSD, exclude the project folder from real-time antivirus scanning, and temporarily disable other extensions for this workspace (codeblocks.build.traceProcesses and the "Workspace Scan Report" command help identify them).',
+    ));
+    this.output.warn(logT(
+      'CPU saturation is a cause too, not a symptom: {0} parallel compiler jobs on {1} logical CPUs ({2} physical cores) keep every core busy, so the extension host is only scheduled in the gaps between compiler time slices. Lower codeblocks.parallelJobs to about {3} (or close other windows) if the editor feels unresponsive during builds.',
+      this.maxJobs(), os.cpus().length, estimatePhysicalCores(), estimatePhysicalCores(),
+    ));
+    // 关键判别：卡顿 ≠ 派发受阻。worker 在单元之间的空闲时间才是「宿主拖慢编译」的直接证据，
+    // 它接近 0 就说明完成事件处理得很快（卡顿发生在编译运行期间），此时要怪的是编译器/磁盘/杀软。
+    const waitMs = Math.round(this.dispatchWaitMs);
+    const compileMs = Math.round(this.prof ? this.profTotalCompileMs : 0);
+    if (this.spawnCount > 1 && waitMs < Math.max(200, this.spawnCount * 20)) {
+      this.output.warn(logT(
+        'Host stalls did not throttle this build: workers waited only {0} ms in total between units ({1} units), so the compile time was spent inside the compiler / disk / antivirus path rather than waiting for the editor. Judge this extension by `dispatch wait`, not by `host stalled ratio`.',
+        waitMs, this.spawnCount,
+      ));
+    } else if (compileMs > 0) {
+      this.output.warn(logT(
+        'Host stalls did throttle this build: workers waited {0} ms between units while compiling took {1} ms. Lowering codeblocks.parallelJobs, excluding the object output directory from watch/search, or closing other extensions will shorten this wait.',
+        waitMs, compileMs,
+      ));
+    }
+  }
+
+  private stopHostLagSampler(): void {
+    this.lagActive = false;
+    if (this.lagTimer) {
+      clearInterval(this.lagTimer);
+      this.lagTimer = undefined;
+    }
+  }
+
+  /**
+   * 构建开始时的系统余量提示。
+   *
+   * 现场排查经验：同一份工程在裸命令行里编完只要十几秒、在 VS Code 里要一分钟时，
+   * 往往不是派生方式的问题，而是**整机内存被其它程序占满**（提交量远超物理内存 → 编译器
+   * 工作集被反复回收/换页）。这里只在余量确实很低时提示一次，避免正常机器上的噪音。
+   */
+  private reportSystemHeadroom(): void {
+    try {
+      const total = os.totalmem();
+      const free = os.freemem();
+      if (total <= 0 || free / total >= 0.15) return;
+      const gb = (n: number): string => (n / (1024 ** 3)).toFixed(1);
+      this.output.warn(logT(
+        '[Code::Blocks] Low free memory: {0} GB of {1} GB available — compiling with {2} parallel jobs may page heavily and make the build several times slower. Consider closing other applications or lowering codeblocks.parallelJobs.',
+        gb(free), gb(total), this.maxJobs(),
+      ));
+    } catch {
+      // 读取失败不影响构建
+    }
+  }
+
+  /**
+   * `codeblocks.build.traceProcesses`：构建收尾打印一行子进程统计。
+   *
+   * 用途：现场对照任务管理器 —— 本扩展只统计**自己派生的进程**（shell/编译器驱动），
+   * 编译器再派生的 `cc1`/`as`/`ld` 不计入；若这一行的数字远小于任务管理器里的进程数，
+   * 说明膨胀来自工具链层数或其它扩展（clangd / rg / 宿主重启）。
+   */
+  private traceProcessSummary(): void {
+    if (!this.traceProcesses()) return;
+    const limit = resolveJobBudget(this.scopeConfig().get<number>('parallelJobs', DEFAULT_PARALLEL_JOBS));
+    this.output.info(logT(
+      '[Code::Blocks] Child processes started by this build: {0} spawn(s), peak {1} alive at once (concurrency limit {2}, logical CPUs {3})',
+      this.spawnCount, this.peakSpawns, limit, os.cpus().length,
+    ));
+  }
+
+  private traceProcesses(): boolean {
+    try {
+      return this.scopeConfig().get<boolean>('build.traceProcesses', false) === true;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * 降低编译子进程的调度优先级（`codeblocks.build.lowerCompilerPriority`，**默认关闭**）。
+   *
+   * 现场问题：8 个编译器并发跑满 8 个逻辑核（本机 i3-10105 = 4 物理核 / 8 逻辑核）时，
+   * 扩展宿主进程只能抢到时间片，事件循环滞后占比 88%（最长单次 3.6 s）——子进程结束的
+   * `close` 事件排队等待处理，worker 迟迟无法派发下一个单元，56 个单元 / 8 并发 = 7 轮，
+   * 每轮被拖 2~3 s，就是十几秒的纯等待。
+   *
+   * 但后续实测推翻了「降优先级有收益」的假设：编译本身只吃 16~31 ms CPU/单元，
+   * 降优先级只会让编译器在系统繁忙时更晚拿到时间片（0.8.5 实测单文件 4.6 s）。
+   * 因此默认改为关闭，仅保留给「并发远大于物理核、且更在意编辑器响应」的场景手动开启。
+   *
+   * Windows 上 SetPriorityClass(BELOW_NORMAL) 会被 cc1/as 等后代继承（子进程继承父进程的
+   * 优先级类），因此在编译器驱动上设置一次即可覆盖整棵进程树；POSIX 下等价于 nice +10。
+   * 失败（权限/进程已退出）静默忽略——优先级只是优化，绝不能影响构建结果。
+   */
+  private demoteChild(proc: ChildProcess): void {
+    const pid = proc.pid;
+    if (!pid) return;
+    if (!this.buildSettings().lowerCompilerPriority) return;
+    try {
+      os.setPriority(pid, os.constants.priority.PRIORITY_BELOW_NORMAL);
+      this.demotedSpawns += 1;
+    } catch {
+      // 进程已退出或平台不支持：忽略
+    }
   }
 
   /**
@@ -268,8 +693,19 @@ export class BuildEngine {
   async build(targetTitle?: string | string[], options: BuildOptions = {}): Promise<boolean> {
     // 对齐 Build()/Rebuild()/BuildWorkspace()：每轮构建清空反引号缓存（cbClearBackticksCache，Clean 单命令不清）
     clearBackticksCache();
+    // include 解析命中的负结果只在同一轮内复用（构建中新增头文件不会被旧缓存挡住）
+    includeResolveCache.clear();
     // 设置快照按轮刷新（构建中改设置 → 下一次构建生效）
     this.cfgSnapshot = undefined;
+    // 子进程 / 派发空档统计按轮重置（上一轮的数字不能串到本轮 profile 里）
+    this.spawnCount = 0;
+    this.peakSpawns = 0;
+    this.demotedSpawns = 0;
+    this.dispatchWaitMs = 0;
+    this.dispatchWaitMaxMs = 0;
+    this.profTotalCompileMs = 0;
+    this.slowUnitReports = 0;
+    this.budgetNoticeShown = false;
     // 第六轮 F8：命令记录按每轮构建重置（HTML 日志 full_command_line）
     this.lastCommands = [];
     // R4：编译缓存已启用但工具缺失 → 每轮构建告警一次（命令生成回退原编译器，构建行为不受影响）
@@ -279,6 +715,9 @@ export class BuildEngine {
     const profEnabled = BuildProfiler.enabled()
       || vscode.workspace.getConfiguration('codeblocks').get<boolean>('build.profile', false) === true;
     this.prof = profEnabled ? new BuildProfiler() : undefined;
+    this.startHostLagSampler();
+    this.startSystemSampler();
+    this.reportSystemHeadroom();
 
     // 编译/链接子进程 PATH 注入：bin + masterPath + extra_paths + 系统 PATH（对齐 SetupEnvironment:795-830：ReplaceMacros 展开 + 去尾分隔符 + 去重）
     const profEnvT0 = Date.now();
@@ -750,10 +1189,12 @@ export class BuildEngine {
         hasCppFilesToLink: hasCpp,
       });
     }
-    // PCH 头文件：编译前删除旧 .gch（对齐 directcommands.cpp 的 wxRemoveFile，避免陈旧产物）
-    if (isHeader) {
-      command = `cmd /c if exist "${objectRel}" del "${objectRel}"\n${command}`;
-    }
+    // PCH 头文件：编译前删除旧 .gch（对齐 directcommands.cpp 的 wxRemoveFile，避免陈旧产物）。
+    // 只记录路径，不在命令生成阶段删除 —— 本方法也被 Makefile 导出 / 编译命令查看复用，
+    // 那里必须无副作用。真正的删除在 runSingleCommand 派发前执行。
+    const pchGchPath = isHeader
+      ? (path.isAbsolute(objectRel) ? objectRel : path.join(this.project.basePath, objectRel))
+      : undefined;
     // 对齐 AddCommandsToArray：展开后为空/纯空白的命令（如 buildCommand=" " 的 no-op）不执行
     if (!command || command.trim() === '') {
       return { reason: 'no-command' };
@@ -766,6 +1207,7 @@ export class BuildEngine {
         command,
         cwd: this.project.basePath,
         isPch: isHeader,
+        pchGchPath,
         // 响应文件基础名对齐 CheckForToLongCommandLine：对象目录 + 源文件名（含扩展）→ <对象目录>/<源文件名>.respFile
         respBase: path.join(path.dirname(object), path.basename(file.relativeFilename)),
       },
@@ -845,7 +1287,7 @@ export class BuildEngine {
     if (this.verboseOutput()) {
       this.output.info(unit.command);
     }
-    return this.runSingleCommand(unit.command, unit.cwd, options, unit.respBase);
+    return this.runSingleCommand(unit.command, unit.cwd, options, unit.respBase, unit.pchGchPath);
   }
 
   /**
@@ -1033,7 +1475,11 @@ export class BuildEngine {
     const missingSourceFiles: string[] = [];
     // M0 探针：收集阶段（全循环 = 增量判定 + 命令生成 + 过滤）
     const profCollectT0 = Date.now();
+    // 增量判定与命令生成是同步文件系统扫描（含 #include 依赖递归），大工程会长时间占住宿主主线程；
+    // 每 32 个文件让出一次事件循环，构建期间的 UI 与其它扩展保持响应。
+    let collectIdx = 0;
     for (const file of sortedFiles) {
+      if ((collectIdx++ & 31) === 31) await yieldToHost();
       // 跳过不参与编译的文件（<Option compile="0"/>）
       if (file.compile === false) continue;
       // 对齐 CB：源缺失的编译文件（含 compilerVar 为空者——else 分支在 GetCompileFileCommand 之前判定）计入 WARNING 条目 → 强制。
@@ -1168,7 +1614,8 @@ export class BuildEngine {
     }
     const compileSec = ((Date.now() - compileStartMs) / 1000).toFixed(1);
     // M0 探针：编译墙钟（并行调度全程；含宿主输出解析，解析单独另行统计）
-    this.profAdd(logT('{0}compile wall clock', this.profPrefix), Date.now() - compileStartMs);
+    this.profTotalCompileMs = Date.now() - compileStartMs;
+    this.profAdd(logT('{0}compile wall clock', this.profPrefix), this.profTotalCompileMs);
     this.lastCompileTimings = [...this.compileTimings];
 
     // 取消检查点：被强杀的编译进程 close 返回失败，但语义是取消而非失败（failedCount 不计）
@@ -1878,7 +2325,7 @@ export class BuildEngine {
       while ((m = re.exec(content)) !== null) {
         const quoted = m[1];
         const angled = m[2];
-        const resolved = this.resolveInclude(quoted ?? angled, fileAbs, includeDirs, quoted === undefined);
+        const resolved = this.resolveInclude(quoted ?? angled, fileAbs, includeDirs, quoted === undefined, dirsKey);
         if (resolved) includes.push(resolved);
       }
     } catch {
@@ -1889,19 +2336,36 @@ export class BuildEngine {
   }
 
   /** 解析 #include 头文件的实际路径：双引号先查源文件目录再查 include 目录；尖括号只查 include 目录 */
-  private resolveInclude(inc: string, fromFile: string, includeDirs: string[], angleBracket = false): string | undefined {
+  private resolveInclude(
+    inc: string,
+    fromFile: string,
+    includeDirs: string[],
+    angleBracket: boolean,
+    dirsKey: string,
+  ): string | undefined {
+    // 命中缓存：同一 SDK 里 50+ 源文件共享同一份头文件图，避免每 include 都做「目录数」次 existsSync
+    const cacheKey = `${dirsKey}\u0000${angleBracket ? '<' : '"'}\u0000${path.dirname(fromFile)}\u0000${inc}`;
+    const cached = includeResolveCache.get(cacheKey);
+    if (cached !== undefined) return cached || undefined;
+    let found: string | undefined;
     // 1. 双引号：相对当前源文件所在目录（C 编译器默认行为）
     if (!angleBracket) {
       const cand = path.resolve(path.dirname(fromFile), inc);
-      if (fs.existsSync(cand)) return cand;
+      if (fs.existsSync(cand)) found = cand;
     }
     // 2. 相对项目 include 目录（相对路径基于项目根目录解析）
-    for (const dir of includeDirs) {
-      const base = path.isAbsolute(dir) ? dir : path.join(this.project.basePath, dir);
-      const cand = path.resolve(base, inc);
-      if (fs.existsSync(cand)) return cand;
+    if (found === undefined) {
+      for (const dir of includeDirs) {
+        const base = path.isAbsolute(dir) ? dir : path.join(this.project.basePath, dir);
+        const cand = path.resolve(base, inc);
+        if (fs.existsSync(cand)) {
+          found = cand;
+          break;
+        }
+      }
     }
-    return undefined;
+    includeResolveCache.set(cacheKey, found ?? '');
+    return found;
   }
 
   /**
@@ -2107,12 +2571,13 @@ export class BuildEngine {
   }
 
   /** 本次构建的设置快照（首次读取时填充；build()/compileFile() 入口重置，避免逐文件 getConfiguration） */
-  private buildSettings(): { skipIncludeDeps: boolean; verboseOutput: boolean } {
+  private buildSettings(): { skipIncludeDeps: boolean; verboseOutput: boolean; lowerCompilerPriority: boolean } {
     if (!this.cfgSnapshot) {
       const cfg = this.scopeConfig();
       this.cfgSnapshot = {
         skipIncludeDeps: cfg.get<boolean>('build.skipIncludeDeps', false) === true,
         verboseOutput: cfg.get<boolean>('build.verboseOutput', false) === true,
+        lowerCompilerPriority: cfg.get<boolean>('build.lowerCompilerPriority', false) === true,
       };
     }
     return this.cfgSnapshot;
@@ -2319,7 +2784,17 @@ export class BuildEngine {
    * 本项为保护性性能增强，显式设置值仍优先、可一键回退。）
    */
   private maxJobs(): number {
-    return resolveParallelJobs(this.scopeConfig().get<number>('parallelJobs', DEFAULT_PARALLEL_JOBS));
+    const configured = this.scopeConfig().get<number>('parallelJobs', DEFAULT_PARALLEL_JOBS);
+    const requested = resolveParallelJobs(configured);
+    const actual = resolveJobBudget(configured);
+    if (actual < requested && !this.budgetNoticeShown) {
+      this.budgetNoticeShown = true;
+      this.output.info(logT(
+        '[Code::Blocks] Concurrency limited by the process budget: requested {0} → actual {1} (logical CPUs {2})',
+        requested, actual, os.cpus().length,
+      ));
+    }
+    return actual;
   }
 
   private async runInParallel(units: CompileUnit[], maxJobs: number, options: BuildOptions, totalCount: number): Promise<(boolean | undefined)[]> {
@@ -2363,6 +2838,8 @@ export class BuildEngine {
     if (!localIdx.length) return;
     let cursor = 0;
     const workers = Array.from({ length: Math.min(maxJobs, localIdx.length) }, async () => {
+      // 派发空档基准：上一单元结束时刻 → 下一单元开跑时刻（宿主卡顿在此处体现为秒级空转）
+      let prevEndMs = 0;
       while (cursor < localIdx.length) {
         // 取消/失败短路检查点：不再启动新的编译单元（已启动的由 cancel() 强杀或自然完成）
         // 对齐 CB OnJobEnd：失败时 m_CommandQueue.Clear()，in-flight 任务自然结束
@@ -2371,8 +2848,20 @@ export class BuildEngine {
         const li = localIdx[pos];
         const u = group[li];
         const startMs = Date.now();
-        const ok = await this.runCommand(u.command, u.cwd, options, u.respBase);
+        if (prevEndMs) {
+          const gap = startMs - prevEndMs;
+          if (gap > this.dispatchWaitMaxMs) this.dispatchWaitMaxMs = gap;
+          this.dispatchWaitMs += gap;
+        }
+        const ok = await this.runCommand(u.command, u.cwd, options, u.respBase, u.pchGchPath);
         const elapsedMs = Date.now() - startMs;
+        prevEndMs = startMs + elapsedMs;
+        // profile 模式：超过 3 s 的单元打印完整命令行（最多 3 条）——
+        // 用于对比 Code::Blocks 同一文件的编译开关：若开关不同（-O2 / -g3 / 多余 -I），差距就在这里
+        if (this.prof && elapsedMs >= 3000 && this.slowUnitReports < 3) {
+          this.slowUnitReports += 1;
+          this.output.warn(logT('[Code::Blocks] Slow compile unit ({0} ms): {1}', elapsedMs, u.command));
+        }
         const elapsedSec = (elapsedMs / 1000).toFixed(1);
         // 详细输出：完整编译命令行（对齐 Code::Blocks clogFull 模式）
         if (this.verboseOutput()) {
@@ -2403,11 +2892,11 @@ export class BuildEngine {
     await Promise.all(workers);
   }
 
-  private async runCommand(command: string, cwd: string, options: BuildOptions, respBase?: string): Promise<boolean> {
+  private async runCommand(command: string, cwd: string, options: BuildOptions, respBase?: string, pchGchPath?: string): Promise<boolean> {
     // 多行命令（模板含 \n）逐条执行，对齐 Code::Blocks AddCommandsToArray
     const lines = command.split('\n').map((s) => s.trim()).filter(Boolean);
     if (lines.length <= 1) {
-      return this.runSingleCommand(command, cwd, options, respBase);
+      return this.runSingleCommand(command, cwd, options, respBase, pchGchPath);
     }
     let ok = true;
     for (const line of lines) {
@@ -2416,17 +2905,24 @@ export class BuildEngine {
         ok = false;
         break;
       }
-      if (!(await this.runSingleCommand(line, cwd, options, respBase))) ok = false;
+      if (!(await this.runSingleCommand(line, cwd, options, respBase, pchGchPath))) ok = false;
     }
     return ok;
   }
 
-  private async runSingleCommand(command: string, cwd: string, options: BuildOptions, respBase?: string): Promise<boolean> {
+  private async runSingleCommand(command: string, cwd: string, options: BuildOptions, respBase?: string, pchGchPath?: string): Promise<boolean> {
     return new Promise<boolean>((resolve) => {
       // 取消检查点：spawn 前（已取消则不再派生新进程）
       if (options.cancel?.isCancelled()) {
         resolve(false);
         return;
+      }
+      // PCH 旧产物：真正派发前才删除（命令收集 / Makefile 导出不得有副作用）。
+      // 与旧实现 `cmd /c if exist … del …` 的静默失败语义一致：删不掉也继续编译。
+      if (pchGchPath) {
+        try {
+          fs.rmSync(pchGchPath, { force: true });
+        } catch { /* 忽略：权限/占用时由编译器自己处理陈旧产物 */ }
       }
       const resp = applyResponseFile(command, respBase, cwd);
       if (resp.respFile) {
@@ -2443,16 +2939,46 @@ export class BuildEngine {
         }
         this.prof.count(logT('{0}spawn count', this.profPrefix));
       }
-      const proc = spawn(command, {
-        cwd: upperDrive(cwd),
-        shell: true,
-        // 不弹控制台窗口（Windows 下每个编译单元都会派生 cmd.exe；隐藏可省去窗口创建/销毁开销）
-        windowsHide: true,
-        // PATH 前置编译器 bin 目录（对齐 CodeBlocks Init 的 PATH 重构），仅 win32 时已由 build() 计算
-        env: this.buildEnv,
-      });
-      // 注册进取消源：cancel() 时强杀整棵进程树（Windows taskkill /T /F，覆盖 cmd.exe→gcc→cc1/as）
-      options.cancel?.register(proc);
+      // 去 shell：编译/链接命令直接 argv 派生（每单元少一个 cmd.exe）；含 shell 元字符时回退旧路径。
+      // 仅 Windows 启用：POSIX 的 shell 会做波浪号/通配符/$VAR 展开与转义处理，直接派生会改变语义；
+      // 而「多一层 shell」在 POSIX 上只是一个 fork/exec，不是本版要解决的进程爆炸来源。
+      // 见 src/build/shellSplit.ts 的安全边界说明。
+      const direct = process.platform === 'win32' ? splitCommandLine(command) : undefined;
+      this.spawnCount += 1;
+      this.liveSpawns += 1;
+      if (this.liveSpawns > this.peakSpawns) this.peakSpawns = this.liveSpawns;
+      if (this.prof) {
+        if (direct) this.prof.count(logT('{0}spawn without shell', this.profPrefix));
+        this.prof.max(logT('spawn peak (live child processes)'), this.liveSpawns);
+      }
+      let proc: ChildProcess;
+      try {
+        proc = direct
+          ? spawn(direct.program, direct.args, {
+              cwd: upperDrive(cwd),
+              windowsHide: true,
+              env: this.buildEnv,
+            })
+          : spawn(command, {
+              cwd: upperDrive(cwd),
+              shell: true,
+              // 不弹控制台窗口（Windows 下每个编译单元都会派生 cmd.exe；隐藏可省去窗口创建/销毁开销）
+              windowsHide: true,
+              // PATH 前置编译器 bin 目录（对齐 CodeBlocks Init 的 PATH 重构），仅 win32 时已由 build() 计算
+              env: this.buildEnv,
+            });
+      } catch (e) {
+        this.liveSpawns -= 1;
+        this.output.error(`[Code::Blocks] ${logT('Failed to execute')}: ${(e as Error).message}`);
+        resolve(false);
+        return;
+      }
+      let slotReleased = false;
+      const releaseSlot = (): void => {
+        if (slotReleased) return;
+        slotReleased = true;
+        this.liveSpawns -= 1;
+      };
       const parser = this.parser;
 
       // 累积原始字节，命令结束时统一解码（UTF-8 严格优先，回退 GBK），
@@ -2481,30 +3007,64 @@ export class BuildEngine {
         }
       };
 
-      proc.stdout?.on('data', (data: Buffer) => stdoutChunks.push(data));
-      proc.stderr?.on('data', (data: Buffer) => stderrChunks.push(data));
+      let retriedWithShell = false;
+      /** 当前生效的子进程：回退重试后，旧进程迟到的 close/error 必须忽略（否则会提前 resolve/释放槽位） */
+      let activeChild: ChildProcess | undefined;
+      const wire = (child: ChildProcess): void => {
+        activeChild = child;
+        // 把编译器进程树降到 BELOW_NORMAL（默认关闭；见 demoteChild）
+        this.demoteChild(child);
+        // 注册进取消源：cancel() 时强杀整棵进程树（Windows taskkill /T /F，覆盖 cmd.exe→gcc→cc1/as）
+        options.cancel?.register(child);
+        child.stdout?.on('data', (data: Buffer) => stdoutChunks.push(data));
+        child.stderr?.on('data', (data: Buffer) => stderrChunks.push(data));
 
-      proc.on('close', (code) => {
-        options.cancel?.unregister(proc);
-        // M0 探针：宿主输出解析耗时 + 输出字节量
-        const profParseT0 = this.prof ? Date.now() : 0;
-        if (stdoutChunks.length) processLines(decodeText(Buffer.concat(stdoutChunks)));
-        if (stderrChunks.length) processLines(decodeText(Buffer.concat(stderrChunks)));
-        if (this.prof) {
-          let bytes = 0;
-          for (const c of stdoutChunks) bytes += c.length;
-          for (const c of stderrChunks) bytes += c.length;
-          this.prof.count(logT('{0}output bytes', this.profPrefix), bytes);
-          this.prof.add(logT('{0}host output parsing', this.profPrefix), Date.now() - profParseT0);
-        }
-        const success = code !== null && code >= 0 && code <= this.compiler.switches.statusSuccess;
-        resolve(success);
-      });
-      proc.on('error', (err) => {
-        options.cancel?.unregister(proc);
-        this.output.error(`[Code::Blocks] ${logT('Failed to execute')}: ${err.message}`);
-        resolve(false);
-      });
+        child.on('close', (code) => {
+          if (child !== activeChild) return; // 已被回退重试取代：忽略迟到的 close
+          options.cancel?.unregister(child);
+          releaseSlot();
+          // M0 探针：宿主输出解析耗时 + 输出字节量
+          const profParseT0 = this.prof ? Date.now() : 0;
+          if (stdoutChunks.length) processLines(decodeText(Buffer.concat(stdoutChunks)));
+          if (stderrChunks.length) processLines(decodeText(Buffer.concat(stderrChunks)));
+          if (this.prof) {
+            let bytes = 0;
+            for (const c of stdoutChunks) bytes += c.length;
+            for (const c of stderrChunks) bytes += c.length;
+            this.prof.count(logT('{0}output bytes', this.profPrefix), bytes);
+            this.prof.add(logT('{0}host output parsing', this.profPrefix), Date.now() - profParseT0);
+          }
+          const success = code !== null && code >= 0 && code <= this.compiler.switches.statusSuccess;
+          resolve(success);
+        });
+        child.on('error', (err) => {
+          if (child !== activeChild) return; // 旧进程的错误已被回退重试接管
+          // 裸程序名在 PATH 上只有 .cmd/.bat 时 libuv 不会补扩展（只补 .exe）⇒ 直接派生会 ENOENT。
+          // 这类包装器（Scoop shim / 自定义 gcc.cmd）必须由 shell 解释：回退重试一次，行为与旧版一致。
+          const code = (err as NodeJS.ErrnoException).code;
+          if (direct && !retriedWithShell && (code === 'ENOENT' || code === 'EINVAL')) {
+            retriedWithShell = true;
+            options.cancel?.unregister(child);
+            try {
+              const retry = spawn(command, {
+                cwd: upperDrive(cwd),
+                shell: true,
+                windowsHide: true,
+                env: this.buildEnv,
+              });
+              wire(retry);
+              return;
+            } catch {
+              // 回退也失败：走下面的统一失败处理
+            }
+          }
+          options.cancel?.unregister(child);
+          releaseSlot();
+          this.output.error(`[Code::Blocks] ${logT('Failed to execute')}: ${err.message}`);
+          resolve(false);
+        });
+      };
+      wire(proc);
     });
   }
 

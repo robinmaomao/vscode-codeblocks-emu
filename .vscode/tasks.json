@@ -19,7 +19,7 @@
       "label": "build-extension",
       "dependsOn": ["npm: compile", "npm: bundle"],
       "dependsOrder": "sequence",
-      "group": "build",
+      "group": { "kind": "build", "isDefault": true },
       "problemMatcher": []
     }
   ]

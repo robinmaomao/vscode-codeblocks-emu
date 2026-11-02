@@ -2,6 +2,25 @@
 
 本文件记录**正式版**里程碑；每个 dev 迭代的逐轮发布说明见 [`docs/release/`](docs/release/)（`0.8.xx-dev.md`），版本号与维护约定见 [`docs/release/00-说明.md`](docs/release/00-说明.md)。
 
+## 0.8.135 — 2026-11-03
+
+**构建期进程/CPU 收口 · 产物排除写入用户设置**
+
+- **去掉 shell 层**：编译/链接命令能安全拆成 `program + args` 时直接 `spawn`，每个单元少一个 `cmd.exe`；
+  含 cmd 元字符、cmd 内建命令、引号不可靠时回退 `shell: true`（行为零变化）。PCH 旧产物删除改宿主内 `fs.rmSync`。
+- **并发进程预算**：实际并发 = `min(请求值, 32, max(8, 逻辑核数))`，被收敛时构建开始打印一行说明；默认仍为 8。
+  新增 `codeblocks.build.traceProcesses`（默认关）打印 spawn 次数 / 同时存活峰值 / 并发上限。
+- **产物排除改写入用户设置**：`codeblocks.build.autoExcludeOutputs`（默认开）现在把
+  `files.watcherExclude` / `search.exclude` 写到**用户设置**，不再污染工作区 `.vscode/settings.json`（不会被提交到仓库）；
+  旧版本写进工作区的同名条目会自动清理（用户自己的条目保留）。
+- **产物目录推导补齐默认值**：`object_output` 为空补 `.objs`、`deps_output` 为空补 `.deps`，并先展开 `$(…)` 宏；
+  覆盖 Build / Build Workspace / Clean / Clean Workspace / 右键单工程 Build / 单文件编译 / Rebuild All 全部入口。
+- **宿主 CPU 收口**：收集阶段每 32 个文件让出事件循环；`#include` 解析结果按「搜索目录签名 + 引用方式 + 源目录」
+  缓存（每轮构建清空负结果）；构建期不再生成编译数据库；编译器探测缓存随工具链 `mtime` 失效。
+- **系统 CPU 归属采样**：`codeblocks.build.sampleSystem`（默认关）每 ~1 s 采样整机 / 编辑器 / 安全软件 /
+  VS Code 文件扫描器（`rg` + `conhost`）/ 其余，构建结束输出归属块；扫描器 ≥8% 或安全软件 ≥10% 时点名告警。
+- 规模（0.8.135 时点）：`contract 2/2`、`unit 170 FAIL=0 SKIP=1`、`e2e 4/4`。
+
 ## 0.8.134 — 2026-10-27
 
 **构建并发/CPU 守卫 · clangd 与 ccache 缺陷修复**
