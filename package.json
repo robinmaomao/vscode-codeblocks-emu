@@ -324,6 +324,11 @@
         "icon": "$(close)"
       },
       {
+        "command": "codeblocks.reloadProject",
+        "title": "%command.codeblocks.reloadProject.title%",
+        "icon": "$(refresh)"
+      },
+      {
         "command": "codeblocks.buildProject",
         "title": "%command.codeblocks.buildProject.title%",
         "icon": "$(package)"
@@ -1193,6 +1198,21 @@
             "minimum": 1,
             "maximum": 1000,
             "description": "%configuration.codeblocks.detect.autoOpenThreshold.description%"
+          },
+          "codeblocks.detect.checkExternalChanges": {
+            "type": "string",
+            "enum": [
+              "off",
+              "prompt",
+              "auto"
+            ],
+            "enumDescriptions": [
+              "%configuration.codeblocks.detect.checkExternalChanges.off%",
+              "%configuration.codeblocks.detect.checkExternalChanges.prompt%",
+              "%configuration.codeblocks.detect.checkExternalChanges.auto%"
+            ],
+            "default": "prompt",
+            "description": "%configuration.codeblocks.detect.checkExternalChanges.description%"
           }
         }
       },
@@ -1791,6 +1811,11 @@
           "group": "1_move@3"
         },
         {
+          "command": "codeblocks.reloadProject",
+          "when": "view == codeblocks.projectTree && viewItem == project",
+          "group": "0_properties@2"
+        },
+        {
           "command": "codeblocks.buildProject",
           "when": "view == codeblocks.projectTree && viewItem == project",
           "group": "2_build@1"
@@ -2099,6 +2124,7 @@
     "@vscode/vsce": "^4.0.0",
     "esbuild": "^0.28.2",
     "fast-xml-parser": "^4.3.6",
+    "iconv-lite": "^0.6.3",
     "pixelmatch": "^8.0.0",
     "playwright": "^1.64.0",
     "pngjs": "^7.0.0",

@@ -11,9 +11,16 @@ import * as os from 'os';
 import * as vscode from 'vscode';
 import { spawnSync } from 'child_process';
 import { LruCache } from './lru';
+import { decodeText } from './encoding';
 import * as i18n from '../i18n';
 
 const EXE = process.platform === 'win32' ? 'clangd.exe' : 'clangd';
+
+/** spawnSync 输出 → 文本（声明类型可能含 string；buffer 编码时为 Buffer） */
+function syncOutText(v: string | Buffer | null | undefined): string {
+  if (v === null || v === undefined) return '';
+  return typeof v === 'string' ? v : decodeText(v);
+}
 
 /** 编译器 include 查询缓存（key = compilerPath|lang；LRU 128 防长会话无界增长/重复同步 spawn 阻塞主线程） */
 const includesCache = new LruCache<string, string[]>(128);
@@ -25,9 +32,9 @@ function findOnPath(): string | undefined {
   const cmd = process.platform === 'win32' ? 'where' : 'which';
   try {
     // 超时保护：扩展宿主主线程被同步子进程阻塞会冻结全部扩展能力（where/which 正常 <50ms）
-    const r = spawnSync(cmd, ['clangd'], { encoding: 'utf8', timeout: 3000, windowsHide: true });
+    const r = spawnSync(cmd, ['clangd'], { encoding: 'buffer', timeout: 3000, windowsHide: true });
     if (r.status === 0 && r.stdout) {
-      const first = r.stdout.split(/\r?\n/)[0].trim();
+      const first = decodeText(r.stdout).split(/\r?\n/)[0].trim();
       if (first) return first;
     }
   } catch {
@@ -198,14 +205,15 @@ export function queryCompilerIncludes(compilerPath: string, lang: 'c' | 'c++', e
     // extraFlags（如 -march=...）用于让 GCC 选择正确的 multilib 系统头目录。
     // 超时保护：编译器路径错误/网络盘/包装脚本挂起时，同步 spawn 会冻结扩展宿主。
     r = spawnSync(compilerPath, ['-E', '-x', lang, '-', '-v', ...extraFlags], {
-      encoding: 'utf8', input: '', timeout: 5000, windowsHide: true,
+      encoding: 'buffer', input: '', timeout: 5000, windowsHide: true,
     });
   } catch {
     includesCache.set(key, []);
     return [];
   }
   // GCC/Clang 把 include 搜索列表打印到 stderr（-v 与 -E 组合）
-  const stderr = String(r.stderr ?? '') + String(r.stdout ?? '');
+  // 系统头路径可能含中文用户名目录：按 UTF-8 严格优先、GBK 回退解码
+  const stderr = syncOutText(r.stderr) + syncOutText(r.stdout);
   const m = stderr.match(/#include <\.\.\.> search starts here:\r?\n([\s\S]*?)\r?\nEnd of search list\./);
   if (!m) {
     includesCache.set(key, []);
@@ -251,7 +259,7 @@ export function queryCompilerTarget(compilerPath: string): string | undefined {
 
   let r: ReturnType<typeof spawnSync>;
   try {
-    r = spawnSync(compilerPath, ['-dumpmachine'], { encoding: 'utf8', timeout: 5000, windowsHide: true });
+    r = spawnSync(compilerPath, ['-dumpmachine'], { encoding: 'buffer', timeout: 5000, windowsHide: true });
   } catch {
     targetCache.set(cacheKey, undefined);
     return undefined;

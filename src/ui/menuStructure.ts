@@ -279,6 +279,7 @@ export const MENU_STRUCTURE: MenuDef[] = [
       SEP,
       { label: 'Workspace Dependencies…', command: 'codeblocks.workspace.editDependencies', needsProject: true },
       { label: 'Create Project from Target…', command: 'codeblocks.exportTargetAsProject', needsProject: true },
+      { label: 'Reload Project from Disk', command: 'codeblocks.reloadProject', needsProject: true },
       { label: 'Properties…', command: 'codeblocks.projectProperties', needsProject: true },
     ],
   },

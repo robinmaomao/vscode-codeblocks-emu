@@ -8,8 +8,15 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { spawnSync, execFile } from 'child_process';
 import { promisify } from 'util';
+import { decodeText } from '../tools/encoding';
 
 const execFileAsync = promisify(execFile);
+
+/** 读取 `where/which/--version` 等工具输出（Buffer → UTF-8 严格优先、GBK 回退） */
+function outText(buf: Buffer | string | undefined): string {
+  if (!buf) return '';
+  return typeof buf === 'string' ? buf : decodeText(buf);
+}
 
 export interface DetectedCompiler {
   id: string;
@@ -78,18 +85,18 @@ export function detectGcc(masterPath = ''): DetectedCompiler | null {
       if (fs.existsSync(bin)) return buildGccResult(dir, bin);
     }
     // 用 where 命令兜底
-    const where = spawnSync('where', [cName], { encoding: 'utf8' });
+    const where = spawnSync('where', [cName], { encoding: 'buffer' });
     if (where.stdout) {
-      const first = where.stdout.split(/\r?\n/)[0].trim();
+      const first = outText(where.stdout).split(/\r?\n/)[0].trim();
       if (first && fs.existsSync(first)) {
         return buildGccResult(path.dirname(path.dirname(first)), first);
       }
     }
   } else {
     // Linux/macOS：which 命令
-    const which = spawnSync('which', [cName], { encoding: 'utf8' });
+    const which = spawnSync('which', [cName], { encoding: 'buffer' });
     if (which.stdout) {
-      const full = which.stdout.trim();
+      const full = outText(which.stdout).trim();
       if (full && fs.existsSync(full)) {
         return buildGccResult(path.dirname(path.dirname(full)), full);
       }
@@ -101,7 +108,7 @@ export function detectGcc(masterPath = ''): DetectedCompiler | null {
 
 function buildGccResult(masterPath: string, cPath: string): DetectedCompiler {
   const win = process.platform === 'win32';
-  const version = spawnSync(cPath, ['--version'], { encoding: 'utf8' }).stdout?.split(/\r?\n/)[0]?.trim();
+  const version = outText(spawnSync(cPath, ['--version'], { encoding: 'buffer' }).stdout).split(/\r?\n/)[0]?.trim();
   return {
     id: 'gcc',
     name: 'GNU GCC Compiler',
@@ -119,7 +126,7 @@ export function detectClang(): DetectedCompiler | null {
   const found = findInPath(clangName, pathVar);
   if (!found) return null;
 
-  const version = spawnSync(found, ['--version'], { encoding: 'utf8' }).stdout?.split(/\r?\n/)[0]?.trim();
+  const version = outText(spawnSync(found, ['--version'], { encoding: 'buffer' }).stdout).split(/\r?\n/)[0]?.trim();
   return {
     id: 'clang',
     name: 'LLVM Clang Compiler',
@@ -136,8 +143,8 @@ export function detectMsvc(): DetectedCompiler | null {
   // 优先用 vswhere 定位 VS 安装
   const vswhere = 'C:\\Program Files (x86)\\Microsoft Visual Studio\\Installer\\vswhere.exe';
   if (fs.existsSync(vswhere)) {
-    const r = spawnSync(vswhere, ['-latest', '-products', '*', '-requires', 'Microsoft.VisualStudio.Component.VC.Tools.x86.x64', '-property', 'installationPath'], { encoding: 'utf8' });
-    const installPath = r.stdout?.trim();
+    const r = spawnSync(vswhere, ['-latest', '-products', '*', '-requires', 'Microsoft.VisualStudio.Component.VC.Tools.x86.x64', '-property', 'installationPath'], { encoding: 'buffer' });
+    const installPath = outText(r.stdout).trim();
     if (installPath) {
       const cl = findClInVs(installPath);
       if (cl) {
@@ -292,7 +299,7 @@ function buildRiscvResult(prefix: string, gccPath: string): DetectedCompiler {
     const p = full(name);
     return fs.existsSync(p) ? p : fallback;
   };
-  const version = spawnSync(gccPath, ['--version'], { encoding: 'utf8' }).stdout?.split(/\r?\n/)[0]?.trim();
+  const version = outText(spawnSync(gccPath, ['--version'], { encoding: 'buffer' }).stdout).split(/\r?\n/)[0]?.trim();
 
   // 纯 C 工具链可能没有 g++，此时 CPP/LD 回退到 gcc（支持纯 C 工程）
   const cpp = existsOr('g++', gccPath);
@@ -383,7 +390,7 @@ function detectToolchain(
   if (!exePath) return null;
   let version: string | undefined;
   try {
-    version = spawnSync(exePath, ['--version'], { encoding: 'utf8' }).stdout?.split(/\r?\n/)[0]?.trim();
+    version = outText(spawnSync(exePath, ['--version'], { encoding: 'buffer' }).stdout).split(/\r?\n/)[0]?.trim();
   } catch { version = undefined; }
   return { id, name, masterPath: master, cCompilerPath: exePath, version };
 }
@@ -437,8 +444,8 @@ export function detectAllCompilers(masterPath = ''): DetectedCompiler[] {
 /** 异步获取 `--version` 首行（替代 spawnSync，探测失败返回 undefined） */
 async function queryVersionAsync(exe: string): Promise<string | undefined> {
   try {
-    const { stdout } = await execFileAsync(exe, ['--version'], { encoding: 'utf8', timeout: 5000 });
-    return stdout.split(/\r?\n/)[0]?.trim();
+    const { stdout } = await execFileAsync(exe, ['--version'], { encoding: 'buffer', timeout: 5000 });
+    return outText(stdout as unknown as Buffer).split(/\r?\n/)[0]?.trim();
   } catch {
     return undefined;
   }
@@ -487,8 +494,8 @@ async function detectGccAsync(masterPath = ''): Promise<DetectedCompiler | null>
     // 用 where 命令兜底
     if (!cPath) {
       try {
-        const { stdout } = await execFileAsync('where', [cName], { encoding: 'utf8', timeout: 5000 });
-        const first = stdout.split(/\r?\n/)[0]?.trim();
+        const { stdout } = await execFileAsync('where', [cName], { encoding: 'buffer', timeout: 5000 });
+        const first = outText(stdout as unknown as Buffer).split(/\r?\n/)[0]?.trim();
         if (first && fs.existsSync(first)) {
           cPath = first;
           master = path.dirname(path.dirname(first));
@@ -498,8 +505,8 @@ async function detectGccAsync(masterPath = ''): Promise<DetectedCompiler | null>
   } else if (!cPath) {
     // Linux/macOS：which 命令
     try {
-      const { stdout } = await execFileAsync('which', [cName], { encoding: 'utf8', timeout: 5000 });
-      const full = stdout.trim();
+      const { stdout } = await execFileAsync('which', [cName], { encoding: 'buffer', timeout: 5000 });
+      const full = outText(stdout as unknown as Buffer).trim();
       if (full && fs.existsSync(full)) {
         cPath = full;
         master = path.dirname(path.dirname(full));
@@ -537,9 +544,9 @@ async function detectMsvcAsync(): Promise<DetectedCompiler | null> {
       const { stdout } = await execFileAsync(
         vswhere,
         ['-latest', '-products', '*', '-requires', 'Microsoft.VisualStudio.Component.VC.Tools.x86.x64', '-property', 'installationPath'],
-        { encoding: 'utf8', timeout: 10000 },
+        { encoding: 'buffer', timeout: 10000 },
       );
-      const installPath = stdout.trim();
+      const installPath = outText(stdout as unknown as Buffer).trim();
       if (installPath) {
         const cl = findClInVs(installPath);
         if (cl) {

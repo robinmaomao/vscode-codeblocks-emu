@@ -9,6 +9,7 @@
  * 保存时通过回调交由 extension.ts 序列化写回 .cbp 并刷新项目树。
  */
 import * as vscode from 'vscode';
+import * as path from 'path';
 import { Project, BuildTarget, OptionsRelationType } from '../model/types';
 import { parseProjectDebuggerConfig, defaultRemoteOptions } from '../model/projectDebuggerExtensions';
 import * as i18n from '../i18n';
@@ -274,6 +275,15 @@ export class ProjectPropertiesPanel {
   public static refreshTitleIfOpen(): void {
     const p = ProjectPropertiesPanel.current;
     if (p) p.panel.title = projectPropertiesTitle(p.project.title);
+  }
+
+  /**
+   * 工程从磁盘重新加载时关闭面板：面板持有的是旧模型，保存会覆盖刚重载的外部改动。
+   * （对齐 Code::Blocks ReloadProject 关闭工程后重建的行为）
+   */
+  public static closeFor(project: Project): void {
+    const p = ProjectPropertiesPanel.current;
+    if (p && path.resolve(p.project.filename).toLowerCase() === path.resolve(project.filename).toLowerCase()) p.dispose();
   }
 
   private buildHtml(): string {

@@ -10,6 +10,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 import { spawnSync } from 'child_process';
 import { Compiler } from '../compiler/compiler';
+import { decodeText } from '../tools/encoding';
 import { upperDrive, shortPathWin } from '../tools/pathCase';
 import { replaceCbMacros, cbBuiltinVars, envVarMap } from './cbMacros';
 import { strictQuoting } from '../build/logLang';
@@ -200,8 +201,8 @@ export function expandBackticks(str: string, onOutput?: (bt: string) => void): s
       try {
         // Y2-A：超时上限 15s→3s —— 宿主主线程阻塞会冻结全部扩展能力；挂起命令按失败（空串）处理并缓存。
         // 保护性偏差：CB 无超时（挂起会永久卡住其 UI）；极慢但合法的命令可能被截断。
-        const r = spawnSync(cmd, { shell: true, timeout: 3000, maxBuffer: 1024 * 1024, encoding: 'utf8' });
-        const text = (r.stdout ?? '').replace(/\r/g, '');
+        const r = spawnSync(cmd, { shell: true, timeout: 3000, maxBuffer: 1024 * 1024, encoding: 'buffer' });
+        const text = decodeText(r.stdout ?? Buffer.alloc(0)).replace(/\r/g, '');
         bt = text.split('\n').map((l) => l.trim()).filter(Boolean).join(' ');
       } catch {
         bt = '';

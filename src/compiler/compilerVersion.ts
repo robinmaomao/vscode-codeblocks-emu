@@ -12,6 +12,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { spawnSync } from 'child_process';
 import { Compiler } from './compiler';
+import { decodeText } from '../tools/encoding';
 
 /** 版本号缓存（key = `<exe>|<mtimeMs>`；stat 失败时 mtime 记 0，仅按路径缓存） */
 const versionCache = new Map<string, string | undefined>();
@@ -44,7 +45,7 @@ export function queryCompilerVersionString(compiler: Compiler): string | undefin
   let version: string | undefined;
   try {
     // Y2-A：超时 8s→3s（宿主共享主线程；超时/失败 → undefined 并缓存负结果）
-    const out = spawnSync(exe, ['--version'], { encoding: 'utf8', timeout: 3000 }).stdout ?? '';
+    const out = decodeText(spawnSync(exe, ['--version'], { encoding: 'buffer', timeout: 3000 }).stdout ?? Buffer.alloc(0));
     const first = out.split(/\r?\n/)[0] ?? '';
     const m = first.match(/\d+\.\d+\.\d+/);
     version = m ? m[0] : undefined;

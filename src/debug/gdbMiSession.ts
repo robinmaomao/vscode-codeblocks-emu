@@ -11,7 +11,7 @@
  */
 import { spawn, ChildProcess } from 'child_process';
 import * as i18n from '../i18n';
-import { decodeText } from '../tools/encoding';
+import { OutputLineDecoder } from '../tools/encoding';
 import { isUnframedLine } from './miParse';
 
 export interface MiResult {
@@ -72,10 +72,17 @@ export class GdbMiSession {
         env: { ...process.env, ...opts.env },
       });
 
-      this.proc.stdout?.on('data', (d: Buffer) => this.feed(this.decodeChunk(d)));
-      this.proc.stderr?.on('data', (d: Buffer) => this.feed(this.decodeChunk(d)));
+      // stdout/stderr 各自的行解码器：只在完整行上判定 UTF-8/GBK，避免跨块把汉字拆成错字。
+      // 用 start() 内的局部变量（而非字段），避免同一实例重复 start 时旧进程写入新解码器。
+      const outDec = new OutputLineDecoder();
+      const errDec = new OutputLineDecoder();
+      this.proc.stdout?.on('data', (d: Buffer) => this.feed(outDec.push(d).text));
+      this.proc.stderr?.on('data', (d: Buffer) => this.feed(errDec.push(d).text));
       this.proc.on('error', (err) => reject(err));
       this.proc.on('exit', (code) => {
+        // 收尾：把两个流里无换行结尾的残行也解析掉（补 \n 让 feed 按完整行处理）
+        const tail = outDec.flush().text + errDec.flush().text;
+        if (tail) this.feed(tail + '\n');
         this.onExit?.(code);
         // 拒绝所有 pending
         for (const [, p] of this.pending) p.reject(new Error(i18n.t('GDB process has exited')));
@@ -197,11 +204,6 @@ export class GdbMiSession {
       this.buffer = this.buffer.slice(idx + 1);
       if (line.trim()) this.parseLine(line);
     }
-  }
-
-  /** 解码子进程输出：UTF-8 严格优先，失败回退 GBK（中文 Windows） */
-  private decodeChunk(buf: Buffer): string {
-    return decodeText(buf);
   }
 
   private parseLine(line: string): void {

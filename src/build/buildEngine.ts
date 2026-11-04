@@ -21,7 +21,7 @@ import { replaceCbMacros, cbBuiltinVars, envVarMap } from '../compiler/cbMacros'
 import { buildLogPrefs, logT, msg } from './logLang';
 import { BuildCancelHandle } from './cancelToken';
 import { BuildProfiler } from './buildProfiler';
-import { decodeText } from '../tools/encoding';
+import { decodeOutputLines } from '../tools/encoding';
 import { isExecutableTargetType, resolveExecutablePath, executableCandidates, withPlatformExtension } from './outputPath';
 import { outputFileSizeText } from './outputFileInfo';
 import { applyResponseFile, compareFilesByWeight, linkRespBase } from './commandLine';
@@ -2986,12 +2986,12 @@ export class BuildEngine {
       const stdoutChunks: Buffer[] = [];
       const stderrChunks: Buffer[] = [];
 
-      const processLines = (text: string) => {
+      const processLines = (lines: string[]) => {
         // 每行只解析一次：严重级别 / Diagnostic / 文件 URI / 结构化上报共用同一份解析结果
         // （此前最多 4 次 parseLine ⇒ 4 倍正则开销，是大量输出时扩展宿主 CPU 的主要来源之一）
         const wantDiagnostic = !!options.onDiagnostic;
         const wantStructured = !!options.onStructuredDiagnostic;
-        for (const line of text.split(/\r?\n/)) {
+        for (const line of lines) {
           if (!line) continue;
           const parsed = parser.parseLine(line);
           const severity = parsed?.type === CompilerLineType.Error
@@ -3025,8 +3025,9 @@ export class BuildEngine {
           releaseSlot();
           // M0 探针：宿主输出解析耗时 + 输出字节量
           const profParseT0 = this.prof ? Date.now() : 0;
-          if (stdoutChunks.length) processLines(decodeText(Buffer.concat(stdoutChunks)));
-          if (stderrChunks.length) processLines(decodeText(Buffer.concat(stderrChunks)));
+          // 按完整行逐行判定编码：同一命令输出可能 GBK/UTF-8 混排（路径 GBK + 源码摘录 UTF-8）
+          if (stdoutChunks.length) processLines(decodeOutputLines(Buffer.concat(stdoutChunks)));
+          if (stderrChunks.length) processLines(decodeOutputLines(Buffer.concat(stderrChunks)));
           if (this.prof) {
             let bytes = 0;
             for (const c of stdoutChunks) bytes += c.length;
