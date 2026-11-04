@@ -629,6 +629,7 @@
   "Project name contains invalid characters": "工程名含非法字符",
   "Project node not found in {0}: {1}": "未在 {0} 中找到工程节点: {1}",
   "Project not found": "项目未找到",
+  "Project is not open: {0}": "工程未打开：{0}",
   "Project properties": "工程属性",
   "Project settings": "项目设置",
   "Project tree": "工程树",

@@ -123,6 +123,20 @@ async function main() {
     ![...Object.values(zh), ...Object.values(en)].some((h) => h.includes('i18n.tr(')));
   check('C3 英文态无未替换的 ${} 模板残留', !en.props.includes('${') && !en.keybindings.includes('${'));
 
+  // ---- C4. 渲染后的内联脚本必须能编译（英文译文含撇号/引号会截断 '...' 字符串，导致整个面板脚本不执行） ----
+  {
+    const scriptOf = (h) => (h.match(/<script>([\s\S]*?)<\/script>/) || [, ''])[1];
+    const bad = [];
+    for (const [id, html] of [...Object.entries(zh), ...Object.entries(en)]) {
+      try {
+        new Function(scriptOf(html));
+      } catch (e) {
+        bad.push(`${id}: ${e.message}`);
+      }
+    }
+    check('C4 中英两态内联脚本均可编译（译文不得截断 JS 字符串）', bad.length === 0, bad);
+  }
+
   // ---- D. 反查词条表 ↔ 插桩单元 ----
   const dictPath = path.join(ROOT, 'src', 'i18n', 'strings.zh-cn.webview.json');
   const dict = JSON.parse(fs.readFileSync(dictPath, 'utf-8'));

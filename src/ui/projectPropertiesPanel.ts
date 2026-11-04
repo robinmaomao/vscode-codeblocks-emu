@@ -445,7 +445,7 @@ export class ProjectPropertiesPanel {
     }
     /* 顶栏 —— 对齐 VS Code 编辑器操作区 */
     .toolbar {
-      display: flex; align-items: center; gap: 6px;
+      display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
       padding: 6px 12px; flex-shrink: 0;
       border-bottom: 1px solid var(--cb-border);
       background: var(--vscode-sideBarSectionHeader-background, transparent);
@@ -456,13 +456,18 @@ export class ProjectPropertiesPanel {
       border: 1px solid var(--vscode-button-border, transparent);
       padding: 4px 10px; border-radius: 2px; cursor: pointer;
       font-family: var(--vscode-font-family); font-size: 13px; line-height: 18px;
+      /* 窄面板下按钮被挤压时不得逐字换行（否则中文变竖排单字） */
+      white-space: nowrap;
     }
     button:hover { background: var(--vscode-button-hoverBackground); }
     button:focus { outline: 1px solid var(--vscode-focusBorder); outline-offset: 2px; }
     button:disabled { opacity: .5; cursor: default; }
     button.secondary { background: var(--vscode-button-secondaryBackground); color: var(--vscode-button-secondaryForeground); }
     button.secondary:hover { background: var(--vscode-button-secondaryHoverBackground); }
-    #status { margin-left: auto; color: var(--vscode-descriptionForeground); font-size: 12px; }
+    #status {
+      margin-left: auto; color: var(--vscode-descriptionForeground); font-size: 12px;
+      min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
     /* 项目标题栏 */
     .project-header {
       padding: 8px 16px; flex-shrink: 0;
@@ -498,7 +503,7 @@ export class ProjectPropertiesPanel {
     /* 右侧内容区 */
     .content { flex: 1; overflow-y: auto; min-width: 0; }
     .tab-pane { padding: 12px 16px; }
-    .layout { display: grid; grid-template-columns: 240px 1fr; gap: 16px; align-items: start; }
+    .layout { display: grid; grid-template-columns: minmax(200px, 240px) minmax(0, 1fr); gap: 16px; align-items: start; }
     /* 列表 —— 对齐 VS Code 树/列表 */
     .list {
       border: 1px solid var(--cb-border); border-radius: 2px;
@@ -511,7 +516,7 @@ export class ProjectPropertiesPanel {
     .list .empty { padding: 10px; color: var(--vscode-descriptionForeground); font-style: italic; }
     .item-icon { display: inline-flex; width: 16px; height: 16px; flex: none; }
     .item-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .list-actions { display: flex; gap: 6px; margin-top: 8px; }
+    .list-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
     .list-actions button { padding: 3px 9px; }
     /* 表单字段 */
     .form label { display: block; margin-bottom: 14px; }
@@ -547,6 +552,11 @@ export class ProjectPropertiesPanel {
     /* 表单分组折叠（D2） */
     details.fg { border: 1px solid var(--cb-border); border-radius: 4px; padding: 6px 10px; margin-bottom: 10px; }
     details.fg summary { cursor: pointer; font-weight: 600; margin: 2px 0 6px; color: var(--vscode-foreground); }
+    /* 窄面板：左侧列表与右侧表单改为上下堆叠，避免表单被挤成细条 */
+    @media (max-width: 720px) {
+      .layout { grid-template-columns: minmax(0, 1fr); }
+      .list { max-height: 200px; }
+    }
   </style>
 </head>
 <body>
@@ -777,7 +787,8 @@ export class ProjectPropertiesPanel {
     }
 
     function collectTargetForm() {
-      if (!targets.length) return;
+      // 表单未渲染时元素不存在（例如本次会话从未切到该 tab）：跳过收集，避免保存时抛异常
+      if (!targets.length || !document.getElementById('f-title')) return;
       const t = targets[selected];
       const oldTitle = t.title;
       const newTitle = document.getElementById('f-title').value.trim() || oldTitle;
@@ -816,6 +827,8 @@ export class ProjectPropertiesPanel {
           const i = v.targets.indexOf(oldTitle);
           if (i >= 0) v.targets[i] = newTitle;
         });
+        // 调试器远程配置按目标标题索引：改名后同步，否则原配置变成无法匹配的孤儿节点
+        dbg.remote.forEach(r => { if (r.target === oldTitle) r.target = newTitle; });
       }
       renderList();
     }
@@ -865,6 +878,8 @@ export class ProjectPropertiesPanel {
       virtualTargets.forEach(v => {
         v.targets = v.targets.filter(t => t !== removedTitle);
       });
+      // 调试器远程配置同样按标题索引：删掉该目标的行，避免保存出孤儿节点
+      dbg.remote = dbg.remote.filter(r => r.target !== removedTitle);
       renderList(); renderForm();
     });
 
@@ -931,9 +946,10 @@ export class ProjectPropertiesPanel {
     }
 
     function collectVTForm() {
-      if (!virtualTargets.length) return;
+      const aliasEl = document.getElementById('vt-alias');
+      if (!aliasEl || !virtualTargets.length) return;
       const v = virtualTargets[selectedVT];
-      v.alias = document.getElementById('vt-alias').value.trim() || v.alias;
+      v.alias = aliasEl.value.trim() || v.alias;
       v.targets = [...document.querySelectorAll('#vtform input[data-title]:checked')].map(c => c.dataset.title);
       renderVTList();
     }
@@ -1018,9 +1034,10 @@ export class ProjectPropertiesPanel {
     }
 
     function collectFileForm() {
-      if (!files.length) return;
+      const varEl = document.getElementById('ff-var');
+      if (!varEl || !files.length) return;
       const f = files[selectedFile];
-      f.compilerVar = document.getElementById('ff-var').value;
+      f.compilerVar = varEl.value;
       f.compile = document.getElementById('ff-compile').checked;
       f.link = document.getElementById('ff-link').checked;
       f.buildCommand = document.getElementById('ff-cmd').value;
@@ -1099,6 +1116,8 @@ export class ProjectPropertiesPanel {
       const el = document.getElementById('oform');
       if (!el || !el.querySelector('#opt-compiler')) return;
       const cur = selectedScope === 'project' ? projOpts : targetOpts[selectedScope];
+      // 目标被删除后作用域索引可能失效：跳过收集（其余 tab 仍照常保存）
+      if (!cur) return;
       cur.compilerOptions = optionsLines(document.getElementById('opt-compiler').value);
       cur.linkerOptions = optionsLines(document.getElementById('opt-linker').value);
       cur.linkLibs = optionsLines(document.getElementById('opt-libs').value);
@@ -1148,6 +1167,7 @@ export class ProjectPropertiesPanel {
       const el = document.getElementById('dform');
       if (!el || !el.querySelector('#dir-include')) return;
       const cur = selectedDirScope === 'project' ? projDirs : targetDirs[selectedDirScope];
+      if (!cur) return;
       cur.includeDirs = optionsLines(document.getElementById('dir-include').value);
       cur.libDirs = optionsLines(document.getElementById('dir-lib').value);
       cur.resourceDirs = optionsLines(document.getElementById('dir-res').value);
@@ -1257,6 +1277,7 @@ export class ProjectPropertiesPanel {
       const el = document.getElementById('scrform');
       if (!el || !el.querySelector('#scr-list')) return;
       const cur = selectedScriptScope === 'project' ? projScripts : targetScripts[selectedScriptScope];
+      if (!cur) return;
       cur.scripts = optionsLines(document.getElementById('scr-list').value);
       cur.before = optionsLines(document.getElementById('scr-before').value);
       cur.after = optionsLines(document.getElementById('scr-after').value);
@@ -1336,8 +1357,10 @@ export class ProjectPropertiesPanel {
       const paths = document.getElementById('dbg-paths');
       if (!paths) return;
       dbg.searchPaths = optionsLines(paths.value);
-      const scopeName = selectedDebugScope === '' ? '' : targets[Number(selectedDebugScope)].title;
-      const cur = dbgRemoteFor(scopeName);
+      const scopeTarget = selectedDebugScope === '' ? undefined : targets[Number(selectedDebugScope)];
+      // 目标被删除后作用域索引可能失效：search_path 已收集，跳过 remote 段
+      if (selectedDebugScope !== '' && !scopeTarget) return;
+      const cur = dbgRemoteFor(scopeTarget ? scopeTarget.title : '');
       cur.connType = Number(document.getElementById('dbg-conn').value) || 0;
       cur.serialPort = document.getElementById('dbg-serial').value.trim();
       cur.serialBaud = document.getElementById('dbg-baud').value.trim() || '115200';
@@ -1352,16 +1375,30 @@ export class ProjectPropertiesPanel {
     }
 
     // ---- 保存 ----
+    function setStatus(text) {
+      const el = document.getElementById('status');
+      if (!el) return;
+      el.textContent = text;
+      // 窄面板下状态区会省略号截断：悬停看完整原因
+      el.title = text;
+    }
+
     function doSave(close) {
-      collectTargetForm();
-      collectVTForm();
-      collectFileForm();
-      collectOptionsForm();
-      collectDirsForm();
-      collectScriptsForm();
-      collectSettingsForm();
-      collectNotesForm();
-      collectDebugForm();
+      // 收集阶段任何异常都要可见：否则点击「保存」毫无反应（曾因未渲染 tab 的 collect 抛错而静默失败）
+      try {
+        collectTargetForm();
+        collectVTForm();
+        collectFileForm();
+        collectOptionsForm();
+        collectDirsForm();
+        collectScriptsForm();
+        collectSettingsForm();
+        collectNotesForm();
+        collectDebugForm();
+      } catch (err) {
+        setStatus('${i18n.tr('保存失败:')}' + ' ' + (err && err.message ? err.message : err));
+        return;
+      }
       vscode.postMessage({
         type: 'save',
         targets: targets,
@@ -1381,9 +1418,9 @@ export class ProjectPropertiesPanel {
 
     window.addEventListener('message', e => {
       if (e.data.type === 'saved') {
-        document.getElementById('status').textContent = '${i18n.tr('已保存 ✔️')}';
+        setStatus('${i18n.tr('已保存 ✔️')}');
       } else if (e.data.type === 'error') {
-        document.getElementById('status').textContent = '${i18n.tr('保存失败:')} ' + e.data.message;
+        setStatus('${i18n.tr('保存失败:')}' + ' ' + e.data.message);
       }
     });
 
