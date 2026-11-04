@@ -79,19 +79,28 @@ const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'cb-enc-'));
 
 // ---------- D. ANSI/响应文件 ----------
 {
+  // 系统 ANSI 代码页因机器而异（中文 Windows = GBK；英文 runner = 437/1252）：样例字符必须在该代码页可表示，
+  // 断言"按该代码页写出 + 可原样解码"，而不是硬编码 GBK（否则非中文环境的 CI 会假红）
+  const acp = enc.windowsAnsiEncoding();
+  const cjk = /^(gbk|gb18030|big5|cp936|cp950)/i.test(acp);
+  const sample = cjk ? '中文' : 'café';
   const ascii = enc.encodeForAnsiFile('gcc -c a.c');
   check('D1 纯 ASCII 内容写 UTF-8（与 ANSI 等价）', ascii.equals(Buffer.from('gcc -c a.c', 'utf-8')), ascii.toString());
-  const nonAscii = enc.encodeForAnsiFile('中文');
-  check('D2 非 ASCII 内容按系统 ANSI 编码写出', nonAscii.equals(gbk('中文')), nonAscii.toString('hex'), gbk('中文').toString('hex'));
+  const nonAscii = enc.encodeForAnsiFile(sample);
+  check(`D2 非 ASCII 内容按系统 ANSI 编码（${acp}）写出`,
+    nonAscii.equals(iconv.encode(sample, acp)) && !nonAscii.equals(utf8(sample)),
+    { hex: nonAscii.toString('hex'), acp }, iconv.encode(sample, acp).toString('hex'));
 
   if (process.platform === 'win32') {
-    const tail = Array.from({ length: 900 }, (_, i) => `"obj/中文/${i}.o"`).join(' ');
+    const tail = Array.from({ length: 900 }, (_, i) => `"obj/${sample}/${i}.o"`).join(' ');
     const cmd = `gcc.exe -o bin/app.exe ${tail}`;
     const res = applyResponseFile(cmd, path.join(tmpRoot, 'link'), tmpRoot);
     const bytes = res.respFile && fs.existsSync(res.respFile) ? fs.readFileSync(res.respFile) : Buffer.alloc(0);
-    const text = iconv.decode(bytes, enc.windowsAnsiEncoding());
+    const text = iconv.decode(bytes, acp);
     check('D3 超长命令生成响应文件', !!res.respFile, res.respFile);
-    check('D4 响应文件含中文路径且可按 ANSI 还原', text.includes('中文') && bytes.some((x) => x > 127), { nonAscii: bytes.some((x) => x > 127), head: text.slice(0, 24) });
+    check(`D4 响应文件含非 ASCII 路径且可按 ANSI（${acp}）还原`,
+      text.includes(sample) && bytes.some((x) => x > 127),
+      { nonAscii: bytes.some((x) => x > 127), head: text.slice(0, 24) });
   }
 }
 
@@ -140,8 +149,10 @@ const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'cb-enc-'));
       fs.writeFileSync(src, '#include "不存在.h"\nint main(void){return 0;}\n', 'utf-8');
       const r = spawnSync('gcc.exe', ['-c', src, '-o', path.join(dir, 'a.o')], { encoding: 'buffer', windowsHide: true });
       const lines = enc.decodeOutputLines(r.stderr || Buffer.alloc(0));
-      check('G1 真实 GCC：同一条 stderr 的 GBK 路径正确', lines.some((l) => l.includes('测试目录')), lines.slice(0, 1));
-      check('G2 真实 GCC：同一条 stderr 的 UTF-8 源码摘录正确', lines.some((l) => l.startsWith(' #include') && l.includes('不存在.h')), lines.slice(0, 2));
+      check('G1 真实 GCC：同一条 stderr 的 ANSI 路径正确', lines.some((l) => l.includes('测试目录')), lines.slice(0, 1));
+      // 源码摘录行的缩进/行号格式随 GCC 版本变化（新版为 `    1 | #include …`），只校验内容不校验前缀
+      check('G2 真实 GCC：同一条 stderr 的源码摘录（UTF-8）正确',
+        lines.some((l) => l.includes('#include') && l.includes('不存在.h')), lines.slice(0, 2));
     } else {
       pass += 2; // 无 gcc 环境：跳过（保持断言计数稳定）
       console.log('SKIP G1/G2（未找到 gcc.exe）');
