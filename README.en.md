@@ -6,7 +6,7 @@ An extension that natively ports the Code::Blocks core features to VS Code — a
 
 Open a `.cbp` / `.workspace` project directly in VS Code and get a build, debug, and project browsing experience aligned with Code::Blocks.
 
-> **Author**: Robinmaomao ｜ **Version**: 0.8.136
+> **Author**: Robinmaomao ｜ **Version**: 0.8.137
 
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE.md)
 
@@ -117,10 +117,10 @@ code --install-extension robinmaomao.codeblocks-vscode
 
 ### Option 2: install from GitHub Releases
 
-Download the latest `codeblocks-vscode-0.8.136.vsix` from [Releases](https://github.com/robinmaomao/vscode-codeblocks-emu/releases):
+Download the latest `codeblocks-vscode-0.8.137.vsix` from [Releases](https://github.com/robinmaomao/vscode-codeblocks-emu/releases):
 
 ```powershell
-code --install-extension codeblocks-vscode-0.8.136.vsix --force
+code --install-extension codeblocks-vscode-0.8.137.vsix --force
 ```
 
 ### Option 3: build from source
@@ -128,7 +128,7 @@ code --install-extension codeblocks-vscode-0.8.136.vsix --force
 ```powershell
 npm install
 npm run package
-code --install-extension codeblocks-vscode-0.8.136.vsix --force
+code --install-extension codeblocks-vscode-0.8.137.vsix --force
 ```
 
 > `npm run package` = `vsce package` (packaging runs the `vscode:prepublish` hook automatically = `tsc` compile (`dist/`, for local tests) + esbuild single-file bundle (`bundle/extension.js`, the release entry)); running `npx vsce package` / `npx vsce publish` directly also builds automatically and never packs a stale or missing `bundle/`; on Windows, prefer `npm.cmd` / `npx.cmd` (PSReadLine execution policy).
@@ -207,7 +207,7 @@ Project tree operations (multi-project drag ordering / per-file compile·link to
 | `codeblocks.clangd.queryDriver` | `false` | When enabled, warns in the Output channel if `clangd.arguments` lacks `--query-driver` (the `Configure clangd --query-driver` command writes it in one click) |
 | `codeblocks.clangd.extraConfig` | `""` | Free-form YAML injected as a **trailing** fragment in the same scope (can override any key written by the extension; the extension adds `If.PathMatch` automatically) |
 
-> The complete set of 77 settings (7 sections, bilingual descriptions) is in [Usage guide](docs/使用说明.md) §13. There are also two clangd commands: `Code::Blocks: Clean Stale clangd Config Fragments` (cleans stale fragments + orphan cache directories, with a preview before confirming) and `Code::Blocks: Configure clangd --query-driver` (cross-compiler fidelity).
+> The complete set of 83 settings (8 sections, bilingual descriptions) is in [Usage guide](docs/使用说明.md) §13. There are also two clangd commands: `Code::Blocks: Clean Stale clangd Config Fragments` (cleans stale fragments + orphan cache directories, with a preview before confirming) and `Code::Blocks: Configure clangd --query-driver` (cross-compiler fidelity).
 
 ## Architecture
 

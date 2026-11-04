@@ -2,6 +2,27 @@
 
 本文件记录**正式版**里程碑；每个 dev 迭代的逐轮发布说明见 [`docs/release/`](docs/release/)（`0.8.xx-dev.md`），版本号与维护约定见 [`docs/release/00-说明.md`](docs/release/00-说明.md)。
 
+## 0.8.137 — 2026-11-04
+
+**外部修改检测 · 编译输出编码 · 面板可用性**
+
+- **`.cbp` 外部修改检测**（对齐 CB `CheckForExternallyModifiedProjects`）：新增设置
+  `codeblocks.detect.checkExternalChanges`（`prompt` 默认 / `auto` / `off`）与命令
+  `Code::Blocks: 从磁盘重新加载工程`（`codeblocks.reloadProject`）；监听 `.cbp` 的 create/change/delete
+  （含原子保存与"文件仍在的 delete"）、窗口重新获得焦点时兜底比较 mtime+size；自写盘不弹、「忽略」等价 CB `Touch`。
+- **编译输出编码治理**：按**完整行**逐行判定 UTF-8 / GBK（整段 UTF-8 快路径 + 跨块残行保留），
+  覆盖主构建、pre/post 脚本、Makefile 构建、自定义工具与 GDB 输出；超长命令响应文件按系统 ANSI 代码页写出；
+  `.cbp` / `.workspace` 读取与原文回写保留原编码。
+- **工程属性面板**：修复「保存静默失效」（未渲染 tab 的表单收集抛 `TypeError`）、「窄面板按钮竖排单字」
+  （`nowrap` + `flex-wrap` + `minmax` + `<720px` 单列堆叠）、「英文界面整个面板脚本不执行」（译文撇号截断内联字符串）；
+  目标改名/删除同步 `remote_debugging`，目标删除后作用域失效不再阻断保存。
+- **编译选项面板**：「应用」改为**立即写回 `.cbp`** 并重绑重解析后的工程/目标；只管理 `options_<id>.xml` 内的选项
+  （手写自定义选项保留）；应用失败在面板可见，目标已被外部改名/删除时报错而不误写工程级选项。
+- 发布说明见 [`docs/release/0.8.137.md`](docs/release/0.8.137.md)；测试结果见
+  [`docs/测试报告-0.8.137.md`](docs/测试报告-0.8.137.md)。
+- 规模（0.8.137 时点）：`contract 2/2`、`unit 175 FAIL=0 SKIP=1`（新增 4 个脚本 / 93 断言；
+  `test-webview-panels` +21、`test-i18n-webview` +1）。
+
 ## 0.8.136 — 2026-11-04
 
 **工作区路径守卫 · AI 指令扫描治理**
@@ -15,6 +36,7 @@
 - 不改编译/链接流程、不禁用 Copilot Chat、不动 `files.watcherExclude` / `search.exclude`。
 - 根因取证与方案见 `docs/archive/RG风暴根因分析与方案-2026-11-04.md`；发布说明见 `docs/release/0.8.136.md`。
 - 规模（0.8.136 时点）：`contract 2/2`、`unit 171 FAIL=0 SKIP=1`（新增 `tests/test-workspace-path-guard.js`，40 断言）。
+
 ## 0.8.135 — 2026-11-03
 
 **构建期进程/CPU 收口 · 产物排除写入用户设置**
