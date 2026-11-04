@@ -6,7 +6,7 @@
 
 直接在 VS Code 中打开 `.cbp` / `.workspace` 工程，即可获得与 Code::Blocks 对齐的构建、调试与工程浏览体验。
 
-> **作者**：Robinmaomao ｜ **版本**：0.8.136
+> **作者**：Robinmaomao ｜ **版本**：0.8.137
 
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE.md)
 
@@ -53,13 +53,16 @@
 - 📂 **工程树浏览**：按公共顶层目录（`relativeToCommonTopLevelPath`）展开的多层嵌套目录树、文件类型图标、缺失文件标记、目录优先排序（对齐 VS Code Explorer）。
 - 🧩 **右键菜单**：项目节点支持增量编译/全量编译/添加文件；文件节点支持从项目移除、打开所在目录、切换编译/链接开关（写回 `.cbp`）。
 - 📄 **单文件编译 / 单文件 Clean**：工程树右键文件 → `Build File`（对齐 Code::Blocks `CompileFile`：DepsSearchStart + IsObjectOutdated 增量判断，命令与整目标构建字节级一致）/ `Clean File`（删对象与 `.depend` 依赖文件）。
+- 🔔 **外部修改检测**：已打开的 `.cbp` 被其它程序（编辑器 / 版本控制 / Code::Blocks 本体）修改时按设置
+  `codeblocks.detect.checkExternalChanges` 弹窗询问重新加载（等价 CB 的「文件已被修改」提示），或手动命令
+  `Code::Blocks: 从磁盘重新加载工程`；扩展自身写盘与「忽略」后不重复弹。
 - ⏹️ **随时停止构建**：构建通知上的 ❌ 按钮或命令 `Code::Blocks: Stop Build`；Windows 下 `taskkill /T /F` 强杀整棵进程树（cmd → gcc → cc1/as/ld 无残留），取消不计入失败。
 - 🛡️ **Rebuild 确认**：Rebuild 前弹出模态确认框（对齐 Code::Blocks），普通 Build 不弹窗。
 - 🚀 **构建语义对齐 Code::Blocks（节选）**——逐项依据见 [docs/对齐对照.md](docs/对齐对照.md)：
   - **文件类型判定**对齐 `FileTypeOf`：汇编源（`.S`/`.s`/`.asm`/`.ss`/`.s62`）正确编译并参与链接；链接脚本（`.ld`）等非源文件默认不编译不链接；`<Option buildCommand>` 自定义命令按 `use="1"` 语义识别。
   - **构建时序**：pre/post build 脚本（`.bat` / 命令，Windows 下实时读取系统 PATH）；项目级 pre/post 每次构建各执行一次、目标级按目标执行、post-build 按「实际产生命令」门控；Rebuild = Clean + Build；Banner 顺序/文案与 up-to-date 判定对齐 Code::Blocks 状态机。
   - **命令行与产物**：含空格工具链路径自动加引号；链接/打包对象逐文件加引号（`QuoteStringIfNeeded`，源文件/子目录含空格不截断）；无 `object_output` 时对象目录默认 `.objs`（对齐 `GetObjectOutput`）；超长命令行自动改用响应文件（`@file`）；静态库归档先删旧库再 ar；对象目录 `CreateDirRecursively` 自动创建 + `GetCommonTopLevelPath` 布局。
-  - **细节对齐**：库输出文件名策略（`prefix_auto` / `extension_auto`、动态库 import 库规则）；路径分隔符与 `map.txt` 等产物对齐（`wxPATH_NATIVE`）；目标类型数字映射（正确区分 `-mwindows`）；`max_reported_errors` 错误数截断；GBK 输出解码。
+  - **细节对齐**：库输出文件名策略（`prefix_auto` / `extension_auto`、动态库 import 库规则）；路径分隔符与 `map.txt` 等产物对齐（`wxPATH_NATIVE`）；目标类型数字映射（正确区分 `-mwindows`）；`max_reported_errors` 错误数截断；**编译输出按完整行判定 UTF-8/GBK**（同一命令里 GBK 路径 + UTF-8 源码摘录都不乱码）。
   - **重链与宏**：外部依赖强制重链（`external_deps` / `additional_output` / 链接库 mtime 比对，缺失 WARNING）+ 编译器全局搜索目录（`default.conf`）+ 项目自定义变量宏展开；宏展开全集对齐 `MacrosManager::ReplaceMacros`（`$(#全局变量[.成员])`、内置宏、环境变量回退、`$$`/`%%` 反转义）。
 
 ### 调试（GDB）
@@ -117,10 +120,10 @@ code --install-extension robinmaomao.codeblocks-vscode
 
 ### 方式二：从 GitHub Releases 安装
 
-从 [Releases](https://github.com/robinmaomao/vscode-codeblocks-emu/releases) 下载最新 `codeblocks-vscode-0.8.136.vsix`：
+从 [Releases](https://github.com/robinmaomao/vscode-codeblocks-emu/releases) 下载最新 `codeblocks-vscode-0.8.137.vsix`：
 
 ```powershell
-code --install-extension codeblocks-vscode-0.8.136.vsix --force
+code --install-extension codeblocks-vscode-0.8.137.vsix --force
 ```
 
 ### 方式三：从源码构建
@@ -128,7 +131,7 @@ code --install-extension codeblocks-vscode-0.8.136.vsix --force
 ```powershell
 npm install
 npm run package
-code --install-extension codeblocks-vscode-0.8.136.vsix --force
+code --install-extension codeblocks-vscode-0.8.137.vsix --force
 ```
 
 > `npm run package` = `vsce package`（打包前会自动执行 `vscode:prepublish` 钩子 = `tsc` 编译（`dist/`，本地测试用）+ esbuild 单文件打包（`bundle/extension.js`，发布入口））；直接运行 `npx vsce package` / `npx vsce publish` 同样会自动构建，不会打进过期或缺失的 `bundle/`；Windows 下建议使用 `npm.cmd` / `npx.cmd`（PSReadLine 执行策略）。
@@ -207,7 +210,7 @@ code --extensionDevelopmentPath="." --disable-extensions --new-window
 | `codeblocks.clangd.queryDriver` | `false` | 开启后若 `clangd.arguments` 缺 `--query-driver` 则在输出通道提示（命令 `Configure clangd --query-driver` 可一键写入） |
 | `codeblocks.clangd.extraConfig` | `""` | 自由 YAML，作为同作用域**后置**片段注入（可覆盖扩展写入的任意键；扩展自动补 `If.PathMatch`） |
 
-> 完整 77 项设置（7 个分区，中英双语描述）见 [docs/使用说明.md](docs/使用说明.md) §13。另有两条 clangd 命令：`Code::Blocks: Clean Stale clangd Config Fragments`（清理失效片段 + 孤儿缓存目录，预览后确认）与 `Code::Blocks: Configure clangd --query-driver`（交叉编译器保真）。
+> 完整 83 项设置（8 个分区，中英双语描述）见 [docs/使用说明.md](docs/使用说明.md) §13。另有两条 clangd 命令：`Code::Blocks: Clean Stale clangd Config Fragments`（清理失效片段 + 孤儿缓存目录，预览后确认）与 `Code::Blocks: Configure clangd --query-driver`（交叉编译器保真）。
 
 ## 架构
 
