@@ -166,7 +166,7 @@ function createVscodeMock(opts = {}) {
     env: {
       appName: 'Visual Studio Code',
       appHost: 'desktop',
-      /** VS Code 显示语言（`opts.language` 可覆盖；默认 zh-cn 与存量中文断言一致，见 docs/国际化.md） */
+      /** VS Code 显示语言（`opts.language` 可覆盖；默认 zh-cn 与存量中文断言一致，见 docs/dev/i18n.md） */
       language: opts.language || 'zh-cn',
       machineId: 'mock-machine',
       sessionId: 'mock-session',

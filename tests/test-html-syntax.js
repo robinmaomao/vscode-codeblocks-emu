@@ -22,7 +22,7 @@ const targetDirs = project.buildTargets.map(t => ({ includeDirs: [...t.includeDi
 const projectSettings = { title: project.title, compilerId: project.compilerId, virtualFolders: [...project.virtualFolders] };
 const typeOptions = Object.entries({ 0:'可执行文件 (Executable)',1:'控制台程序 (Console application)',2:'静态库 (Static library)',3:'动态库 (Dynamic library)',4:'仅命令 (Commands only)',5:'本机 (Native)' })
   .map(([v,name]) => `<option value="${v}">${name}</option>`).join('');
-// 3. 插值（注入真实数据后，中和其余插值：模板文案插桩 i18n.tr('…') 见 docs/国际化.md 批次 2）
+// 3. 插值（注入真实数据后，中和其余插值：模板文案插桩 i18n.tr('…') 见 docs/dev/i18n.md 批次 2）
 const data = JSON.stringify({ title: project.title, compilerId: cmp, targets, files, projectOpts, targetOpts, projectDirs, targetDirs, projectSettings }).replace(/</g, '\\u003c');
 let html = neutralizeInterpolations(
   htmlTemplate.replace('${data}', data).replace('${typeOptions}', typeOptions)

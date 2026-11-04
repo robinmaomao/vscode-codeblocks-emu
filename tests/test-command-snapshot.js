@@ -1,5 +1,5 @@
 // 命令快照（golden）回归：hello-cb.cbp 的 Debug/Release 编译/链接命令逐字节比对
-// 期望值 = CB 25.03 源码推导 + 实测定格（docs/archive/第四轮编译链接对齐核查报告.md 附录 A）
+// 期望值 = CB 25.03 源码推导 + 实测定格（docs/archive/compile-link-alignment-round4.md 附录 A）
 // 任何宏顺序/分隔符/引号/空格数量回归立即暴露。
 // 注 1：源文件路径按**当前仓库根**推导（原实现写死本机 E:\ 绝对路径，导致 CI runner 上快照不匹配）。
 // 注 2（D-13 保护性差异）：Windows 可执行类目标的输出无扩展名时，扩展按 `extension_auto`（平台默认扩展名）

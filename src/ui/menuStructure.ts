@@ -2,7 +2,7 @@
  * 状态栏菜单结构 —— Code::Blocks 菜单栏移植（纯数据层，无 vscode 依赖）
  *
  * 顶级菜单对齐 Code::Blocks：File / Edit / View / Search / Project / Build / Debug / Tools / Settings
- * （CB 的 Plugins / Help 有意不移植，见 docs/对齐对照.md「菜单对齐」章节）。
+ * （CB 的 Plugins / Help 有意不移植，见 docs/guide/alignment.md「菜单对齐」章节）。
  *
  * 本模块只放数据：由 statusBarMenu.ts 渲染为两级/三级 QuickPick；
  * 由 tests/test-menu-structure.js 做静态校验（命令存在性 / 快捷键一致性 / 结构合法性）。
@@ -117,7 +117,7 @@ const SEP: MenuItemDef = { label: '', separator: true };
  * 菜单结构 —— 对齐 Code::Blocks 菜单栏
  * File/Edit/View/Search 参考 main_menu.xrc；Build 参考 compiler_menu.xrc；
  * Debug 参考 debugger_menu.xrc；Project 参考 projectmanagerui.cpp::CreateMenu。
- * 未移植项与差异见 docs/对齐对照.md「菜单对齐」。
+ * 未移植项与差异见 docs/guide/alignment.md「菜单对齐」。
  */
 export const MENU_STRUCTURE: MenuDef[] = [
   {

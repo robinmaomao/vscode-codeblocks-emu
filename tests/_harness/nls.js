@@ -1,4 +1,4 @@
-// nls 解析辅助：package.json 的静态贡献文案已改为 %key%（见 docs/国际化.md），
+// nls 解析辅助：package.json 的静态贡献文案已改为 %key%（见 docs/dev/i18n.md），
 // 测试断言「命令标题 / 设置描述 / 视图名」时应先用本模块还原，而不是断言 %key% 原文。
 //
 // 语言选择（与 VS Code 一致）：

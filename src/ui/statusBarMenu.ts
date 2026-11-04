@@ -5,7 +5,7 @@
  * 第一级 = Workspace（构建顺序）/ Recent Projects（可清除历史）/ 9 个顶级菜单；
  * 第二级起 = 命令（支持子菜单下钻、分隔线、快捷键与「（无工程）」标注）。
  * 悬停就地展开常用命令链接（与菜单结构共用 menuStructure.ts 单一数据源）。
- * 菜单结构与对齐说明见 docs/对齐对照.md「菜单对齐」章节。
+ * 菜单结构与对齐说明见 docs/guide/alignment.md「菜单对齐」章节。
  */
 import * as vscode from 'vscode';
 import * as path from 'path';

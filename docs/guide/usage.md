@@ -1,0 +1,936 @@
+# Code::Blocks for VS Code 使用说明
+
+> 语言：**中文** ｜ [English](./usage.en.md)
+>
+> 版本：0.8.137 ｜ 本扩展为 Code::Blocks 核心功能的原生移植，直接驱动 GCC / GDB，**不依赖** `tasks.json` / `launch.json`。
+
+---
+
+## 目录
+
+1. [简介](#1-简介)
+2. [安装](#2-安装)
+3. [界面组成](#3-界面组成)
+4. [快速开始](#4-快速开始)
+5. [工程管理](#5-工程管理)
+6. [构建系统](#6-构建系统)
+7. [构建目标与编译器](#7-构建目标与编译器)
+8. [调试（GDB）](#8-调试gdb)
+9. [代码补全与 IntelliSense](#9-代码补全与-intellisense)
+10. [构建日志（Build Log）](#10-构建日志build-log)
+11. [辅助工具](#11-辅助工具)
+12. [快捷键](#12-快捷键)
+13. [设置项总表](#13-设置项总表)
+14. [RISC-V 交叉编译完整示例](#14-risc-v-交叉编译完整示例)
+15. [常见问题](#15-常见问题)
+16. [不支持的功能](#16-不支持的功能)
+
+---
+
+## 1. 简介
+
+Code::Blocks for VS Code 是一个「迷你 IDE 内核」：直接解析 `.cbp` / `.workspace` 工程文件，内置 Code::Blocks 的命令模板与宏展开引擎，直接派生进程执行编译 / 链接 / 调试。它不是把 `.cbp` 翻译成 `tasks.json` 的桥接工具，因此行为与 Code::Blocks 高度一致：
+
+- 增量编译（源文件 + `#include` 头文件 + `.ld` 等链接输入文件 mtime 比对）
+- 文件类型判定对齐 Code::Blocks（`FileTypeOf`）：汇编源（`.S` / `.s` / `.asm`）正确编译并参与链接，链接脚本（`.ld`）等非源文件默认不编译不链接
+- `Rebuild` = Clean + Build（对齐 Code::Blocks，**前会弹确认框**）
+- pre/post build 脚本（`.bat` / 命令）；项目级 pre/post 每次构建各执行一次，post-build 按「实际产生命令」门控（对齐 Code::Blocks 状态机）
+- 外部依赖强制重链（`external_deps` / `additional_output` / 链接库更新即重链）+ 编译器全局搜索目录 + 项目自定义变量宏展开
+- **编译随时停止**：构建通知 ❌ 按钮或 `Code::Blocks: Stop Build`
+- 对象目录自动创建、公共顶层目录对象布局
+- **编译输出编码解码**：按**完整行**逐行判定 UTF-8 / GBK（同一命令输出混排也能正确解码，中文 Windows 下 GCC 报错、源码摘录、中文路径不乱码）；pre/post 脚本、Makefile 构建、自定义工具输出同一口径；超长命令的响应文件按系统 ANSI 代码页写出（含中文路径时 GCC 能正确读取）
+- 错误数截断（`max_reported_errors`）
+- 专用语法高亮（`.ld` / `.lcf` 链接脚本、`.S` / `.s` 汇编、`.xm` 配置脚本，含自动 token 配色）
+
+> 逐项对齐依据（对应 Code::Blocks 源码位置）见 [与 Code::Blocks 对齐对照](./alignment.md)。
+
+---
+
+## 2. 安装
+
+### 2.1 从 VSIX 安装
+
+```powershell
+code --install-extension codeblocks-vscode-0.8.137.vsix --force
+```
+
+### 2.2 从源码构建
+
+```powershell
+npm install
+npm run package
+code --install-extension codeblocks-vscode-0.8.137.vsix --force
+```
+
+> `npm run package` = `vsce package`（打包前自动执行 `vscode:prepublish` 钩子 = `tsc` 编译（`dist/`，本地测试用）+ **esbuild 单文件打包**（`bundle/extension.js`，发布入口））；
+> 直接运行 `npx vsce package` / `npx vsce publish` 也会自动构建，不会打进过期或缺失的 `bundle/`；
+> 仅需编译时用 `npm run compile`，单独重打 bundle 用 `npm run bundle`（`.vscode` 任务 `build-extension` 已含两者）。
+> Windows 下建议使用 `npm.cmd` / `npx.cmd`（PSReadLine 执行策略）。
+
+### 2.3 开发调试
+
+```powershell
+code --extensionDevelopmentPath="." --disable-extensions --new-window
+```
+
+---
+
+## 3. 界面组成
+
+安装后，左侧活动栏出现 **Code::Blocks** 图标，点击展开侧边栏（Project / Analysis；**Symbols 默认隐藏**）；**Build Log** 位于底部 Panel（`Ctrl+J` 打开，选择「Build Log」标签页）；**Menu** 位于状态栏最左侧：
+
+| 入口 | 位置 | 说明 |
+|------|------|------|
+| **Menu** | 状态栏最左（`⊞ Menu`） | Code::Blocks 菜单栏（File / Edit / View / Search / Project / Build / Debug / Tools / Settings）：点击弹出两级菜单（Project tree / Folding / Case / Line / Errors 等为**子菜单**，可继续下钻）；列表显示**快捷键**与分隔线，未打开工程时相关项标注**（无工程）**；**悬停就地展开**常用命令链接 |
+| **Project** | 侧边栏（主体） | 工程树：多项目 + 嵌套目录 + 文件浏览（可拖拽排序、右键操作）；项目行悬停显示 **Build / Rebuild / Clean / Properties** 快捷按钮 |
+| **Analysis** | 侧边栏 | 工程分析：按工程展示 `.cbp` 重要属性（概要 / 构建目标 / 构建命令 / 搜索目录 / 文件 / 虚拟目标 / 变量 / 备注）；**悬停显示对应的 .cbp 配置片段**，**点击属性在 .cbp 中定位**，右键可复制片段；顶部为「最近构建」快捷入口（点击打开 Build Log） |
+| **Symbols** | 侧边栏（默认隐藏） | 符号浏览器：按 函数 / 宏 / 类型 / 变量 分组展示项目符号，点击跳转定义；可从视图容器的 **⋯ → Views** 菜单调出，或用设置 `codeblocks.ui.symbolsView` 控制 |
+| **Build Log** | 底部 Panel（标签页） | 结构化构建摘要树（编译器 / 编译统计 / 链接结果 / 错误警告分组） |
+
+- 视图的**位置、并排/上下排布、大小**均可自由拖动调整，由 VS Code 自动保存并在下次打开时恢复。
+- **Menu 动态区**：**Workspace** 按依赖拓扑列出构建顺序（点击设为活动工程）；**Recent Projects** 列出最近工程（末尾 **Clear Recent Projects** 可清空历史）。
+- 执行 **`Code::Blocks: Reset View Layout`** 可一键恢复默认排布（Build Log 回到底部 Panel，侧栏顺序 Project → Symbols → Analysis，其中 Symbols 默认隐藏）。
+- 未打开工程时，**Project** 视图显示空态引导（打开工程 / 新建工程 / 单文件编译 / 检测编译器）。
+- **Analysis 视图**默认全部折叠（仅第一个工程的「概要」展开）；标题栏 **⟳** 可手动刷新，打开/移除工程与构建完成时自动刷新。
+- **Project 视图标题栏**：常驻按钮由设置 `codeblocks.ui.projectToolbar` 决定（默认 Build Workspace / Rebuild Workspace / Clean Workspace）；未选中的按钮自动进入 **⋯** 溢出菜单（新建/打开工程、Build / Rebuild / Clean、Run / Debug、编译器选项 / 工程属性、代码统计）。
+
+状态栏其余项：**构建目标（Target）**、**构建菜单（Build）**、**编译器（Compiler）**。
+
+- **构建菜单（Build）**：点击弹出菜单——Build（活动项目增量编译，`Ctrl+F9`）/ Rebuild（活动项目全量编译，`Ctrl+F11`）/ **Build Workspace**（全部工程增量编译）/ **Rebuild Workspace**（全部工程 Clean + Build，会弹确认）；悬停就地显示四项命令链接。
+- **构建进行中**：Build 项变为 `$(sync~spin) Building… (Ns)`（实时秒数），**再次点击（或悬停点「停止构建」）即可停止构建**。
+
+---
+
+## 4. 快速开始
+
+1. 打开包含 `.cbp` / `.workspace` 的文件夹（扩展自动检测并提示选择要打开的工程），
+   或执行命令面板的 **`Code::Blocks: Open Project (.cbp)`**。
+2. 在左侧 **Code::Blocks** 面板的 **Project** 视图中浏览工程文件。
+3. 状态栏点击 **Target** 选择构建目标；点击 **Build** 或按 `Ctrl+F9` 开始构建。
+4. 构建结果在 **Build Log** 视图中以树形展示；按 `F4` / `Shift+F4` 循环跳转错误。
+
+---
+
+## 5. 工程管理
+
+### 5.1 打开工程
+
+- 命令面板：`Code::Blocks: Open Project (.cbp)`
+- 或直接打开包含 `.cbp` 的文件夹，按提示多选工程
+- **检测与自动打开可配置（父目录多工程工作区建议调整）**：
+  - `codeblocks.detect.autoOpen`：`all`（默认，弹多选）/ `single`（仅检测到单个工程时自动打开）/ `off`（不自动检测，仍可用状态栏入口）
+  - `codeblocks.detect.autoOpenThreshold`（默认 `20`）：未打开工程数**超过该值不再自动弹多选**（仅状态栏入口 + 输出通道提示），同时限制会话恢复的工程数
+  - 多选列表默认**只勾选最近使用过的工程**（不再默认全选）；`.cbp` 新增/删除只做增量登记，不触发工作区级全量扫描
+- **外部修改检测（对齐 Code::Blocks 的 "Reload Project?"）**：工程打开后若 `.cbp` 被其它程序修改，扩展会在**文件变更事件**和**窗口重新获得焦点**时检查并弹窗询问：
+  - `重新加载`：重新解析工程（目标/文件/选项全部按磁盘内容刷新，活动工程与已选目标尽量保留）；`忽略`：不重载，下次再改才再问
+  - `codeblocks.detect.checkExternalChanges`：`prompt`（默认，弹窗）/ `auto`（直接重载 + 状态栏提示）/ `off`（不检测）
+  - 手动兜底：命令 `Code::Blocks: 从磁盘重新加载工程`（工程树右键 / Menu → Project），网络盘或监视器漏报时使用
+- **排查工作区扫描开销**：命令面板 `Code::Blocks: Workspace Scan Report` → 在「Code::Blocks」输出通道打印扫描耗时、检测到的工程数、工程目录数、当前 ripgrep 进程数与"改用单个工程目录"的建议（大目录/网络盘/杀软环境下可据此定位构建期机器变慢的原因）
+
+### 5.2 多项目
+
+- 同时打开多个 `.cbp` 后，**Project** 视图按顺序列出（**顺序即编译顺序**）。
+- 拖拽工程节点调整编译顺序；右键工程节点可 **上移 / 下移 / 移除**（也可从 Menu → Project → Project tree 执行，作用对象为活动工程）。
+- `Alt+F5` / `Alt+F6` 在打开的工程间**循环切换**活动工程（对齐 Code::Blocks Activate prior/next project）。
+- **活动项目**（树中实心绿点标识）决定状态栏 Target / Compiler 和 `F9` 构建的对象。
+- **点击工程树任意节点**（项目 / 文件夹 / 文件）即可把该节点所属工程设为活动项目；**编辑某工程的文件时活动项目会自动跟随**（切到该文件所属工程）。
+- **共享文件**（同一文件出现在多个工程）：点击哪个工程子树下的节点就切到哪个工程；在编辑器里直接编辑共享文件时活动项目保持不变（归属不唯一，避免乱跳）。
+- 右键某工程的 **Build / Rebuild（单工程编译）** 也会把活动项目切到该工程。
+- 活动项目跨窗口记住：重载后自动恢复上次的选择。
+- **共享文件**的补全 / 跳转按**活动工程**的编译命令解析；切换活动工程后会自动重新生成编译数据库，并在存在打开文件时重启 clangd 刷新红波浪线（开关 `codeblocks.clangd.restartOnActiveProjectSwitch`）。
+
+### 5.3 右键菜单
+
+**项目节点：**
+
+| 命令 | 说明 |
+|------|------|
+| Move Up / Move Down | 调整编译顺序 |
+| Remove Project | 从工作区移除（不删除磁盘文件） |
+| Build / Rebuild | 增量 / 全量编译该项目 |
+| Add Files... | 向 `.cbp` 添加文件 |
+| Add Files Recursively... | 选目录递归收录源文件（过滤 `.git`/`obj`/`bin`/`*.cbp`）；多构建目标时询问归属（对齐 CB） |
+| Find File... | 在本工程内模糊查找并**在工程树中逐级展开定位**（默认仅定位，不打开文件） |
+
+**文件夹 / 虚拟文件夹 / 文件分组节点：**
+
+| 命令 | 说明 |
+|------|------|
+| Add Files... / Add Files Recursively... | 只向该目录所属工程添加文件（作用域为工程） |
+| Find File... | 只在该节点**作用域内**查找（目录含子目录 / 虚拟文件夹 / 文件分组） |
+
+**文件节点：**
+
+| 命令 | 说明 |
+|------|------|
+| Compile File | 切换该文件是否参与编译（写回 `.cbp`） |
+| Link File | 切换该文件是否参与链接（写回 `.cbp`） |
+| Properties... | 直达工程属性的「文件」页并选中该文件行（修改 compile/link/目标/虚拟文件夹等） |
+| Remove File from Project | 从工程移除（保留磁盘文件，写回 `.cbp`） |
+| Open Containing Folder | 在系统文件管理器中打开所在目录 |
+
+> **查找文件（Find File…）**：命令面板调用时作用域为**活动工程**（多工程时列出全部）；未打开工程的
+> 工作区 `*.cbp` 以「工程文件」条目列出，选中**直接打开工程**。行为对齐 Code::Blocks：
+> 默认只在工程树中定位（`select + focus + expand`）；设置 **`codeblocks.ui.findFileOpen`**（默认 `false`，
+> 对应 CB `Find file → Open file` 复选框）开启后定位并同时打开文件。
+
+### 5.4 新建工程与模板
+
+`Code::Blocks: New Project` 向导内置 **12 个模板**：
+
+| 模板 | 说明 |
+|------|------|
+| Console application (C / C++) | 控制台程序（main.c / main.cpp） |
+| Static / Shared library | 静态库 / 共享库 |
+| Empty project | 空工程 |
+| GLFW / SDL2 application | 图形窗口程序（预置链接库，按安装路径调整 include/lib） |
+| wxWidgets / Qt Widgets application | GUI 框架小程序（库名/ moc 说明见模板说明文件） |
+| AVR application | AVR 裸机（avr-gcc；预置 `-mmcu=atmega328p -DF_CPU=16000000UL -Os`，PB5 闪烁） |
+| MSP430 application | MSP430 裸机（msp430-gcc；预置 `-mmcu=msp430g2553 -Os`） |
+| OpenCV application | OpenCV 图像窗口（预置 opencv_core/imgproc/imgcodecs/highgui） |
+
+**用户模板**（对齐 CB File → New → From template… / Save project as template…）：
+
+| 命令 | 说明 |
+|------|------|
+| `Code::Blocks: Save Project as Template…` | 把当前工程存为模板：工程名写入 `$(PROJECT_NAME)` 占位符（标题与输出文件名），骨架文件一并收编（排除 `obj/`、`bin/`）；已存在同名模板时确认覆盖 |
+| `Code::Blocks: New Project from Template…` | 选择模板 → 输入新工程名与父目录 → 复制骨架 + 写出 `<新名>.cbp`（占位符→新工程名）；无模板时提示先保存 |
+| `Code::Blocks: New Project` | 向导顶端直接列出用户模板（带 $(library) 图标），可与内置模板混选 |
+
+模板目录：`<globalStorage>/templates/<id>/`（`template.json` 清单 + `project.cbp` + 骨架文件），格式为纯文本，可手工编辑或拷贝分享。
+
+---
+
+## 6. 构建系统
+
+| 功能 | 快捷键 | 菜单 / 命令 |
+|------|--------|-------------|
+| Build（增量编译，活动项目） | `Ctrl+F9` | `Code::Blocks: Build` |
+| Compile Current File（编译当前文件） | `Ctrl+Shift+F9` | Menu Build → Compile Current File（对齐 CB Ctrl-Shift-F9） |
+| Build Workspace（全部工程） | — | `Code::Blocks: Build Workspace` |
+| Build and Run | `F9` | `Code::Blocks: Build and Run` |
+| Run | `Ctrl+F10` | `Code::Blocks: Run` |
+| Rebuild（全量编译） | `Ctrl+F11` | `Code::Blocks: Rebuild` |
+| Clean | —（对齐 CB；无快捷键） | `Code::Blocks: Clean` |
+| Rebuild Workspace | — | `Code::Blocks: Rebuild Workspace` |
+| Debug / Continue | `F8` | `Code::Blocks: Debug`（调试中 = 继续运行） |
+| **Stop Build（编译随时停止）** | 通知 ❌ 按钮 | Menu Build → Abort ／ `Code::Blocks: Stop Build` |
+| Next / Previous Error | `F4` / `Shift+F4` | Menu Build → Errors → Next/Previous Error |
+| Clear All Errors | — | Menu Build → Errors → Clear All Errors（同时清空输出面板与 Problems 诊断） |
+| Clear Build Output | — | Build Log 视图标题栏 `$(clear-all)` ／ `Code::Blocks: Clear Build Output`（清空输出面板 + Build Log 树 + Problems 诊断） |
+| Build File（单文件编译） | — | 工程树右键文件 → `Build File` |
+| Compile File（无项目） | — | `Code::Blocks: Compile File (Without Project)` |
+| Clean File（单文件清理） | — | 工程树右键文件 → `Clean File` |
+
+- **增量编译**：源文件与 `#include` 头文件按 mtime 比对，头文件更新也触发重编译。
+- **Rebuild** 对齐 Code::Blocks：先清理对象目录，再全量重编译；**触发前弹模态确认框**（普通 Build 不弹窗）。
+- **Rebuild Workspace**：全部已打开工程先整体 Clean 再整体 Build（依赖拓扑顺序，弹确认框；对齐 Code::Blocks `RebuildWorkspace`）。
+- **Clean**：删除各目标的对象文件、`.depend` 依赖文件与输出文件（含 Windows 无扩展名输出自动追加的 `.exe`、动态库的 import 库）。
+- **编译随时停止**：构建通知右上角 ❌ 或命令面板 `Stop Build`；Windows 下 `taskkill /T /F` 强杀整棵进程树（cmd → gcc → cc1/as 无残留），取消显示「⚠ 构建已取消」而非「构建失败」，已完成的编译计数如实统计。
+- **外部依赖重链**：链接库 / `external_deps` / `additional_output` 比输出新时即使「已是最新」也会强制重链（对齐 Code::Blocks `AreExternalDepsOutdated`）；依赖文件缺失时输出 WARNING（对齐 `directcommands.cpp:707-720`）。
+- **链接输入重链（保护性增强）**：工程内白名单扩展名的非编译文件改动后自动重链接 / 重新打包（设置 `codeblocks.build.linkInputExtensions`，**默认仅 `.xm`**，可按需添加 `.ld`/`.lds`/`.icf`/`.def` 等或设 `[]` 关闭；Code::Blocks 无此自动识别，需手动填入 External dependencies）。
+- **编译条目计数强制重链（对齐 CB）**：编译列表中过期的文件在 Code::Blocks 中会产生条目（日志行或命令本身）并因此强制链接 / 重新打包（`directcommands.cpp:585`）；扩展复刻——无可执行命令的文件（自定义空命令 `buildCommand=" "`、工具未匹配）、**真实自定义命令**的编译单元、以及**源缺失的文件**（WARNING 条目，else 分支 :562-566）均使**每次构建强制重链**（对象永不产生/源缺失，与 CB 一致；空命令类构建日志会注明原因）。
+- **post-build 门控**：项目级 post-build 仅在最后一个目标实际产生编译/链接/打包命令（或项目设置 alwaysRunPostBuildSteps）时执行——Rebuild 后的纯增量构建不再重复执行 post 脚本。
+- **脚本结束判定（对齐 CB）**：pre/post-build 脚本以**命令本体（cmd.exe）退出**为结束信号——脚本里启动的后台程序（`start`、`start /b`、GUI 程序、守护进程）不再拖住构建（对齐 Code::Blocks 的同步等待语义；修复前会被它们拖到退出为止，实测 `start /b` 场景白等 5.1s）。命令退出后，**管道安静约 0.25s 即继续**（尾部输出仍是实时流式读取，安静期只用于确认没有在途数据），**最多不超过 1.5s**（设置 `codeblocks.build.scriptExitGraceMs`，设 `0` = 立即结束、完全对齐 CB）；确有后台进程时日志给出说明行（`[script i-N] 后台进程仍在运行（不阻塞构建…）`），单条命令超过 3s 时给出 `耗时 x.xs` 行便于定位（`plainCbLog` 模式不输出这两类提示）。**需等后台程序结束**的脚本请改用前台命令或 `start /wait`。
+- **脚本输出实时流式**：脚本命令的 stdout/stderr **边运行边逐行写入构建日志**（缩进两空格；不再等命令结束才回放）——长时间运行/被网络盘（SMB 重连）、上传服务等阻塞时，日志仍能看到进展，不会「一片空白」。
+- **长命令心跳行**：脚本命令运行超过 5s 起，每 5s 输出一行 `[script i-N] 仍在运行 (x s)…`（首条附「网络盘/服务等待 → 可在脚本内设置超时，或点『停止构建』终止」提示），可一眼区分「脚本自身慢/网络等待」与「扩展卡住」（`plainCbLog` 模式静默）。
+- **脚本命令可选超时**：设置 `codeblocks.build.scriptCommandTimeoutMs`（默认 `0` = 不超时，与 Code::Blocks 的无限等待一致；上限 3600000）——超时后**强杀该命令的整棵进程树**、日志给出超时行、构建记为失败。适用于脚本里的网络盘重连（`if not exist Z:\…`）、上传服务（.NET 默认 100s 超时）等阻塞场景；仅作用于脚本命令，不影响编译/链接。
+- **超时杀树不留残兵**：`taskkill /T /F` 是**瞬时快照**式的——快照之后才产生的子孙会逃逸；若在 taskkill 执行前命令本体已退出，整次杀树更会变成空操作（实测输出「没有找到进程」），此时脚本仍继续解释后续行、可能启动 `start /b` 后台进程（实测杀树后 1~10s 仍出现新进程且长期存活）。扩展因此在超时启用时**运行期多次采集命令的进程树 PID**（启动 150ms 后起，每 2.5s 一次、最多 4 次；中间 cmd 退出后其子进程的 PPID 仍指向该 PID，可据此追溯），超时后按「父 PID ∈ 已终止集合」多轮（6×800ms）收割，避免脚本被终止后悄悄留下后台进程。脚本启动后台程序会连带被终止属于预期行为（超时语义 = 终止整棵命令树）；退出码说明：超时命令记为失败。
+- **单文件编译（Build File）**：工程树右键源文件 → `Build File`，只编译该文件不链接；增量判断（源/头依赖 mtime）与取消支持同整目标构建，编译命令与整目标构建字节级一致（对齐 Code::Blocks `CompileFile`）。
+- **单文件清理（Clean File）**：工程树右键文件 → `Clean File`，删除该文件的对象文件与 `.depend` 依赖文件（对齐 `GetCleanSingleFileCommand`）。
+- **输出清理**：整目标 / 工作区 / 单文件编译 / 清理在开始时自动清空输出；`Clear Build Output`（Build Log 标题栏 `$(clear-all)`）随时清空输出面板 + Build Log 树 + Problems 诊断；输出通道默认普通模式（`codeblocks.build.persistLog` 默认 `false`）——历史随窗口重载自动消失，开启后才写盘跨窗口保留。
+- **普通输出样式**（`persistLog=false`）：每行可带时间戳（格式 `2026-09-29 15:11:20.222`，与日志文件同款；设置 `codeblocks.build.outputTimestamp` 默认 `false`，开启后生效）；警告行加 `⚠️`、错误行加 `❌` 标记（VS Code 输出面板不渲染颜色，用文本标记高亮；`plainCbLog` 模式下关闭标记）；构建完成汇总块（`✅ 构建完成…`）统一输出在「构建成功/失败」行之后（构建输出的最末尾），含「🕒 编译时间」行（格式 `2026-09-29 15:11:20`）。
+- **Run 终端复用**：`Run` / `Build and Run` / 无工程编译后运行 / 自定义工具（terminal 模式）都在**同名终端**中执行——同名旧终端先关闭再新建（始终只有一个标签、每次输出全新、cwd/env 每轮生效；同名匹配仅处置「本会话由扩展创建」或「名称曾被扩展使用过」（workspaceState 持久化注册表，窗口重载后旧标签同样回收）的终端，从未用过的名称不受影响；Debug 走调试控制台不受影响）。
+- **运行前编译器校验（对齐 CB）**：`Run`（含库 / `CommandsOnly` 目标的宿主运行分支）启动前校验目标编译器（对齐 `CompilerGCC::Run`）——编译器 ID 未注册或工具链路径无效时输出与构建同款的完整报错（末行 `Run aborted...`）并中止，即使可执行文件已存在也不会运行；`CommandsOnly` 目标与 `null` 编译器除外。
+- 构建前自动保存未保存文件（可在设置中关闭）。
+
+> **已知局限**：编译 / 链接命令经 shell 执行（以支持 `.bat` 脚本、重定向等）。若工程路径或文件名含 shell 特殊字符（如 `&` `|` `^` `;` `%` 等），可能被 shell 误解析；建议避免在这些路径中使用此类字符。
+
+---
+
+## 7. 构建目标与编译器
+
+### 7.1 构建目标（Target）
+
+- 状态栏点击 **Target** 切换构建目标；或命令 `Code::Blocks: Select Build Target`。
+- 每个目标可有独立的编译选项、输出文件与对象目录。
+- **构建目标按工程记忆**：每个工程各自记住自己最后选中的目标（对齐 Code::Blocks 的 per-project `m_ActiveTarget`），切换活动工程互不影响，重载窗口后仍记得。
+- `F9`/`Ctrl+F9` 构建**活动项目**（对齐 CB Build：仅活动项目，多工程且无活动项目时弹出选择）；`Code::Blocks: Build Workspace` 依次构建**每个工程各自的活动目标**（依赖拓扑顺序，对齐 CB BuildWorkspace）。
+
+### 7.2 编译器探测
+
+- 命令：`Code::Blocks: Detect Compilers`
+- 自动探测 GCC / MinGW / Clang / MSVC（vswhere），以及 **RISC-V 交叉编译器**。
+- 交叉编译器从 `%APPDATA%\CodeBlocks\default.conf` 的 `/compiler/user_sets/<id>` 读取，
+  因此 `.cbp` 中 `compiler="riscv32-elf"` 这类自定义编译器 ID 无需额外配置即可使用。
+
+### 7.3 编译选项
+
+- 命令：`Code::Blocks: Compiler Options`
+- Webview 按 Category 分组展示 `options_<id>.xml` 中的 `<Option>`，勾选后写回项目 / 目标编译选项。
+- 「应用」**立即写回 `.cbp`**（Code::Blocks 是"改内存 + 保存工程"，本扩展没有工程"已修改"状态，故直接落盘，重开工程不丢）；
+  仅管理 XML 里列出的选项，**手写在工程属性页的自定义选项（如 `-pipe`）会原样保留**；写盘失败会在面板状态区显示原因。
+- 工程属性面板（`Properties…`）要点：构建目标页含「**依赖与附加输出**」分组（`external_deps`/`additional_output`，比输出新时强制重链接）、「**环境变量**」分组（`<Environment>`，每行 `name=value`）与「**高级**」分组（运行工作目录 / deps 输出目录 / 平台 / 宿主程序 / console runner / import 库·def 文件 / 库前缀·扩展名策略）；项目设置页含「**环境变量**」与「**项目自定义变量**」（供 `$(name)` 宏）以及「**工程编译与输出**」（平台 / PCH 策略 / 扩展对象命名）与「**Makefile 模式**」（自定义 Makefile / 文件名 / 执行目录）。
+- 目标列表支持**上移/下移**（调整目标顺序，影响导出与遍历顺序，对齐 CB Re-order）与「**导出为工程**」（把选中目标导出为只包含其文件的独立 `.cbp`，对齐 CB Create project from target；也可从命令面板 / Project 菜单 `Create Project from Target…` 调用）。
+- 「构建脚本」页支持**无构建命令时也执行 post-build**（`Mode after=always`，对齐 CB Pre/post 页选项）；另有运行参数 / 搜索目录 / 虚拟目标等全部页。
+- 面板可用性：**未切到过的 tab 也能正常保存**（保存前按"元素是否存在"跳过未渲染表单）；收集或写盘失败会在顶栏右侧状态区显示原因（不再静默无反应）；窄面板（< 720 px）下左侧列表与右侧表单自动改为上下堆叠，按钮不再逐字换行成竖排。
+
+### 7.4 混合编译器工程
+
+- 每个目标可声明独立编译器（`<Option compiler="..."/>`）：构建、单文件编译/清理、
+  `compile_commands.json`、错误/警告正则均按**目标声明的编译器**切换
+  （对齐 Code::Blocks `GetCompiler(target->GetCompilerID())`）。
+- 目标未声明编译器时回退工程默认编译器；编译器 ID 未注册时保持当前编译器。
+
+### 7.5 环境变量（对齐 CB Build options → Custom variables）
+
+- **编辑入口**（工程属性面板）：**项目设置页**「环境变量」+ **构建目标页**「环境变量」分组，
+  均为每行 `name=value`；写回 `.cbp` 的 `<Build><Environment>` / `<Target><Environment>`
+  （对齐 Code::Blocks 构建选项对话框的 Custom variables 页）。
+- **用途一·宏展开**：构建/运行命令中的 `$(NAME)` 按「**目标覆盖项目**」展开；宏名查找大小写不敏感
+  （`$(port)` 与 `$(PORT)` 等效，对齐 CB `Upper()`）；未命中再回退系统环境变量。
+- **用途二·进程环境**：`Run` 与 `Debug` 启动的程序会注入这些变量（项目级 + 目标级）。
+- 注意：**内置宏优先**于同名环境变量（如 `TARGET_OUTPUT_FILE` 不会被覆盖；保护性差异）；
+  「项目自定义变量」是扩展增强（写入 Extensions 节点，供 `$(name)` 宏），与 CB 的 Custom variables 不是同一机制。
+
+---
+
+## 8. 调试（GDB）
+
+- 命令：`Code::Blocks: Debug`（或 `F8`）；附加运行中进程：`Code::Blocks: Attach to Process…`
+- **F5 已接入**（0.8.128）：无 `launch.json` 时按 F5 会**按活动工程的活动目标直接启动调试**（与 F8 同一套推导：输出文件 / 宿主程序、运行目录、参数、环境变量、源搜索目录、远程目标）；输出文件不存在时提示「请先构建」而不再静默失败。VS Code 的 `Select debugger` 与 `Select and Start Debugging` 列表里也能看到 `Code::Blocks GDB`（动态配置）并直接启动。
+- 自研内联 DAP 调试适配器，直接驱动 `gdb -i=mi`；调试器类型为 `codeblocks`（GDB），适用于 C / C++ 文件。
+- 基础能力：断点（条件 / 命中次数 / 日志断点）、单步（含**指令级步进**）、变量（查看/修改/悬停求值）、调用栈、线程、表达式求值。
+
+**第四十九轮新增（对齐 Code::Blocks 调试器窗口）：**
+
+| 能力 | 对应 CB | 用法 |
+|---|---|---|
+| 反汇编视图 | Disassembly | 调试时右键源码或用命令面板打开「反汇编视图」（混合源码+汇编，按窗口自适应取指令） |
+| 内存查看 | Examine memory | 调试工具栏「Memory」视图输入地址或表达式（如 `&buf`）；指针变量右键「查看二进制数据」 |
+| 数据断点 | Breakpoint properties（watch） | 变量右键「数据断点」（写/读/读写 → GDB watch/rwatch/awatch） |
+| 异常断点 | — | 运行与调试面板「异常断点」勾选 C++ 抛出/捕获 |
+| 运行到光标处 | Run to cursor | 编辑器右键「运行到光标处」（`-exec-until`） |
+| 设置下一条语句 | Set next statement | 命令 `Code::Blocks: Set Next Statement`（GDB jump） |
+| 指令断点 | Disassembly 断点 | 反汇编视图 gutter 点击或右键「添加指令断点」（条件/命中次数/日志消息复用断点机制；第五十一轮） |
+| 发送 GDB 命令 | Debug → Send user command | 命令 `Code::Blocks: Send GDB Command…`；Debug Console 输入以 `-` 开头按 MI 原样执行（否则按 CLI，如 `add-symbol-file app.elf`） |
+| 寄存器 | CPU registers | 运行与调试面板 **Registers** 视图（**默认禁用**：设置 `codeblocks.debug.registers` 开启；部分 MinGW GDB 8.1 读取寄存器会让 GDB 崩溃，开启前请确认） |
+| 附加进程 | Attach to process | 命令 `Code::Blocks: Attach to Process…`（列出本机进程，`-target-attach`） |
+| **分离调试器** | Debug → Detach | 命令 `Code::Blocks: Detach`（Debug 菜单）——**暂停时**可用；分离后被调试进程**继续运行**，调试会话结束（对齐 CB：附加会话 + 暂停才提供；launch 会话同样可用，为保护性扩展） |
+| **附加符号文件** | Debug → Add symbol file | 命令 `Code::Blocks: Add Symbol File…`（Debug 菜单）——**暂停时**可用；QuickPick 列出**已加载库（自动带 .text 加载地址）**或「选择文件…」（exe/dll/so/elf/o），地址必填（GDB 硬要求：无地址会报 `The address where … has been loaded is missing`）。CB 25.03 该项实际不可用（实现被注释且命令缺地址），本扩展为可用版 |
+| 调试信息（Information 子菜单） | Debug → Information | Debug 菜单 **Debug Information** 子菜单：当前栈帧 / 已加载库 / 目标与文件 / FPU 状态 / 信号处理（GDB `info frame` / `sharedlibrary` / `files` / `float` / `signals`，输出到 Code::Blocks 输出通道；第三轮） |
+
+**调试器设置**（对齐 CB Debugger settings，见 §13）：`initCommands`（初始化命令）、`userArguments`（GDB 命令行附加参数）、`disableInit`（默认开：GDB 传 `-nx` 不执行用户 `.gdbinit`/`gdb.ini`，对齐 CB「Disable startup scripts (-nx)」）、`printPretty` / `printElements`（变量显示）、`disassemblyFlavor` + `instructionSet`（反汇编风格，含自定义）、`charset`、`gdbPath`（GDB 路径）、`addOtherProjectDirs`（其它工程搜索目录）。每次会话还会自动下发 CB 的固定初始化命令（`set confirm off` / `width 0` / `height 0` / `breakpoint pending on` / `print asm-demangle on` / `unwindonsignal on` / `filename-display absolute` / `style enabled off`，老 GDB 不支持的项自动忽略）。
+
+**工程级调试器配置（第三轮 R3/R4）**：工程属性面板新增「**调试器**」tab——
+
+- **源搜索目录**（每行一个，支持 `$(VAR)` 宏）：调试会话向 GDB 发 `directory` 命令（对齐 CB debugger search paths）；
+  工程根与公共顶层目录总是包含；设置 `codeblocks.debug.addOtherProjectDirs` 开启后追加其它已打开工程目录。
+- **远程目标**（项目级默认 + 每目标覆盖，对齐 CB 工程级 debugger options）：连接类型 TCP / UDP / 串口，
+  串口端口与波特率、IP 与端口、extended-remote、跳过 PATH/LD_LIBRARY_PATH 注入，以及连接前/后 GDB 命令与 shell 命令；
+  命令顺序：连接前命令 → 连接前 shell → [`set remotebaud`] → `target [extended-]remote` → 连接后命令 → 连接后 shell；
+  有效连接（串口需端口+波特率；TCP/UDP 需 IP+端口）时启动用 `continue` 而非 `run`（对齐 CB；适合 OpenOCD / 串口目标）。
+  写入 `.cbp` 的 `<Extensions><debugger><remote_debugging>`（与 Code::Blocks 双向兼容）。
+
+**launch.json 支持（0.8.122-dev 引入，0.8.128 接入 F5）**：`launch.json` 中 `"type": "codeblocks"` 提供配置 schema 与「添加配置」模板（launch 必填 `program`，另有 `cwd` / `args` / `stopOnEntry` / `environment` / `gdbPath` / `searchDirs` / `remoteDebugging`；attach 必填 `pid`，另有可选 `program` 符号文件等），手写配置不再出现未知属性提示。创建 / 添加配置时按**当前工程目标**生成真实 `program`（不再是占位路径）；用户显式写出的 `program` 优先，变量替换后该文件不存在则回退到活动目标输出并在输出通道记录原因；**F5 与 F8 共用同一套推导逻辑**（活动目标 → 输出文件 → GDB → 运行目录 / 参数 / 环境 / 源目录 / 远程目标）。
+
+- **`stopOnEntry`**（launch，默认 `false`）：为 `true` 时运行前插一次性入口断点，命中后上报 `stopped(reason=entry)`（VS Code 显示「已暂停在入口」），不改变既有断点/continue 行为。入口按 **`main` → `WinMain` → `wWinMain`** 依次选取，且只接受**带源码位置**的解析结果——GUI 程序（`-mwindows` / `-municode`）的 `main` 是 MinGW CRT 提供的桩符号（无源码行、永不命中），会被剔除并改用真实入口 `WinMain` / `wWinMain`（停在用户源码首行）；三者都不可用（如 `strip -s` 后无符号表）时**回退到程序入口地址**（`info files` 的 `Entry point`，该停点无源码行，帧名显示 `??`，与 DAP「入口」语义一致），并在 Debug Console 输出一行中文说明。**限制**：仅 launch 支持（attach 与「远程目标已运行」会给出提示并照常运行）；**可重定位镜像**（PE 置了 `DYNAMICBASE`，新 binutils 默认开启）下程序入口地址在加载前不可知，此时不尝试入口地址断点并给出说明（带调试符号编译即可正常首停）；其它取不到入口的情况下回退为「不首停 + 一行中文说明」（不静默失败、不阻塞程序，**绝不会让程序起不来**——入口断点若导致启动失败会被自动撤销并重试）。
+
+**调试器的工具链兼容性：** 内置 GDB/MI 前端（不依赖 cppdbg / CodeLLDB），GDB 按「显式配置 → 编译器 masterPath/bin → PATH」定位，可调试 GCC/Clang 系工具链产物（MinGW 32/64 位、TDM、LLVM-MinGW 等）。为适配不同年代/构建的 GDB，前端做了多项兼容处理：条件断点/命中次数/日志断点由前端求值实现（部分 GDB 8.1 构建命中带条件断点会崩溃）、Step Out 用「调用者返回地址临时断点」实现（`-exec-finish` 在部分 GDB 上会崩溃）、寄存器读取默认关闭（部分 GDB 读取寄存器会崩溃）。已联调验证：MinGW-w64 GCC（64 位）+ GDB 8.1、MinGW.org GCC 6.3（32 位）+ GDB 7.6.1。
+
+**已知限制：** Pause（暂停）依赖 GDB 的平台中断支持：Windows 原生 GDB 无法中断运行中的进程，且 `-exec-interrupt` 会让 GDB 永久失去响应——因此该平台下扩展**不再下发中断命令**，而是直接提示「当前调试目标不支持暂停…（请使用断点或「停止」结束会话）」并保持会话可用；远程目标与 Linux/macOS（中断有效）行为不变。MSVC（cl.exe，PDB 调试信息）不在 GDB 支持范围内，请使用 GCC/Clang 工具链调试。
+
+---
+
+## 9. 代码补全与 IntelliSense
+
+打开工程时，扩展会在**工作区之外**生成 clangd 所需内容，**不在工程目录写入任何文件**（不生成 `.clangd`、不覆盖你自有的 `compile_commands.json`）：
+
+1. **`compile_commands.json`（写到扩展缓存目录）** —— 复用与 Code::Blocks 对齐的编译命令（宏展开后的 `$compiler $options $includes ...`），并对每条命令做 clang 兼容化：剔除 clang 不认识的 GCC 专属 flag（`-march=自定义扩展`、`-msave-restore` 等），自动追加编译器默认 include 搜索路径（`-isystem`，让 RISC-V 等交叉工具链的系统头文件也能被 clangd 找到）。
+2. **用户级 clangd 配置 `config.yaml`** —— 用 `If.PathMatch` 把编译数据库按工程树作用域指向上面的缓存目录（Windows 位于 `%LocalAppData%\clangd\config.yaml`），不影响用户其它内容。
+
+- 命令：`Code::Blocks: Generate compile_commands.json (IntelliSense)`（手动重新生成，并检测 clangd）
+- 打开工程、切换活动项目时自动重新生成；**修改影响产物的 `codeblocks.clangd.*` 设置后也会自动重新生成一次**（约 150ms 去抖合并；clangd 自己会重载 `config.yaml`，无需重启或重载窗口），生成/跳过都会在输出通道留痕。只影响展示/提示的 `buildLogDiagnostics`、`restartOnActiveProjectSwitch`、`queryDriver` 不改变产物，**不会**触发重建（避免大工程每次改设置都全量收集编译命令）；「生成 compile_commands.json」命令与手动重检会顺带清除 clangd 探测缓存，刚安装/下载完也能立即生效。未打开工程时不做生成（作用域未知），下次打开工程按新设置生成。
+- **改编译器后同样立即生效**：编译数据库里的编译命令、`--target`、系统头 `-isystem` 全部按当前编译器推导，因此修改 `codeblocks.compilerId` / `codeblocks.masterPath` / `codeblocks.compilerPrograms` 时会**按新编译器重新生成**并在编译数据库真正变化后**重启 clangd**（否则已打开文件仍按旧编译命令报错/补全），底部状态栏 `Compiler:` 同步刷新。编译器变化不提供关闭项（不重启等于设置没生效）；切换活动工程的重启可用 `codeblocks.clangd.restartOnActiveProjectSwitch` 关闭。
+- **设置取值容错**：`suppressedWarnings` / `forcedIncludes` / `excludeDirs` 都是字符串数组。若手改 `settings.json` 时误写成字符串（如 `"codeblocks.clangd.suppressedWarnings": "-Wunused-function, -Wempty-body"`），扩展会**按逗号/分号/空白拆分**后使用；写成其它类型则**回退设置默认值**，并在输出通道给出 `取值类型不正确` 提示（否则「设置里配了却没写进 `config.yaml`」难以排查）。数组值会顺带 trim、去空、去重。
+- **历史残留自动清理**：扩展只会重写「本次打开作用域」的片段，项目被删除/移动后旧片段会永久残留（clangd 每次都要解析它们）。因此每次生成配置时会**顺带清理失效片段**（作用域目录或编译数据库目录已不存在者），并把清理数量打印到输出通道；也可用命令 `Code::Blocks: Clean Stale clangd Config Fragments` 手动预览 + 清理（同时清理扩展缓存目录里已无对应片段的孤儿 `compile_commands.json` 目录，可重建）。**安全边界**：只动扩展自己标记的片段（`# >>> codeblocks-vscode <hash> begin`…`end`），用户自有内容一律不碰；网络盘/未挂载盘符（如未映射的 `Z:`、U 盘）与 `\\server\share` 路径一律跳过，不会误删。
+
+**配合 clangd 使用（推荐）：**
+
+1. 安装 VS Code 扩展 **clangd**（`llvm-vs-code-extensions.vscode-clangd`），并执行其 `clangd: Download language server` 命令（或在系统中安装 LLVM 工具链）。
+2. 打开工程后 clangd 会自动通过 `config.yaml` 找到编译数据库，即可获得：
+   - 代码补全、签名帮助
+   - 跳转定义 / 查找引用 / 悬停提示
+   - 重命名、文档符号
+
+> 若使用微软 C/C++ 扩展（cpptools），可手动执行 `Code::Blocks: Generate compile_commands.json`，再把缓存目录里的 `compile_commands.json` 配置到 `c_cpp_properties.json` 的 `compileCommands` 字段使用。
+
+**诊断归属（检测到 clangd 后）：**
+
+- **Problems 面板**：由 clangd 产出，构建引擎不再报错（避免重复）。
+- **Build Log 视图**：来源由设置 `codeblocks.clangd.buildLogDiagnostics` 决定：
+  - `build`（默认）：构建引擎的完整诊断，覆盖所有编译文件；
+  - `clangd`：clangd 诊断（仅打开过的文件，构建后可能不完整/滞后）。
+- **头文件补全/跳转**：自动为头文件注入回退编译 flag（`-I`、`-isystem`、`--target`），并在存在 `include.h` 时强制预包含（避免 `unknown type name u8/u16` 之类误报）。
+- **未使用头文件提示**：默认关闭（片段写入 `Diagnostics.UnusedIncludes: None`）；改为 `strict` 可让 clangd 提示未使用的 `#include`，设为 `omit` 则该键不写入、交给 clangd 默认值（clangd 17+ 为 `strict`）或你自己的配置。
+- **补全不自动插入头文件**：默认 `Completion.HeaderInsertion: Never` —— clangd 默认 `IWYU` 会在接受补全时自动插入符号所属的 `#include`（嵌入式/裸机工程常无对应标准头可插），扩展默认关闭该行为；设置 `codeblocks.clangd.headerInsertion` 可切回 `iwyu` 或 `omit`（不写该键，交给你自己的配置）。
+- **头文件诊断默认整体压制**：嵌入式 SDK 的头文件普遍不自包含，单独打开时会缺上下文产生大量 `unknown type name` / `too many errors` 误报，因此默认（`codeblocks.clangd.suppressHeaderDiagnostics = true`）把头文件的全部诊断压掉。**代价**：编辑头文件时也不会看到任何错误提示（`.c` 源文件的诊断不受影响）。若你更看重头文件诊断、能接受误报，可把该设置改为 `false`。
+
+**让配置由你决定（设置项 = 只写「需要写」的键）：**
+
+扩展片段里的每个键都由设置项驱动，**留默认/`omit` 就不写该键**，由 clangd 默认值或你自己的配置决定；默认值与历史行为一致，升级不会改变现有产物：
+
+- **优先级要点**：扩展写的是**用户级** `config.yaml`，按 clangd 规则「用户配置 > 内层项目 `.clangd` > 外层项目」，它会**压过**你在工程里写的 `.clangd`。要让位给工程配置，把对应设置设为 `omit`（或把值改成与你 `.clangd` 一致）。
+- 可切换的键：`Diagnostics.UnusedIncludes`、`Completion.HeaderInsertion`、`Index.Background`（`skip` 可大幅降低 clangd 在大型 SDK 上的 CPU/内存占用，代价是跨文件跳转变弱）、`Index.StandardLibrary`、`Diagnostics.ClangTidy`（`off` 关掉 clang-tidy 噪声）、`Completion.AllScopes`、`InlayHints.Enabled`、`Documentation.CommentFormat`（`doxygen` 让悬停显示参数/返回值说明）、`If.PathExclude`（`excludeDirs` 排除 `obj` / `bin` 等目录）。
+- **自由 YAML**：`codeblocks.clangd.extraConfig` 会把你的 YAML 作为**同作用域的后置片段**注入（扩展自动加 `If.PathMatch`，你不用写 `If`），因此可以覆盖上面任何键，例如：
+  ```yaml
+  Diagnostics:
+    MissingIncludes: Strict
+  Completion:
+    ArgumentLists: Delimiters
+  ```
+  注意：YAML 语法错误会让 clangd 丢弃**整个** `config.yaml`（含扩展片段）；扩展会在输出通道对「制表符 / `---` 分隔行 / 顶层 `If:`」给出提示。
+
+**交叉编译器保真（可选，推荐保留默认）：**
+
+扩展默认用「`--target` + 手写 `-isystem`/`-include`」让 clangd 理解交叉工具链。更保真的做法是让 clangd 直接向工程编译器查询：
+
+1. 命令 `Code::Blocks: Configure clangd --query-driver` —— 按当前活动工程的编译器路径生成 `--query-driver=<编译器目录>/*` 并**合并**进 VS Code 的 `clangd.arguments`（可选择写入工作区设置 / 用户设置 / 仅复制到剪贴板；写入前有预览确认，不覆盖你已有的其它参数）。
+2. 设置 `codeblocks.clangd.builtinHeaders = queryDriver` —— 让 clangd 使用从交叉编译器提取的内建头（`stddef.h` 等），而不是 clangd 自带的内建头。
+3. `codeblocks.clangd.queryDriver = true` 时，若 `clangd.arguments` 里还没有 `--query-driver`，扩展会在输出通道给出一条可操作提示（不会自动改你的设置）。
+
+
+**未安装 clangd 时的兜底（轻量符号补全）：**
+
+扩展内置了一个项目内轻量符号索引（参考 Code::Blocks codecompletion 的词法扫描思路，只提取标识符、不做完整语法树），在 clangd 不可用时自动生效，提供：
+
+- 项目内函数 / 宏（`#define`）/ 结构体枚举类 / 变量的**代码补全**
+- 悬停显示符号签名与 `文件:行`
+- `Ctrl+点击`（或 F12）**跳转定义**
+- 当前文件的**大纲（Outline / 文档符号）**
+
+检测到 clangd 后兜底自动禁用，避免与 clangd 补全重复。
+
+**Symbols 符号浏览器（始终可用，不依赖 clangd）：**
+
+侧边栏的 **Symbols** 视图对齐 Code::Blocks 的 Symbols 面板，按 **函数 / 宏 / 类型 / 变量** 分组展示所有已打开项目的符号，点击节点精确定位到定义位置。
+
+---
+
+## 10. 构建日志（Build Log）
+
+Build Log 视图位于**底部 Panel**（打开方式：`Ctrl+J` 后选择「Build Log」标签页、菜单 Build → Build Log，或构建完成时自动聚焦——时机由设置 `codeblocks.ui.buildLogAutoFocus` 控制，**默认仅当构建有错误时**聚焦；有错误时默认还会自动跳转到第一个错误，可用 `codeblocks.ui.buildLogFocusFirstError` 关闭）。每次构建生成一棵结构化摘要树：
+
+```
+构建成功 / 失败（根，显示用时 · N 错误 · N 警告）
+└── 项目名（目标 · 成功/失败）
+    ├── 编译器路径
+    ├── 编译 N · 跳过 N · 失败 N
+    ├── 链接成功/失败（输出文件）
+    ├── 错误 (3)          ← 分组节点，数量即统计结果
+    │   ├── main.c:12:5   error message
+    │   └── ...
+    └── 警告 (5)          ← 分组节点
+        ├── util.c:30:2   warning message
+        └── ...
+```
+
+- **错误 / 警告分组**：分组节点 label 直接显示数量（如 `错误 (3)`），具体诊断挂在其下一层级。
+- 点击诊断节点精确定位到 `文件:行:列`。
+- `F4` 跳转下一个错误，`Shift+F4` 跳转上一个错误（循环）。
+- 错误数超过上限（默认 50，设置 `codeblocks.maxReportedErrors` 调整）时自动截断。
+- 原始编译输出仍保留在 **输出面板「Code::Blocks」** 中用于排障。
+- **输出面板「Code::Blocks」** 采用日志通道（LogOutputChannel）：每行带时间戳；构建过程输出单行完成式进度（`✔️ [Compiled] 123-248 xxx.c (2.0s)` / `✗ [Failed]`）、`[Skipping]` / `[Linking]` / `[Archiving]` 状态，构建结束输出 Emoji 汇总块（编译 / 跳过 / 失败统计 + 错误 / 警告数 + 耗时 + 最慢 Top3）。
+- **链接/打包成功打印产物体积行**（对齐 Code::Blocks `Output file is %s with size %.2f %s`）：如 `Output file is bin\Debug\hello.exe with size 478.53 KB`；体积按 CB 规则三档两位小数（`bytes` / `KB` / `MB`，≥1 MiB 一律 MB）。**纯 CB 日志（`codeblocks.build.plainCbLog`）下同样输出**，便于与 Code::Blocks 逐行比对；产物缺失时不打印。
+- 用户停止构建时输出 `⚠ [Interrupted]` 与「⚠ 构建已取消」，被中断的文件不计入失败统计。
+- 详细模式（设置 `codeblocks.build.verboseOutput`）额外输出完整编译命令行、Clean 逐文件列表与跳过列表。
+- **HTML 构建日志**（设置 `codeblocks.build.saveHtmlLog`，默认关）：构建结束在工程目录写 `<工程文件名>_build_log.html`（对齐 CB SaveBuildLog）；子开关 `codeblocks.build.saveHtmlLogFullCommandLine`（默认关，对齐 CB `full_command_line`）开启后在诊断汇总表前追加本次执行的完整命令行块。
+
+---
+
+## 11. 辅助工具
+
+| 命令 | 说明 |
+|------|------|
+| `Code::Blocks: Code Statistics` | 统计代码 / 注释 / 空行 / 总行数 |
+| `Code::Blocks: TODO List` | 扫描 TODO / FIXME / NOTE / HACK / XXX（含优先级、用户、日期；关键字可由 `codeblocks.todo.keywords` 自定义） |
+| `Code::Blocks: Add TODO Item…` | 在当前行下方插入 TODO 注释（类型 / 用户名 / 内容，对齐 CB todo 插件 Add Todo item） |
+| `Code::Blocks: Toggle Bookmark` / `Previous·Next Bookmark` / `Clear All Bookmarks` | 书签（对齐 CB Edit → Bookmarks；`Alt+K` 切换 / `Alt+H` 上一个 / `Alt+L` 下一个；概览尺标记；按工作区存储，行漂移时按文本回找） |
+| `Code::Blocks: Open Include File` | 打开光标处 `#include` 指向的文件（当前文件目录 → 目标 include 搜索目录；对齐 CB Open include file） |
+| `Code::Blocks: Format with AStyle` | 调用外部 AStyle 格式化（回退 VS Code 内置格式化） |
+| `Code::Blocks: Tidy Comments` | 整理选中的块注释（`*` 对齐 / 空格规范 / 超宽换行，幂等） |
+| `Code::Blocks: Insert Header Guard` | 插入头文件保护宏（已有 `#pragma once`/`#ifndef` 则跳过）；设置 `codeblocks.editor.autoHeaderGuard` 可新建空头文件自动插入 |
+| `Code::Blocks: Swap Header / Source` | 头文件 ⇄ 源文件互换（同目录同名主干，大小写不敏感；工程文件列表回退）；亦在 Edit 菜单 |
+| `Code::Blocks: Show Compiler Commands` | 查看当前编译器各命令模板（CompileObject/Link…）+ 活动工程/目标真实展开命令 |
+| `Code::Blocks: Export Makefile` | 导出可独立构建的 Makefile（字面命令 + 目录规则 + clean；本机 mingw32-make 实测） |
+| `Code::Blocks: Import Project` | 导入 Dev-C++（`.dev`）/ VC6（`.dsp`）/ VS2010+（`.vcxproj`）→ 生成 `.cbp` |
+| `Code::Blocks: Edit Workspace Dependencies` | 编辑 `.workspace` 工程依赖（多选 + 环路检测；构建按依赖拓扑） |
+| `Code::Blocks: Run Tool` | 运行 `codeblocks.tools` 中登记的自定义工具（Tools 菜单动态列出） |
+| `Code::Blocks: Configure Tools…` | 打开 `codeblocks.tools` 设置页 |
+| `Code::Blocks: Open default.conf` | 打开 Code::Blocks `default.conf` 手工编辑（全局编译器设置/全局变量；保存后扩展读取立即生效，CB 本体需重启） |
+
+---
+
+## 12. 快捷键
+
+### 12.1 已对齐 Code::Blocks 的键位
+
+| 功能 | 键位 | 说明 |
+|------|------|------|
+| Build / Run / Rebuild | `Ctrl+F9` / `Ctrl+F10` / `Ctrl+F11` | 对齐 CB（CB 的 Clean 无加速键，本扩展 Clean 同样无键位） |
+| Compile Current File | `Ctrl+Shift+F9` | 对齐 CB |
+| Build and Run | `F9` | 对齐 CB；VS Code 默认 `F9` 为「切换断点」，扩展在编辑器聚焦且非调试时占用（见 12.3） |
+| Debug / Continue | `F8` | 对齐 CB（**调试中按 F8 = 继续**，即 Start / Continue 单项语义）；VS Code 默认 `F8` 为「下一错误/警告」，现已被本扩展占用（含调试中） |
+| Next / Previous Error | `F4` / `Shift+F4`（另见 12.2 的 CB 键位 `Alt+F2` / `Alt+F1`） | 扩展沿用 VS Code 惯例 + CB 别名 |
+| Activate Prior / Next Project | `Alt+F5` / `Alt+F6` | 对齐 CB Project tree |
+
+### 12.2 新增安全键（全部避开 VS Code 默认）
+
+| 功能 | 键位 | 作用域 |
+|------|------|--------|
+| 下一个 / 上一个错误（CB 键位） | `Alt+F2` / `Alt+F1` | 编辑器聚焦 |
+| Goto File（CB Goto file） | `Alt+G` | 全局（原生 `Ctrl+P` 不受影响） |
+| 打开 Project 视图（CB Manager） | `Shift+F2` | 全局 |
+| Replace in Files（CB Replace in files） | `Ctrl+Shift+R` | 非 Search Editor |
+| 上移 / 下移工程（CB Project tree） | `Ctrl+Shift+Up` / `Ctrl+Shift+Down` | Project 树聚焦时 |
+| 选择下一个匹配（CB Ctrl-E ≈ 原生 Ctrl+D） | `Ctrl+E` | 编辑器聚焦 |
+| 切换书签 / 上一个 / 下一个（CB Bookmarks） | `Alt+K` / `Alt+H` / `Alt+L` | 编辑器聚焦 |
+
+### 12.3 与 VS Code 冲突的键位：CB 保真模式
+
+设置 **`codeblocks.keybindings.cbStyle`**（默认 `false`）开启后启用以下 CB 键位——会**覆盖 VS Code 默认**，关闭设置即恢复：
+
+| 键位 | 映射到 | 覆盖的 VS Code 默认 |
+|------|--------|----------------------|
+| `F5` | 切换断点 | 启动 / 继续调试 |
+| `Shift+F8` | 停止调试 | 上一错误 / 警告 |
+| `F2` | 打开 Build Log | 重命名符号 |
+| `Ctrl+R` | 替换 | 打开最近 |
+| `Ctrl+Shift+B` | 跳转匹配括号 | 运行生成任务 |
+| `Ctrl+Shift+C` | 注释 / 取消注释行 | 打开新命令行 |
+| `Ctrl+Shift+S` | 全部保存 | 另存为 |
+| `Ctrl+Q` | 退出 VS Code | 快速打开视图 |
+
+> 未开启 `cbStyle` 时 `F5` 保持 VS Code 默认「启动 / 继续调试」——本扩展已在无 `launch.json` 时按活动工程目标接管启动（见 §8）。
+| `F12` | 折叠 / 展开当前块 | 转到定义 |
+| `F7` / `Shift+F7` / `Ctrl+F7` | 单步跳过 / 进入 / 跳出（调试中） | 无（VS Code 默认为 F10/F11/Shift+F11，两者并存） |
+
+> 开启时会弹一次提醒，可一键查看冲突清单。
+
+### 12.4 冲突检测与处理
+
+- 命令 **`Code::Blocks: Check Keybinding Conflicts`** 扫描三类来源并逐条报告：
+  1. 内置 VS Code 默认冲突表（`src/tools/keybindingConflicts.ts`）；
+  2. 用户 `keybindings.json`（真实撞车，最高优先级）；
+  3. 其他已安装扩展的 `~/.vscode/extensions/<扩展目录>/package.json`；
+- 报告支持：**打开键盘快捷方式编辑器** / **打开 keybindings.json** / **复制报告**；结果同步写入 Code::Blocks 输出通道；
+- 启动时若检测到用户级冲突，在输出通道与状态栏提示一次（不弹窗）；
+- 若使用 `overrides` 托管配置（见 12.5），报告还会显示每个托管项的**生效状态**（已生效 / 未写入 / 未知键名）；
+- 想改键：`Ctrl+K Ctrl+S` 打开键盘快捷方式，搜索 `Code::Blocks` 或按按键过滤。
+
+### 12.5 可视化配置每个快捷键（设置面板 + 托管写入）
+
+打开**快捷键设置面板**的三个入口：命令 **`Code::Blocks: Keybinding Settings`**、Menu → Settings → Keybindings…、**扩展设置界面**（`Ctrl+,` → Extensions → Code::Blocks）中 `Keybindings: Cb Style` / `Keybindings: Overrides` 两项描述内嵌的一键链接（点击即打开面板 / 检查冲突）：
+
+- 一屏列出全部 30 个可配置项（按「构建 / 运行 / 工程」「外部命令别名」「CB 保真组」分组，可折叠、可搜索）；
+- 每行显示：命令名与 id、`when` 条件、当前键位、默认键位、生效状态（已生效 / 未写入）、冲突注解（与 VS Code 默认冲突 / 与其它项重复）；
+- 行内操作：**录入**（点击后直接按下组合键录入，Esc 取消，Backspace = 解绑）、**手动**（输入如 `ctrl+alt+b`、`ctrl+k ctrl+c`；被 VS Code/系统优先占用的组合用此方式）、**解绑**、**默认**（恢复该命令默认键位）；
+- 顶部：**应用**（设置与文件一致性兜底）、**全部重置**（模态确认）、**检查冲突**（调用三源检测）、**打开 keybindings.json**、**导出方案 / 导入方案**；
+- 修改**立即生效**：写入设置 `codeblocks.keybindings.overrides` 并同步到用户 `keybindings.json`（沿用托管写入：仅托管条目、首次备份、回读校验回滚）。
+
+**键位方案导入/导出**：面板按钮或命令 `Export / Import Keybinding Scheme`——导出为 JSON（`{ version, generatedBy, overrides }`，稳定排序）；导入兼容包装或直接映射，可选**合并 / 覆盖**，非法与未知项自动忽略并提示。
+
+**设置（高级/脚本化途径）**：`codeblocks.keybindings.overrides` 仍是唯一数据源，可直接编辑：
+
+```jsonc
+"codeblocks.keybindings.overrides": {
+  "build": "ctrl+alt+b",   // 改键：写入正向条目 + 对默认 Ctrl+F9 写移除规则
+  "cbQuit": "",             // 空字符串 = 解绑
+  "debug": "default"        // 向导中输入 default 可恢复默认（设置中删除该项亦可）
+}
+```
+
+**其它命令入口**：`Configure Keybindings…`（QuickPick 快速改单项）、`Apply Keybindings`、`Reset Keybindings`（等价于面板「全部重置」）。
+
+注意：键位是**用户级**（跨窗口共享）；被 VS Code/系统优先占用的组合在面板中无法捕获（用「手动」输入）；若同时在键盘快捷方式 UI 手动改同命令可能产生双绑——用「检查冲突」查看、用「全部重置」清理。
+
+---
+
+## 13. 设置项总表
+
+> 设置页按 **8 个分区**呈现（编译器 / 构建 / 工作区 / 调试 / IntelliSense / 界面 / 编辑器 / 快捷键；VS Code 设置编辑器内显示分区标题，`configuration` 数组机制）。
+> 分区标题跟随 VS Code 显示语言（`package.nls.json` 英文默认 + `package.nls.zh-cn.json` 中文）。
+> 路径类设置 `codeblocks.masterPath` / `codeblocks.compilerPrograms` / `codeblocks.debug.gdbPath` / `codeblocks.build.compilerCache` / `codeblocks.build.compilerCachePath` 声明为 **machine-overridable**：不参与 Settings Sync（避免跨机同步坏路径），仍可按工作区覆盖。
+
+### 13.0 界面语言与中英文切换
+
+> **一句话**：命令标题与设置界面跟随 **VS Code 显示语言**（`package.nls.json` 英文默认 / `package.nls.zh-cn.json` 中文，重载窗口生效）；弹窗、QuickPick、状态栏、WebView 面板标题由设置 **`codeblocks.ui.language`** 控制，**修改即时生效**。
+
+| 你想看到的 | 怎么做 |
+| --- | --- |
+| 全中文（含命令面板） | VS Code 显示语言设为中文（`Ctrl+Shift+P` → `Configure Display Language`）；`codeblocks.ui.language` 保持 `auto` |
+| 全英文（含命令面板） | VS Code 显示语言设为英文；`codeblocks.ui.language` 保持 `auto` |
+| 命令面板英文、扩展运行时文案中文（或反之） | 用命令 **`Code::Blocks: Switch UI Language…`** 或直接改 `codeblocks.ui.language` 为 `zh-cn` / `en` |
+
+- `auto` 的判定：显示语言以 `zh` 开头（`zh-cn` / `zh-tw` / `zh-hans`…）→ 中文；其它一律英文（`zh-tw`/`zh-hk` 目前按简体处理）。
+- 切换命令（`Code::Blocks: Switch UI Language…`）提供三态选择、标注当前模式，并在切换后提示「命令标题/设置界面需重载窗口」+ 一键重载。
+- **已打开的 WebView 面板**：切换语言后只刷新标题，正文与标签在下次打开时按新语言渲染（避免丢弃工程属性面板里未保存的编辑）。
+- **覆盖范围（0.8.132 起已全覆盖）**：构建日志、树视图节点、调试提示、clangd/键位/统计工具文案、菜单标签、三个 WebView 面板内部字段均双语；
+  唯一例外是 `codeblocks.log.english=true` 时构建日志被强制英文（与 `ui.language` 无关，见 §14 FAQ）。
+
+### 13.1 编译器与工具链
+
+| 设置项 | 默认值 | 说明 |
+|--------|--------|------|
+| `codeblocks.compilerId` | `gcc` | 默认编译器 ID（对应 `options_<id>.xml`）；修改后底部状态栏 `Compiler:` 即时刷新，并按新编译器重新生成 clangd 编译数据库（真正变化则重启 clangd） |
+| `codeblocks.masterPath` | `` | 编译器安装根目录（留空则从 PATH 探测）；machine-overridable；修改后同上（涉及编译命令与系统头路径） |
+| `codeblocks.compilerPrograms` | `{}` | 编译器程序完整路径（交叉编译器由「探测编译器」自动写入；属性 `C/CPP/LD/LIB/WINDRES/MAKE/DBGconfig`）；machine-overridable；修改后同上 |
+
+### 13.2 构建与日志
+
+| 设置项 | 默认值 | 说明 |
+|--------|--------|------|
+| `codeblocks.saveBeforeBuild` | `true` | 构建 / 运行 / 清理前自动保存 |
+| `codeblocks.parallelJobs` | `8` | 并行编译任务数（默认 8；0 = 自动：逻辑核数 × 2，最多 32；并发越高全量构建越快但 CPU 越接近 100%，且每条编译进程链常驻几十至几百 MB，默认 8 给编辑器留余量。范围 0–32，显式值优先，1 = 串行，支持文件夹级覆盖。**进程预算**：无论怎么设，实际并发不超过 `max(8, 逻辑核数)`，被收敛时构建开始会在输出通道说明） |
+| `codeblocks.build.compilerCache` | `none` | 编译缓存（保护性增强，默认关）：`none`/`ccache`/`sccache`；启用后仅**标准编译命令**前置缓存程序（链接/资源编译/脚本/`compile_commands.json` 不注入；导出 Makefile/命令查看的展开预览反映启用状态；ccache 适用 GCC/Clang，MSVC 请选 sccache；PCH 单元走标准编译路径同样前置——ccache 对 PCH 缓存支持有限，未命中属预期）。工具自动探测：PATH → WinGet Links / WinGet Packages（新式 winget 便携包直写 PATH 的兜底）/ Scoop shims / cargo bin / Chocolatey / Program Files；**未找到时构建回退原编译器**（不使构建失败，输出通道告警一次；**未找到时每个构建都会重扫**——运行中安装/补齐后**下一个构建**即生效；已找到时复用解析结果并校验路径存在性，工具被卸载/移动会自动重扫；无需重载窗口）。**检测到但未启用：每次打开工作区都会询问是否启用**（提示含版本号；可点「不再提示」，修改本设置自动重置；每次激活/重检会把检测到的**版本号与路径**写入 Code::Blocks 输出通道）。安装引导：命令面板运行 `Code::Blocks: Install Compiler Cache (ccache/sccache)…`（仅引导，不静默安装）；machine-overridable |
+| `codeblocks.build.compilerCachePath` | `` | 编译缓存工具可执行文件显式路径（如 `C:\tools\ccache\ccache.exe`）；留空 = 自动探测；**路径无效等同未找到**（不静默改用 PATH）；仅编译缓存非 `none` 时生效；machine-overridable |
+| `codeblocks.maxReportedErrors` | `50` | 单次构建最多收集的错误数（0 = 不限制） |
+| `codeblocks.build.verboseOutput` | `false` | 构建详细输出：完整编译命令行、Clean 逐文件删除列表、增量跳过列表（对齐 Code::Blocks 详细模式） |
+| `codeblocks.build.profile` | `false` | 构建性能探针：构建结束在 Code::Blocks 输出通道追加 `[profile]` 阶段计时块（环境准备/收集（增量判定·命令生成）/首进程延迟/编译/链接/宿主输出解析 + spawn 次数/去 shell 次数/并发子进程峰值 + 输出量）。等效环境变量 `CB_BUILD_PROFILE=1`（任一开启即生效）；默认关闭零开销、修改即时生效 |
+| `codeblocks.build.traceProcesses` | `false` | 进程追踪：构建结束打印一行「本次构建启动的子进程数 + 同时存活峰值（并发上限、逻辑核数）」，用于和任务管理器对照排查进程/CPU 暴增。只统计扩展自己派生的进程（shell/编译器驱动），不含编译器再派生的 `cc1`/`as`；默认关闭 |
+| `codeblocks.build.lowerCompilerPriority` | `false` | 编译器进程优先级：把编译/链接子进程降到「低于正常」（Windows `SetPriorityClass(BELOW_NORMAL)`，被 `cc1`/`as` 继承；POSIX 等价 nice +10）。**实测结论：在 I/O 瓶颈型构建上它会让编译器饿死、反而更慢**（现场：gcc 仅 0.5% CPU 但单文件墙钟 4.6 s），因此**默认关闭**；仅当 `parallelJobs` 大于物理核数、且你希望编辑器保持响应时手动开启 |
+| `codeblocks.build.autoExcludeOutputs` | `true` | 构建前自动把工程的目标文件/输出目录写入**用户设置**的 `files.watcherExclude` 与 `search.exclude`（**不再写入工作区 `.vscode/settings.json`**，因此不会被提交到仓库）：含 `object_output`（未配置时为默认 `.objs`）、`deps_output`（未配置时为默认 `.deps`）、输出文件所在目录，以及展开 `$(…)` 宏后的路径。旧版本写进工作区的同名条目会被自动清理，用户自己添加的其它条目保留。主 Build / Build Workspace / Clean / Clean Workspace / 右键单工程 Build / 单文件编译 / Rebuild All 全部入口都会先排除。**这是构建期 CPU 被吃满的主要原因之一**：构建写出几十个 `.o` 会让 VS Code 反复全工作区枚举（隔离实验：`rg.exe` 峰值 **281**，每个还带一个 `conhost`），加上排除后峰值为 **0**。首次真正添加时提示一次（含「重载窗口」按钮）；关闭后行为与旧版一致 |
+| `codeblocks.workspace.pathGuard` | `prompt` | 工作区路径守卫：检查工作区路径里是否含 **glob 元字符**（`[ ] { } * ?`）。路径里出现 `[内部]xxx` 这类目录名时，VS Code 的 AI 指令定位器（`PromptFilesLocator`）会把搜索根**截断到祖先目录**，之后每次文件变更都用 `rg --files`（不带任何 `-g` 过滤）把整棵树枚举一遍——实测这正是构建时 `Code.exe` 进程组暴增、CPU 打满 100% 的直接原因。命中时会在 Code::Blocks 输出通道和通知里给出**命中的路径段**与 **VS Code 实际使用的搜索根**（含该根下的文件数），并在你确认后把 `.github/instructions` 与 `.claude/rules` 两处扫描写进**用户设置**的 `chat.instructionsFilesLocations`（值为 `false`，**不写工作区 `.vscode/settings.json`**），立刻生效；`off` = 不检查，`prompt` = 提示并询问，`auto` = 直接写入并提示。手动检查：命令 `Code::Blocks: 检查工作区路径` |
+| `codeblocks.build.sampleSystem` | `false` | 系统 CPU 归属采样（每 ~1 s：整机利用率 + 编辑器/安全软件/VS Code 文件扫描器各占多少，剩余归为「工具链 + 其它程序 + 系统」）——整机 CPU 利用率（`PerformanceCounter`，任务管理器口径）+ 「编辑器 / 已知安全软件 / `rg`+`conhost` 扫描器」各组的 CPU 占用，构建结束输出归属块，并在实时防护 ≥10% 或扫描器 ≥8% 时点名告警。用于回答「构建慢时 CPU 被谁吃掉了」。不再跟随 profile 自动开启（构建期它自身会占 ~3% CPU）；仅 Windows，每次构建多一个隐藏 PowerShell 进程（采样本身约 0.1 核） |
+| `codeblocks.build.skipIncludeDeps` | `false` | 增量编译跳过 `#include` 头文件依赖扫描（对齐 Code::Blocks /skip_include_deps 设置，可加速大工程增量判断） |
+| `codeblocks.build.linkInputExtensions` | `["xm"]` | 增量编译识别的工程内链接输入扩展名（**默认仅 `.xm`**，可按需添加 `.ld`/`.lds` 链接脚本、`.icf`、`.def` 等）：改动后自动重链接 / 重新打包（保护性增强；CB 需手动填 External dependencies）。支持 `xm` / `.xm` / `*.xm`（大小写不敏感，可填逗号分隔字符串，误配回退默认）；设 `[]` 关闭。仅作用于未显式参与编译（compile=false）的链接输入（含带自定义命令者）；带 `compile="1"` 的文件走 CB 条目计数强制（见构建行为，每次构建都重链） |
+| `codeblocks.build.compileCommandsOnlyTargets` | `false` | CommandsOnly 目标（type=4）是否编译其文件（对齐 CB：以空选项/空 include 编译；默认关闭仅执行 pre/post 脚本） |
+| `codeblocks.build.plainCbLog` | `false` | 纯 CB 日志模式（关闭脚本编号/单行完成式/Emoji 汇总块/最慢 Top3，输出 CB 风格 === Build finished ===） |
+| `codeblocks.build.scriptCommandTimeoutMs` | `0` | 单条 pre/post-build 脚本命令的超时（毫秒，默认 `0` = 不超时，与 Code::Blocks 无限等待一致；上限 3600000）。超时后强杀该命令的整棵进程树（含脚本启动的后台进程：运行期采集进程树 PID，超时后多轮收割逃逸孤儿）并把构建记为失败，适用于脚本内网络盘（SMB）重连、上传服务（.NET 默认 100s 超时）等长时间阻塞场景；仅作用于脚本命令，不影响编译/链接 |
+| `codeblocks.build.scriptExitGraceMs` | `1500` | pre/post-build 脚本命令的结束宽限（毫秒，范围 0–60000）：**这是上限**——命令本体（cmd.exe）退出后，管道安静约 250ms 即立即继续，最多再等这段时间；期间管道关闭也立即继续。**Code::Blocks 只等命令本体**——设 `0` 完全对齐（脚本里的后台程序不再拖慢 post-build）；脚本确需等后台程序结束时请用前台命令或 `start /wait`。修改后即时生效 |
+| `codeblocks.build.persistLog` | `false` | 构建输出通道日志持久化：开启后输出写盘并跨窗口保留历史（`%APPDATA%\Code\logs` 下 `CodeBlocks.log`）；默认关闭用普通输出通道（窗口重载即清空历史）。修改后需重载窗口生效——改动时会**弹出提醒**（含「重载窗口」一键按钮） |
+| `codeblocks.build.outputTimestamp` | `false` | 普通输出通道每行是否输出时间戳（格式 `2026-09-29 15:11:20.222`，与日志文件同款；默认关，开启后生效）。仅 `persistLog=false`（普通通道）时生效；修改后即时生效 |
+| `codeblocks.build.strictQuoting` | `false` | 严格引号规则（仅空格加引号，对齐 CB NeedQuotes） |
+| `codeblocks.build.asmUsesCompilerVar` | `false` | 汇编文件（`.s`/`.asm`/`.ss`/`.s62`）按 compilerVar 选择编译程序（`true`=对齐 CB：`.s` 默认 CPP 即 g++；`false`=强制 C 编译器，嵌入式场景更安全） |
+| `codeblocks.build.responseFile` | `safe` | 超长命令响应文件策略：`safe`=保护性默认（阈值 8000、绝对路径引用、保留源扩展名 `main.c.respFile`）；`cb`=对齐 CB（阈值 32767、`main.respFile`、相对路径引用） |
+| `codeblocks.build.cleanResponseFiles` | `false` | Clean / Rebuild 时删除对象目录下的响应文件（`*.respFile`，超长命令的 `@file` 临时输入）。Code::Blocks 从不清理，默认关闭保持对齐；开启可避免旧响应文件永久遗留（响应文件随时可安全删除） |
+| `codeblocks.build.saveHtmlLog` | `false` | 构建结束保存 HTML 构建日志（对齐 Code::Blocks `save_html_build_log`，默认关闭）：写为 `<工程文件名>_build_log.html`（工作区构建为 `<工作区文件名>_build_log.html`），内容为构建起止时间 + 诊断汇总表 |
+| `codeblocks.build.saveHtmlLogFullCommandLine` | `false` | HTML 构建日志输出完整命令行（对齐 Code::Blocks `save_html_build_log/full_command_line`“Always output the full command line in the generated HTML file”，默认关闭）；仅 `saveHtmlLog` 开启时生效 |
+| `codeblocks.log.english` | `false` | 构建日志英文文案（汇总/状态类消息） |
+
+### 13.3 调试 (GDB)
+
+| 设置项 | 默认值 | 说明 |
+|--------|--------|------|
+| `codeblocks.gdbTimeoutMs` | `30000` | GDB MI 命令超时（毫秒，≥1000）。个别慢操作（加载符号、大数组子节点展开等）可适当调大 |
+| `codeblocks.debug.initCommands` | `[]` | 调试会话启动后注入的 GDB 命令（按 CLI 逐条执行，如 `set pagination off`） |
+| `codeblocks.debug.userArguments` | `` | 附加到 GDB 命令行的参数（引号感知分词；对齐 CB user arguments） |
+| `codeblocks.debug.disableInit` | `true` | 调试启动时给 GDB 传 `-nx`，不执行用户 `.gdbinit`/`gdb.ini`（对齐 CB Debugger settings「Disable startup scripts (-nx)」，默认开；需要加载本机启动脚本请关闭） |
+| `codeblocks.debug.printPretty` | `false` | 调试变量显示美化（GDB `set print pretty on`） |
+| `codeblocks.debug.printElements` | `0` | 数组/字符串最多显示元素数（`set print elements`；0 = 不设置） |
+| `codeblocks.debug.disassemblyFlavor` | `default` | 反汇编语法风格（`intel` / `att` / `custom`；default = 不设置；custom = 使用 `instructionSet` 的值） |
+| `codeblocks.debug.instructionSet` | `` | 自定义反汇编风格参数（仅 `disassemblyFlavor = custom` 时生效） |
+| `codeblocks.debug.charset` | `` | 调试字符集（`set charset`，如 UTF-8 / GBK；留空 = 不设置） |
+| `codeblocks.debug.gdbPath` | `` | GDB 可执行文件路径（留空自动探测：masterPath/bin → PATH；跨工具链建议显式指定）；machine-overridable |
+| `codeblocks.debug.trace` | `false` | 调试协议跟踪：DAP 请求/响应/事件写入 Code::Blocks 输出通道（排查调试异常时开启） |
+| `codeblocks.debug.registers` | `false` | Registers 视图读取寄存器值（默认关；部分 MinGW GDB 8.1 读取寄存器会崩溃，确认后再开） |
+| `codeblocks.debug.addOtherProjectDirs` | `false` | 把其它已打开工程的目录加入调试源搜索（对齐 CB add other project search dirs） |
+
+### 13.4 IntelliSense (clangd)
+
+| 设置项 | 默认值 | 说明 |
+|--------|--------|------|
+| `codeblocks.clangd.enabled` | `true` | 是否启用 clangd 集成（自动生成 `compile_commands.json` 并更新 clangd 用户配置）。关闭后回退轻量补全、不再生成/更新用户级 `config.yaml`；扩展会**提醒既有的扩展片段仍会被 clangd 读取**（片段是用户级配置，不自动删除），可选择打开该配置手动清理 |
+| `codeblocks.clangd.buildLogDiagnostics` | `build` | 检测到 clangd 时 Build Log 的诊断来源：`build` = 构建引擎完整诊断（默认，覆盖所有编译文件）；`clangd` = clangd 诊断（仅打开过的文件，可能不完整）。无论哪种，Problems 面板都由 clangd 产出 |
+| `codeblocks.clangd.restartOnActiveProjectSwitch` | `true` | 切换活动工程且编译数据库实际变化（存在共享文件）时，是否重启 clangd 让已打开文件立即按新活动工程编译命令重新分析。重启会触发 clangd 重索引，若嫌频繁可关闭；**仅作用于切换活动工程**——编译器设置（`compilerId`/`masterPath`/`compilerPrograms`）变化时会无条件重启 |
+| `codeblocks.clangd.forcedIncludes` | `["global.h"]` | clangd 分析头文件时强制预包含的基础头文件名（按 include 搜索目录查找，存在则加 `-include`）。默认 `global.h`（typedef/macro/sfr/clib 基础上下文）；勿用 `include.h` 这类「包含所有头文件」的主头文件，否则会对被它包含的头文件造成递归包含、产生大量误报 |
+| `codeblocks.clangd.suppressedWarnings` | `["-Wunused-function", "redefinition_different_typedef"]` | 在 clangd 诊断中压制的诊断（写入 `Diagnostics.Suppress`；支持 `-W` 组名或 clangd 诊断名）。默认压制两项嵌入式 SDK 跨界误报：静态函数编译期断言未使用（`-Wunused-function`）与 SDK 头文件 vs 工具链系统头的 typedef 冲突（`__int32_t` 等）；移除对应项即恢复显示 |
+| `codeblocks.clangd.suppressHeaderDiagnostics` | `true` | 压制头文件（`.h`）单独分析时的全部诊断。嵌入式 SDK 头文件不自包含，单独打开时缺上下文会产生大量 `unknown type name` 等误报；`.c` 文件诊断不受影响 |
+| `codeblocks.clangd.unusedIncludes` | `none` | 写入 `Diagnostics.UnusedIncludes`：`none` = 关闭未使用头文件提示（默认）；`strict` = 让 clangd 提示；`omit` = 不写该键（交 clangd 默认值 —— 17+ 为 `strict` —— 或你自己的配置） |
+| `codeblocks.clangd.headerInsertion` | `never` | 写入 `Completion.HeaderInsertion`：`never` = 补全不自动插入 `#include`（默认）；`iwyu` = clangd 默认行为；`omit` = 不写该键 |
+| `codeblocks.clangd.indexBackground` | `default` | 写入 `Index.Background`：`default` 不写；`skip` = 不为工程文件建后台索引（大 SDK 可显著省 CPU/内存，跨文件跳转变弱）；`build` = 显式开启 |
+| `codeblocks.clangd.indexStandardLibrary` | `default` | 写入 `Index.StandardLibrary`：`default` 不写；`false` = 不预索引标准库（裸机工程可省内存）；`true` = 显式开启 |
+| `codeblocks.clangd.clangTidy` | `default` | clang-tidy 诊断：`default` 不写；`off` = 写入 `Diagnostics.ClangTidy.Remove: ['*']` 关闭全部 clang-tidy 检查 |
+| `codeblocks.clangd.completionAllScopes` | `default` | 写入 `Completion.AllScopes`：`default` 不写；`no` = 只提示可见作用域（补全更短更省）；`yes` = 显式开启 |
+| `codeblocks.clangd.inlayHints` | `default` | 写入 `InlayHints.Enabled`：`default` 不写；`off` = 关闭参数名/推导类型等内联提示；`on` = 开启 |
+| `codeblocks.clangd.documentationCommentFormat` | `default` | 写入 `Documentation.CommentFormat`：`default` 不写；`doxygen` = 按 Doxygen 解析（悬停补上参数/返回值说明）；`markdown` / `plaintext` 亦可显式指定 |
+| `codeblocks.clangd.excludeDirs` | `[]` | 写入 `If.PathExclude`：这些目录名（如 `obj`、`bin`）下的文件不套用本工程片段 |
+| `codeblocks.clangd.builtinHeaders` | `clangd` | 写入 `CompileFlags.BuiltinHeaders`：`clangd` = clangd 自带内建头（默认）；`queryDriver` = 用 `--query-driver` 从交叉编译器提取的内建头 |
+| `codeblocks.clangd.queryDriver` | `false` | 开启后若 `clangd.arguments` 尚未包含 `--query-driver`，输出通道给出一条可操作提示（配合命令 `Configure clangd --query-driver`） |
+| `codeblocks.clangd.extraConfig` | `""` | 附加到每个工程片段的自由 YAML（作为同作用域**后置**片段，可覆盖扩展写入的任意键；扩展自动补 `If.PathMatch`，无需自己写 `If`） |
+
+### 13.5 界面
+
+| 设置项 | 默认值 | 说明 |
+|--------|--------|------|
+| `codeblocks.ui.language` | `auto` | **运行时界面语言**：`auto`（跟随 VS Code 显示语言）/ `en`（始终英文）/ `zh-cn`（始终中文）。作用于弹窗、QuickPick、状态栏、WebView 面板标题；命令标题与设置界面始终跟随 VS Code 显示语言（需重载窗口）。修改即时生效，详见 [国际化](../dev/i18n.md) |
+| `codeblocks.projectTree.categorize` | `true` | 工程树按文件类型分组显示（Sources / Headers / ASM Sources / Resources / Others）；关闭后按物理目录显示 |
+| `codeblocks.ui.quietSuccess` | `false` | 构建成功静默（不弹 toast，仅日志与状态栏徽标） |
+| `codeblocks.ui.quietFailure` | `false` | 构建失败静默（不弹失败 toast，仅日志 + Build Log 树 / 状态栏徽标） |
+| `codeblocks.ui.buildLogAutoFocus` | `errors` | 构建结束自动聚焦 Build Log 的时机：`errors`（默认，对齐 CB）/ `errorsAndWarnings` / `always`（旧行为）/ `never` |
+| `codeblocks.ui.buildLogFocusFirstError` | `true` | 构建结束存在错误时跳转到第一个错误（对齐 CB `auto_focus_build_errors`，默认开；与 `buildLogAutoFocus` 独立） |
+| `codeblocks.ui.projectToolbar` | `["buildWorkspace","rebuildWorkspace","cleanWorkspace"]` | Project 视图标题栏常驻按钮（未选中的自动进入 ⋯ 溢出菜单）。可选值：`newProject` / `openProject` / `build` / `rebuild` / `clean` / `run` / `debug` / `buildWorkspace` / `rebuildWorkspace` / `cleanWorkspace` / `compilerOptions` / `projectProperties` / `codeStats` |
+| `codeblocks.ui.symbolsView` | `true` | 显示 Symbols 视图（初始默认隐藏，可从视图容器的 ⋯ → Views 菜单调出；关闭此设置后强制隐藏） |
+| `codeblocks.ui.recentProjectsLimit` | `8` | 「最近工程」列表上限（状态栏菜单 Recent Projects；范围 0–50，0 = 不记录） |
+| `codeblocks.ui.findFileOpen` | `false` | 查找文件（Find File…）时同时打开选中的文件；默认仅在本工程树中定位（对齐 Code::Blocks 的 Find file → `Open file` 复选框，其配置项 `/project_manager/find_file_open` 默认同样为 false） |
+| `codeblocks.detect.autoOpen` | `all` | 工作区工程自动检测行为：`all`（多选，受阈值保护）/ `single`（仅检测到单个工程时自动打开）/ `off`（不自动检测，仍可用状态栏入口）；父目录多工程工作区建议 `single` 或 `off` |
+| `codeblocks.detect.autoOpenThreshold` | `20` | 自动检测阈值（1–1000）：未打开工程数超过该值时不自动弹多选（仅状态栏入口 + 输出通道提示），并限制会话恢复的工程数 |
+| `codeblocks.detect.checkExternalChanges` | `prompt` | 已打开的 `.cbp` 被其它程序修改后的处理：`prompt`（弹窗询问是否重新加载，对齐 Code::Blocks `environment/check_modified_files`）/ `auto`（直接重载 + 状态栏提示）/ `off`（不检查，手动命令 `Code::Blocks: 从磁盘重新加载工程` 仍可用） |
+
+### 13.6 编辑器辅助与工具
+
+| 设置项 | 默认值 | 说明 |
+|--------|--------|------|
+| `codeblocks.editor.autoHeaderGuard` | `false` | 新建空头文件（.h/.hpp/.hxx）时自动插入头文件保护宏（已有保护不处理） |
+| `codeblocks.editor.headerGuardStyle` | `ifndef` | 头文件保护风格：`ifndef`（`#ifndef`/`#define`/`#endif` 包裹）或 `pragma-once`（仅顶部 `#pragma once`） |
+| `codeblocks.editor.tidyCommentWidth` | `80` | Tidy 注释（块注释整理）的换行宽度（20–200） |
+| `codeblocks.editor.asmHashComment` | `false` | 汇编（`.s` / `.S`）注释标记：默认 `//`（预处理的 `.S` 安全）；开启后 `Ctrl+/` 等注释操作改用 GAS 原生 `#`（原生 `.s` 直接汇编需开启——GAS 拒绝 `//`；修改即时生效） |
+| `codeblocks.astyleOptions` | `["--style=allman", "--indent=spaces=4"]` | AStyle 格式化选项 |
+| `codeblocks.todo.keywords` | `["TODO","FIXME","NOTE","HACK","XXX"]` | TODO 关键字（列表扫描 + Add TODO Item 类型选项） |
+| `codeblocks.tools` | `[]` | 用户自定义工具（对等 Code::Blocks Configure tools）：`{ name, command, arguments?, workingDirectory?, env?, output }`；`output` ∈ `output`（专用输出通道）/ `terminal` / `silent`；支持别名宏 `${file}` `${fileDir}` `${projectDir}` `${projectName}` `${workspaceFolder}` 与 CB 宏 `$(VAR)`；条目在 Tools 菜单动态列出 |
+
+### 13.7 快捷键
+
+| 设置项 | 默认值 | 说明 |
+|--------|--------|------|
+| `codeblocks.keybindings.cbStyle` | `false` | CB 保真键位：启用与 VS Code 默认冲突的 Code::Blocks 键位（F5 断点 / F2 Build Log / Ctrl+R 替换 等 12 项，详见 §12.3）；关闭即恢复 VS Code 默认 |
+| `codeblocks.keybindings.overrides` | `{}` | 逐命令自定义快捷键（键名 = 命令短 id，值 = 键位串或空 = 解绑）；推荐用可视化面板（§12.5）修改（**扩展设置界面该项描述内即有一键入口**）；修改后**自动写入用户 `keybindings.json`**（仅托管条目 + 首次备份） |
+
+---
+
+## 14. RISC-V 交叉编译完整示例
+
+> 本示例以一个 RISC-V 交叉编译工程为例（编译器 ID 假设为 `riscv32-elf`，已在 Code::Blocks 中配置），演示零配置交叉编译流程。
+
+### 14.1 前置条件
+
+1. 已安装 Code::Blocks 并配置过该 RISC-V 交叉编译器（存在于 `%APPDATA%\CodeBlocks\default.conf` 的 `/compiler/user_sets/riscv32-elf`）。
+2. 扩展自动从该配置读取 `C_COMPILER` / `LINKER` 等程序路径，**无需手动填路径**。
+
+> 若 Code::Blocks 未配置，也可在设置 `codeblocks.compilerPrograms` 中手动指定：
+> ```json
+> {
+>   "codeblocks.compilerPrograms": {
+>     "C": "D:\\riscv-toolchain\\bin\\riscv32-elf-gcc.exe",
+>     "CPP": "D:\\riscv-toolchain\\bin\\riscv32-elf-g++.exe",
+>     "LD": "D:\\riscv-toolchain\\bin\\riscv32-elf-g++.exe",
+>     "LIB": "D:\\riscv-toolchain\\bin\\riscv32-elf-ar.exe"
+>   }
+> }
+> ```
+
+### 14.2 工程结构
+
+```
+my-project/
+├── app.cbp
+├── platform/            ← 平台源文件
+├── drivers/             ← 外设驱动源文件
+├── common/              ← 公共组件源文件
+└── Output/
+    ├── bin/             ← 最终固件 app.elf
+    └── obj/             ← 对象文件（含 custom.o 链接脚本对象）
+```
+
+### 14.3 `app.cbp` 关键配置
+
+```xml
+<?xml version="1.0" encoding="UTF-8" standalone="yes" ?>
+<CodeBlocks_project_file>
+  <FileVersion major="1" minor="6" />
+  <Project>
+    <Option title="app" />
+    <Option pch_mode="2" />
+    <Option compiler="riscv32-elf" />
+
+    <Build>
+      <Target title="Debug">
+        <!-- type="1" = 控制台应用；RISC-V 下会走 LinkConsoleExeCmd，不加 -mwindows -->
+        <Option type="1" />
+        <Option output="Output/bin/app.elf" />
+        <Option object_output="Output/obj/" />
+        <Option compiler="riscv32-elf" />
+
+        <Compiler>
+          <Add option="-march=rv32imac" />
+          <Add option="-mabi=ilp32" />
+          <Add option="-Os" />
+        </Compiler>
+
+        <Linker>
+          <Add library="platform" />
+          <Add library="drivers" />
+          <Add library="common" />
+          <Add option="-TOutput/obj/custom.o" />
+        </Linker>
+
+        <Unit filename="main.c" />
+        <Unit filename="platform/uart.c" />
+        <Unit filename="drivers/gpio.c" />
+        <!-- ... 其余 Unit ... -->
+      </Target>
+    </Build>
+  </Project>
+</CodeBlocks_project_file>
+```
+
+### 14.4 操作步骤
+
+1. 用 VS Code 打开工程根目录，扩展检测到 `app.cbp` 并提示打开。
+2. 状态栏 **Compiler** 显示探测到的 RISC-V 工具链（如 `RISC-V GCC (riscv32-elf)`）。
+3. 状态栏 **Target** 选择 `Debug`。
+4. 按 `Ctrl+F9` 构建。扩展自动：
+   - 用 `riscv32-elf-gcc` 编译各 `.c`，对象写到 `Output/obj/`；
+   - 用 `riscv32-elf-ld`（经 `LinkConsoleExeCmd`）链接，加入 `-lplatform -ldrivers -lcommon` 与 `-TOutput/obj/custom.o`；
+   - 产出 `Output/bin/app.elf`。
+5. 查看 **Build Log**：分组节点显示 `错误 (0)` / `警告 (N)`，有错误时 `F4` 逐个定位。
+
+### 14.5 注意事项
+
+- **必须使用控制台应用类型**（`<Option type="1"/>`）。若误用 Windows GUI 类型（`-mwindows`），RISC-V 链接器会报 `unrecognised emulation mode: windows`。
+- **无独立 `options_riscv32-elf.xml`** 时，扩展复用 GCC 模板（`options_gcc.xml`）生成命令行，这是预期行为。
+- 交叉编译器程序路径来源于 Code::Blocks 的 `default.conf`；若路径失效，用 `Code::Blocks: Detect Compilers` 重新探测，或手动写 `codeblocks.compilerPrograms`。
+- 构建产物名 `app.elf` 无 `.exe` 后缀；增量跳过判断已兼容无扩展名输出（自动匹配 `.exe` 回退）。
+
+---
+
+## 15. 常见问题
+
+**Q：构建时任务管理器里 VS Code 多出上百个 `rg.exe` / `conhost.exe`，CPU 打满？**
+A：多半是**工作区路径里含 glob 元字符**（`[ ] { } * ?`）导致的。VS Code 的 AI 指令定位器会把 `.github/instructions` / `.claude/rules` 这类位置拼成绝对路径后做 glob 拆分，遇到第一个含元字符的目录名（例如 `[内部]5756C_lvd_reset`）就把**搜索根截断到祖先目录**，于是每次文件变更都用 `rg --files`（不带任何 `-g` 过滤）枚举整个祖先目录——构建写几十个对象文件就会叠出上百次枚举。处理办法：① 命令 `Code::Blocks: 检查工作区路径` 查看命中段与真实搜索根；② 把命中的目录改名去掉 `[ ] { } * ?`（最彻底）；或 ③ 让设置 `codeblocks.workspace.pathGuard`（默认 `prompt`）在提示后关闭这两处扫描（写入**用户设置**的 `chat.instructionsFilesLocations=false`，不写工作区 `.vscode/settings.json`）。
+
+**Q：增量编译后仍重新链接 / 编译？**
+A：确认链接输出与对象文件在同一磁盘，且未手动删除输出。扩展对无扩展名输出（MinGW 自动加 `.exe`）已做回退匹配。
+
+**Q：改了 `.ld` 链接脚本（或 `.xm` / `.def` / `.icf`）后，增量编译会识别吗？**
+A：分两种情形：
+- 该文件带 `compile="1"`（含 CB 惯用的自定义空命令 `buildCommand=" "`）：按 Code::Blocks 条目计数规则，**每次构建都会重链接 / 重新打包**（此类文件对象永不产生，对齐 `directcommands.cpp:585`；构建日志会注明「强制链接（对齐 CB 条目计数）」）——与 Code::Blocks 行为完全一致。
+- 普通链接输入（未显式参与编译，含带自定义命令者）：按 mtime 比对，比输出新即自动重链接 / 重新打包（保护性增强，0.8.96-dev 起）；可在设置 `codeblocks.build.linkInputExtensions` 增删扩展名或设 `[]` 关闭（**默认仅 `.xm`**；如需识别 `.ld` 等请自行添加，如 `["xm","ld"]`；支持 `xm`/`.xm`/`*.xm` 形式、大小写不敏感、可填逗号分隔字符串）。注意：Code::Blocks 对这类文件本身不自动识别（需手动填入目标属性 External dependencies）；工程外文件请用 External dependencies。
+
+**Q：构建后出现 `Debug_link.respFile`（或 `main.c.respFile`）是什么？可以删吗？**
+A：这是**响应文件**：链接 / 编译命令行超过长度阈值时，扩展（对齐 Code::Blocks `CheckForToLongCommandLine`）把命令末尾参数（通常是对象列表）写入 `@file` 供 GCC 读取——属正常构建产物，**可安全删除**（需要时会自动重新生成）。它位于对象输出目录（默认 `.objs/`，或 `.cbp` 设置的 `object_output`）；Code::Blocks 本身也不清理它。想让 Clean / Rebuild 自动清理：开启设置 `codeblocks.build.cleanResponseFiles`（默认关）。想减少生成：可把 `codeblocks.build.responseFile` 改为 `cb`（阈值 32767），但超过 8191 时经 cmd 执行有风险，`safe` 默认正为规避该风险。
+
+**Q：Build Log 错误跳转路径出现重复段（中文路径）？**
+A：已修复。升级到 0.4.0 后，编译错误行的文件路径字符类已支持中文（`\u0080-\uFFFF`）。
+
+**Q：构建（编译）时 CPU 一直 100% / 风扇狂转，怎么降下来？**
+A：按「谁在吃 CPU」逐个排查：
+- **并发编译任务数**（最常见）：`codeblocks.parallelJobs` **默认 8**（此前默认「逻辑核数 × 2，最多 32」，8 线程机即 16、16 核机 32）。按需调整：`1` = 串行最省；`4` 适合老旧机器；`0` = 恢复自动（`min(逻辑核数 × 2, 32)`）。可在工程所在文件夹的 `.vscode/settings.json` 里单独设置（该设置按资源作用域读取，多根工作区按工程生效），下一次构建生效。**另有进程预算兜底**：实际并发不会超过 `max(8, 逻辑核数)`，被收敛时构建开始会打印一行说明（例：请求 32 → 实际 8）。
+- **clangd 后台索引**：clangd 是独立进程，默认会在后台为工程建索引（大 SDK 上 CPU/内存占用明显）。可把 `codeblocks.clangd.indexBackground` 设为 `skip`（牺牲部分跨文件跳转）或 `build`（更积极）；构建中若因切换活动工程触发编译数据库变化，扩展会**把 clangd 重启推迟到构建结束**，避免整库重索引与编译抢 CPU。
+- **编译缓存（ccache/sccache）**：默认关闭。开启后首次/未命中构建会多一次预处理（ccache 需要哈希输入），CPU 可能略升，但重复构建命中缓存时显著更快；MSVC 请用 sccache（ccache 不适配 cl.exe）。若只需省 CPU 而不追求命中率，保持默认 `none`。
+- **include 依赖扫描**：构建开始会在扩展宿主内扫描 `#include`（跨构建缓存已扩到 8192 个文件）。巨型工程若想跳过，可开 `codeblocks.build.skipIncludeDeps`（头文件改动不再触发重编译，需自行全量构建）。
+
+扩展自身侧也已收口：每条编译输出只解析一次（此前最多 4 次）、增量检查与详细输出的设置读取改为每轮构建一次、ccache 前缀按轮记忆化、编译子进程以隐藏窗口方式派生（`windowsHide`）、clangd 探测的同步子进程带超时。
+
+**Q：任务管理器里 VS Code 的子进程/线程数暴增（几百个）、CPU 100%，是扩展在狂开进程吗？**
+A：先分清「进程」和「进程链」，再按三步定位：
+1. **打开 `codeblocks.build.traceProcesses`**（默认关）→ 构建结束输出通道会打印一行 `Child processes started by this build: N spawn(s), peak P alive at once (concurrency limit M, logical CPUs C)`。这里的 N/P **只统计扩展自己派生的进程**（shell / 编译器驱动）。如果任务管理器里的数量远大于 P，说明膨胀来自编译器再派生的 `cc1`/`as`、工具链包装脚本、clangd 或 ripgrep，而不是扩展直接拉起。
+2. **核对并发上限**：`codeblocks.parallelJobs` 的生效值（含文件夹级）与上面那行的 `concurrency limit` 是否一致；8 并发时同时存活的编译相关进程通常在 24~40 个量级。
+3. **关掉叠加因素复测**：临时设 `codeblocks.clangd.enabled: false`（或 `indexBackground: skip`）、`codeblocks.build.skipIncludeDeps: true`、并把 `**/Output/**`、`**/obj/**`、`**/bin/**` 加进 `files.watcherExclude`，逐项对比。
+
+扩展侧的进程链也已收敛：编译/链接命令**不再经过 `cmd.exe`**（直接 argv 派生，每单元少一个进程），PCH 旧产物改在宿主内删除（不再拼 `cmd /c if exist … del …`），pre/post 脚本派生带 `windowsHide`，构建期不再生成编译数据库（推迟到构建结束），系统头探测结果按工具链时间戳缓存。
+
+**Q：构建时任务管理器里出现成百上千个 `rg.exe` / "控制台窗口主机"，CPU 被打满、构建慢 10 倍？**
+A：这是**工作区级 ripgrep 风暴**，与编译进程无关。判定与定位方法：
+1. **看扩展自报**：开 `codeblocks.build.traceProcesses`，构建结束那行 `peak P` 若只有个位数（如 8），而任务管理器里是几百个 → 多出来的不是编译进程。
+2. **看真实镜像名**：任务管理器「进程」页的应用分组里，子进程显示的是**应用名**而不是镜像名——请到「详细信息」页按名称排序，或直接数 `rg.exe` / `conhost.exe` 的个数。VS Code 的 ripgrep 由**文件搜索服务**派生，每个还会带一个隐藏控制台 `conhost.exe`，所以数量成对出现。
+3. **成因**（历史推断，适用于「其它扩展自己监听工作区」的情形；本次已定位到更常见的成因是**工作区路径含 glob 元字符**，见本节第一条 FAQ）：某些扩展在**构建产物落盘（`Output/obj/*.o` 等）**时会对整个工作区做一次全量文件枚举（`workspace.findFiles('**/*')`）。工作区越大、越没有排除项，每次枚举越慢（几万文件要 10~20 秒），于是请求不断堆积 → 几百个 `rg.exe` 同时存在 → CPU 100%、扩展宿主被饿死（构建墙钟会比正常慢一个数量级）。
+4. **30 秒复现（不用编译）**：仓库内 `release\repro-rg-storm.ps1`（按 2 秒一个的节奏在 `Output/obj` 下造 40 个假 `.o`，并采样 `rg.exe` 峰值）。峰值 ≥10 即复现。
+5. **定位到具体扩展**：用复现脚本做 A/B——在「扩展」视图里对当前工作区**禁用一半扩展 → 重载窗口 → 再跑脚本**（二分 4 轮即可）。**已复现的真实案例**：某「搜索历史」类扩展用 `createFileSystemWatcher('**/*')` 监听整个工作区，并在 `onDidCreate/onDidChange/onDidDelete` 时重跑一次全库正则搜索（`workspace.findFiles('**/*')` + 读取每个文件），于是构建产物每落盘一个文件就触发一次全量扫描——这正是「任务管理器几百个 rg.exe + CPU 100%」的来源。该类扩展通常**没有**路径排除设置，`files.watcherExclude` 也挡不住，只能**禁用/卸载**。
+6. **一键排除**（对「其它扩展自己监听」的情形有效；对「路径含 glob 元字符」的成因**无效**——那种搜索请求根本没有任何 exclude 参数）：命令面板 → `Code::Blocks: 从文件监听/搜索中排除构建产物`（`codeblocks.excludeBuildOutputs`）—— 按当前工程的对象输出目录与输出文件目录，把 `**/Output/**` 等 glob 合并进**用户设置**的 `files.watcherExclude` + `search.exclude`（保留你已有的条目；若工作区设置里有旧版本写下的同名条目，会一并迁移清理），完成后提示重载窗口。
+   **实测有效性**（隔离窗口、禁用全部扩展、10 个文件/400ms 的快速风暴）：不排除时 `rg.exe` 峰值 **10**；排除 `Output` 后峰值 **0**；而每 5 秒建一个文件（慢速）时峰值为 **0** —— 说明触发条件是「文件事件的突发速率」，且这是 **VS Code 核心行为**（`rg --files` 全工作区枚举），并非某个扩展。
+7. **长期解法**：为该工程建一个专用 **VS Code 配置文件（Profile）**，只启用本扩展 + clangd；或把产物目录加进**用户设置**的 `files.watcherExclude` / `search.exclude`（见 §5.1 排查小节）。注意：若某个扩展用的是自己的文件监听（不经过 VS Code watcher），`files.watcherExclude` 不一定能挡住它，最终仍要禁用该扩展；但核心的这次风暴（本 FAQ 描述的就是它）可以被排除项挡住。
+
+**Q：同一个工程，用命令行编译只要十几秒，在 VS Code 里却要一分钟以上？**
+A：先看 `[profile]` 里的两组数：
+1. **`host event loop lag max / total`**（0.8.135 起）：这是扩展宿主主线程的卡顿（ms）。若 `max` 有几百 ms、`compile wall clock` 又很长，说明**宿主被别的扩展/同步 IO 抢住**，编译器本身没问题——按上一条排查风暴源。
+2. **单文件耗时走势**：`✔️ [Compiled] N-56 …` 行里的秒数若**单调上升**（如 2.2 → 3.9 → 8.6 → 13 s），说明外部竞争在累积（扫描风暴 / 换页），而不是并发设置不对。
+
+再核对机器余量：**提交量（Commit）明显超过物理内存**时（任务管理器「性能 → 内存」看「已提交」与「可用」），编译器工作集会被反复换页，构建慢数倍是必然的。此时：
+- 关闭常驻大户（浏览器多开、IM、网盘、安全软件的后台扫描）；
+- 加大物理内存或扩大页面文件；
+- 临时把 `codeblocks.parallelJobs` 降到 4（4 物理核机器上 8 并发并非总是更快，实测本机 8/4/2 = 5.4 s / 9.1 s / 17.8 s，但若已换页，降到 4 往往更稳）。
+
+> 判定口径：裸命令行用**相同工具链、相同 8 并发**编同一个工程，若那边 12 s、VS Code 内 60 s，且任务管理器内存 90%+，则瓶颈在机器余量与他人扩展，扩展侧只负责把自身并发/派生压到最小。
+
+**Q：构建失败但 failedCount 为 0？**
+A：已修复。0.4.0 起失败分支也会返回并累加统计。
+
+**Q：RISC-V 链接报 `unrecognised emulation mode: windows`？**
+A：目标类型误设为 Windows GUI 应用。改为控制台应用（`<Option type="1"/>`）。
+
+**Q：状态栏编译器名称不对？**
+A：执行 `Code::Blocks: Detect Compilers` 重新探测；同名工具链按安装目录 `masterPath` 与版本号区分。
+
+**Q：clangd 报 `typedef redefinition with different types`（`redefinition_different_typedef`）？**
+A：这是嵌入式 SDK 头文件（如 `typedef.h`）与工具链系统头（如 `_stdint.h`）对 `__int32_t` 等类型的跨界冲突——GCC 能编过、clangd/clang 会报错。0.8.98-dev 起该诊断**默认压制**（写入 clangd 用户配置 `Diagnostics.Suppress`）。如需恢复显示，从设置 `codeblocks.clangd.suppressedWarnings` 移除 `redefinition_different_typedef` 保存即可——扩展会自动重新生成 clangd 用户配置、clangd 自动重载；也可手动执行 `Code::Blocks: Generate compile_commands.json…`。
+
+**Q：在 `codeblocks.clangd.suppressedWarnings` 里加了压制项（如 `-Wempty-body`），clangd 仍报该诊断？**
+A：按顺序查三处：① `%LocalAppData%\clangd\config.yaml` 里本工程片段的 `Diagnostics.Suppress` 是否含该项（改设置后扩展会自动重新生成，输出通道会打印「设置已变更，按新设置重新生成」与「已更新 clangd 用户配置」）；② 值的写法是否是**字符串数组**（写成字符串会被按逗号/空白拆分并在输出通道提示，写成其它类型会回退默认值）；③ clangd 是否真的重载了配置（`clangd: Restart language server` 可强制重载）。另外头文件（`.h`）下的诊断默认被 `codeblocks.clangd.suppressHeaderDiagnostics` 整体压制，与压制列表无关。
+
+**Q：改了编译器设置（`compilerId` / `masterPath` / `compilerPrograms`），clangd 还在按旧编译器报错？**
+A：0.8.131 起改这三项会立即按新编译器重新生成编译数据库，并在数据库**真正变化**且存在已打开 C/C++ 文件时**自动重启 clangd**（输出通道会打印「编译器设置已变更，按新编译器重新生成 clangd 编译数据库」与「编译器设置已变更，重启 clangd 以刷新已打开文件」）；底部状态栏 `Compiler:` 同步刷新。若只看到「compile_commands.json 未变化，跳过写入」，说明编译数据库内容本来一致（例如该工程的编译命令没用上你改的那一项），此时不会无谓重启 clangd。
+
+**Q：关闭 `codeblocks.clangd.enabled` 后 clangd 仍报旧工程的红波浪线？**
+A：关闭只让扩展**停止生成/更新**用户级 `config.yaml`；已写入的片段属于用户级配置（优先级高于项目 `.clangd`），仍会被 clangd 读取。关闭时扩展会弹出提醒，可点「打开 clangd 配置」删除 `# >>> codeblocks-vscode …` 标记块，然后执行 `clangd: Restart language server`。
+
+**Q：修改 `codeblocks.build.persistLog` 后日志仍不写盘（或历史仍在）？**
+A：输出通道类型在窗口激活时创建，无法热切换（重建会清空当前输出）。改动后扩展会弹出提醒并可点「重载窗口」一键生效，否则重载窗口前行为保持原样。
+
+**Q：汇编文件（.s / .S）里 Ctrl+/ 插入的注释符号用 `//` 还是 `#`？**
+A：默认 `//`（对经 C 预处理的 `.S` 安全）；**原生 `.s`（GAS 直接汇编）不识别 `//`**（RISC-V 实测整行 / 行尾均报错，`#` 才是 GAS 原生注释）。需要 `#` 时开启设置 `codeblocks.editor.asmHashComment`（即时生效；`Ctrl+/`、`Ctrl+K Ctrl+C/U` 等全部注释操作一致生效）。注意块注释（`Shift+Alt+A`）始终为 C 风格，不受该设置影响。
+
+**Q：把 `codeblocks.ui.language` 改成 `en`，命令面板里还是中文？**
+A：命令标题与设置界面属于 `package.json` 静态贡献，VS Code 只按**显示语言**解析（`%key%` 在扩展加载前展开），扩展无法运行时改写。要让命令面板也变英文：`Ctrl+Shift+P` → `Configure Display Language` 选英文并重载窗口。`ui.language` 管的是运行时文案（弹窗 / QuickPick / 状态栏 / 面板标题）。
+
+**Q：切换语言后已打开的面板还是旧语言？**
+A：切换会立刻刷新面板**标题**与后续弹窗；面板正文/标签在**下次打开**时按新语言渲染。这是有意设计：工程属性面板的编辑态只存在于 WebView，重渲染会丢弃未保存的改动。
+
+**Q：`ui.language` 和 `codeblocks.log.english` 谁优先？构建日志语言怎么定？**
+A：两者管不同东西，互不覆盖：
+
+| 设置 | 管什么 | 取值影响 |
+| --- | --- | --- |
+| `codeblocks.ui.language` | **界面文案**（弹窗 / QuickPick / 状态栏 / 树视图 / 调试提示 / WebView 面板 / 菜单标签） | `auto`（跟随显示语言）/ `en` / `zh-cn`，**即时生效** |
+| `codeblocks.log.english` | **构建日志**（输出通道里的构建过程、阶段汇总、`[profile]` 剖析块） | `true` → **恒定英文**（对齐 Code::Blocks 原文，忽略 `ui.language`）；`false`（默认）→ 跟随 `ui.language` |
+
+即：想让**日志永远是英文**（对照 CB 输出排错）→ 开 `codeblocks.log.english`；想让**界面和日志一起变** → 只改 `ui.language`。
+
+**Q：构建日志（输出通道）现在中英都覆盖了吗？**
+A：**已全覆盖**（0.8.132 批次 2）。构建引擎日志、树视图节点、调试层提示、clangd/键位/统计工具提示、状态栏菜单 148 个菜单标签、三个 WebView 面板的内部字段都随 `ui.language` 双语；
+唯一例外是 `codeblocks.log.english=true` 时日志被强制英文（见上一条）。发现漏翻请按 [国际化](../dev/i18n.md) §6 的守卫自查。
+
+---
+
+## 16. 不支持的功能（已知限制）
+
+以下 Code::Blocks 功能暂未移植，遇到相关配置时扩展会明确警告或静默忽略：
+
+| 功能 | 说明 |
+|------|------|
+| **Squirrel 构建脚本** | `<Script file="*.script"/>` 未支持，构建时输出「暂不支持 Squirrel 构建脚本，已跳过」警告（已决策维持现状，不移植） |
+| **makefile 项目模式（部分）** | Build/Rebuild/Clean 走 `<MakeCommands>` 子集已支持；DistClean / 单文件编译未接入 |
+| **console runner** | Code::Blocks 的 cb_console_runner 未移植 |
+| **EvalXMLCondition exec 分支** | 编译器 XML 条件 `<if exec="程序">` 实际运行外部程序判定未实现（简化返回 default；gcc/clang XML 未使用） |
+| **`stopOnEntry` 启动参数** | 已支持（0.8.129-dev）：launch 下按 `main` → `WinMain` → `wWinMain` 选入口符号（排除 GUI 程序的 CRT `main` 桩）插临时断点实现首停并上报 `reason=entry`，均不可用时兜底到程序入口地址（无源码行；可重定位镜像除外）；启动被入口断点中止时自动撤断点重试；attach/远程给出「不适用」提示（详见 §8） |
+| **无扩展名的可执行产物（Windows）** | Run/Debug 需要一个带可执行扩展名的产物（`cmd.exe` / `CreateProcess` 的要求，对齐上游 Code::Blocks）。用 TCC 等「`-o` 不补 `.exe`」的工具链时，请在目标「输出文件名」里写全 `.exe` |
+| **单文件编译（无工程）的输出编码** | `Compile File (Without Project)` 走 VS Code 任务终端（`ShellExecution`），终端固定按 UTF-8 解释输出，编译器若输出 GBK 中文（中文 Windows 下可能）会显示为乱码；工程内构建 / 单文件编译（Build File）走扩展输出通道，编码已按行正确解码。需要完整编码支持时请使用工程构建 |
+
+### 16.1 建议用 VS Code 扩展替代（本扩展不另行实现）
+
+以下 Code::Blocks 功能（第五轮批次三 T1/T4/T5）经评估**不在本扩展重复实现**，推荐直接用成熟的 VS Code 扩展：
+
+| Code::Blocks 功能 | 推荐扩展（扩展 ID） | 说明 |
+|---|---|---|
+| CppCheck / Vera++ 分析（T1） | **Cppcheck Official**（`cppchecksolutionsab.cppcheck-official`，Cppcheck 团队支持）· **C/C++ Advanced Lint**（`jbenden.c-cpp-flylint`）· **Cppcheck Turbo**（`emielestivenartentity.cppcheck-turbo`） | 保存时/手动对 C/C++ 运行 cppcheck，结果进「问题」面板；可先用本扩展 `Code::Blocks: Export compile_commands.json…`（Build 菜单）导出编译数据库，让 cppcheck 按**工程口径**（各目标 `-I`/`-D`）分析 |
+| 正则测试台（T4） | **Regex Previewer**（`chrmarti.regex`，面向 JS/TS/PHP/Haxe）· **Regexp Explain**（`louiswt.regexp-preview`）· RegExp Preview and Editor | 通用正则验证；VS Code 搜索框的正则模式也可做基础验证 |
+| 符号表 nm 查看（T5，单库/单文件） | **Nm tool**（`wibren-wiersma.nm-tool`）· **vscode-binutils**（`sqlpassion.vscode-binutils`） | 单库 nm / objdump 查看；**「跨多个库批量搜索符号」暂无扩展替代**，已记录待办（暂不实施） |
+
+> **其余批次三项目（2026-09-28 决策：记录待办、暂不实施）**：Profiler（gprof）、Copy strings to clipboard、
+> T5 跨库符号搜索、Export Makefile 入 Build 菜单（命令已具备，当前位于 Tools 菜单）。
+> 详情与决策见 [未实现功能待办](../dev/backlog.md) §2（明确不移植清单）。
+> 提醒：以上扩展为社区/厂商产品，请自行评估安装；本扩展不内置或捆绑它们。
+
+## 许可证
+
+[GPL v3](../../LICENSE.md)。TypeScript 代码为独立重写；`resources/compilers/*.xml` 派生自 GPL v3 源码。

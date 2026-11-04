@@ -1,6 +1,6 @@
 // 覆盖矩阵生成器：把 package.json 的贡献面（命令/视图/设置/键位/语言/菜单/调试器）
 // 与各测试层（contract / 无头 unit / e2e / host）以及 src 实现做交叉统计，
-// 输出 docs/测试覆盖矩阵.md（入库）+ .cb-tools/coverage-matrix.json（临时，gitignore）。
+// 输出 docs/testing/coverage-matrix.md（入库）+ .cb-tools/coverage-matrix.json（临时，gitignore）。
 // 用法：node tests/contract/gen-coverage-matrix.js
 const fs = require('fs');
 const path = require('path');
@@ -141,7 +141,7 @@ const summary = [
 const md = [];
 md.push('# 测试覆盖矩阵（自动生成，勿手工编辑）');
 md.push('');
-md.push('> 生成方式：`npm run coverage:matrix`（脚本 [`tests/contract/gen-coverage-matrix.js`](../tests/contract/gen-coverage-matrix.js)）');
+md.push('> 生成方式：`npm run coverage:matrix`（脚本 [`tests/contract/gen-coverage-matrix.js`](../../tests/contract/gen-coverage-matrix.js)）');
 md.push('> 判定口径：契约项 ID（命令/视图/设置键/键位/语言/语法/DAP 能力标记）在对应测试层源码中出现即计为命中；');
 md.push('> 视觉层/性能层不引用命令 ID 字面量，按 `EXPLICIT_HITS`（面/引擎级覆盖）人工补充，明细见脚本内注释。');
 md.push('> 列 `src` 表示实现存在（不算测试覆盖）；`契约/无头/E2E/视觉/性能/宿主` 为六个自动化测试层。');
@@ -182,7 +182,7 @@ table('4. 快捷键', keyRows, cols);
 table('5. 语言与语法', langRows, cols);
 table('6. 调试（DAP）能力', dapRows, cols);
 
-const outMd = path.join(root, 'docs', '测试覆盖矩阵.md');
+const outMd = path.join(root, 'docs', 'testing', 'coverage-matrix.md');
 fs.writeFileSync(outMd, md.join('\n'), 'utf-8');
 const cbTools = path.join(root, '.cb-tools');
 if (!fs.existsSync(cbTools)) fs.mkdirSync(cbTools, { recursive: true });

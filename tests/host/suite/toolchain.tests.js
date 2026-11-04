@@ -12,7 +12,7 @@
 // 工具链探测（与产品相同的优先级：PATH 优先）：
 //  1. PATH（where.exe）—— 产品 src/compiler/detector.ts 的 detectAvr 也是 PATH 优先；
 //  2. CB_TOOLCHAIN_ROOT（分号分隔多根）—— 与 tests/e2e/harness.js 的探测约定一致；
-//  3. <repo>/.cb-tools/toolchains/**/bin —— 本机解包位置（docs/测试方案.md §5.0，gitignored）。
+//  3. <repo>/.cb-tools/toolchains/**/bin —— 本机解包位置（docs/testing/strategy.md §5.0，gitignored）。
 //  探测不到 → SKIP，并打印「未安装 + 安装位置 + 方案 §5.0 指引」（CI runner 上通常缺失，不判失败）。
 //
 // 产品侧「非原生工具链」接线：交叉工具链的完整程序路径由设置 `codeblocks.compilerPrograms` 提供，
@@ -192,7 +192,7 @@ function skipNoToolchain(ctx) {
   console.log('       或把其 bin 目录加入 PATH；或设 CB_TOOLCHAIN_ROOT=<bin 目录或其上级>');
   console.log('     · 下载：AVR GCC → github.com/ZakKemble/avr-gcc-build releases（avr-gcc-*-x64-windows.zip）；');
   console.log('             RISC-V GCC → github.com/xpack-dev-tools/riscv-none-elf-gcc-xpack releases（*-win32-x64.zip）');
-  console.log('     · 指引：docs/测试方案.md §5.0「工具链安装（W6，可选）」');
+  console.log('     · 指引：docs/testing/strategy.md §5.0「工具链安装（W6，可选）」');
   console.log('     · CI runner 通常未安装交叉工具链 → 本用例按 SKIP 计（不判失败、不静默通过）');
   ctx.skip();
 }

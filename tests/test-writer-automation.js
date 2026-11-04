@@ -7,7 +7,7 @@
 //   3) 新测试脚本的样板约定（命名自发现 / 摘要行 / 退出码门控）。
 // 本检查器把 1、2 变成对全部探针工程的批量断言（直接 require test-writer.js 导出的
 // roundTrip / discoverProbeProjects，并校验其 --check CLI 模式），把 3 变成对
-// tests/** 的静态约定检查。依据：docs/测试方案.md §7 维护约定
+// tests/** 的静态约定检查。依据：docs/testing/strategy.md §7 维护约定
 // （「新增无头测试：tests/test-*.js，末行输出 `N pass, M fail` 摘要」「新增分层测试：
 // 放对应目录并匹配 test-*.js（host 层为 runTest.js）」）。
 //
@@ -162,7 +162,7 @@ const unknownDirs = fs.readdirSync(TESTS, { withFileTypes: true })
 check('1.4 tests 子目录都已在 run-all.js 层配置或辅助目录白名单内（新增层需登记）',
   unknownDirs.length === 0, unknownDirs, [...knownDirs].sort());
 
-// ---------- 2. 摘要行与退出码门控（docs/测试方案.md §7） ----------
+// ---------- 2. 摘要行与退出码门控（docs/testing/strategy.md §7） ----------
 const noTally = [], noExit = [];
 for (const s of scripts) {
   const text = fs.readFileSync(s.abs, 'utf-8');
@@ -247,7 +247,7 @@ check('4.3 序列化不新增绝对本机路径（每个探针：序列化产物
 console.log('');
 console.log(`     · 发现脚本 ${scripts.length} 个（unit ${scripts.filter((s) => s.layer === 'unit').length} / 其它层 ${scripts.filter((s) => s.layer !== 'unit').length}）；` +
   `KNOWN_MANUAL=${[...KNOWN_MANUAL].join(',') || '(无)'}`);
-console.log(`     · 冻结：无摘要 ${GRANDFATHER_NO_TALLY.size} 个、无退出码门控 ${GRANDFATHER_NO_EXIT.size} 个（历史脚本，新增脚本必须满足约定，见 docs/测试方案.md §7）`);
+console.log(`     · 冻结：无摘要 ${GRANDFATHER_NO_TALLY.size} 个、无退出码门控 ${GRANDFATHER_NO_EXIT.size} 个（历史脚本，新增脚本必须满足约定，见 docs/testing/strategy.md §7）`);
 console.log(`     · 辅助脚本 ${helperFiles.length} 个（${helperFiles.join(', ')}）`);
 console.log(`     · 探针工程 ${probes.length} 个（${probes.join(', ')}）`);
 console.log(`test-writer-automation: ${pass} pass, ${fail} fail`);

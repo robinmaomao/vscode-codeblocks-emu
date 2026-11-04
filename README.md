@@ -8,11 +8,11 @@
 
 > **作者**：Robinmaomao ｜ **版本**：0.8.137
 
-[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE.md)
+[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](./LICENSE.md)
 
-> **许可证说明**：本扩展的 TypeScript 代码为独立重写（非复制 GPL 源码）；其中错误正则表（`resources/compilers/options_common_re.xml`）与命令模板（`resources/compilers/options_gcc.xml`）源自 GPL v3 的 Code::Blocks `compilergcc` 资源，因此整体按 GPL v3 发布，详见 [LICENSE.md](LICENSE.md)。
+> **许可证说明**：本扩展的 TypeScript 代码为独立重写（非复制 GPL 源码）；其中错误正则表（`resources/compilers/options_common_re.xml`）与命令模板（`resources/compilers/options_gcc.xml`）源自 GPL v3 的 Code::Blocks `compilergcc` 资源，因此整体按 GPL v3 发布，详见 [LICENSE.md](./LICENSE.md)。
 
-> 📖 详细的功能介绍、使用说明与 **RISC-V 交叉编译完整示例**见 [docs/使用说明.md](docs/使用说明.md)（英文版 [docs/使用说明.en.md](docs/使用说明.en.md)）；逐项对齐依据见 [docs/对齐对照.md](docs/对齐对照.md)。
+> 📖 详细的功能介绍、使用说明与 **RISC-V 交叉编译完整示例**见 [docs/guide/usage.md](./docs/guide/usage.md)（英文版 [docs/guide/usage.en.md](./docs/guide/usage.en.md)）；逐项对齐依据见 [docs/guide/alignment.md](./docs/guide/alignment.md)。
 
 > **非官方声明**：本扩展是社区个人开发者基于公开资料对 Code::Blocks 功能的**独立重写与移植**，与 Code::Blocks 官方项目及其作者 / 团队**无任何隶属、合作或背书关系**，也不代表其立场；「Code::Blocks」名称与标识版权归其原作者所有，此处仅用于说明所对标的功能与兼容目标。问题反馈请提交到 [本仓库 Issues](https://github.com/robinmaomao/vscode-codeblocks-emu/issues)，**不要**提交给 Code::Blocks 官方。
 >
@@ -20,27 +20,27 @@
 
 ## 截图
 
-> 以下截图均由本扩展在真实 VS Code 中运行录制（示例工程即仓库内的 [`test-project/`](test-project/)：3 个 `.cbp` + 1 个 `.workspace`）。
+> 以下截图均由本扩展在真实 VS Code 中运行录制（示例工程即仓库内的 [`test-project/`](./test-project/)：3 个 `.cbp` + 1 个 `.workspace`）。
 
 ### 打开工作区：自动检测并多选打开 `.cbp` / `.workspace`
 
-![自动检测并多选打开工作区内的工程](docs/images/detect-open-projects.png)
+![自动检测并多选打开工作区内的工程](./docs/images/detect-open-projects.png)
 
 ### 工程树 · 项目管理 · 工程分析
 
-![工程树与工程分析](docs/images/project-tree.png)
+![工程树与工程分析](./docs/images/project-tree.png)
 
 ### 构建：状态栏菜单 → Build Workspace → 实时构建日志
 
-![构建流程巡览](docs/images/build-tour.gif)
+![构建流程巡览](./docs/images/build-tour.gif)
 
-![构建日志与结果](docs/images/build-log.png)
+![构建日志与结果](./docs/images/build-log.png)
 
 ### Code::Blocks 菜单（状态栏 `Menu`：9 大顶级菜单 + 快捷键）
 
-![Code::Blocks 菜单](docs/images/cb-menu.png)
+![Code::Blocks 菜单](./docs/images/cb-menu.png)
 
-![Build 子菜单](docs/images/cb-build-menu.png)
+![Build 子菜单](./docs/images/cb-build-menu.png)
 
 ## 特性
 
@@ -58,7 +58,7 @@
   `Code::Blocks: 从磁盘重新加载工程`；扩展自身写盘与「忽略」后不重复弹。
 - ⏹️ **随时停止构建**：构建通知上的 ❌ 按钮或命令 `Code::Blocks: Stop Build`；Windows 下 `taskkill /T /F` 强杀整棵进程树（cmd → gcc → cc1/as/ld 无残留），取消不计入失败。
 - 🛡️ **Rebuild 确认**：Rebuild 前弹出模态确认框（对齐 Code::Blocks），普通 Build 不弹窗。
-- 🚀 **构建语义对齐 Code::Blocks（节选）**——逐项依据见 [docs/对齐对照.md](docs/对齐对照.md)：
+- 🚀 **构建语义对齐 Code::Blocks（节选）**——逐项依据见 [docs/guide/alignment.md](./docs/guide/alignment.md)：
   - **文件类型判定**对齐 `FileTypeOf`：汇编源（`.S`/`.s`/`.asm`/`.ss`/`.s62`）正确编译并参与链接；链接脚本（`.ld`）等非源文件默认不编译不链接；`<Option buildCommand>` 自定义命令按 `use="1"` 语义识别。
   - **构建时序**：pre/post build 脚本（`.bat` / 命令，Windows 下实时读取系统 PATH）；项目级 pre/post 每次构建各执行一次、目标级按目标执行、post-build 按「实际产生命令」门控；Rebuild = Clean + Build；Banner 顺序/文案与 up-to-date 判定对齐 Code::Blocks 状态机。
   - **命令行与产物**：含空格工具链路径自动加引号；链接/打包对象逐文件加引号（`QuoteStringIfNeeded`，源文件/子目录含空格不截断）；无 `object_output` 时对象目录默认 `.objs`（对齐 `GetObjectOutput`）；超长命令行自动改用响应文件（`@file`）；静态库归档先删旧库再 ar；对象目录 `CreateDirRecursively` 自动创建 + `GetCommonTopLevelPath` 布局。
@@ -67,7 +67,7 @@
 
 ### 调试（GDB）
 
-- 🐞 **自研内联 DAP 调试适配器**：直接驱动 `gdb -i=mi`——断点（条件/命中次数/日志）、单步（含指令级）、变量查看与修改（含深层成员）、调用栈、线程、表达式求值、反汇编视图、Memory 内存查看、Registers 寄存器视图、数据断点、异常断点、运行到光标、Set Next Statement、指令断点、附加进程、Detach、Add Symbol File、Send GDB Command（Debug Console `-` 前缀透传 MI）、多调试会话路由（聚焦会话优先）；另有针对 MinGW GDB 7.6.1–8.1 的多项兼容修复（程序输出转发、Step Out / 条件断点 / 寄存器读取等）；**F5 已接入**：无 `launch.json` 时按活动工程目标直接启动调试，`Select and Start Debugging` 中亦可见 `Code::Blocks GDB`。详见 [docs/使用说明.md](docs/使用说明.md)。
+- 🐞 **自研内联 DAP 调试适配器**：直接驱动 `gdb -i=mi`——断点（条件/命中次数/日志）、单步（含指令级）、变量查看与修改（含深层成员）、调用栈、线程、表达式求值、反汇编视图、Memory 内存查看、Registers 寄存器视图、数据断点、异常断点、运行到光标、Set Next Statement、指令断点、附加进程、Detach、Add Symbol File、Send GDB Command（Debug Console `-` 前缀透传 MI）、多调试会话路由（聚焦会话优先）；另有针对 MinGW GDB 7.6.1–8.1 的多项兼容修复（程序输出转发、Step Out / 条件断点 / 寄存器读取等）；**F5 已接入**：无 `launch.json` 时按活动工程目标直接启动调试，`Select and Start Debugging` 中亦可见 `Code::Blocks GDB`。详见 [docs/guide/usage.md](./docs/guide/usage.md)。
 
 ### IntelliSense 与符号
 
@@ -76,7 +76,7 @@
 
 ### 界面与快捷键
 
-- 🌐 **中英文界面语言**：静态贡献（命令标题 / 设置描述 / 视图名）跟随 **VS Code 显示语言**（`package.nls.json` 英文默认 + `package.nls.zh-cn.json` 中文）；运行时文案（弹窗 / QuickPick / 状态栏 / WebView 面板标题）由设置 **`codeblocks.ui.language`**（`auto` / `en` / `zh-cn`，默认 `auto`）控制并**即时生效**，也可用命令 `Code::Blocks: Switch UI Language…` 切换（三态选择 + 一键重载窗口）。详见 [docs/国际化.md](docs/国际化.md)。
+- 🌐 **中英文界面语言**：静态贡献（命令标题 / 设置描述 / 视图名）跟随 **VS Code 显示语言**（`package.nls.json` 英文默认 + `package.nls.zh-cn.json` 中文）；运行时文案（弹窗 / QuickPick / 状态栏 / WebView 面板标题）由设置 **`codeblocks.ui.language`**（`auto` / `en` / `zh-cn`，默认 `auto`）控制并**即时生效**，也可用命令 `Code::Blocks: Switch UI Language…` 切换（三态选择 + 一键重载窗口）。详见 [docs/dev/i18n.md](./docs/dev/i18n.md)。
 - 🗂️ **Code::Blocks 菜单（状态栏 `Menu`）**：File / Edit / View / Search / Project / Build / Debug / Tools / Settings 九大菜单——支持**子菜单下钻**、分隔线、**快捷键标注**；Build 菜单含 Compile Current File（Ctrl+Shift+F9）、Workspace 三连（Build / Rebuild / Clean Workspace）、Abort、Errors（上一/下一/清除全部）、Select Target、Export compile_commands.json；未打开工程时相关项标注提示；悬停就地展开常用命令链接。
 - ⌨️ **快捷键与冲突处理**：默认键位全部避开 VS Code 默认（`Alt+G` Goto File / `Shift+F2` Project 视图 / `Alt+F1-F2` 错误导航 / `Ctrl+Shift+R` Replace in Files 等 CB 键位）；设置 `codeblocks.keybindings.cbStyle` 启用 **CB 保真键位**（F5 断点、Ctrl+R 替换 等 12 项，会覆盖 VS Code 默认，可随时关闭）；命令 `Code::Blocks: Check Keybinding Conflicts` 扫描内置默认 / 用户 keybindings.json / 其它扩展并生成冲突报告。
 - 🎛️ **快捷键可配置**：设置 `codeblocks.keybindings.overrides`（30 项：构建/调试/错误导航/工程管理 + 外部别名 + CB 保真组）为唯一数据源，修改后**自动写入用户 keybindings.json**（自定义键 + 对默认键的移除规则；仅托管条目、注释保留、首次备份、回读校验回滚）；另提供**可视化设置面板**（`Code::Blocks: Keybinding Settings`：按键捕获录入、行内冲突/生效状态、检查冲突、方案导入导出）。
@@ -103,7 +103,7 @@
 | **console runner** | Code::Blocks 的 cb_console_runner 未移植（集成终端等价） |
 | **default.conf 全局设置编辑**（B1/B2/C4） | 评估后不做：default.conf 为 Code::Blocks 本体私有配置（CB 退出/打开设置时整文件覆写，写入竞态无法消除）；全局目录/选项/库/变量已被完整读取生效。替代：`Settings → Default Config…` 打开文件手工编辑 |
 
-> 完整限制清单、行为差异与替代方案见 [docs/使用说明.md](docs/使用说明.md) §16 与 [docs/对齐对照.md](docs/对齐对照.md)。
+> 完整限制清单、行为差异与替代方案见 [docs/guide/usage.md](./docs/guide/usage.md) §16 与 [docs/guide/alignment.md](./docs/guide/alignment.md)。
 > 部分 Code::Blocks 工具（CppCheck / 正则测试台 / nm 查看等）不在本扩展重复实现，推荐使用成熟 VS Code 扩展替代（见使用说明 §16.1）。
 
 ## 安装
@@ -171,7 +171,7 @@ code --extensionDevelopmentPath="." --disable-extensions --new-window
 
 ### 更多用法
 
-工程树操作（多项目拖拽排序 / 文件编译·链接开关 / 单文件 Build·Clean）、错误导航（`F4` / `Shift+F4`）、快捷键与命令全集、各面板说明，见 **[docs/使用说明.md](docs/使用说明.md)**（§3 界面 / §6 构建 / §11 快捷键 / §13 设置）——README 不再重复维护。
+工程树操作（多项目拖拽排序 / 文件编译·链接开关 / 单文件 Build·Clean）、错误导航（`F4` / `Shift+F4`）、快捷键与命令全集、各面板说明，见 **[docs/guide/usage.md](./docs/guide/usage.md)**（§3 界面 / §6 构建 / §11 快捷键 / §13 设置）——README 不再重复维护。
 
 ## 配置（常用设置）
 
@@ -210,7 +210,7 @@ code --extensionDevelopmentPath="." --disable-extensions --new-window
 | `codeblocks.clangd.queryDriver` | `false` | 开启后若 `clangd.arguments` 缺 `--query-driver` 则在输出通道提示（命令 `Configure clangd --query-driver` 可一键写入） |
 | `codeblocks.clangd.extraConfig` | `""` | 自由 YAML，作为同作用域**后置**片段注入（可覆盖扩展写入的任意键；扩展自动补 `If.PathMatch`） |
 
-> 完整 83 项设置（8 个分区，中英双语描述）见 [docs/使用说明.md](docs/使用说明.md) §13。另有两条 clangd 命令：`Code::Blocks: Clean Stale clangd Config Fragments`（清理失效片段 + 孤儿缓存目录，预览后确认）与 `Code::Blocks: Configure clangd --query-driver`（交叉编译器保真）。
+> 完整 83 项设置（8 个分区，中英双语描述）见 [docs/guide/usage.md](./docs/guide/usage.md) §13。另有两条 clangd 命令：`Code::Blocks: Clean Stale clangd Config Fragments`（清理失效片段 + 孤儿缓存目录，预览后确认）与 `Code::Blocks: Configure clangd --query-driver`（交叉编译器保真）。
 
 ## 架构
 
@@ -245,4 +245,4 @@ src/
 
 ## 许可证
 
-[GPL v3](LICENSE.md)。本项目从 Code::Blocks 源码（LGPL/GPL v3）移植核心逻辑，`resources/compilers/*.xml` 派生自 GPL v3 源码。
+[GPL v3](./LICENSE.md)。本项目从 Code::Blocks 源码（LGPL/GPL v3）移植核心逻辑，`resources/compilers/*.xml` 派生自 GPL v3 源码。

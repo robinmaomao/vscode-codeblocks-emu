@@ -8,11 +8,11 @@ Open a `.cbp` / `.workspace` project directly in VS Code and get a build, debug,
 
 > **Author**: Robinmaomao ｜ **Version**: 0.8.137
 
-[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE.md)
+[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](./LICENSE.md)
 
-> **License note**: The TypeScript code of this extension is an independent rewrite (it does not copy GPL sources); however, the error regular-expression table (`resources/compilers/options_common_re.xml`) and the command templates (`resources/compilers/options_gcc.xml`) are derived from the GPL v3 Code::Blocks `compilergcc` resources, so the extension as a whole is released under GPL v3. See [LICENSE.md](LICENSE.md) for details.
+> **License note**: The TypeScript code of this extension is an independent rewrite (it does not copy GPL sources); however, the error regular-expression table (`resources/compilers/options_common_re.xml`) and the command templates (`resources/compilers/options_gcc.xml`) are derived from the GPL v3 Code::Blocks `compilergcc` resources, so the extension as a whole is released under GPL v3. See [LICENSE.md](./LICENSE.md) for details.
 
-> 📖 For a detailed feature tour, usage instructions, and a **complete RISC-V cross-compilation example**, see [Usage guide](docs/使用说明.md) (English: [Usage guide (EN)](docs/使用说明.en.md)); for item-by-item alignment evidence, see [Code::Blocks alignment reference](docs/对齐对照.md).
+> 📖 For a detailed feature tour, usage instructions, and a **complete RISC-V cross-compilation example**, see [Usage guide](./docs/guide/usage.md) (English: [Usage guide (EN)](./docs/guide/usage.en.md)); for item-by-item alignment evidence, see [Code::Blocks alignment reference](./docs/guide/alignment.md).
 
 > **Unofficial notice**: This extension is an **independent rewrite and port** of Code::Blocks features by an individual community developer based on public information. It has **no affiliation, cooperation, or endorsement relationship** with the official Code::Blocks project or its authors / team, and does not represent their positions. The "Code::Blocks" name and logo are copyright their original authors; they are used here only to describe the feature set and compatibility target being modelled. Please report issues to [this repository](https://github.com/robinmaomao/vscode-codeblocks-emu/issues), **not** to the Code::Blocks team.
 >
@@ -20,27 +20,27 @@ Open a `.cbp` / `.workspace` project directly in VS Code and get a build, debug,
 
 ## Screenshots
 
-> All screenshots below were recorded from this extension running in real VS Code (the sample workspace is the [`test-project/`](test-project/) folder in this repository: 3 `.cbp` files + 1 `.workspace`).
+> All screenshots below were recorded from this extension running in real VS Code (the sample workspace is the [`test-project/`](./test-project/) folder in this repository: 3 `.cbp` files + 1 `.workspace`).
 
 ### Opening a workspace: auto-detect and multi-select `.cbp` / `.workspace`
 
-![Automatically detect and multi-select the projects in the workspace](docs/images/detect-open-projects.png)
+![Automatically detect and multi-select the projects in the workspace](./docs/images/detect-open-projects.png)
 
 ### Project tree · Project management · Project analysis
 
-![Project tree and project analysis](docs/images/project-tree.png)
+![Project tree and project analysis](./docs/images/project-tree.png)
 
 ### Build: status bar menu → Build Workspace → live Build Log
 
-![Build workflow tour](docs/images/build-tour.gif)
+![Build workflow tour](./docs/images/build-tour.gif)
 
-![Build Log and results](docs/images/build-log.png)
+![Build Log and results](./docs/images/build-log.png)
 
 ### Code::Blocks menu (status bar `Menu`: 9 top-level menus + keybindings)
 
-![Code::Blocks menu](docs/images/cb-menu.png)
+![Code::Blocks menu](./docs/images/cb-menu.png)
 
-![Build submenu](docs/images/cb-build-menu.png)
+![Build submenu](./docs/images/cb-build-menu.png)
 
 ## Features
 
@@ -55,7 +55,7 @@ Open a `.cbp` / `.workspace` project directly in VS Code and get a build, debug,
 - 📄 **Single-file build / single-file Clean**: right-click a file in the project tree → `Build File` (aligned with Code::Blocks `CompileFile`: DepsSearchStart + IsObjectOutdated incremental check, with a command byte-identical to the whole-target build) / `Clean File` (deletes the object and the `.depend` dependency files).
 - ⏹️ **Stop a build at any time**: the ❌ button on the build notification or the `Code::Blocks: Stop Build` command; on Windows, `taskkill /T /F` kills the entire process tree (cmd → gcc → cc1/as/ld, no leftovers), and a cancellation is not counted as a failure.
 - 🛡️ **Rebuild confirmation**: a modal confirmation dialog appears before Rebuild (aligned with Code::Blocks); a normal Build shows no dialog.
-- 🚀 **Build semantics aligned with Code::Blocks (excerpt)** — item-by-item evidence in [Code::Blocks alignment reference](docs/对齐对照.md):
+- 🚀 **Build semantics aligned with Code::Blocks (excerpt)** — item-by-item evidence in [Code::Blocks alignment reference](./docs/guide/alignment.md):
   - **File type detection** aligned with `FileTypeOf`: assembly sources (`.S`/`.s`/`.asm`/`.ss`/`.s62`) are compiled correctly and take part in linking; non-source files such as linker scripts (`.ld`) are neither compiled nor linked by default; `<Option buildCommand>` custom commands are recognized with `use="1"` semantics.
   - **Build sequencing**: pre/post-build scripts (`.bat` / commands, reading the system PATH live on Windows); project-level pre/post run once per build, target-level scripts run per target, and post-build is gated on "commands actually produced"; Rebuild = Clean + Build; banner order/wording and the up-to-date check align with the Code::Blocks state machine.
   - **Command lines and artifacts**: toolchain paths containing spaces are quoted automatically; objects passed to link/archive are quoted file by file (`QuoteStringIfNeeded`, so spaces in source files/subdirectories are not truncated); the object directory defaults to `.objs` when there is no `object_output` (aligned with `GetObjectOutput`); overlong command lines switch to a response file (`@file`); static library archiving deletes the old library before running ar; the object directory is created by `CreateDirRecursively` with the `GetCommonTopLevelPath` layout.
@@ -64,7 +64,7 @@ Open a `.cbp` / `.workspace` project directly in VS Code and get a build, debug,
 
 ### Debugging (GDB)
 
-- 🐞 **In-house inline DAP debug adapter**: drives `gdb -i=mi` directly — breakpoints (conditional / hit count / log), stepping (including instruction-level), variable inspection and modification (including nested members), call stack, threads, expression evaluation, disassembly view, Memory view, Registers view, data breakpoints, exception breakpoints, Run to Cursor, Set Next Statement, instruction breakpoints, attach to process, Detach, Add Symbol File, Send GDB Command (the Debug Console `-` prefix passes straight through to MI), multi-session routing (focused session first); plus a number of compatibility fixes for MinGW GDB 7.6.1–8.1 (program output forwarding, Step Out / conditional breakpoints / register reads, etc.); **F5 is wired up**: with no `launch.json`, debugging starts directly from the active project target, and `Code::Blocks GDB` also appears in `Select and Start Debugging`. See [Usage guide](docs/使用说明.md) for details.
+- 🐞 **In-house inline DAP debug adapter**: drives `gdb -i=mi` directly — breakpoints (conditional / hit count / log), stepping (including instruction-level), variable inspection and modification (including nested members), call stack, threads, expression evaluation, disassembly view, Memory view, Registers view, data breakpoints, exception breakpoints, Run to Cursor, Set Next Statement, instruction breakpoints, attach to process, Detach, Add Symbol File, Send GDB Command (the Debug Console `-` prefix passes straight through to MI), multi-session routing (focused session first); plus a number of compatibility fixes for MinGW GDB 7.6.1–8.1 (program output forwarding, Step Out / conditional breakpoints / register reads, etc.); **F5 is wired up**: with no `launch.json`, debugging starts directly from the active project target, and `Code::Blocks GDB` also appears in `Select and Start Debugging`. See [Usage guide](./docs/guide/usage.md) for details.
 
 ### IntelliSense and symbols
 
@@ -73,7 +73,7 @@ Open a `.cbp` / `.workspace` project directly in VS Code and get a build, debug,
 
 ### UI and keybindings
 
-- 🌐 **Chinese/English UI language**: static contributions (command titles / setting descriptions / view names) follow the **VS Code display language** (`package.nls.json` English default + `package.nls.zh-cn.json` Chinese); runtime strings (dialogs / QuickPick / status bar / WebView panel titles) are controlled by the **`codeblocks.ui.language`** setting (`auto` / `en` / `zh-cn`, default `auto`) and take effect **immediately**; you can also switch with the `Code::Blocks: Switch UI Language…` command (three-state choice + one-click window reload). See [Internationalization (i18n)](docs/国际化.md) for details.
+- 🌐 **Chinese/English UI language**: static contributions (command titles / setting descriptions / view names) follow the **VS Code display language** (`package.nls.json` English default + `package.nls.zh-cn.json` Chinese); runtime strings (dialogs / QuickPick / status bar / WebView panel titles) are controlled by the **`codeblocks.ui.language`** setting (`auto` / `en` / `zh-cn`, default `auto`) and take effect **immediately**; you can also switch with the `Code::Blocks: Switch UI Language…` command (three-state choice + one-click window reload). See [Internationalization (i18n)](./docs/dev/i18n.md) for details.
 - 🗂️ **Code::Blocks menu (status bar `Menu`)**: the nine menus File / Edit / View / Search / Project / Build / Debug / Tools / Settings — supports **submenu drill-down**, separators, and **keybinding labels**; the Build menu contains Compile Current File (Ctrl+Shift+F9), the Workspace trio (Build / Rebuild / Clean Workspace), Abort, Errors (previous/next/clear all), Select Target, Export compile_commands.json; related items are annotated when no project is open; hovering expands common command links in place.
 - ⌨️ **Keybindings and conflict handling**: the default keys avoid all VS Code defaults (`Alt+G` Goto File / `Shift+F2` Project view / `Alt+F1-F2` error navigation / `Ctrl+Shift+R` Replace in Files and other CB keybindings); the `codeblocks.keybindings.cbStyle` setting enables **CB-faithful keybindings** (F5 toggle breakpoint, Ctrl+R replace, and 12 items in total, which override VS Code defaults and can be turned off at any time); the `Code::Blocks: Check Keybinding Conflicts` command scans built-in defaults / the user keybindings.json / other extensions and produces a conflict report.
 - 🎛️ **Configurable keybindings**: the `codeblocks.keybindings.overrides` setting (30 items: build/debug/error navigation/project management + external aliases + the CB-faithful group) is the single source of truth, and changes are **written to the user keybindings.json automatically** (custom keys + removal rules for the default keys; managed entries only, comments preserved, first-time backup, read-back validation with rollback); a **visual settings panel** is also provided (`Code::Blocks: Keybinding Settings`: key capture input, inline conflict/effective status, conflict check, profile import/export).
@@ -100,7 +100,7 @@ The following Code::Blocks features have not been ported yet; the extension warn
 | **console runner** | The Code::Blocks cb_console_runner is not ported (the integrated terminal is equivalent) |
 | **default.conf global settings editing** (B1/B2/C4) | Decided against after evaluation: default.conf is Code::Blocks' own private configuration (CB rewrites the whole file on exit/when opening settings, so write races cannot be eliminated); global directories/options/libraries/variables are already read and applied in full. Alternative: `Settings → Default Config…` to open the file and edit it by hand |
 
-> The complete limitation list, behavior differences, and alternatives are in [Usage guide](docs/使用说明.md) §16 and [Code::Blocks alignment reference](docs/对齐对照.md).
+> The complete limitation list, behavior differences, and alternatives are in [Usage guide](./docs/guide/usage.md) §16 and [Code::Blocks alignment reference](./docs/guide/alignment.md).
 > Some Code::Blocks tools (CppCheck / regex test bench / nm viewer, etc.) are not re-implemented in this extension; use mature VS Code extensions instead (see §16.1 of the user guide).
 
 ## Installation
@@ -168,7 +168,7 @@ code --extensionDevelopmentPath="." --disable-extensions --new-window
 
 ### More usage
 
-Project tree operations (multi-project drag ordering / per-file compile·link toggles / single-file Build·Clean), error navigation (`F4` / `Shift+F4`), the full keybinding and command reference, and panel descriptions are in **[Usage guide](docs/使用说明.md)** (§3 UI / §6 Build / §11 Keybindings / §13 Settings) — this README does not duplicate them.
+Project tree operations (multi-project drag ordering / per-file compile·link toggles / single-file Build·Clean), error navigation (`F4` / `Shift+F4`), the full keybinding and command reference, and panel descriptions are in **[Usage guide](./docs/guide/usage.md)** (§3 UI / §6 Build / §11 Keybindings / §13 Settings) — this README does not duplicate them.
 
 ## Configuration (common settings)
 
@@ -207,7 +207,7 @@ Project tree operations (multi-project drag ordering / per-file compile·link to
 | `codeblocks.clangd.queryDriver` | `false` | When enabled, warns in the Output channel if `clangd.arguments` lacks `--query-driver` (the `Configure clangd --query-driver` command writes it in one click) |
 | `codeblocks.clangd.extraConfig` | `""` | Free-form YAML injected as a **trailing** fragment in the same scope (can override any key written by the extension; the extension adds `If.PathMatch` automatically) |
 
-> The complete set of 83 settings (8 sections, bilingual descriptions) is in [Usage guide](docs/使用说明.md) §13. There are also two clangd commands: `Code::Blocks: Clean Stale clangd Config Fragments` (cleans stale fragments + orphan cache directories, with a preview before confirming) and `Code::Blocks: Configure clangd --query-driver` (cross-compiler fidelity).
+> The complete set of 83 settings (8 sections, bilingual descriptions) is in [Usage guide](./docs/guide/usage.md) §13. There are also two clangd commands: `Code::Blocks: Clean Stale clangd Config Fragments` (cleans stale fragments + orphan cache directories, with a preview before confirming) and `Code::Blocks: Configure clangd --query-driver` (cross-compiler fidelity).
 
 ## Architecture
 
@@ -242,4 +242,4 @@ The extension reads the Code::Blocks "user-defined compilers" (`/compiler/user_s
 
 ## License
 
-[GPL v3](LICENSE.md). This project ports core logic from the Code::Blocks sources (LGPL/GPL v3); `resources/compilers/*.xml` is derived from GPL v3 sources.
+[GPL v3](./LICENSE.md). This project ports core logic from the Code::Blocks sources (LGPL/GPL v3); `resources/compilers/*.xml` is derived from GPL v3 sources.

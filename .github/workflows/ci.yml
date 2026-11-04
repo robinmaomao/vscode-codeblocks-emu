@@ -67,7 +67,7 @@ jobs:
           npm run coverage:matrix
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-          $file = 'docs/测试覆盖矩阵.md'
+          $file = 'docs/testing/coverage-matrix.md'
           $out = @('### 测试覆盖矩阵汇总（npm run coverage:matrix）', '')
           $table = New-Object System.Collections.Generic.List[string]
           if (Test-Path -LiteralPath $file) {
@@ -80,7 +80,7 @@ jobs:
             }
             $out += $table
           } else {
-            $out += '（未找到 docs/测试覆盖矩阵.md）'
+            $out += '（未找到 docs/testing/coverage-matrix.md）'
           }
           Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value $out -Encoding utf8
 
@@ -99,7 +99,7 @@ jobs:
           path: |
             .cbtest.txt
             .cb-tools/report-*.json
-            docs/测试覆盖矩阵.md
+            docs/testing/coverage-matrix.md
           if-no-files-found: ignore
 
   # ---------- 门控：真实工程 E2E（需要 gcc/g++/gdb/ar） ----------
@@ -215,5 +215,5 @@ jobs:
           name: desktop-reports
           path: |
             .cb-tools/visual-diff/**
-            docs/性能基准.md
+            docs/testing/performance-baseline.md
           if-no-files-found: ignore

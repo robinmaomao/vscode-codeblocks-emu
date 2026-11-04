@@ -123,7 +123,7 @@ suite('宿主集成 · WebView 面板（真实宿主内创建与消息协议边�
     assert.strictEqual(propTab.label, `工程属性: ${WEBVIEW_PROJ_TITLE}`, `标签标题异常：${propTab.label}`);
 
     // 3b) 界面语言切换（真实宿主）：codeblocks.ui.language=auto→en ⇒ 已打开面板标题立即变英文；
-    //     切回 zh-cn 立即恢复中文（详见 docs/国际化.md：面板正文在下次打开时按新语言渲染，标题即时刷新）
+    //     切回 zh-cn 立即恢复中文（详见 docs/dev/i18n.md：面板正文在下次打开时按新语言渲染，标题即时刷新）
     await U.setConfig('ui.language', 'en');
     const titleEn = await U.waitFor(async () => {
       const t = U.tabsOfViewType(PROP_PANEL)[0];

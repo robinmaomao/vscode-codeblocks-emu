@@ -1,6 +1,7 @@
 # 更新日志（Changelog）
 
-本文件记录**正式版**里程碑；每个 dev 迭代的逐轮发布说明见 [`docs/release/`](docs/release/)（`0.8.xx-dev.md`），版本号与维护约定见 [`docs/release/00-说明.md`](docs/release/00-说明.md)。
+本文件记录**正式版**里程碑；近期 dev 迭代的逐轮发布说明见 [`docs/release/`](./docs/release/)（`0.8.xx-dev.md`），
+`0.8.76`–`0.8.128` 的 dev 说明已合并归档到 [`docs/release/archive/`](./docs/release/archive/)；版本号与维护约定见 [`docs/release/00-index.md`](./docs/release/00-index.md)。
 
 ## 0.8.137 — 2026-11-04
 
@@ -18,8 +19,8 @@
   目标改名/删除同步 `remote_debugging`，目标删除后作用域失效不再阻断保存。
 - **编译选项面板**：「应用」改为**立即写回 `.cbp`** 并重绑重解析后的工程/目标；只管理 `options_<id>.xml` 内的选项
   （手写自定义选项保留）；应用失败在面板可见，目标已被外部改名/删除时报错而不误写工程级选项。
-- 发布说明见 [`docs/release/0.8.137.md`](docs/release/0.8.137.md)；测试结果见
-  [`docs/测试报告-0.8.137.md`](docs/测试报告-0.8.137.md)。
+- 发布说明见 [`docs/release/0.8.137.md`](./docs/release/0.8.137.md)；测试结果见
+  [`docs/testing/test-report-0.8.137.md`](./docs/testing/test-report-0.8.137.md)。
 - 规模（0.8.137 时点）：`contract 2/2`、`unit 175 FAIL=0 SKIP=1`（新增 4 个脚本 / 93 断言；
   `test-webview-panels` +21、`test-i18n-webview` +1）。
 
@@ -34,7 +35,7 @@
   （或 `auto` 模式）把 `chat.instructionsFilesLocations` 的 `.github/instructions`、`.claude/rules` 写成 `false`，
   **只写用户设置**（不写工作区 `.vscode/settings.json`、立即生效、幂等）。
 - 不改编译/链接流程、不禁用 Copilot Chat、不动 `files.watcherExclude` / `search.exclude`。
-- 根因取证与方案见 `docs/archive/RG风暴根因分析与方案-2026-11-04.md`；发布说明见 `docs/release/0.8.136.md`。
+- 根因取证与方案见 `docs/archive/2026-11-04-rg-storm-root-cause.md`；发布说明见 `docs/release/0.8.136.md`。
 - 规模（0.8.136 时点）：`contract 2/2`、`unit 171 FAIL=0 SKIP=1`（新增 `tests/test-workspace-path-guard.js`，40 断言）。
 
 ## 0.8.135 — 2026-11-03
@@ -107,7 +108,7 @@
 - **运行时文案全覆盖**（本版新增，迁移点 290 → **1123**、词条 239 → **1072**）：WebView 三个面板的**内部字段**（源级插桩 `i18n.tr()` + 193 条中文→英文反查表，不翻译工程名等数据）、状态栏菜单与 **148 个菜单标签**、树视图 5 个 provider、调试层（适配器 / MI 会话 / 调试配置）、构建引擎 5 个文件、clangd/键位/统计等工具类与工程/模型 12 个文件、`extension.ts` 剩余日志与 UI。
 - **构建日志新入口 `logT()`**（本版新增）：`codeblocks.log.english=true` 时日志**恒英文**（对齐 Code::Blocks 原文），否则跟随 `ui.language`；`src/build/**` 全面改用 `logT`，历史 `msg(zh, en)` 仅保留 3 处构建结果 toast（守卫禁止新代码在 `build/**` 调用 `msg`）。
 - **守卫**（本版新增/升级）：词条漂移 AST 守卫（含 `logT` 源串、`build/**` 禁 `msg`）、静态 nls 覆盖、**29 个已本地化文件 AST 级禁中文字面量**、WebView 插桩点 ↔ 反查表双向一致、mock 显示语言可覆盖。
-- **文档双语**（本版新增）：面向用户的三份文档各出英文版并从中文版互链 —— `README.en.md`、`docs/使用说明.en.md`、`docs/国际化.en.md`（与中文版结构 1:1，术语沿用运行时英文源串）。
+- **文档双语**（本版新增）：面向用户的三份文档各出英文版并从中文版互链 —— `README.en.md`、`docs/guide/usage.en.md`、`docs/dev/i18n.en.md`（与中文版结构 1:1，术语沿用运行时英文源串）。
 - 规模（0.8.132 时点）：命令 106 → **107** 项、设置 76 → **77** 项；分层回归 `contract 2/2`、`unit 161 FAIL=0 SKIP=1`、`e2e 4/4`、`visual 24 pass`、`perf 13 项 0 fail`、`pack 14 pass`、`host 24 pass`。
 
 ## 0.8.131 — 2026-10-15
@@ -129,7 +130,7 @@
   - **`codeblocks.clangd.enabled` 关闭提醒（G4）**：关闭只让扩展停止**生成/更新**用户级 `config.yaml`，已写入的片段（用户级配置，优先级高于项目 `.clangd`）仍会被 clangd 读取 ⇒ 关闭时**弹提醒**并提供「打开 clangd 配置 / 稍后」；无既存片段、或值未变化（其它来源重复派发事件）时静默，不重复打扰
 - 规模：命令 106 项、设置 76 项（7 分区 + 中英 nls）、视图 5 个；分层回归 contract 2/2、unit 155 脚本 FAIL=0 SKIP=1、e2e 4/4、perf 13 项 0 fail、pack 14 pass
 
-📄 详细发布说明：[`docs/release/0.8.131.md`](docs/release/0.8.131.md)
+📄 详细发布说明：[`docs/release/0.8.131.md`](./docs/release/0.8.131.md)
 
 ## 0.8.130 — 2026-10-13
 
@@ -149,7 +150,7 @@
 - 测试与 CI 稳定性：安静期相关断言去掉机器速度依赖、持续输出场景改用 cmd 内建 `echo` 循环、失败清单打印到输出末尾（产品行为零变化）
 - 规模：命令 105 项、设置 74 项（7 分区 + 中英 nls）、视图 5 个；分层回归 contract 2/2、unit 153 脚本 FAIL=0 SKIP=1、e2e 4/4、perf 13 项 0 fail、pack 14 pass
 
-📄 详细发布说明：[`docs/release/0.8.130.md`](docs/release/0.8.130.md)
+📄 详细发布说明：[`docs/release/0.8.130.md`](./docs/release/0.8.130.md)
 
 ## 0.8.129 — 2026-10-13
 
@@ -162,7 +163,7 @@
 - **缺陷收口**：测试阶段登记的 D-01…D-20 与能力缺口 C-01（`stopOnEntry` 入口首停）全部修复
 - 规模：命令 103 项、设置 61 项（7 分区 + 中英 nls）、视图 5 个；分层回归 contract 2/2、unit 151 脚本 FAIL=0 SKIP=1、e2e 4/4、perf 13 项 0 fail、pack 14 pass
 
-📄 详细发布说明：[`docs/release/0.8.129.md`](docs/release/0.8.129.md)
+📄 详细发布说明：[`docs/release/0.8.129.md`](./docs/release/0.8.129.md)
 
 ## 0.8.128 — 2026-10-09
 
@@ -175,7 +176,7 @@
 - 构建流程加固：新增 `vscode:prepublish` 钩子（`vsce package` / `vsce publish` 前自动 `compile` + `bundle`），杜绝打进过期或缺失的 `bundle/extension.js`；`npm run package` 简化为 `vsce package`
 - 规模：命令 103 项、设置 60 项（7 分区 + 中英 nls）、视图 5 个；回归 `tests/run-all.js` 135 文件 FAIL=0
 
-📄 详细发布说明：[`docs/release/0.8.128.md`](docs/release/0.8.128.md)
+📄 详细发布说明：[`docs/release/0.8.128.md`](./docs/release/0.8.128.md)
 
 ## 0.8.127 — 2026-10-09
 
@@ -187,7 +188,7 @@
 - 无效编译器与 Run 前校验日志完整对齐 Code::Blocks（`PrintInvalidCompiler` / `Run aborted...`）
 - 打包瘦身：esbuild 单文件入口，VSIX 199 文件 / 528 KB → 74 文件 / 307 KB（-63% / -42%）
 
-📄 详细发布说明：[`docs/release/0.8.127.md`](docs/release/0.8.127.md)
+📄 详细发布说明：[`docs/release/0.8.127.md`](./docs/release/0.8.127.md)
 
 ## 0.8.119 — 2026-09-30
 
@@ -199,7 +200,7 @@
 - Build Log 底部面板、结构化输出、状态栏菜单、书签与错误导航（F4 / Shift+F4）、Run 终端复用
 - 质量体系：回归测试 52 → 122 个文件（FAIL=0）+ 真机构建自检
 
-📄 详细发布说明：[`docs/release/0.8.119.md`](docs/release/0.8.119.md)
+📄 详细发布说明：[`docs/release/0.8.119.md`](./docs/release/0.8.119.md)
 
 ## 0.8.11 — 2026-09-24
 
@@ -209,10 +210,10 @@
 - 覆盖文件类型判定（`FileTypeOf`）、静态库归档、编译单元按 weight 排序、文件排序字节序、`$file` 分隔符、盘符归一化
 - 健壮性：含空格工具链路径引号、长命令行响应文件、pre/post-build 实时读取系统 PATH
 
-📄 详细发布说明：[`docs/release/0.8.11.md`](docs/release/0.8.11.md)
+📄 详细发布说明：[`docs/release/0.8.11.md`](./docs/release/0.8.11.md)
 
 ## 0.8.2 – 0.8.10（早期版本）
 
 - 编译产物一致性对齐的起始阶段（v0.8.4 – v0.8.11 逐轮修复，详见 0.8.11 发布说明的「编译产物一致性」章节）
 
-📄 历史存档：[`docs/release/archive/0.8.2~0.8.46.md`](docs/release/archive/0.8.2~0.8.46.md)
+📄 历史存档：[`docs/release/archive/0.8.2-0.8.46.md`](./docs/release/archive/0.8.2-0.8.46.md)

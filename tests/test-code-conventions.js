@@ -69,7 +69,7 @@ for (const f of files) {
 check('src 无 @ts-ignore / @ts-expect-error', tsIgnore.length === 0, tsIgnore);
 
 // ---- 4. 已迁移 i18n 的文件：UI 语境行不得再出现中文字面量（防新代码绕过 i18n.t） ----
-// 迁移范围与批次见 docs/国际化.md：文件迁移完成后加入白名单，此后新写的弹窗/QuickPick/状态栏文案
+// 迁移范围与批次见 docs/dev/i18n.md：文件迁移完成后加入白名单，此后新写的弹窗/QuickPick/状态栏文案
 // 必须走 i18n.t('English source', …)，中文译义放 src/i18n/strings.zh-cn.json。
 const I18N_MIGRATED_FILES = [
   'extension.ts',
@@ -145,7 +145,7 @@ for (const f of files) {
   const text = fs.readFileSync(f, 'utf-8');
   const sf = ts.createSourceFile(f, text, ts.ScriptTarget.ES2020, true, ts.ScriptKind.TS);
   const visit = (node) => {
-    // 豁免：i18n.tr('中文原文') / i18n.t('…') 的第一个实参（中文即键，见 docs/国际化.md）
+    // 豁免：i18n.tr('中文原文') / i18n.t('…') 的第一个实参（中文即键，见 docs/dev/i18n.md）
     const parent = node.parent;
     if (parent && ts.isCallExpression(parent) && parent.arguments[0] === node
       && ts.isPropertyAccessExpression(parent.expression)
