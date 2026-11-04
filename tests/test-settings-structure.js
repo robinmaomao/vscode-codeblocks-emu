@@ -16,7 +16,7 @@ const { nlsText } = require('./_harness/nls');
 const cfg = pkg.contributes.configuration;
 check('configuration 为数组（分区块）', Array.isArray(cfg), typeof cfg);
 if (!Array.isArray(cfg)) { console.log('设置结构: 0 pass, 1 fail'); process.exit(1); }
-check('分区块数量 = 7', cfg.length === 7, cfg.length);
+check('分区块数量 = 8', cfg.length === 8, cfg.length);
 check('每块含 title + order', cfg.every((b) => typeof b.title === 'string' && b.title && Number.isFinite(b.order)), cfg.map((b) => [b.title, b.order]));
 check('order 严格递增', cfg.every((b, i) => i === 0 || cfg[i - 1].order < b.order), cfg.map((b) => b.order));
 
@@ -38,7 +38,7 @@ for (const b of cfg) {
     byKey[k] = v;
   }
 }
-  check('设置项总数 = 81', keys.length === 81, keys.length);
+  check('设置项总数 = 82', keys.length === 82, keys.length);
 check('无重复键', new Set(keys).size === keys.length, keys.length - new Set(keys).size);
 check('disableInit 默认 true（对齐 CB disable_init）', byKey['codeblocks.debug.disableInit']?.default === true, byKey['codeblocks.debug.disableInit']);
 check('saveHtmlLogFullCommandLine 默认 false（对齐 CB full_command_line）', byKey['codeblocks.build.saveHtmlLogFullCommandLine']?.default === false, byKey['codeblocks.build.saveHtmlLogFullCommandLine']);
