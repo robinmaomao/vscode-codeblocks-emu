@@ -5,7 +5,7 @@
 //  B. 内置回退正则路径（`new OutputParser()` = getDefaultRegexes()）——仅当编译器无 options_<id>.xml 时使用
 //     （如 default.conf 里的用户自定义交叉编译器）。
 //
-// ⚠ 历史缺陷 D-01（已修复，见 docs/测试报告-0.8.128.md）：回退表原第 2 条 "Preprocessor error" 为 catch-all（lt=error），
+// ⚠ 历史缺陷 D-01（已修复，见 docs/dev/decisions.md）：回退表原第 2 条 "Preprocessor error" 为 catch-all（lt=error），
 //    排在 "Compiler warning" 之前，导致该路径下 warning/note 被归类为 Error，且不支持 `file:line:` 无列号格式。
 //    修复：关键字特异条目（warning/note，含无列号变体）前移到 catch-all 之前；B 组断言随之改为期望行为。
 const path = require('path');

@@ -1,9 +1,9 @@
 // L3 工具链矩阵：编译器家族 × 真实调用
 //
-// 口径（与 docs/测试方案.md 一致）：
+// 口径（与 docs/testing/strategy.md 一致）：
 //  1. **清单**：扩展随包 `resources/compilers/options_<id>.xml` 即「支持的编译器家族」台账（静态核对）。
 //  2. **探测**：PATH（where.exe）→ CB_TOOLCHAIN_ROOT（分号分隔）→ `.cb-tools/toolchains/**/bin`（本地解包，
-//     gitignored；见 docs/测试方案.md「工具链安装」）。探测不到即 SKIP，并在末尾打印安装指引，绝不静默通过。
+//     gitignored；见 docs/testing/strategy.md「工具链安装」）。探测不到即 SKIP，并在末尾打印安装指引，绝不静默通过。
 //  3. **实跑**：
 //     · 原生工具链 → 全量构建（编译+链接）并**运行产物**校验输出；
 //     · 交叉工具链 → 单文件编译为对象/目标文件，并按 ELF 魔数与 `e_machine` 校验体系结构（证明真的交叉了）；
@@ -349,7 +349,7 @@ async function buildLinkAndCheckElf(desc) {
       if (key) console.log(`  · ${key}: ${GUIDES[key]}`);
     }
     console.log('  解包位置：<repo>/.cb-tools/toolchains/<name>/（或设 CB_TOOLCHAIN_ROOT=<dir>），其 bin 目录会被自动探测');
-    console.log('  网络受限时：直连 GitHub 资产可能被限速，可用 ghfast.top 代理或国内镜像（见 docs/测试方案.md §5.0）');
+    console.log('  网络受限时：直连 GitHub 资产可能被限速，可用 ghfast.top 代理或国内镜像（见 docs/testing/strategy.md §5.0）');
   } else {
     console.log('\n[工具链清单] 全部已安装');
   }

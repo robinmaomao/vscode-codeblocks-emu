@@ -3,7 +3,7 @@
 // 职责：
 //   1. 历史落盘：每次 test-perf.js 运行追加一条 JSON 记录到 .cb-tools/perf-history.jsonl
 //      （gitignored：历史只对本机有意义——跨机比较会被 CPU/OS/Node 差异主导；
-//        需要入库的结论以 docs/性能基准.md 的「趋势」小节形式呈现）
+//        需要入库的结论以 docs/testing/performance-baseline.md 的「趋势」小节形式呈现）
 //   2. 漂移对比：本次 median 与「上次运行」「最近 N 次中位数」比较；
 //      恶化超过阈值（默认相对 +25% 且绝对 +3ms）→ 输出告警文本（**不判失败**）
 //   3. 对照基线：同时给出与 tests/perf/baseline.json 基线 median 的相对变化（信息性）

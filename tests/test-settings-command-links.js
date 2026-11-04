@@ -25,7 +25,7 @@ const props = Array.isArray(cfg)
 const markdowns = [];
 function collect(key, node) {
   if (!node || typeof node !== 'object') return;
-  // markdown 文案已改为 nls 占位符（%key%），断言前先解析（见 docs/国际化.md）
+  // markdown 文案已改为 nls 占位符（%key%），断言前先解析（见 docs/dev/i18n.md）
   if (typeof node.markdownDescription === 'string') markdowns.push([key, nlsText(node.markdownDescription)]);
   if (Array.isArray(node.markdownEnumDescriptions)) {
     node.markdownEnumDescriptions.forEach((t, i) => {

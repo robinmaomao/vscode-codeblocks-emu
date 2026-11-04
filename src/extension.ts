@@ -335,7 +335,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     if (e.affectsConfiguration('codeblocks.build.persistLog')) void promptReloadForPersistLog();
   }));
   // L1：ui.language 决定运行时文案语言 ⇒ 变更后立即重新解析 + 刷新状态栏与已打开面板
-  // （静态贡献项——命令标题 / 设置界面——只能跟随 VS Code 显示语言，需重载窗口，见 docs/国际化.md）
+  // （静态贡献项——命令标题 / 设置界面——只能跟随 VS Code 显示语言，需重载窗口，见 docs/dev/i18n.md）
   context.subscriptions.push(vscode.workspace.onDidChangeConfiguration((e) => {
     if (!e.affectsConfiguration(i18n.LANGUAGE_SETTING_FULL)) return;
     i18n.refreshUiLanguage();

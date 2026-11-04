@@ -96,7 +96,7 @@ async function makeAdapter() {
   {
     const src = require('fs').readFileSync(path.resolve(__dirname, '../dist/debug/gdbDebugAdapter.js'), 'utf-8');
     check('静态接线：onConfigurationDone 调用 startTarget', /onConfigurationDone\(req\)[\s\S]{0,400}startTarget\(/.test(src), /onConfigurationDone\(req\)[\s\S]{0,400}startTarget\(/.test(src), true);
-    // 文案已 i18n 化（英文源串 + 词条，见 docs/国际化.md）；此处断言接线不变：失败仍写 stderr
+    // 文案已 i18n 化（英文源串 + 词条，见 docs/dev/i18n.md）；此处断言接线不变：失败仍写 stderr
     check('静态接线：启动失败仍写 stderr 提示',
       /sendOutput\('stderr'[\s\S]{0,120}Failed to start the program/.test(src),
       /sendOutput\('stderr'[\s\S]{0,120}Failed to start the program/.test(src), true);

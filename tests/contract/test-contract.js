@@ -210,7 +210,7 @@ check('G3 根目录 VSIX 文件名版本与 package.json 一致（存在时）',
   vsix.every((f) => f.includes(pkg.version)), { vsix, version: pkg.version }, '版本一致');
 
 const mdLinks = [];
-for (const rel of ['README.md', 'docs/使用说明.md', 'docs/对齐对照.md', 'docs/开发进度.md']) {
+for (const rel of ['README.md', 'docs/guide/usage.md', 'docs/guide/alignment.md', 'docs/dev/progress.md']) {
   const abs = path.join(root, rel);
   if (!fs.existsSync(abs)) { mdLinks.push({ file: rel, target: '(文件缺失)', resolved: false }); continue; }
   const text = fs.readFileSync(abs, 'utf-8');

@@ -6,7 +6,7 @@
  * 设置变更（`codeblocks.ui.language`）后调用 `refreshUiLanguage()` 即时生效，无需重载窗口。
  *
  * 静态贡献（命令标题 / 设置描述 / 视图名）无法运行时改语言，走 package.nls.*.json
- * 跟随 VS Code 显示语言；两者语义边界见 docs/国际化.md。
+ * 跟随 VS Code 显示语言；两者语义边界见 docs/dev/i18n.md。
  */
 import { LANGUAGE_SETTING, resolveLanguage, translate, UiLanguage, Translations } from './core';
 import zhCn from './strings.zh-cn.json';

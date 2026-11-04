@@ -1,7 +1,7 @@
 /**
  * 工作区路径 glob 元字符检查 + AI 指令目录扫描治理（纯逻辑，便于单测）。
  *
- * 背景（实测，详见 docs/archive/RG风暴根因分析与方案-2026-11-04.md §14–§16）：
+ * 背景（实测，详见 docs/archive/2026-11-04-rg-storm-root-cause.md §14–§16）：
  * VS Code 的 `PromptFilesLocator` 会把「AI 指令文件位置」拼成绝对路径后用 `Eao()`
  * 拆成 `{ searchRoot, filePattern }`：**遇到第一个含 glob 元字符的路径段就截断**。
  * `Eao()` 内部用 `xgn()` 逐段判断，`*`/`?` 直接命中，`[...]`/`{...}` 成对时命中。

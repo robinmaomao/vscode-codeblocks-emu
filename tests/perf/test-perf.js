@@ -12,7 +12,7 @@
 //   node tests/perf/test-perf.js --history-file=<path>  # 覆盖历史文件位置（自测用）
 //
 // 产物：.cb-tools/perf/<时间戳>.json（原始结果）+ .cb-tools/perf-history.jsonl（趋势历史追加）
-//      + docs/性能基准.md（人类可读报告，含趋势小节；--report / --update-baseline 时才落盘）
+//      + docs/testing/performance-baseline.md（人类可读报告，含趋势小节；--report / --update-baseline 时才落盘）
 //
 // 门禁语义：退出码只由预算硬门禁（min > budget → fail，bench.js evaluate）决定；
 //          趋势漂移只输出告警（不改变退出码）。
@@ -464,7 +464,7 @@ async function main() {
   const lines = [];
   lines.push('# 性能基准报告（自动生成，勿手工编辑）');
   lines.push('');
-  lines.push('> 生成方式：`npm run test:perf`（脚本 [`tests/perf/test-perf.js`](../tests/perf/test-perf.js)）；基线：`tests/perf/baseline.json`');
+  lines.push('> 生成方式：`npm run test:perf`（脚本 [`tests/perf/test-perf.js`](../../tests/perf/test-perf.js)）；基线：`tests/perf/baseline.json`');
   lines.push('> 判定（D5 决策）：预算门禁用 **min**（最小采样，抗负载尖峰）；`median > 1.8×基线` → 告警（不失败）。');
   lines.push('> 抗抖动：首次超预算会自动复核一次，复核通过则降级为告警；真实进程类基准在机器负载下会偶发尖峰，故以 min 为硬门禁口径。');
   lines.push('');
@@ -494,7 +494,7 @@ async function main() {
     lines.push('');
     lines.push('> 历史：`.cb-tools/perf-history.jsonl`（本机历史，gitignored；跨机历史不参与比较）');
     lines.push(`> ${trend.formatMeta(trendSummary)}`);
-    lines.push('> 趋势告警**仅打印，不影响退出码**；硬门禁仍是 `min ≤ 预算`（[`bench.js`](../tests/perf/bench.js) evaluate）。');
+    lines.push('> 趋势告警**仅打印，不影响退出码**；硬门禁仍是 `min ≤ 预算`（[`bench.js`](../../tests/perf/bench.js) evaluate）。');
     lines.push('');
     if (trendSummary.meta.firstRun || !trendSummary.rows.some((r) => r.status !== 'no-history')) {
       lines.push('本机首次运行（无同机历史可比）：本次结果已写入历史，作为后续对比参照。');
@@ -517,14 +517,14 @@ async function main() {
   lines.push(`汇总：**${results.length - failCount - warnCount} 通过 / ${warnCount} 告警 / ${failCount} 失败**${trendAlertCount ? `（另有趋势告警 ${trendAlertCount} 项，见上「趋势」小节，不影响判定与退出码）` : ''}`);
   lines.push('');
   const reportText = lines.join('\n');
-  // 原始报告始终落临时目录；docs/性能基准.md 仅在显式刷新（--update-baseline / --report）时更新，
+  // 原始报告始终落临时目录；docs/testing/performance-baseline.md 仅在显式刷新（--update-baseline / --report）时更新，
   // 避免日常跑基准总是弄脏工作区。
   fs.writeFileSync(path.join(cbTools, `性能基准-${stamp}.md`), reportText, 'utf-8');
   if (update || args.includes('--report')) {
-    fs.writeFileSync(path.join(root, 'docs', '性能基准.md'), reportText, 'utf-8');
-    console.log('报告: docs/性能基准.md');
+    fs.writeFileSync(path.join(root, 'docs', 'testing', 'performance-baseline.md'), reportText, 'utf-8');
+    console.log('报告: docs/testing/performance-baseline.md');
   } else {
-    console.log(`报告: ${path.relative(root, path.join(cbTools, `性能基准-${stamp}.md`))}（如需更新 docs/性能基准.md 请加 --report）`);
+    console.log(`报告: ${path.relative(root, path.join(cbTools, `性能基准-${stamp}.md`))}（如需更新 docs/testing/performance-baseline.md 请加 --report）`);
   }
 
   console.log(`\nperf 性能基准: ${results.length} 项, ${results.length - failCount - warnCount} pass, ${warnCount} warn, ${failCount} fail`);

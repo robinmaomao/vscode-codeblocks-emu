@@ -1,4 +1,4 @@
-// 构建日志文案统一入口 logT() 回归（docs/国际化.md §2「三种运行时 API」）：
+// 构建日志文案统一入口 logT() 回归（docs/dev/i18n.md §2「三种运行时 API」）：
 //  - log.english = true  → 恒英文源串（对齐 CB 原文，占位符按 args 替换）
 //  - log.english = false → 跟随 codeblocks.ui.language（zh-cn 走词条表，en 回退英文源串）
 //  - msg(zh, en) 历史入口保持原语义（仅 log.english 决定）
