@@ -48,7 +48,7 @@
 |--------|------|--------|--------|------|
 | `codeblocks.saveBeforeBuild` | boolean | `true` |  | 构建 / 运行 / 清理前自动保存所有脏文件。 |
 | `codeblocks.parallelJobs` | number | `8` | resource | 并行编译任务数。`1` = 串行；`2`–`32` = 显式并发；`0` = 自动（当前主机逻辑核数，上限 32）。实际并发还受进程预算上限 `max(8, 逻辑核数)` 约束，被收敛时构建开始会输出说明。支持文件夹级覆盖，下一次构建生效。 |
-| `codeblocks.build.compilerCache` | string | `none` | machine-overridable | 编译缓存：`none` / `ccache` / `sccache`。仅标准编译命令前置缓存程序；未找到工具时回退原编译器并告警。 |
+| `codeblocks.build.compilerCache` | string | `none` | machine-overridable | 编译缓存：`none` / `ccache` / `sccache`。仅标准编译命令前置缓存程序；未找到工具时回退原编译器并告警。ccache 只接受 UTF-8 预处理输出：工程路径含非 ASCII 字符时编译单元改用工程相对源路径并追加 `-fno-working-directory`（否则每次编译都被判不可缓存），源文件/包含目录非 ASCII 仍无法缓存（构建开始告警）。 |
 | `codeblocks.build.compilerCachePath` | string | `""` | machine-overridable | 缓存工具显式路径；留空自动探测（PATH / WinGet / Scoop / cargo / Chocolatey / Program Files）。路径无效等同未找到，仅缓存非 `none` 时生效。 |
 | `codeblocks.build.skipIncludeDeps` | boolean | `false` |  | 增量编译跳过 `#include` 依赖扫描（对齐 CB `skip_include_deps`），适合非 C/C++ 编译器或追求更快的增量判断。 |
 | `codeblocks.build.linkInputExtensions` | array | `["xm"]` |  | 参与增量重链接的工程内链接输入扩展名（如 `ld` / `lds` / `icf` / `def`）；支持 `xm`、`.xm`、`*.xm`，设 `[]` 关闭。 |

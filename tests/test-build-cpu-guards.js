@@ -36,7 +36,8 @@ check('B3 全部探测派生隐藏窗口（windowsHide: true）', clangdTool.inc
 
 // ---- C. ccache：前缀记忆化 + 解析缓存命中校验 ----
 const gen = read('dist/compiler/commandGenerator.js');
-check('C1 编译缓存前缀按生成器实例记忆化', gen.includes('cachePrefixMemo') && /cachePrefixMemo !== undefined/.test(gen), null);
+check('C1 编译缓存设置（前缀 + 非 ASCII 规避）按生成器实例记忆化',
+  gen.includes('cacheCfgMemo') && /if \(this\.cacheCfgMemo\)\s*\n\s*return this\.cacheCfgMemo;/.test(gen), null);
 const cc = read('dist/build/compilerCache.js');
 check('C2 解析缓存命中时校验路径存在性（失效则重扫）', /isRunnableFile\(resolveCacheVal[,)]/.test(cc), null);
 const engine = read('dist/build/buildEngine.js');

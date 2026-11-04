@@ -30,7 +30,10 @@ import {
   aggregateSamples, encodePowerShellCommand, parseSampleLine, SAMPLE_SCRIPT,
   type SystemSample, type SystemSummary,
 } from './systemSampler';
-import { clearCompilerCacheResolveCache, normalizeCompilerCacheKind, resolveCompilerCachePathCached } from './compilerCache';
+import {
+  ccacheNeedsAsciiPaths, clearCompilerCacheResolveCache, firstNonAscii, hasNonAscii, isGnuLikeCompilerProgram,
+  normalizeCompilerCacheKind, resolveCompilerCachePathCached, type CompilerCacheKind,
+} from './compilerCache';
 import { upperDrive, shortPathWin } from '../tools/pathCase';
 import { getWindowsSystemPath } from '../tools/windowsPath';
 import { LruCache } from '../tools/lru';
@@ -39,6 +42,9 @@ import { LruCache } from '../tools/lru';
 const COMPILER_CACHE_WARN_DEBOUNCE_MS = 10_000;
 let lastCompilerCacheWarnKey = '';
 let lastCompilerCacheWarnAt = 0;
+/** R4：编译缓存「非 ASCII 路径」提示跨引擎去抖（同上；工作区构建逐项目建引擎） */
+let lastCompilerCachePathKey = '';
+let lastCompilerCachePathAt = 0;
 
 /** 结构化的诊断信息（供 Build Log 视图展示，文件为绝对路径） */
 export interface StructuredDiagnostic {
@@ -709,6 +715,8 @@ export class BuildEngine {
     // 第六轮 F8：命令记录按每轮构建重置（HTML 日志 full_command_line）
     this.lastCommands = [];
     // R4：编译缓存已启用但工具缺失 → 每轮构建告警一次（命令生成回退原编译器，构建行为不受影响）
+    //     非 ASCII 路径说明/告警与缺失检查共用同一次配置读取
+    this.ccacheAsciiMemo = undefined;
     this.warnCompilerCacheMissing();
     // M0 阶段计时探针：设置 codeblocks.build.profile 或环境变量 CB_BUILD_PROFILE=1 启用（默认关闭时零开销）
     this.profBuildStartMs = Date.now();
@@ -925,22 +933,43 @@ export class BuildEngine {
   }
 
   /**
-   * R4：编译缓存工具缺失告警（每引擎一次；跨引擎 10s 去抖——工作区构建逐项目建引擎）。
+   * R4：编译缓存构建前检查（每次构建一次；每引擎每项只报告一次，跨引擎 10s 去抖 —— 工作区构建逐项目建引擎）。
+   *
+   * 两项检查共用一次配置读取（D3：每单元设置读取 ≤2 次 = 这里 + 命令生成器各一次）：
+   *  1. 已启用但**未找到**工具 → 告警（命令生成静默回退原编译器，这里说明原因与出路）；
+   *  2. 已找到工具 → 非 ASCII 路径说明/告警（见 reportCompilerCachePathFit）。
+   *
    * 探测语义：已找到时复用会话缓存（只校验一次路径存在性）；**未找到时清空缓存**，
    * 让下一个构建重新扫描 —— 运行中安装工具后，下一构建即生效（无需重载窗口/重新检测）。
    * 这样既保留「运行中安装可被检测」，又避免 ccache 已启用时每个构建都全盘扫描
    * PATH / 常见安装目录 / WinGet Packages（后者是同步递归目录遍历）。
-   * 未解析到时命令生成静默回退原编译器，这里在输出通道说明原因与出路（安装引导 / compilerCachePath）。
    */
   private compilerCacheWarned = false;
+  private compilerCachePathReported = false;
   private warnCompilerCacheMissing(): void {
-    if (this.compilerCacheWarned) return;
+    if (this.compilerCacheWarned && this.compilerCachePathReported) return;
     try {
       const cfg = vscode.workspace.getConfiguration('codeblocks');
       const kind = normalizeCompilerCacheKind(cfg.get<string>('build.compilerCache', 'none'));
-      if (kind === 'none') return;
+      if (kind === 'none') {
+        // 默认关：不触发后续任何路径判断（零影响，也不多读设置）
+        this.ccacheAsciiMemo = false;
+        return;
+      }
       const explicit = cfg.get<string>('build.compilerCachePath', '') || '';
-      if (resolveCompilerCachePathCached(kind, explicit)) return;
+      const resolved = resolveCompilerCachePathCached(kind, explicit);
+      if (resolved) {
+        // 顺带求值非 ASCII 路径规避（共用这次设置读取；命令生成侧与本引擎的源路径选择都依赖它）
+        this.ccacheAsciiMemo = ccacheNeedsAsciiPaths(
+          kind,
+          true,
+          isGnuLikeCompilerProgram(this.compiler.programs.C) || isGnuLikeCompilerProgram(this.compiler.programs.CPP),
+          this.project.basePath,
+        );
+        this.reportCompilerCachePathFit(kind);
+        return;
+      }
+      if (this.compilerCacheWarned) return;
       // 未找到：清空缓存供下一构建重扫（本次构建已回退原编译器）
       clearCompilerCacheResolveCache();
       // 跨引擎去抖：工作区构建 = 每项目一个引擎 → 同一配置窗口期内只告警一次
@@ -955,6 +984,60 @@ export class BuildEngine {
         `${explicit ? logT(' (codeblocks.build.compilerCachePath = {0} is invalid)', explicit) : logT(' (not found in PATH or common install directories)')}` +
         logT(' — This build falls back to the original compiler; run the "Code::Blocks: Install Compiler Cache" command for installation guidance, or set compilerCachePath to the correct executable path.'),
       );
+    } catch {
+      // 无 vscode 宿主（headless 单测）或读取失败：静默（构建不受影响）
+    }
+  }
+
+  /**
+   * R4：编译缓存「非 ASCII 路径」说明/告警（每引擎一次；跨引擎 10s 去抖）。
+   *
+   * ccache 只接受 UTF-8 预处理输出：中文 Windows 上 GCC/Clang 按系统 ANSI（GBK）写
+   * `# 1 "<cwd>//"` linemarker 与源文件/头文件路径，ccache 记 `unsupported_source_encoding`
+   * 后直接跑真编译器 —— 该次编译**不进缓存**（`ccache -s`：Cacheable calls 0 / Uncacheable 100%，
+   * 用户侧表现为「ccache 不生效」）。工程根路径非 ASCII 由**两处**共同规避：命令生成侧追加
+   * `-fno-working-directory`（CommandGenerator.appendWorkingDirSuppress）、编译单元改用工程相对
+   * 源路径（compileSourcePath），此处说明一次；源文件/包含目录的非 ASCII 上述手段救不了，
+   * 明确告警并给出出路，避免用户误以为缓存已生效。
+   */
+  private reportCompilerCachePathFit(kind: CompilerCacheKind): void {
+    if (this.compilerCachePathReported) return;
+    if (kind !== 'ccache') return; // sccache 无该限制（保持原行为）
+    try {
+      const baseNonAscii = hasNonAscii(this.project.basePath);
+      // 只统计真正参与编译的文件（普通文本/笔记类文件的中文名与 ccache 无关，避免误报）
+      const fileHit = firstNonAscii(
+        this.project.files
+          .filter((f) => {
+            const ft = fileTypeOf(f.relativeFilename);
+            return ft === FileType.Header || isCompilableFileType(ft);
+          })
+          .map((f) => f.relativeFilename),
+      );
+      const incHit = firstNonAscii([...(this.compiler.includeDirs ?? []), ...(this.project.includeDirs ?? [])]);
+      if (!baseNonAscii && !fileHit && !incHit) return;
+      // 跨引擎去抖：工作区构建 = 每项目一个引擎 → 同一路径窗口期内只提示一次
+      const now = Date.now();
+      const key = `${kind}\u0000${this.project.basePath}\u0000${fileHit ?? ''}\u0000${incHit ?? ''}`;
+      if (key === lastCompilerCachePathKey && now - lastCompilerCachePathAt < COMPILER_CACHE_WARN_DEBOUNCE_MS) return;
+      lastCompilerCachePathKey = key;
+      lastCompilerCachePathAt = now;
+      this.compilerCachePathReported = true;
+      if (baseNonAscii) {
+        const mitigated = isGnuLikeCompilerProgram(this.compiler.programs.C)
+          || isGnuLikeCompilerProgram(this.compiler.programs.CPP);
+        const message = mitigated
+          ? logT('[Code::Blocks] Compiler cache: the project path contains non-ASCII characters — compile commands use project-relative source paths plus -fno-working-directory so that ccache can cache them (only debug sections of the object files may differ)')
+          : logT('[Code::Blocks] Compiler cache: the project path contains non-ASCII characters and this compiler has no automatic workaround — ccache marks every compilation as uncacheable; use an ASCII-only project path to get cache hits');
+        if (mitigated) this.output.info(message);
+        else this.output.warn(message);
+      }
+      const remaining = fileHit ?? incHit;
+      if (remaining) {
+        this.output.warn(
+          logT('[Code::Blocks] Compiler cache: non-ASCII paths remain in source files or include directories (for example {0}) — ccache cannot cache those compilations; rename them to ASCII or move the project to an ASCII-only path', remaining),
+        );
+      }
     } catch {
       // 无 vscode 宿主（headless 单测）或读取失败：静默（构建不受影响）
     }
@@ -1136,6 +1219,53 @@ export class BuildEngine {
   }
 
   /**
+   * 编译单元源文件路径（对齐 GetCompileFileCommand：UseFullSourcePaths → 绝对路径，资源文件再转短路径）。
+   *
+   * R4 例外：ccache 已启用且工程根路径含非 ASCII 时改用**工程相对路径** —— 绝对路径会把
+   * 中文目录的 GBK 字节带进 `# 1 "<源文件>"` linemarker，ccache 因此拒绝缓存；
+   * 相对路径 + `-fno-working-directory`（命令生成侧追加）后预处理输出全为 ASCII。
+   * 源文件相对路径本身含非 ASCII 时相对化无效，保持原绝对路径（由构建开始告警说明）。
+   */
+  private compileSourcePath(file: ProjectFile, ft: FileType): string {
+    if (!this.compiler.switches.useFullSourcePaths) return file.relativeFilename;
+    // 资源文件走 windres（不前置缓存程序、也不加抑制开关）→ 维持 CB 的绝对路径 + 短路径语义
+    if (ft !== FileType.Resource && this.ccacheAsciiPathWorkaround() && !hasNonAscii(file.relativeFilename)) {
+      return file.relativeFilename;
+    }
+    return ft === FileType.Resource && process.platform === 'win32'
+      ? shortPathWin(file.absolutePath)
+      : file.absolutePath;
+  }
+
+  /**
+   * R4：ccache 非 ASCII 路径规避是否启用（ccache + 工具已解析 + GCC/Clang + 工程根非 ASCII）。
+   * 每轮构建惰性求值一次：`build()` 由 warnCompilerCacheMissing 顺带赋值（共用一次设置读取），
+   * 其它入口（单文件编译 / Makefile 视图）首次用到时自行求值。
+   */
+  private ccacheAsciiMemo: boolean | undefined;
+  private ccacheAsciiPathWorkaround(): boolean {
+    if (this.ccacheAsciiMemo !== undefined) return this.ccacheAsciiMemo;
+    let on = false;
+    try {
+      const cfg = vscode.workspace.getConfiguration('codeblocks');
+      const kind = normalizeCompilerCacheKind(cfg.get<string>('build.compilerCache', 'none'));
+      if (kind === 'ccache') {
+        const explicit = cfg.get<string>('build.compilerCachePath', '') || '';
+        on = ccacheNeedsAsciiPaths(
+          kind,
+          resolveCompilerCachePathCached(kind, explicit) !== undefined,
+          isGnuLikeCompilerProgram(this.compiler.programs.C) || isGnuLikeCompilerProgram(this.compiler.programs.CPP),
+          this.project.basePath,
+        );
+      }
+    } catch {
+      on = false;
+    }
+    this.ccacheAsciiMemo = on;
+    return on;
+  }
+
+  /**
    * 构造单个文件的编译单元 —— 对齐 GetCompileFileCommand（directcommands.cpp:262）。
    * 整目标构建（1b 循环）与单文件编译（compileFile）复用本方法，保证两条路径产出的命令字节级一致。
    * - compile=false / compilerVar 为空由调用方先行过滤；
@@ -1171,11 +1301,7 @@ export class BuildEngine {
       command = this.expandCustomCommand(custom.command, generator, target, file, objectRel);
     } else {
       // 源文件路径（对齐 GetCompileFileCommand：UseFullSourcePaths 时绝对路径（资源文件再转短路径），否则相对路径）
-      const srcFile = this.compiler.switches.useFullSourcePaths
-        ? (ft === FileType.Resource && process.platform === 'win32'
-            ? shortPathWin(file.absolutePath)
-            : file.absolutePath)
-        : file.relativeFilename;
+      const srcFile = this.compileSourcePath(file, ft);
       // 资源文件走 CompileResourceCmd（windres），其余走 CompileObjectCmd（对齐 GetCompileFileCommand）
       const cmdType = ft === FileType.Resource ? CommandType.CompileResourceCmd : CommandType.CompileObjectCmd;
       command = generator.generate(cmdType, {
@@ -1221,6 +1347,7 @@ export class BuildEngine {
   async compileFile(targetTitle: string, fileRel: string, options: BuildOptions): Promise<boolean> {
     // 设置快照按轮刷新（与整目标构建一致）
     this.cfgSnapshot = undefined;
+    this.ccacheAsciiMemo = undefined;
     const target = this.project.buildTargets.find((t) => t.title === targetTitle);
     if (!target) {
       this.output.error(logT('[Code::Blocks] Build target not found: {0}', targetTitle));

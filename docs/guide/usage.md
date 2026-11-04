@@ -2,7 +2,7 @@
 
 > 语言：**中文** ｜ [English](./usage.en.md)
 >
-> 版本：0.8.137 ｜ 本扩展为 Code::Blocks 核心功能的原生移植，直接驱动 GCC / GDB，**不依赖** `tasks.json` / `launch.json`。
+> 版本：0.8.138 ｜ 本扩展为 Code::Blocks 核心功能的原生移植，直接驱动 GCC / GDB，**不依赖** `tasks.json` / `launch.json`。
 
 ---
 
@@ -51,7 +51,7 @@ Code::Blocks for VS Code 是一个「迷你 IDE 内核」：直接解析 `.cbp` 
 ### 2.1 从 VSIX 安装
 
 ```powershell
-code --install-extension codeblocks-vscode-0.8.137.vsix --force
+code --install-extension codeblocks-vscode-0.8.138.vsix --force
 ```
 
 ### 2.2 从源码构建
@@ -59,7 +59,7 @@ code --install-extension codeblocks-vscode-0.8.137.vsix --force
 ```powershell
 npm install
 npm run package
-code --install-extension codeblocks-vscode-0.8.137.vsix --force
+code --install-extension codeblocks-vscode-0.8.138.vsix --force
 ```
 
 > `npm run package` = `vsce package`（打包前自动执行 `vscode:prepublish` 钩子 = `tsc` 编译（`dist/`，本地测试用）+ **esbuild 单文件打包**（`bundle/extension.js`，发布入口））；
@@ -594,7 +594,7 @@ Build Log 视图位于**底部 Panel**（打开方式：`Ctrl+J` 后选择「Bui
 |--------|--------|------|
 | `codeblocks.saveBeforeBuild` | `true` | 构建 / 运行 / 清理前自动保存 |
 | `codeblocks.parallelJobs` | `8` | 并行编译任务数（默认 8；0 = 自动：当前主机逻辑核数，最多 32；并发越高全量构建越快但 CPU 越接近 100%，且每条编译进程链常驻几十至几百 MB，默认 8 给编辑器留余量。范围 0–32，显式值优先，1 = 串行，支持文件夹级覆盖。**进程预算**：无论怎么设，实际并发不超过 `max(8, 逻辑核数)`，被收敛时构建开始会在输出通道说明） |
-| `codeblocks.build.compilerCache` | `none` | 编译缓存（保护性增强，默认关）：`none`/`ccache`/`sccache`；启用后仅**标准编译命令**前置缓存程序（链接/资源编译/脚本/`compile_commands.json` 不注入；导出 Makefile/命令查看的展开预览反映启用状态；ccache 适用 GCC/Clang，MSVC 请选 sccache；PCH 单元走标准编译路径同样前置——ccache 对 PCH 缓存支持有限，未命中属预期）。工具自动探测：PATH → WinGet Links / WinGet Packages（新式 winget 便携包直写 PATH 的兜底）/ Scoop shims / cargo bin / Chocolatey / Program Files；**未找到时构建回退原编译器**（不使构建失败，输出通道告警一次；**未找到时每个构建都会重扫**——运行中安装/补齐后**下一个构建**即生效；已找到时复用解析结果并校验路径存在性，工具被卸载/移动会自动重扫；无需重载窗口）。**检测到但未启用：每次打开工作区都会询问是否启用**（提示含版本号；可点「不再提示」，修改本设置自动重置；每次激活/重检会把检测到的**版本号与路径**写入 Code::Blocks 输出通道）。安装引导：命令面板运行 `Code::Blocks: Install Compiler Cache (ccache/sccache)…`（仅引导，不静默安装）；machine-overridable |
+| `codeblocks.build.compilerCache` | `none` | 编译缓存（保护性增强，默认关）：`none`/`ccache`/`sccache`；启用后仅**标准编译命令**前置缓存程序（链接/资源编译/脚本/`compile_commands.json` 不注入；导出 Makefile/命令查看的展开预览反映启用状态；ccache 适用 GCC/Clang，MSVC 请选 sccache；PCH 单元走标准编译路径同样前置——ccache 对 PCH 缓存支持有限，未命中属预期）。工具自动探测：PATH → WinGet Links / WinGet Packages（新式 winget 便携包直写 PATH 的兜底）/ Scoop shims / cargo bin / Chocolatey / Program Files；**未找到时构建回退原编译器**（不使构建失败，输出通道告警一次；**未找到时每个构建都会重扫**——运行中安装/补齐后**下一个构建**即生效；已找到时复用解析结果并校验路径存在性，工具被卸载/移动会自动重扫；无需重载窗口）。**检测到但未启用：每次打开工作区都会询问是否启用**（提示含版本号；可点「不再提示」，修改本设置自动重置；每次激活/重检会把检测到的**版本号与路径**写入 Code::Blocks 输出通道）。安装引导：命令面板运行 `Code::Blocks: Install Compiler Cache (ccache/sccache)…`（仅引导，不静默安装）；ccache 只接受 UTF-8 预处理输出：工程路径含非 ASCII 字符时编译单元改用工程相对源路径并追加 `-fno-working-directory`，源文件/包含目录的非 ASCII 部分仍无法缓存（构建开始告警，见 §15 常见问题）；machine-overridable |
 | `codeblocks.build.compilerCachePath` | `` | 编译缓存工具可执行文件显式路径（如 `C:\tools\ccache\ccache.exe`）；留空 = 自动探测；**路径无效等同未找到**（不静默改用 PATH）；仅编译缓存非 `none` 时生效；machine-overridable |
 | `codeblocks.maxReportedErrors` | `50` | 单次构建最多收集的错误数（0 = 不限制） |
 | `codeblocks.build.verboseOutput` | `false` | 构建详细输出：完整编译命令行、Clean 逐文件删除列表、增量跳过列表（对齐 Code::Blocks 详细模式） |
@@ -813,6 +813,14 @@ A：这是**响应文件**：链接 / 编译命令行超过长度阈值时，扩
 
 **Q：Build Log 错误跳转路径出现重复段（中文路径）？**
 A：已修复。升级到 0.4.0 后，编译错误行的文件路径字符类已支持中文（`\u0080-\uFFFF`）。
+
+**Q：开了 `codeblocks.build.compilerCache = ccache`，但 `ccache -s` 里 `Cacheable calls` 一直是 0（缓存从不命中），工程路径带中文时尤其明显？**
+A：这是 ccache 的**编码限制**，不是命令转义/引号问题（编译本身是成功的，只是每次都被判「不可缓存」）。ccache 要求编译器的**预处理输出是 UTF-8**；中文 Windows 上 GCC/Clang 按系统 ANSI 代码页（GBK）写路径 —— `-g` 会隐式启用 `-fworking-directory`，预处理输出首部即 `# 1 "<绝对工程路径>//"`，这些字节不是合法 UTF-8，ccache 记 `unsupported_source_encoding` 后**直接运行真编译器**，该次编译根本不进缓存（`ccache -s` 表现为 `Cacheable calls: 0` / `Uncacheable calls: 100%`）。分两种情形：
+
+- **工程根路径含非 ASCII（最常见）**：`compilerCache = ccache` 且工具已探测到时，扩展自动把该工程的编译单元改为**工程相对源路径**并追加 `-fno-working-directory`（两者缺一不可：前者去掉源文件 linemarker 的中文字节，后者去掉 cwd linemarker），构建开始在输出通道说明一次；`.text` 与原来一致，仅目标文件的调试段可能有细微差异。
+- **源文件 / 头文件 / 包含目录含非 ASCII**：上述手段救不了这些编译，输出通道会告警并给出示例文件名 —— 把它们改名为 ASCII，或把工程放到纯 ASCII 路径。
+
+纯 ASCII 的「特殊符号」路径（空格、`&`、`()`、`#`、`%`、`!`、`'`）**不影响** ccache，扩展的引号与 shell 回退已覆盖；sccache 无此限制，不受影响。验证方法：命令行执行 `ccache -s`（或 `ccache --show-stats`）看 `Cacheable calls` 与 `Hits`。
 
 **Q：构建（编译）时 CPU 一直 100% / 风扇狂转，怎么降下来？**
 A：按「谁在吃 CPU」逐个排查：

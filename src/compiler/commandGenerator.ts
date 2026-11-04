@@ -15,7 +15,7 @@ import { upperDrive, shortPathWin } from '../tools/pathCase';
 import { replaceCbMacros, cbBuiltinVars, envVarMap } from './cbMacros';
 import { strictQuoting } from '../build/logLang';
 import { isExecutableTargetType, withPlatformExtension } from '../build/outputPath';
-import { normalizeCompilerCacheKind, resolveCompilerCachePathCached } from '../build/compilerCache';
+import { ccacheNeedsAsciiPaths, isGnuLikeCompilerProgram, normalizeCompilerCacheKind, resolveCompilerCachePathCached, WORKING_DIR_SUPPRESS_FLAG } from '../build/compilerCache';
 import {
   Project,
   BuildTarget,
@@ -227,8 +227,8 @@ export class CommandGenerator {
   private cache = new Map<string, PregenCache>();
   /** 反引号派生搜索目录（SearchDirsFromBackticks 语义，供 deps 扫描） */
   private backtickDirs = new Map<string, { inc: string[]; lib: string[] }>();
-  /** 编译缓存前缀记忆化（undefined = 尚未解析；'' = 未启用/未找到） */
-  private cachePrefixMemo: string | undefined;
+  /** 编译缓存设置解析结果记忆化（undefined = 尚未解析；前缀与非 ASCII 规避共用一份） */
+  private cacheCfgMemo: { prefix: string; asciiFix: boolean } | undefined;
 
   constructor(project: Project, compiler: Compiler) {
     this.project = project;
@@ -742,7 +742,10 @@ export class CommandGenerator {
     const template = this.getCommandTemplate(commandType, path.extname(unquote(params.file)).replace('.', ''));
     if (!template) return '';
 
-    return this.renderTemplate(template, params);
+    const command = this.renderTemplate(template, params);
+    // 编译缓存（ccache）非 ASCII 路径规避：仅标准编译命令（含 PCH 头文件）追加，链接/资源/脚本不加
+    if (commandType === CommandType.CompileObjectCmd) return this.appendWorkingDirSuppress(command, params);
+    return command;
   }
 
   /** 用任意模板字符串展开宏（供自定义 buildCommand 使用） */
@@ -751,17 +754,25 @@ export class CommandGenerator {
   }
 
   /**
-   * 编译缓存前缀（R4 保护性增强）：ccache/sccache 启用且解析到工具时返回 `"<wrapper>" `（含尾随空格）。
-   * - 仅标准编译命令注入（noCompilerCache 排除 clangd/脚本/自定义命令场景）
-   * - 设置 none / 未解析到工具 → 空串（回退原编译器；构建开始由 buildEngine 输出一次告警）
-   * - 解析结果按 kind|显式路径|PATH 会话缓存；设置变化/安装动作由 extension 主动清缓存
-   * - **本实例记忆化**：全量构建每单元都会展开 $compiler，避免每单元两次 getConfiguration
-   *   （千文件工程约 2000 次配置查找）；设置变化后的下一次构建由新生成器实例读取
+   * 编译缓存设置解析（每实例一次）：前缀 + 非 ASCII 路径规避，共用同一份 getConfiguration，
+   * 保持「每轮构建每单元设置读取 ≤2 次」（本方法 + buildEngine 构建前检查各一次）。
+   *
+   * 前缀（R4 保护性增强）：ccache/sccache 启用且解析到工具时返回 `"<wrapper>" `（含尾随空格）；
+   * 仅标准编译命令注入（noCompilerCache 排除 clangd/脚本/自定义命令场景）；设置 none / 未解析到
+   * 工具 → 空串（回退原编译器；构建开始由 buildEngine 输出一次告警）。
+   *
+   * 非 ASCII 路径规避（R4 续）：ccache 只接受 UTF-8 预处理输出，而中文 Windows 上 GCC/Clang 把
+   * `-g` 隐式 `-fworking-directory` 的 cwd linemarker 按 ANSI（GBK）写出 → 每份编译被判
+   * Uncacheable、缓存永远不命中。工程根路径含非 ASCII 时追加 `-fno-working-directory` 抑制该
+   * linemarker（实测配合相对源路径可恢复 100% 可缓存并产生命中）。
+   * 条件：kind=ccache + 工具已解析 + GCC/Clang 家族 + 工程根非 ASCII。副作用仅在 `.debug_*` 段。
+   *
+   * 解析结果按 kind|显式路径|PATH 会话缓存；设置变化/安装动作由 extension 主动清解析缓存，
+   * 新构建用新生成器实例重新读取设置。
    */
-  private compilerCachePrefix(params: GenerateParams): string {
-    if (params.noCompilerCache) return '';
-    if (this.cachePrefixMemo !== undefined) return this.cachePrefixMemo;
-    let prefix = '';
+  private compilerCacheSettings(): { prefix: string; asciiFix: boolean } {
+    if (this.cacheCfgMemo) return this.cacheCfgMemo;
+    let memo = { prefix: '', asciiFix: false };
     try {
       // 惰性 require：headless 单测无 vscode 宿主时回退默认（与 asmUsesCompilerVar 同款）
       const vs: typeof import('vscode') = require('vscode');
@@ -770,13 +781,33 @@ export class CommandGenerator {
       if (kind !== 'none') {
         const explicit = cfg.get<string>('build.compilerCachePath', '') || '';
         const resolved = resolveCompilerCachePathCached(kind, explicit);
-        if (resolved) prefix = quoteIfNeeded(this.fixSep(resolved)) + ' ';
+        if (resolved) {
+          const gnuLike = isGnuLikeCompilerProgram(this.compiler.programs.C)
+            || isGnuLikeCompilerProgram(this.compiler.programs.CPP);
+          memo = {
+            prefix: quoteIfNeeded(this.fixSep(resolved)) + ' ',
+            asciiFix: ccacheNeedsAsciiPaths(kind, true, gnuLike, this.project.basePath),
+          };
+        }
       }
     } catch {
-      prefix = '';
+      memo = { prefix: '', asciiFix: false };
     }
-    this.cachePrefixMemo = prefix;
-    return prefix;
+    this.cacheCfgMemo = memo;
+    return memo;
+  }
+
+  /** 编译缓存前缀（`$compiler` 展开点注入；noCompilerCache 场景为空串） */
+  private compilerCachePrefix(params: GenerateParams): string {
+    if (params.noCompilerCache) return '';
+    return this.compilerCacheSettings().prefix;
+  }
+
+  /** 标准编译命令末尾追加 cwd linemarker 抑制开关（非 ASCII 规避；已存在则不重复） */
+  private appendWorkingDirSuppress(command: string, params: GenerateParams): string {
+    if (!command || params.noCompilerCache) return command;
+    if (command.includes(WORKING_DIR_SUPPRESS_FLAG)) return command;
+    return this.compilerCacheSettings().asciiFix ? `${command} ${WORKING_DIR_SUPPRESS_FLAG}` : command;
   }
 
   /** 核心：将命令模板展开为最终命令行 */
