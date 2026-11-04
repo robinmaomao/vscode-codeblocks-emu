@@ -2,7 +2,7 @@
   "name": "codeblocks-vscode",
   "displayName": "%extension.displayName%",
   "description": "%extension.description%",
-  "version": "0.8.135",
+  "version": "0.8.136",
   "icon": "resources/icon.png",
   "publisher": "robinmaomao",
   "author": {
@@ -182,6 +182,11 @@
         "command": "codeblocks.workspaceScanReport",
         "title": "%command.codeblocks.workspaceScanReport.title%",
         "icon": "$(pulse)"
+      },
+      {
+        "command": "codeblocks.checkWorkspacePath",
+        "title": "%command.codeblocks.checkWorkspacePath.title%",
+        "icon": "$(warning)"
       },
       {
         "command": "codeblocks.excludeBuildOutputs",
@@ -807,6 +812,27 @@
             "type": "boolean",
             "default": false,
             "description": "%configuration.codeblocks.log.english.description%"
+          }
+        }
+      },
+      {
+        "title": "%configuration.workspace.title%",
+        "order": 25,
+        "properties": {
+          "codeblocks.workspace.pathGuard": {
+            "type": "string",
+            "enum": [
+              "off",
+              "prompt",
+              "auto"
+            ],
+            "enumDescriptions": [
+              "%configuration.codeblocks.workspace.pathGuard.off%",
+              "%configuration.codeblocks.workspace.pathGuard.prompt%",
+              "%configuration.codeblocks.workspace.pathGuard.auto%"
+            ],
+            "default": "prompt",
+            "description": "%configuration.codeblocks.workspace.pathGuard.description%"
           }
         }
       },

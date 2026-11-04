@@ -2,6 +2,19 @@
 
 本文件记录**正式版**里程碑；每个 dev 迭代的逐轮发布说明见 [`docs/release/`](docs/release/)（`0.8.xx-dev.md`），版本号与维护约定见 [`docs/release/00-说明.md`](docs/release/00-说明.md)。
 
+## 0.8.136 — 2026-11-04
+
+**工作区路径守卫 · AI 指令扫描治理**
+
+- 新增设置 `codeblocks.workspace.pathGuard`（`off` / `prompt` / `auto`，默认 `prompt`）与命令
+  `Code::Blocks: 检查工作区路径`：复刻 VS Code `PromptFilesLocator` 的 `xgn()` / `Eao()`，检查工作区路径是否含
+  glob 元字符（`[ ] { } * ?`），并给出 **VS Code 实际使用的搜索根**（含 `[内部]xxx` 这类目录名时会被截断到祖先目录）。
+- 命中时在 Code::Blocks 输出通道 + 通知里报告命中段、搜索根、`filePattern`、影响与修复路径；按用户确认
+  （或 `auto` 模式）把 `chat.instructionsFilesLocations` 的 `.github/instructions`、`.claude/rules` 写成 `false`，
+  **只写用户设置**（不写工作区 `.vscode/settings.json`、立即生效、幂等）。
+- 不改编译/链接流程、不禁用 Copilot Chat、不动 `files.watcherExclude` / `search.exclude`。
+- 根因取证与方案见 `docs/archive/RG风暴根因分析与方案-2026-11-04.md`；发布说明见 `docs/release/0.8.136.md`。
+- 规模（0.8.136 时点）：`contract 2/2`、`unit 171 FAIL=0 SKIP=1`（新增 `tests/test-workspace-path-guard.js`，40 断言）。
 ## 0.8.135 — 2026-11-03
 
 **构建期进程/CPU 收口 · 产物排除写入用户设置**

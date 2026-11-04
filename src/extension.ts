@@ -34,6 +34,7 @@ import { SymbolTreeProvider } from './ui/symbolTreeProvider';
 import { BuildSpinRenderState, nextBuildSpinRender } from './ui/buildStatusRender';
 import { createRunTerminal, setRunTerminalRegistry, createWorkspaceRunTerminalRegistry } from './ui/runTerminal';
 import { BuildEngine } from './build/buildEngine';
+import { analyzeWorkspacePath, countFilesCapped, mergePromptScanLocations, PROMPT_SCAN_LOCATIONS } from './build/workspacePathGuard';
 import {
   COMPILER_CACHE_INSTALL,
   buildInstallGuideItems,
@@ -1905,6 +1906,23 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   );
 
   context.subscriptions.push(
+    vscode.commands.registerCommand('codeblocks.checkWorkspacePath', async () => {
+      await reportWorkspacePathGuard('manual');
+    }),
+  );
+
+  // 工作区路径守卫：激活后延迟检查（不阻塞激活），并跟随工作区/配置变化；
+  // 设置项 workspace.pathGuard=off 时自动检查直接返回，手动命令仍可用。
+  setTimeout(() => { void reportWorkspacePathGuard('activate'); }, 1500);
+  context.subscriptions.push(vscode.workspace.onDidChangeWorkspaceFolders(() => {
+    pathGuardReported.clear();
+    void reportWorkspacePathGuard('folders');
+  }));
+  context.subscriptions.push(vscode.workspace.onDidChangeConfiguration((e) => {
+    if (e.affectsConfiguration('codeblocks.workspace.pathGuard')) void reportWorkspacePathGuard('config');
+  }));
+
+  context.subscriptions.push(
     vscode.commands.registerCommand('codeblocks.excludeBuildOutputs', async () => {
       await excludeBuildOutputsFromWatch();
     }),
@@ -2325,6 +2343,155 @@ async function excludeBuildOutputsFromWatch(): Promise<void> {
     reload,
   );
   if (pick === reload) void vscode.commands.executeCommand('workbench.action.reloadWindow');
+}
+
+// ———— 工作区路径守卫（codeblocks.workspace.pathGuard） ————
+//
+// 背景（实测）：工作区路径含成对 `[ ]` 时，VS Code 的 `PromptFilesLocator` 会把 AI 指令位置
+// 拆成「祖先目录 + glob」，于是每次文件变更都用 `rg --files`（无任何 -g 过滤）枚举整个祖先目录。
+// 这里只做两件事：把问题说清楚（输出 + 通知），并在用户确认后把 `.github/instructions`、
+// `.claude/rules` 两处扫描写进**用户设置**（绝不写工作区 `.vscode/settings.json`）。
+
+/** 本窗口内已提示过的工作区（避免每次触发都弹窗） */
+const pathGuardReported = new Set<string>();
+const PATH_GUARD_DISMISSED_KEY = 'codeblocks.pathGuard.dismissed';
+const PROMPT_SCAN_SETTING_KEY = 'chat.instructionsFilesLocations';
+
+function pathGuardMode(): 'off' | 'prompt' | 'auto' {
+  const raw = vscode.workspace.getConfiguration('codeblocks').get<string>('workspace.pathGuard', 'prompt');
+  return raw === 'off' || raw === 'auto' ? raw : 'prompt';
+}
+
+function pathGuardDismissed(): Set<string> {
+  const stored = extContext?.globalState.get<string[]>(PATH_GUARD_DISMISSED_KEY, []) ?? [];
+  return new Set(Array.isArray(stored) ? stored : []);
+}
+
+async function dismissPathGuard(workspace: string): Promise<void> {
+  const key = workspace.toLowerCase();
+  const next = [...pathGuardDismissed()];
+  if (!next.includes(key)) next.push(key);
+  await extContext?.globalState.update(PATH_GUARD_DISMISSED_KEY, next.slice(-50));
+}
+
+/**
+ * 把两处 AI 指令扫描写入**用户设置**（幂等）。
+ * 返回本次新关闭的条目，以及"写入后仍然生效"的条目（工作区级同名条目会覆盖用户级）。
+ */
+async function applyPromptScanLocations(): Promise<{ changed: string[]; stillEnabled: string[] }> {
+  const readEffective = (): string[] => {
+    const effective = vscode.workspace.getConfiguration().get<Record<string, unknown>>(PROMPT_SCAN_SETTING_KEY) ?? {};
+    return PROMPT_SCAN_LOCATIONS.filter((loc) => effective[loc] !== false);
+  };
+  const cfg = vscode.workspace.getConfiguration();
+  const merged = mergePromptScanLocations(cfg.inspect<Record<string, unknown>>(PROMPT_SCAN_SETTING_KEY)?.globalValue);
+  if (merged.changed.length === 0) return { changed: [], stillEnabled: readEffective() };
+  await cfg.update(PROMPT_SCAN_SETTING_KEY, merged.value, vscode.ConfigurationTarget.Global);
+  return { changed: merged.changed, stillEnabled: readEffective() };
+}
+
+/** 检查所有工作区目录，输出报告并在需要时提示用户 */
+async function reportWorkspacePathGuard(reason: 'activate' | 'folders' | 'config' | 'manual'): Promise<void> {
+  const mode = pathGuardMode();
+  if (mode === 'off' && reason !== 'manual') return;
+  const folders = vscode.workspace.workspaceFolders ?? [];
+  if (folders.length === 0) {
+    if (reason === 'manual') vscode.window.showInformationMessage(i18n.t('Open a workspace folder first'));
+    return;
+  }
+  const dismissed = pathGuardDismissed();
+  let reported = false;
+  for (const folder of folders) {
+    const workspace = folder.uri.fsPath;
+    const key = workspace.toLowerCase();
+    const analysis = analyzeWorkspacePath(workspace);
+    if (analysis.ok) {
+      if (reason === 'manual') {
+        outputChannel.info(logT('Workspace path looks fine: no glob metacharacters found ({0})', workspace));
+        vscode.window.showInformationMessage(i18n.t('Workspace path looks fine: no glob metacharacters found'));
+      }
+      continue;
+    }
+    // auto 模式是用户的显式选择：即使之前点过「不再提示」也要执行修复
+    if (reason !== 'manual' && (pathGuardReported.has(key) || (mode !== 'auto' && dismissed.has(key)))) continue;
+    pathGuardReported.add(key);
+    reported = true;
+
+    const count = countFilesCapped(analysis.searchRoot);
+    const countText = count.missing ? '0' : String(count.count);
+    const segments = analysis.offending.map((hit) => `"${hit.segment}" (${hit.kind})`).join(', ');
+    outputChannel.warn(logT('[Code::Blocks] Workspace path contains glob metacharacter(s): {0}', segments));
+    outputChannel.warn(logT('  Workspace: {0}', workspace));
+    outputChannel.warn(logT('  VS Code truncates the AI instruction search root to: {0} ({1} file(s){2})', analysis.searchRoot, countText, count.capped ? '+' : ''));
+    if (analysis.filePattern) {
+      outputChannel.warn(logT('  filePattern: {0} (matched in JavaScript, so ripgrep runs without any -g filter)', analysis.filePattern));
+    }
+    outputChannel.warn(logT('  Impact: every file change under that folder re-runs rg --files over the whole tree, which inflates the Code.exe process group and pushes CPU to 100% during builds'));
+    outputChannel.warn(logT('  Fix: rename the offending folder so it contains no [ ] { } * ?, or disable the two scan locations in user settings'));
+    outputChannel.warn(logT('  To revert: set chat.instructionsFilesLocations back to {0}', '{ ".github/instructions": true, ".claude/rules": true }'));
+    if (reason === 'manual') outputChannel.show(true);
+
+    let applied: string[] = [];
+    let applyError: string | undefined;
+    if (mode === 'auto') {
+      try {
+        const result = await applyPromptScanLocations();
+        applied = result.changed;
+        if (applied.length) {
+          outputChannel.info(logT('[Code::Blocks] Disabled {0} AI instruction scan location(s) in USER settings: {1} (takes effect immediately)', applied.length, applied.join(', ')));
+        }
+        if (result.stillEnabled.length) {
+          outputChannel.warn(logT('  A workspace-level chat.instructionsFilesLocations still enables {0}; remove those entries for the fix to take effect', result.stillEnabled.join(', ')));
+        }
+      } catch (e) {
+        applyError = (e as Error).message;
+        outputChannel.warn(`[Code::Blocks] ${i18n.t('Failed to update user settings: {0}', applyError)}`);
+      }
+    }
+
+    const boxes = applied.length
+      ? [i18n.t('Copy diagnostics'), i18n.t("Don't show again")]
+      : [i18n.t('Disable those two scan locations'), i18n.t('Copy diagnostics'), i18n.t("Don't show again")];
+    const message = i18n.t('Workspace path contains glob metacharacter(s) ([ ] { } * ?). VS Code will enumerate {0} on every file change, which can push CPU to 100% during builds', analysis.searchRoot);
+    const pick = applied.length
+      ? await vscode.window.showInformationMessage(i18n.t('Disabled .github/instructions and .claude/rules scanning in your user settings (chat.instructionsFilesLocations); takes effect immediately, set both back to true to restore'), ...boxes)
+      : applyError !== undefined
+        ? await vscode.window.showErrorMessage(i18n.t('Failed to update user settings: {0}', applyError))
+        : mode === 'auto'
+          ? await vscode.window.showInformationMessage(i18n.t('Those two scan locations are already disabled in your user settings'), ...boxes)
+          : await vscode.window.showWarningMessage(message, { modal: false, detail: i18n.t('Detected in: {0}', segments) }, ...boxes);
+    if (pick === i18n.t('Copy diagnostics')) {
+      await vscode.env.clipboard.writeText([
+        `workspace: ${workspace}`,
+        `offending: ${segments}`,
+        `searchRoot: ${analysis.searchRoot}`,
+        `filePattern: ${analysis.filePattern ?? '(none)'}`,
+        `files: ${countText}`,
+      ].join('\n'));
+      vscode.window.showInformationMessage(i18n.t('Diagnostics copied to the clipboard'));
+    } else if (pick === i18n.t('Disable those two scan locations')) {
+      try {
+        const result = await applyPromptScanLocations();
+        if (result.changed.length) {
+          outputChannel.info(logT('[Code::Blocks] Disabled {0} AI instruction scan location(s) in USER settings: {1} (takes effect immediately)', result.changed.length, result.changed.join(', ')));
+          vscode.window.showInformationMessage(i18n.t('Disabled .github/instructions and .claude/rules scanning in your user settings (chat.instructionsFilesLocations); takes effect immediately, set both back to true to restore'));
+        } else {
+          vscode.window.showInformationMessage(i18n.t('Those two scan locations are already disabled in your user settings'));
+        }
+        if (result.stillEnabled.length) {
+          outputChannel.warn(logT('  A workspace-level chat.instructionsFilesLocations still enables {0}; remove those entries for the fix to take effect', result.stillEnabled.join(', ')));
+        }
+      } catch (e) {
+        outputChannel.warn(`[Code::Blocks] ${i18n.t('Failed to update user settings: {0}', (e as Error).message)}`);
+        vscode.window.showErrorMessage(i18n.t('Failed to update user settings: {0}', (e as Error).message));
+      }
+    } else if (pick === i18n.t("Don't show again")) {
+      await dismissPathGuard(workspace);
+    }
+  }
+  if (reason === 'manual' && !reported && folders.length > 0) {
+    outputChannel.show(true);
+  }
 }
 
 async function showWorkspaceScanReport(): Promise<void> {
