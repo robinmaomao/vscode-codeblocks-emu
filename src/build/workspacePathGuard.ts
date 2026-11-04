@@ -233,3 +233,13 @@ export function mergePromptScanLocations(existing: unknown): { value: Record<str
   }
   return { value, changed };
 }
+
+/**
+ * 两处扫描是否**已经**关闭（按当前有效值判断：工作区级 `true` 覆盖用户级 `false` 时仍算未关闭）。
+ * 用于"修好之后不再重复提示"：重载窗口后 `pathGuardReported` 会重置，必须靠配置本身判断。
+ */
+export function arePromptScanLocationsDisabled(existing: unknown): boolean {
+  if (!existing || typeof existing !== 'object' || Array.isArray(existing)) return false;
+  const value = existing as Record<string, unknown>;
+  return PROMPT_SCAN_LOCATIONS.every((location) => value[location] === false);
+}
