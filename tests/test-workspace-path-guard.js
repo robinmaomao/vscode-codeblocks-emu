@@ -21,6 +21,7 @@ const {
   analyzeWorkspacePath,
   countFilesCapped,
   mergePromptScanLocations,
+  arePromptScanLocationsDisabled,
   PROMPT_SCAN_LOCATIONS,
 } = require('../dist/build/workspacePathGuard.js');
 
@@ -58,7 +59,6 @@ check('D5 自定义位置同样截断', splitCustom.filePattern === '[内部]575
 const splitUnc = computeInstructionSearchRoot('\\\\server\\share\\[x]proj');
 check('D6 UNC 前缀在 searchRoot 中保留', splitUnc.searchRoot === '\\\\server\\share', splitUnc.searchRoot);
 check('D7 UNC 命中段进入 filePattern', splitUnc.filePattern === '[x]proj/.github/instructions', splitUnc.filePattern);
-
 // ---------- E. analyzeWorkspacePath ----------
 const aBad = analyzeWorkspacePath(bad);
 check('E1 坏路径 ok=false', aBad.ok === false, aBad.ok);
@@ -96,6 +96,12 @@ const g6 = mergePromptScanLocations([]);
 check('G6 数组按非法值忽略', g6.value['.github/instructions'] === false && g6.changed.length === 2, g6);
 const g7 = mergePromptScanLocations({ '.github/instructions': true });
 check('G7 已显式 true 会被改为 false（正是修复手段）', g7.value['.github/instructions'] === false, g7.value);
+
+// ---------- G2. "已关闭"判定（用于重载窗口后不再重复提示） ----------
+check('G8 两项 false → 判定已关闭', arePromptScanLocationsDisabled({ '.github/instructions': false, '.claude/rules': false }) === true);
+check('G9 缺一项 → 判定未关闭', arePromptScanLocationsDisabled({ '.github/instructions': false }) === false);
+check('G10 一项为 true → 判定未关闭', arePromptScanLocationsDisabled({ '.github/instructions': false, '.claude/rules': true }) === false);
+check('G11 非对象/空值 → 判定未关闭', arePromptScanLocationsDisabled(undefined) === false && arePromptScanLocationsDisabled('x') === false && arePromptScanLocationsDisabled([]) === false);
 
 // ---------- H. 贡献面：设置与命令必须真的注册 ----------
 const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf-8'));

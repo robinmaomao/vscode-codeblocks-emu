@@ -34,7 +34,7 @@ import { SymbolTreeProvider } from './ui/symbolTreeProvider';
 import { BuildSpinRenderState, nextBuildSpinRender } from './ui/buildStatusRender';
 import { createRunTerminal, setRunTerminalRegistry, createWorkspaceRunTerminalRegistry } from './ui/runTerminal';
 import { BuildEngine } from './build/buildEngine';
-import { analyzeWorkspacePath, countFilesCapped, mergePromptScanLocations, PROMPT_SCAN_LOCATIONS } from './build/workspacePathGuard';
+import { analyzeWorkspacePath, arePromptScanLocationsDisabled, countFilesCapped, mergePromptScanLocations, PROMPT_SCAN_LOCATIONS } from './build/workspacePathGuard';
 import {
   COMPILER_CACHE_INSTALL,
   buildInstallGuideItems,
@@ -2412,6 +2412,13 @@ async function reportWorkspacePathGuard(reason: 'activate' | 'folders' | 'config
       }
       continue;
     }
+    // 已经关闭两处扫描（用户点过 Disable / auto 已写入 / 手动改过设置）：
+    // 自动流程不再打扰；手动命令仍给完整报告。重载窗口后 pathGuardReported 会重置，
+    // 因此必须按"有效配置"判断，否则每次打开都会重复提示。
+    const alreadyClosed = arePromptScanLocationsDisabled(
+      vscode.workspace.getConfiguration().get<Record<string, unknown>>(PROMPT_SCAN_SETTING_KEY),
+    );
+    if (alreadyClosed && reason !== 'manual') continue;
     // auto 模式是用户的显式选择：即使之前点过「不再提示」也要执行修复
     if (reason !== 'manual' && (pathGuardReported.has(key) || (mode !== 'auto' && dismissed.has(key)))) continue;
     pathGuardReported.add(key);
@@ -2430,6 +2437,12 @@ async function reportWorkspacePathGuard(reason: 'activate' | 'folders' | 'config
     outputChannel.warn(logT('  Fix: rename the offending folder so it contains no [ ] { } * ?, or disable the two scan locations in user settings'));
     outputChannel.warn(logT('  To revert: set chat.instructionsFilesLocations back to {0}', '{ ".github/instructions": true, ".claude/rules": true }'));
     if (reason === 'manual') outputChannel.show(true);
+
+    if (alreadyClosed) {
+      // 修复已生效：只报告，不再弹修复提示（避免每次打开/重载都打扰）
+      vscode.window.showInformationMessage(i18n.t('Those two scan locations are already disabled in your user settings'));
+      continue;
+    }
 
     let applied: string[] = [];
     let applyError: string | undefined;
