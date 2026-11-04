@@ -103,5 +103,97 @@ for (const p of PANELS) {
   check('快捷键面板：已移除 retainContextWhenHidden', !kb.includes('retainContextWhenHidden'), null);
 }
 
+// ============ 面板可用性 / 布局回归（0.8.136） ============
+// 缺陷 1：doSave() 无条件收集所有 tab 的表单，而未访问过的 tab 元素不存在 ⇒ 抛 TypeError ⇒ 保存静默失效。
+// 缺陷 2：.list-actions 无 flex-wrap + button 无 white-space:nowrap ⇒ 窄面板下中文按钮逐字换行成竖排单字。
+/** 取 CSS 中某个选择器的声明体（选择器需出现在行首，避免匹配到 `.ops button` 之类） */
+function ruleBody(css, selector) {
+  const esc = selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const m = css.match(new RegExp('(?:^|\\n)[ \\t]*' + esc + '[ \\t]*\\{([^}]*)\\}'));
+  return m ? m[1] : null;
+}
+/** 取内联脚本中某个函数的函数体（花括号配平；模板占位已中和为 0） */
+function fnBody(script, name) {
+  const start = script.indexOf('function ' + name + '(');
+  if (start < 0) return null;
+  const brace = script.indexOf('{', start);
+  let depth = 0;
+  for (let i = brace; i < script.length; i++) {
+    if (script[i] === '{') depth++;
+    else if (script[i] === '}') {
+      depth--;
+      if (depth === 0) return script.slice(brace, i + 1);
+    }
+  }
+  return null;
+}
+
+{
+  const propsDist = fs.readFileSync(path.resolve(__dirname, '../dist/ui/projectPropertiesPanel.js'), 'utf-8');
+  const tpl = extractTemplate(propsDist, propsDist.indexOf('return `<!DOCTYPE html>') + 'return '.length);
+  const html = neutralizePlaceholders(tpl);
+  const css = (html.match(/<style>([\s\S]*?)<\/style>/) || [, ''])[1];
+  const script = (html.match(/<script>([\s\S]*?)<\/script>/) || [, ''])[1];
+
+  check('工程属性：按钮禁止逐字换行（button white-space: nowrap）',
+    /white-space:\s*nowrap/.test(ruleBody(css, 'button') || ''), ruleBody(css, 'button'));
+  check('工程属性：列表按钮行可换行（.list-actions flex-wrap）',
+    /flex-wrap:\s*wrap/.test(ruleBody(css, '.list-actions') || ''), ruleBody(css, '.list-actions'));
+  check('工程属性：顶栏可换行（.toolbar flex-wrap）',
+    /flex-wrap:\s*wrap/.test(ruleBody(css, '.toolbar') || ''), ruleBody(css, '.toolbar'));
+  const layout = ruleBody(css, '.layout') || '';
+  check('工程属性：列表列有下限、表单列可收缩（minmax）',
+    /minmax\(200px,\s*240px\)/.test(layout) && /minmax\(0,\s*1fr\)/.test(layout), layout);
+  check('工程属性：窄面板改为上下堆叠（媒体查询）', /@media\s*\(max-width:\s*720px\)/.test(css), null);
+
+  const save = fnBody(script, 'doSave') || '';
+  check('工程属性：保存前收集异常不再逃逸（try/catch）', /try\s*\{/.test(save) && /catch\s*\(/.test(save), save.slice(0, 120));
+  check('工程属性：收集异常时在状态栏可见', /setStatus\(/.test(save) && /return;/.test(save), save.slice(0, 200));
+  const fBody = fnBody(script, 'collectFileForm') || '';
+  const vBody = fnBody(script, 'collectVTForm') || '';
+  const tBody = fnBody(script, 'collectTargetForm') || '';
+  check('工程属性：文件表单未渲染时跳过收集（元素存在性守卫）',
+    /document\.getElementById\('ff-var'\)/.test(fBody) && /if \(!\w+/.test(fBody), fBody.slice(0, 120));
+  check('工程属性：虚拟目标表单未渲染时跳过收集',
+    /document\.getElementById\('vt-alias'\)/.test(vBody) && /if \(!\w+/.test(vBody), vBody.slice(0, 120));
+  check('工程属性：目标表单未渲染时跳过收集',
+    /if \(!targets\.length \|\| !document\.getElementById\('f-title'\)\) return;/.test(tBody), tBody.slice(0, 150));
+  // 目标被删除后各目标级 tab 的作用域索引可能失效：collect 必须能跳过而不是抛错（否则整次保存失败）
+  for (const name of ['collectOptionsForm', 'collectDirsForm', 'collectScriptsForm']) {
+    const body = fnBody(script, name) || '';
+    check(`工程属性：${name} 作用域失效时跳过（if (!cur) return）`, /if \(!cur\) return;/.test(body), body.slice(0, 200));
+  }
+  const dbgBody = fnBody(script, 'collectDebugForm') || '';
+  check('工程属性：collectDebugForm 作用域失效时跳过 remote 段（保留 search_path）',
+    /dbg\.searchPaths = optionsLines\(/.test(dbgBody) && /if \(selectedDebugScope !== '' && !scopeTarget\) return;/.test(dbgBody), dbgBody.slice(0, 240));
+  // 调试器远程配置按目标标题索引：改名/删除目标时必须同步，否则保存出孤儿 <remote_debugging target="…"> 节点
+  check('工程属性：目标改名同步调试器远程配置',
+    /dbg\.remote\.forEach\(r => \{ if \(r\.target === oldTitle\) r\.target = newTitle; \}\)/.test(script), null);
+  check('工程属性：目标删除清掉调试器远程配置',
+    /dbg\.remote = dbg\.remote\.filter\(r => r\.target !== removedTitle\)/.test(script), null);
+}
+
+{
+  const coDist = fs.readFileSync(path.resolve(__dirname, '../dist/ui/compilerOptionsPanel.js'), 'utf-8');
+  const tpl = extractTemplate(coDist, coDist.indexOf('return `<!DOCTYPE html>') + 'return '.length);
+  const css = (neutralizePlaceholders(tpl).match(/<style>([\s\S]*?)<\/style>/) || [, ''])[1];
+  check('编译选项：工具栏可换行（.toolbar flex-wrap）',
+    /flex-wrap:\s*wrap/.test(ruleBody(css, '.toolbar') || ''), ruleBody(css, '.toolbar'));
+  check('编译选项：按钮禁止逐字换行（button white-space: nowrap）',
+    /white-space:\s*nowrap/.test(ruleBody(css, 'button') || ''), ruleBody(css, 'button'));
+  check('编译选项：选项行可换行（.opt flex-wrap）',
+    /flex-wrap:\s*wrap/.test(ruleBody(css, '.opt') || ''), ruleBody(css, '.opt'));
+}
+
+{
+  const kbDist = fs.readFileSync(path.resolve(__dirname, '../dist/ui/keybindingPanel.js'), 'utf-8');
+  const tpl = extractTemplate(kbDist, kbDist.indexOf('return `<!DOCTYPE html>') + 'return '.length);
+  const css = (neutralizePlaceholders(tpl).match(/<style>([\s\S]*?)<\/style>/) || [, ''])[1];
+  check('快捷键：按钮禁止逐字换行（button white-space: nowrap）',
+    /white-space:\s*nowrap/.test(ruleBody(css, 'button') || ''), ruleBody(css, 'button'));
+  check('快捷键：工具栏行可换行（.top .row flex-wrap）',
+    /flex-wrap:\s*wrap/.test(ruleBody(css, '.top .row') || ''), ruleBody(css, '.top .row'));
+}
+
 console.log(`WebView 面板回归: ${pass} pass, ${fail} fail`);
 process.exit(fail ? 1 : 0);

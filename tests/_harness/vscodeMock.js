@@ -96,14 +96,19 @@ function createVscodeMock(opts = {}) {
       set html(v) { html.value = v; },
       postMessage: (m) => { webview.posted.push(m); return Promise.resolve(true); },
       posted: [],
-      onDidReceiveMessage: (listener) => { msgListeners.push(listener); return new Disposable(); },
+      onDidReceiveMessage: (listener, thisArg) => { msgListeners.push(thisArg ? listener.bind(thisArg) : listener); return new Disposable(); },
       __emit: (m) => msgListeners.forEach((l) => l(m)),
     };
     const panel = {
       kind, title, viewColumn: column, webview,
       visible: true, active: true,
       reveal() {}, hide() {},
-      dispose() { disposeListeners.forEach((l) => l()); },
+      dispose() {
+        // 对齐真实 VS Code：onDidDispose 只触发一次（面板内部 dispose() 会再次调用 panel.dispose()，无守卫会无限递归）
+        if (panel.__disposed) return;
+        panel.__disposed = true;
+        disposeListeners.forEach((l) => l());
+      },
       onDidDispose: (listener) => { disposeListeners.push(listener); return new Disposable(); },
       onDidChangeViewState: () => new Disposable(),
       iconPath: undefined,

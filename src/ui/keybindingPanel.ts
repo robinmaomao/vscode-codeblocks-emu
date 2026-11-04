@@ -150,7 +150,7 @@ export class KeybindingPanel {
   .top { position: sticky; top: 0; background: var(--vscode-editor-background); padding: 10px 0; border-bottom: 1px solid var(--vscode-panel-border); z-index: 2; }
   .top .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
   input[type="search"], #manualInput { background: var(--vscode-input-background); color: var(--vscode-input-foreground); border: 1px solid var(--vscode-input-border, transparent); padding: 4px 8px; border-radius: 2px; min-width: 220px; }
-  button { background: var(--vscode-button-background); color: var(--vscode-button-foreground); border: none; padding: 4px 10px; border-radius: 2px; cursor: pointer; }
+  button { background: var(--vscode-button-background); color: var(--vscode-button-foreground); border: none; padding: 4px 10px; border-radius: 2px; cursor: pointer; white-space: nowrap; }
   button.secondary { background: var(--vscode-button-secondaryBackground, transparent); color: var(--vscode-button-secondaryForeground, var(--vscode-foreground)); border: 1px solid var(--vscode-panel-border); }
   button:hover { opacity: .9; }
   #bar { display: none; margin: 8px 0; padding: 8px 10px; border: 1px solid var(--vscode-focusBorder); border-radius: 3px; background: var(--vscode-editorWidget-background); }

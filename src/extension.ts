@@ -1434,7 +1434,23 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       if (!project) return;
       const targetTitle = await selectTarget();
       const target = targetTitle ? project.buildTargets.find((t) => t.title === targetTitle) : undefined;
-      CompilerOptionsPanel.show(getCompiler(), project, target, context.extensionUri);
+      CompilerOptionsPanel.show(getCompiler(), project, target, context.extensionUri, async (options) => {
+        // 应用 = 立即写回 .cbp：本扩展没有 Code::Blocks 的「工程已修改」状态，仅改内存会让改动在重开工程后丢失
+        const live = openProjects.find((p) => p.filename === project.filename);
+        if (!live) throw new Error(i18n.t('Project is not open: {0}', project.title));
+        const liveTarget = target ? live.buildTargets.find((t) => t.title === target.title) : undefined;
+        // 目标在面板打开后被改名/删除：不要静默改写工程级选项（作用域会错位）
+        if (target && !liveTarget) throw new Error(i18n.t('Target not found: {0}', target.title));
+        if (liveTarget) liveTarget.compilerOptions = options;
+        else live.compilerOptions = options;
+        await persistProjectAndReload(live);
+        const fresh = openProjects.find((p) => p.filename === project.filename);
+        if (!fresh) return undefined;
+        return {
+          project: fresh,
+          target: target ? fresh.buildTargets.find((t) => t.title === target.title) : undefined,
+        };
+      });
     }),
   );
 
