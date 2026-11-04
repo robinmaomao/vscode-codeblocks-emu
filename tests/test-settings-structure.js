@@ -1,7 +1,8 @@
-// 设置结构回归（第53轮配置整理）：
-//  - configuration 为 7 个分区块（title+order），设置项总数 76、无重复键
+// 设置结构回归（配置整理）：
+//  - configuration 为 9 个分区块（title+order），设置项总数 82、无重复键
 //  - 关键默认值/枚举/scope/数值校验/DBGconfig/描述无轮次标记
 //  - 全部设置键在 dist 中被读取（无死配置；ui.symbolsView 由 when 子句使用）
+//  - 已移除的 clangd.queryDriver 不再出现
 const fs = require('fs');
 const path = require('path');
 
@@ -16,7 +17,7 @@ const { nlsText } = require('./_harness/nls');
 const cfg = pkg.contributes.configuration;
 check('configuration 为数组（分区块）', Array.isArray(cfg), typeof cfg);
 if (!Array.isArray(cfg)) { console.log('设置结构: 0 pass, 1 fail'); process.exit(1); }
-check('分区块数量 = 8', cfg.length === 8, cfg.length);
+check('分区块数量 = 9', cfg.length === 9, cfg.length);
 check('每块含 title + order', cfg.every((b) => typeof b.title === 'string' && b.title && Number.isFinite(b.order)), cfg.map((b) => [b.title, b.order]));
 check('order 严格递增', cfg.every((b, i) => i === 0 || cfg[i - 1].order < b.order), cfg.map((b) => b.order));
 
@@ -38,7 +39,8 @@ for (const b of cfg) {
     byKey[k] = v;
   }
 }
-  check('设置项总数 = 83', keys.length === 83, keys.length);
+check('设置项总数 = 82', keys.length === 82, keys.length);
+check('已移除冗余设置 clangd.queryDriver', !keys.includes('codeblocks.clangd.queryDriver'), keys.filter((k) => /queryDriver$/.test(k)));
 check('无重复键', new Set(keys).size === keys.length, keys.length - new Set(keys).size);
 check('disableInit 默认 true（对齐 CB disable_init）', byKey['codeblocks.debug.disableInit']?.default === true, byKey['codeblocks.debug.disableInit']);
 check('saveHtmlLogFullCommandLine 默认 false（对齐 CB full_command_line）', byKey['codeblocks.build.saveHtmlLogFullCommandLine']?.default === false, byKey['codeblocks.build.saveHtmlLogFullCommandLine']);
@@ -105,7 +107,7 @@ check('scope machine-overridable ×3（路径类设置）',
 check('gdbPath 描述无「第 N 轮」内部标记', !String(nlsText(byKey['codeblocks.debug.gdbPath']?.description) || '').includes('第'), null);
 check('compilerPrograms 含 DBGconfig 属性', !!byKey['codeblocks.compilerPrograms']?.properties?.DBGconfig, null);
 
-check('parallelJobs 0–32 且默认 8（0 = 自动）',
+check('parallelJobs 0–32 且默认 8（0 = 当前主机逻辑核数）',
   byKey['codeblocks.parallelJobs']?.minimum === 0
   && byKey['codeblocks.parallelJobs']?.maximum === 32
   && byKey['codeblocks.parallelJobs']?.default === 8,

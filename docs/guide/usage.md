@@ -350,7 +350,7 @@ code --extensionDevelopmentPath="." --disable-extensions --new-window
 2. **用户级 clangd 配置 `config.yaml`** —— 用 `If.PathMatch` 把编译数据库按工程树作用域指向上面的缓存目录（Windows 位于 `%LocalAppData%\clangd\config.yaml`），不影响用户其它内容。
 
 - 命令：`Code::Blocks: Generate compile_commands.json (IntelliSense)`（手动重新生成，并检测 clangd）
-- 打开工程、切换活动项目时自动重新生成；**修改影响产物的 `codeblocks.clangd.*` 设置后也会自动重新生成一次**（约 150ms 去抖合并；clangd 自己会重载 `config.yaml`，无需重启或重载窗口），生成/跳过都会在输出通道留痕。只影响展示/提示的 `buildLogDiagnostics`、`restartOnActiveProjectSwitch`、`queryDriver` 不改变产物，**不会**触发重建（避免大工程每次改设置都全量收集编译命令）；「生成 compile_commands.json」命令与手动重检会顺带清除 clangd 探测缓存，刚安装/下载完也能立即生效。未打开工程时不做生成（作用域未知），下次打开工程按新设置生成。
+- 打开工程、切换活动项目时自动重新生成；**修改影响产物的 `codeblocks.clangd.*` 设置后也会自动重新生成一次**（约 150ms 去抖合并；clangd 自己会重载 `config.yaml`，无需重启或重载窗口），生成/跳过都会在输出通道留痕。只影响展示/提示的 `buildLogDiagnostics`、`restartOnActiveProjectSwitch` 不改变产物，**不会**触发重建（避免大工程每次改设置都全量收集编译命令）；「生成 compile_commands.json」命令与手动重检会顺带清除 clangd 探测缓存，刚安装/下载完也能立即生效。未打开工程时不做生成（作用域未知），下次打开工程按新设置生成。
 - **改编译器后同样立即生效**：编译数据库里的编译命令、`--target`、系统头 `-isystem` 全部按当前编译器推导，因此修改 `codeblocks.compilerId` / `codeblocks.masterPath` / `codeblocks.compilerPrograms` 时会**按新编译器重新生成**并在编译数据库真正变化后**重启 clangd**（否则已打开文件仍按旧编译命令报错/补全），底部状态栏 `Compiler:` 同步刷新。编译器变化不提供关闭项（不重启等于设置没生效）；切换活动工程的重启可用 `codeblocks.clangd.restartOnActiveProjectSwitch` 关闭。
 - **设置取值容错**：`suppressedWarnings` / `forcedIncludes` / `excludeDirs` 都是字符串数组。若手改 `settings.json` 时误写成字符串（如 `"codeblocks.clangd.suppressedWarnings": "-Wunused-function, -Wempty-body"`），扩展会**按逗号/分号/空白拆分**后使用；写成其它类型则**回退设置默认值**，并在输出通道给出 `取值类型不正确` 提示（否则「设置里配了却没写进 `config.yaml`」难以排查）。数组值会顺带 trim、去空、去重。
 - **历史残留自动清理**：扩展只会重写「本次打开作用域」的片段，项目被删除/移动后旧片段会永久残留（clangd 每次都要解析它们）。因此每次生成配置时会**顺带清理失效片段**（作用域目录或编译数据库目录已不存在者），并把清理数量打印到输出通道；也可用命令 `Code::Blocks: Clean Stale clangd Config Fragments` 手动预览 + 清理（同时清理扩展缓存目录里已无对应片段的孤儿 `compile_commands.json` 目录，可重建）。**安全边界**：只动扩展自己标记的片段（`# >>> codeblocks-vscode <hash> begin`…`end`），用户自有内容一律不碰；网络盘/未挂载盘符（如未映射的 `Z:`、U 盘）与 `\\server\share` 路径一律跳过，不会误删。
@@ -397,7 +397,7 @@ code --extensionDevelopmentPath="." --disable-extensions --new-window
 
 1. 命令 `Code::Blocks: Configure clangd --query-driver` —— 按当前活动工程的编译器路径生成 `--query-driver=<编译器目录>/*` 并**合并**进 VS Code 的 `clangd.arguments`（可选择写入工作区设置 / 用户设置 / 仅复制到剪贴板；写入前有预览确认，不覆盖你已有的其它参数）。
 2. 设置 `codeblocks.clangd.builtinHeaders = queryDriver` —— 让 clangd 使用从交叉编译器提取的内建头（`stddef.h` 等），而不是 clangd 自带的内建头。
-3. `codeblocks.clangd.queryDriver = true` 时，若 `clangd.arguments` 里还没有 `--query-driver`，扩展会在输出通道给出一条可操作提示（不会自动改你的设置）。
+3. 把 `codeblocks.clangd.builtinHeaders` 设为 `queryDriver` 后，若 `clangd.arguments` 里还没有 `--query-driver`，扩展会在输出通道给出一条可操作提示（不会自动改你的设置）。
 
 
 **未安装 clangd 时的兜底（轻量符号补全）：**
@@ -558,9 +558,11 @@ Build Log 视图位于**底部 Panel**（打开方式：`Ctrl+J` 后选择「Bui
 
 ## 13. 设置项总表
 
-> 设置页按 **8 个分区**呈现（编译器 / 构建 / 工作区 / 调试 / IntelliSense / 界面 / 编辑器 / 快捷键；VS Code 设置编辑器内显示分区标题，`configuration` 数组机制）。
+> 设置页按 **9 个分区**呈现（编译器 / 构建 / 构建日志与通知 / 工作区与工程 / 调试 / IntelliSense / 界面 / 编辑器与工具 / 快捷键；VS Code 设置编辑器内显示分区标题，`configuration` 数组机制）。
+> **完整逐项参考**（类型、默认值、作用域、取值与生效时机）见 [设置项完整参考](./settings.md)｜英文版 [settings.en.md](./settings.en.md)。
 > 分区标题跟随 VS Code 显示语言（`package.nls.json` 英文默认 + `package.nls.zh-cn.json` 中文）。
 > 路径类设置 `codeblocks.masterPath` / `codeblocks.compilerPrograms` / `codeblocks.debug.gdbPath` / `codeblocks.build.compilerCache` / `codeblocks.build.compilerCachePath` 声明为 **machine-overridable**：不参与 Settings Sync（避免跨机同步坏路径），仍可按工作区覆盖。
+> **升级迁移**：`codeblocks.parallelJobs` 的 `0` 由「逻辑核数 × 2」改为「当前主机逻辑核数」，升级时会把显式配置的 `0` 一次性改写为 `8`；`codeblocks.clangd.queryDriver` 已移除（改用 `clangd.builtinHeaders=queryDriver` + 配置命令）。
 
 ### 13.0 界面语言与中英文切换
 
@@ -591,7 +593,7 @@ Build Log 视图位于**底部 Panel**（打开方式：`Ctrl+J` 后选择「Bui
 | 设置项 | 默认值 | 说明 |
 |--------|--------|------|
 | `codeblocks.saveBeforeBuild` | `true` | 构建 / 运行 / 清理前自动保存 |
-| `codeblocks.parallelJobs` | `8` | 并行编译任务数（默认 8；0 = 自动：逻辑核数 × 2，最多 32；并发越高全量构建越快但 CPU 越接近 100%，且每条编译进程链常驻几十至几百 MB，默认 8 给编辑器留余量。范围 0–32，显式值优先，1 = 串行，支持文件夹级覆盖。**进程预算**：无论怎么设，实际并发不超过 `max(8, 逻辑核数)`，被收敛时构建开始会在输出通道说明） |
+| `codeblocks.parallelJobs` | `8` | 并行编译任务数（默认 8；0 = 自动：当前主机逻辑核数，最多 32；并发越高全量构建越快但 CPU 越接近 100%，且每条编译进程链常驻几十至几百 MB，默认 8 给编辑器留余量。范围 0–32，显式值优先，1 = 串行，支持文件夹级覆盖。**进程预算**：无论怎么设，实际并发不超过 `max(8, 逻辑核数)`，被收敛时构建开始会在输出通道说明） |
 | `codeblocks.build.compilerCache` | `none` | 编译缓存（保护性增强，默认关）：`none`/`ccache`/`sccache`；启用后仅**标准编译命令**前置缓存程序（链接/资源编译/脚本/`compile_commands.json` 不注入；导出 Makefile/命令查看的展开预览反映启用状态；ccache 适用 GCC/Clang，MSVC 请选 sccache；PCH 单元走标准编译路径同样前置——ccache 对 PCH 缓存支持有限，未命中属预期）。工具自动探测：PATH → WinGet Links / WinGet Packages（新式 winget 便携包直写 PATH 的兜底）/ Scoop shims / cargo bin / Chocolatey / Program Files；**未找到时构建回退原编译器**（不使构建失败，输出通道告警一次；**未找到时每个构建都会重扫**——运行中安装/补齐后**下一个构建**即生效；已找到时复用解析结果并校验路径存在性，工具被卸载/移动会自动重扫；无需重载窗口）。**检测到但未启用：每次打开工作区都会询问是否启用**（提示含版本号；可点「不再提示」，修改本设置自动重置；每次激活/重检会把检测到的**版本号与路径**写入 Code::Blocks 输出通道）。安装引导：命令面板运行 `Code::Blocks: Install Compiler Cache (ccache/sccache)…`（仅引导，不静默安装）；machine-overridable |
 | `codeblocks.build.compilerCachePath` | `` | 编译缓存工具可执行文件显式路径（如 `C:\tools\ccache\ccache.exe`）；留空 = 自动探测；**路径无效等同未找到**（不静默改用 PATH）；仅编译缓存非 `none` 时生效；machine-overridable |
 | `codeblocks.maxReportedErrors` | `50` | 单次构建最多收集的错误数（0 = 不限制） |
@@ -656,7 +658,6 @@ Build Log 视图位于**底部 Panel**（打开方式：`Ctrl+J` 后选择「Bui
 | `codeblocks.clangd.documentationCommentFormat` | `default` | 写入 `Documentation.CommentFormat`：`default` 不写；`doxygen` = 按 Doxygen 解析（悬停补上参数/返回值说明）；`markdown` / `plaintext` 亦可显式指定 |
 | `codeblocks.clangd.excludeDirs` | `[]` | 写入 `If.PathExclude`：这些目录名（如 `obj`、`bin`）下的文件不套用本工程片段 |
 | `codeblocks.clangd.builtinHeaders` | `clangd` | 写入 `CompileFlags.BuiltinHeaders`：`clangd` = clangd 自带内建头（默认）；`queryDriver` = 用 `--query-driver` 从交叉编译器提取的内建头 |
-| `codeblocks.clangd.queryDriver` | `false` | 开启后若 `clangd.arguments` 尚未包含 `--query-driver`，输出通道给出一条可操作提示（配合命令 `Configure clangd --query-driver`） |
 | `codeblocks.clangd.extraConfig` | `""` | 附加到每个工程片段的自由 YAML（作为同作用域**后置**片段，可覆盖扩展写入的任意键；扩展自动补 `If.PathMatch`，无需自己写 `If`） |
 
 ### 13.5 界面
@@ -815,7 +816,7 @@ A：已修复。升级到 0.4.0 后，编译错误行的文件路径字符类已
 
 **Q：构建（编译）时 CPU 一直 100% / 风扇狂转，怎么降下来？**
 A：按「谁在吃 CPU」逐个排查：
-- **并发编译任务数**（最常见）：`codeblocks.parallelJobs` **默认 8**（此前默认「逻辑核数 × 2，最多 32」，8 线程机即 16、16 核机 32）。按需调整：`1` = 串行最省；`4` 适合老旧机器；`0` = 恢复自动（`min(逻辑核数 × 2, 32)`）。可在工程所在文件夹的 `.vscode/settings.json` 里单独设置（该设置按资源作用域读取，多根工作区按工程生效），下一次构建生效。**另有进程预算兜底**：实际并发不会超过 `max(8, 逻辑核数)`，被收敛时构建开始会打印一行说明（例：请求 32 → 实际 8）。
+- **并发编译任务数**（最常见）：`codeblocks.parallelJobs` **默认 8**（此前默认「逻辑核数 × 2，最多 32」，8 线程机即 16、16 核机 32）。按需调整：`1` = 串行最省；`4` 适合老旧机器；`0` = 按当前主机逻辑核数自动（`min(逻辑核数, 32)`；升级时显式 0 会一次性迁移为 8）。可在工程所在文件夹的 `.vscode/settings.json` 里单独设置（该设置按资源作用域读取，多根工作区按工程生效），下一次构建生效。**另有进程预算兜底**：实际并发不会超过 `max(8, 逻辑核数)`，被收敛时构建开始会打印一行说明（例：请求 32 → 实际 8）。
 - **clangd 后台索引**：clangd 是独立进程，默认会在后台为工程建索引（大 SDK 上 CPU/内存占用明显）。可把 `codeblocks.clangd.indexBackground` 设为 `skip`（牺牲部分跨文件跳转）或 `build`（更积极）；构建中若因切换活动工程触发编译数据库变化，扩展会**把 clangd 重启推迟到构建结束**，避免整库重索引与编译抢 CPU。
 - **编译缓存（ccache/sccache）**：默认关闭。开启后首次/未命中构建会多一次预处理（ccache 需要哈希输入），CPU 可能略升，但重复构建命中缓存时显著更快；MSVC 请用 sccache（ccache 不适配 cl.exe）。若只需省 CPU 而不追求命中率，保持默认 `none`。
 - **include 依赖扫描**：构建开始会在扩展宿主内扫描 `#include`（跨构建缓存已扩到 8192 个文件）。巨型工程若想跳过，可开 `codeblocks.build.skipIncludeDeps`（头文件改动不再触发重编译，需自行全量构建）。

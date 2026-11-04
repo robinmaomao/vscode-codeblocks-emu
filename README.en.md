@@ -176,7 +176,7 @@ Project tree operations (multi-project drag ordering / per-file compile·link to
 |--------|--------|------|
 | `codeblocks.compilerId` | `gcc` | Default compiler ID (maps to `options_<id>.xml`) |
 | `codeblocks.masterPath` | `` | Compiler installation root (empty = detect from PATH) |
-| `codeblocks.parallelJobs` | `8` | Number of parallel compile jobs (default 8; 0 = automatic: logical cores × 2, at most 32) |
+| `codeblocks.parallelJobs` | `8` | Number of parallel compile jobs (default 8; 0 = automatic: the host's logical core count, at most 32) |
 | `codeblocks.saveBeforeBuild` | `true` | Save automatically before building |
 | `codeblocks.compilerPrograms` | `{}` | Full paths of compiler programs (cross compilers are written by detection) |
 | `codeblocks.astyleOptions` | `["--style=allman", "--indent=spaces=4"]` | AStyle formatting options |
@@ -207,7 +207,7 @@ Project tree operations (multi-project drag ordering / per-file compile·link to
 | `codeblocks.clangd.queryDriver` | `false` | When enabled, warns in the Output channel if `clangd.arguments` lacks `--query-driver` (the `Configure clangd --query-driver` command writes it in one click) |
 | `codeblocks.clangd.extraConfig` | `""` | Free-form YAML injected as a **trailing** fragment in the same scope (can override any key written by the extension; the extension adds `If.PathMatch` automatically) |
 
-> The complete set of 83 settings (8 sections, bilingual descriptions) is in [Usage guide](./docs/guide/usage.md) §13. There are also two clangd commands: `Code::Blocks: Clean Stale clangd Config Fragments` (cleans stale fragments + orphan cache directories, with a preview before confirming) and `Code::Blocks: Configure clangd --query-driver` (cross-compiler fidelity).
+> The complete set of 82 settings (9 sections, bilingual descriptions) is in [Settings reference](./docs/guide/settings.en.md) (Chinese [settings.md](./docs/guide/settings.md)). There are also two clangd commands: `Code::Blocks: Clean Stale clangd Config Fragments` (cleans stale fragments + orphan cache directories, with a preview before confirming) and `Code::Blocks: Configure clangd --query-driver` (cross-compiler fidelity).
 
 ## Architecture
 

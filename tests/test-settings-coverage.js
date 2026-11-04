@@ -48,7 +48,6 @@ const SETTINGS = [
   ['codeblocks.clangd.documentationCommentFormat', 'src/extension.ts', 'dist/extension.js', '片段 Documentation.CommentFormat（generateClangdForWorkspaceInternal）'],
   ['codeblocks.clangd.excludeDirs', 'src/extension.ts', 'dist/extension.js', '片段 If.PathExclude（generateClangdForWorkspaceInternal）'],
   ['codeblocks.clangd.builtinHeaders', 'src/extension.ts', 'dist/extension.js', '片段 CompileFlags.BuiltinHeaders（generateClangdForWorkspaceInternal）'],
-  ['codeblocks.clangd.queryDriver', 'src/extension.ts', 'dist/extension.js', 'query-driver 提示（generateClangdForWorkspaceInternal）'],
   ['codeblocks.clangd.extraConfig', 'src/extension.ts', 'dist/extension.js', '自由 YAML 注入 + 轻量校验提示（generateClangdForWorkspaceInternal）'],
   ['codeblocks.projectTree.categorize', 'src/extension.ts', 'dist/extension.js', '工程树分组显示开关（activate 内注册视图处）'],
   ['codeblocks.ui.projectToolbar', 'src/extension.ts', 'dist/extension.js', '工程工具栏按钮可见性（applyProjectToolbarContext）'],
@@ -83,6 +82,36 @@ for (const [key, srcRel, distRel, note] of SETTINGS) {
   }
   check(`S ${key}：已接线到编译产物 ${distRel}`, lineOfKey(distRel, key) > 0, lineOfKey(distRel, key) || '未找到', distRel);
 }
+
+// ---------- 全覆盖断言：package.json 中的每个设置键都必须在源码中存在真实读取点 ----------
+// 例外：
+//  - ui.language 通过 i18n.LANGUAGE_SETTING 常量读取（src/i18n/index.ts）
+//  - editor.asmHashComment 通过 ASM_HASH_COMMENT_SETTING 常量读取（src/tools/asmCommentConfig.ts）
+//  - ui.symbolsView 仅由 package.json 视图 when 子句使用，不在代码中读取
+const pkg = JSON.parse(read('package.json'));
+const declaredKeys = pkg.contributes.configuration.flatMap((b) => Object.keys(b.properties || {}));
+const srcFiles = [];
+(function walk(dir) {
+  for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+    const p = path.join(dir, e.name);
+    if (e.isDirectory()) walk(p);
+    else if (e.name.endsWith('.ts')) srcFiles.push(p);
+  }
+})(path.join(ROOT, 'src'));
+const srcTexts = srcFiles.map((f) => fs.readFileSync(f, 'utf-8'));
+const readByLiteral = (bare) => {
+  const needle = new RegExp(`['"\`]${bare.replace(/\./g, '\\.')}['"\`]`);
+  return srcTexts.some((t) => t.split(/\r?\n/).some((l) => needle.test(l) && isConfigRead(l)));
+};
+const readExceptions = new Set(['codeblocks.ui.language', 'codeblocks.ui.symbolsView', 'codeblocks.editor.asmHashComment']);
+const missingReads = declaredKeys.filter((k) => {
+  if (readExceptions.has(k)) return false;
+  return !readByLiteral(k.replace(/^codeblocks\./, ''));
+});
+check('全部设置键都有真实源码读取点（ui.language / editor.asmHashComment 常量、ui.symbolsView when 子句除外）',
+  missingReads.length === 0, missingReads);
+check('覆盖清单未引用已删除设置', !SETTINGS.some(([k]) => k === 'codeblocks.clangd.queryDriver'),
+  SETTINGS.filter(([k]) => k === 'codeblocks.clangd.queryDriver'));
 
 // ---------- 行为断言 ----------
 (async () => {

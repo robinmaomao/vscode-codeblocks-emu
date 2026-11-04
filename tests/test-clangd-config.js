@@ -330,7 +330,8 @@ for (const block of pkg.contributes.configuration) {
 check('package.json 默认含 redefinition_different_typedef',
   Array.isArray(def) && def.includes('redefinition_different_typedef') && def.includes('-Wunused-function'), def);
 
-// 新增 12 项 clangd 设置：默认值必须等于「历史行为」（不改变现有产物）
+// 11 项 clangd 策略设置：默认值必须等于「历史行为」（不改变现有产物）
+// 注：queryDriver 布尔已移除（只用于提示）；实际开关是 builtinHeaders=queryDriver + 配置命令。
 const NEW_SETTINGS = {
   'codeblocks.clangd.unusedIncludes': ['none', 'strict', 'omit'],
   'codeblocks.clangd.headerInsertion': ['never', 'iwyu', 'omit'],
@@ -342,7 +343,6 @@ const NEW_SETTINGS = {
   'codeblocks.clangd.documentationCommentFormat': ['default', 'plaintext', 'markdown', 'doxygen'],
   'codeblocks.clangd.excludeDirs': undefined,
   'codeblocks.clangd.builtinHeaders': ['clangd', 'queryDriver'],
-  'codeblocks.clangd.queryDriver': undefined,
   'codeblocks.clangd.extraConfig': undefined,
 };
 {
@@ -365,6 +365,12 @@ check('extension 默认数组已接线（dist 含 redefinition_different_typedef
 for (const key of Object.keys(NEW_SETTINGS)) {
   check(`dist 已接线设置读取：${key}`, ext.includes(`'${key.replace('codeblocks.', '')}'`) || ext.includes(key), null);
 }
+check('已移除 queryDriver 布尔设置（不再读取 clangd.queryDriver）',
+  !/\.get\s*(<[^>]*>)?\s*\(\s*['"`]clangd\.queryDriver['"`]/.test(ext)
+  && ext.includes("update('clangd.queryDriver', undefined"), null);
+check('builtinHeaders=queryDriver 时仍会提示配置 --query-driver',
+  /\.get\(\s*['"]clangd\.builtinHeaders['"]\s*,\s*['"]clangd['"]\s*\)\s*===\s*['"]queryDriver['"]/.test(ext)
+  && ext.includes('does not contain --query-driver yet'), null);
 check('dist 含清理命令实现（cleanClangdConfigInteractive）', ext.includes('cleanClangdConfigInteractive') && ext.includes('codeblocks.cleanClangdConfig'), null);
 check('dist 监听 codeblocks.clangd 设置变化（自动重新生成，免重开工程）', ext.includes("affectsConfiguration('codeblocks.clangd')"), null);
 check('dist 监听编译器设置变化（G1：状态栏刷新 + 按新编译器重生成，免重开工程）',

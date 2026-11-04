@@ -68,6 +68,10 @@ function createVscodeMock(opts = {}) {
   const warnings = [];
   const infos = [];
   const configStore = { ...(opts.config || {}) };
+  /** `inspect()` 的显式值覆盖：`codeblocks.parallelJobs` → { globalValue, workspaceValue, workspaceFolderValue } */
+  const inspectStore = { ...(opts.inspect || {}) };
+  /** `update()` 调用记录（供设置迁移回归） */
+  const configUpdates = [];
   const fileWatchers = [];
   /** findFiles 调用记录（含 include/exclude/maxResults），用于"事件不再触发全量扫描"回归 */
   const findFilesCalls = [];
@@ -182,8 +186,14 @@ function createVscodeMock(opts = {}) {
           const full = section ? `${section}.${key}` : key;
           return full in configStore ? configStore[full] : def;
         },
-        inspect: (key) => ({ key, defaultValue: configStore[section ? `${section}.${key}` : key] }),
-        update: () => Promise.resolve(),
+        inspect: (key) => {
+          const full = section ? `${section}.${key}` : key;
+          return full in inspectStore ? inspectStore[full] : { key, defaultValue: configStore[full] };
+        },
+        update: (key, value, target) => {
+          configUpdates.push({ key: section ? `${section}.${key}` : key, value, target });
+          return Promise.resolve();
+        },
         has: (key) => (section ? `${section}.${key}` : key) in configStore,
       }),
       onDidChangeConfiguration: (listener) => { configChangeListeners.push(listener); return new Disposable(); },
@@ -317,7 +327,7 @@ function createVscodeMock(opts = {}) {
   });
 
   return {
-    vscode: proxied, webviews, channels, warnings, infos, configStore, fileWatchers, commandHandlers, findFilesCalls, statusBarItems,
+    vscode: proxied, webviews, channels, warnings, infos, configStore, configUpdates, fileWatchers, commandHandlers, findFilesCalls, statusBarItems,
     /** 测试用：向 .cbp 监视器派发事件（kind: create | change | delete） */
     emitFileEvent(kind, fsPath) {
       const target = fileWatchers.find((w) => String(w.pattern || '').includes('.cbp'));

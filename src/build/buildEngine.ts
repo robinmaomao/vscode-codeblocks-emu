@@ -132,7 +132,7 @@ export const MAX_PARALLEL_JOBS = 32;
 /**
  * 有效并行任务数（BuildEngine 与单元测试共用，保证「设置 → 实际并发」可验证）。
  * - 数值 ≥1：显式值（向下取整；大于 32 按 32 截断，兼容旧版本写入的 64；纯数字字符串同样接受）
- * - 0：自动 = min(逻辑核数 × 2, 32)
+ * - 0：自动 = min(当前主机逻辑核数, 32)
  * - 其它（未配置 / null / 负数 / 非数值）：回退默认值 8
  */
 export function resolveParallelJobs(configured: unknown, logicalCpus?: number): number {
@@ -144,7 +144,7 @@ export function resolveParallelJobs(configured: unknown, logicalCpus?: number): 
   if (n >= 1) return Math.min(Math.floor(n), MAX_PARALLEL_JOBS);
   if (n === 0) {
     const logical = Math.max(1, logicalCpus ?? os.cpus().length ?? 1);
-    return Math.min(logical * 2, MAX_PARALLEL_JOBS);
+    return Math.min(logical, MAX_PARALLEL_JOBS);
   }
   return DEFAULT_PARALLEL_JOBS; // 负数
 }
@@ -155,7 +155,7 @@ export function resolveParallelJobs(configured: unknown, logicalCpus?: number): 
  * 为什么按「单元数」而不是「进程数」：Windows 上一条 GCC 编译命令至少派生
  * `cmd.exe → gcc → cc1 → as`（去 shell 后仍有三层），上限 32 意味着同时存活
  * 100~190 个子进程 —— 任务管理器里就是「进程/线程暴增 + CPU 100%」。
- * 默认值 8 保持不变（用户已确认），这里只收敛 `0`（自动 = 核数×2）与历史写入的大值。
+ * 默认值 8 保持不变（用户已确认），这里只收敛 `0`（自动 = 当前主机逻辑核数）与历史写入的大值。
  */
 export function processBudget(logicalCpus?: number): number {
   const cores = Math.max(1, Math.floor(logicalCpus ?? os.cpus().length ?? 1));
@@ -326,7 +326,7 @@ export class BuildEngine {
   private sysSamples: SystemSample[] = [];
   private sysBuf = '';
 
-  /** 采样开关：显式设置，或已开启构建性能探针时自动跟随（profile 的价值就是解释耗时的归属） */
+  /** 采样开关：显式设置（不跟随 profile 自动开启——采样自身会占约 0.1 核，需要时单独开启） */
   private sampleSystemEnabled(): boolean {
     if (process.platform !== 'win32') return false;
     try {
@@ -2772,11 +2772,11 @@ export class BuildEngine {
   }
 
   /**
-   * 并行任务数：显式设置为准；0 = 自动；未配置 = 默认 8（见 resolveParallelJobs）。
+   * 并行任务数：显式设置为准；0 = 自动（当前主机逻辑核数）；未配置 = 默认 8（见 resolveParallelJobs）。
    *
    * 默认值 2026-10-27 由「0 = 自动」改为 8：逻辑核数 × 2 的超额订阅让编译期 CPU 长期跑满
    * （8 线程机 16 并发、16 核机 32 并发），宿主卡顿/风扇狂转的反馈集中在此。
-   * 仍保留 0 = 自动（min(逻辑核数 × 2, 32)）供需要极限吞吐的场景显式开启。
+   * 仍保留 0 = 自动（min(当前主机逻辑核数, 32)）供需要按机器吞吐的场景显式开启。
    *
    * 作用域：按工程文件 URI 读取，多根工作区里工程所在文件夹的覆盖值也能生效
    *（此前不带 URI 只读工作区级值，文件夹级 `codeblocks.parallelJobs` 被静默忽略）。
