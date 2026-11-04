@@ -32,7 +32,7 @@ check('编辑器占用：确认后保存并关闭对应 Tab（TabInputText + tab
 check('大小写仅变体/占用：两段式改名回退（临时名 .cb-rename-）',
   /caseOnly/.test(ext) && /cb-rename-/.test(ext), 'fallback', 'ok');
 check('文本手术接线：renameUnitInCbpText 且未命中时提示手动修正',
-  /renameUnitInCbpText\)\?\(raw, oldRel, newRel\)|renameUnitInCbpText\)\(raw, oldRel, newRel\)/.test(ext)
+  /renameUnitInCbpText\)\([A-Za-z_$][\w$.]*\s*,\s*oldRel,\s*newRel\)/.test(ext)
   && /Could not update the reference/.test(ext), 'text-surgery', 'ok');
 check('跨工程引用：仅状态栏提示，不自动修改',
   /other opened project\(s\) reference this file/.test(ext), 'notify', 'ok');

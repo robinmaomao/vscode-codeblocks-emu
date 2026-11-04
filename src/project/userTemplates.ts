@@ -18,6 +18,7 @@
  * 纯逻辑模块（仅依赖 fs/path），供命令与回归测试共用；不依赖 vscode。
  */
 import * as fs from 'fs';
+import { decodeTextWithEncoding } from '../tools/encoding';
 import * as path from 'path';
 import * as i18n from '../i18n';
 
@@ -156,6 +157,15 @@ export function getUserTemplate(root: string, id: string): UserTemplateManifest 
  * - 骨架文件按 `fileRels` 收编（缺失跳过；目录结构保留）；
  * - 同名模板存在且未允许覆盖时抛错。
  */
+/**
+ * 读取模板源 .cbp：兼容旧 ANSI(GBK) 工程，并把 XML 声明规范化为 UTF-8
+ * （模板文件始终以 UTF-8 写出，声明与内容保持一致）。
+ */
+function readTemplateSourceCbp(file: string): string {
+  const text = decodeTextWithEncoding(fs.readFileSync(file)).text;
+  return text.replace(/^(<\?xml[^>]*?encoding=["'])[^"']*(["'])/i, '$1UTF-8$2');
+}
+
 export function saveAsUserTemplate(opts: SaveTemplateOptions): UserTemplateManifest {
   const name = String(opts.name ?? '').trim();
   if (!name) throw new Error(i18n.t('Template name cannot be empty'));
@@ -163,7 +173,7 @@ export function saveAsUserTemplate(opts: SaveTemplateOptions): UserTemplateManif
   const tplDir = path.join(opts.root, id);
   if (fs.existsSync(tplDir) && !opts.overwrite) throw new Error(i18n.t('Template already exists: {0} ({1})', name, id));
 
-  const xml = fs.readFileSync(opts.cbpPath, 'utf-8');
+  const xml = readTemplateSourceCbp(opts.cbpPath);
   const files: string[] = [];
   const collected: { rel: string; abs: string }[] = [];
   for (const rel of opts.fileRels ?? []) {
@@ -251,6 +261,6 @@ export function instantiateUserTemplate(
   const cbpSrc = path.join(tplDir, manifest.cbp);
   if (!fs.existsSync(cbpSrc)) throw new Error(i18n.t('Missing template project file: {0}', manifest.cbp));
   const cbpPath = path.join(projectDir, `${name}.cbp`);
-  fs.writeFileSync(cbpPath, applyTemplateNameToXml(fs.readFileSync(cbpSrc, 'utf-8'), name), 'utf-8');
+  fs.writeFileSync(cbpPath, applyTemplateNameToXml(readTemplateSourceCbp(cbpSrc), name), 'utf-8');
   return { manifest, projectDir, cbpPath, copiedFiles: copied, missingFiles: missing };
 }

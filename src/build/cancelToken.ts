@@ -8,6 +8,7 @@
  *    cmd.exe → gcc → cc1/as/ld 的孙子进程一并终止）。
  */
 import { ChildProcess, execFile, spawn } from 'child_process';
+import { decodeText } from '../tools/encoding';
 
 export interface BuildCancelHandle {
   /** 是否已请求取消 */
@@ -86,8 +87,8 @@ function runPowerShell(script: string, timeoutMs = 20000): Promise<{ ok: boolean
   return new Promise((resolve) => {
     try {
       execFile('powershell.exe', ['-NoProfile', '-NonInteractive', '-EncodedCommand', encoded],
-        { windowsHide: true, timeout: timeoutMs, encoding: 'utf8' },
-        (err, stdout) => resolve({ ok: !err, out: err ? '' : String(stdout || '').trim() }));
+        { windowsHide: true, timeout: timeoutMs, encoding: 'buffer' },
+        (err, stdout) => resolve({ ok: !err, out: err ? '' : decodeText(stdout ?? Buffer.alloc(0)).trim() }));
     } catch {
       resolve({ ok: false, out: '' });
     }
@@ -108,10 +109,10 @@ function listProcessPairs(): Promise<ProcPair[]> {
   return new Promise((resolve) => {
     if (process.platform !== 'win32') { resolve([]); return; }
     execFile('wmic', ['process', 'get', 'ProcessId,ParentProcessId', '/format:csv'],
-      { windowsHide: true, timeout: 20000, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 },
+      { windowsHide: true, timeout: 20000, encoding: 'buffer', maxBuffer: 16 * 1024 * 1024 },
       (err, stdout) => {
         if (!err && stdout) {
-          const rows = String(stdout).split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
+          const rows = decodeText(stdout as unknown as Buffer).split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
           if (rows.length > 1) {
             const header = rows[0].split(',').map((s) => s.trim().toLowerCase());
             const ppidIdx = header.indexOf('parentprocessid');

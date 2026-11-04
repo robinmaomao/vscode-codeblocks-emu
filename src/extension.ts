@@ -56,7 +56,7 @@ import { applyGeneratedFiles } from './build/generatedFiles';
 import { buildLogBaseName, renderHtmlBuildLog } from './build/htmlBuildLog';
 import { cbBuiltinVars, replaceCbMacros, globalVariables, envVarMap } from './compiler/cbMacros';
 import { buildLogPrefs, logT, msg, quietSuccess, resetBuildLogPrefsCache } from './build/logLang';
-import { decodeText } from './tools/encoding';
+import { decodeText, decodeTextWithEncoding, encodeText, OutputLineDecoder, TextEncoding } from './tools/encoding';
 import { ASM_HASH_COMMENT_SETTING, ASM_LANGUAGE_ID, asmCommentsRule } from './tools/asmCommentConfig';
 import * as i18n from './i18n';
 import { clearBackticksCache, CommandGenerator } from './compiler/commandGenerator';
@@ -87,6 +87,7 @@ import { setProjectDependencies, wouldCreateCycle } from './model/workspaceWrite
 import { PathOwnerIndex, buildPathOwnerIndex, findSoleOwner, normFilePath } from './model/pathOwnerIndex';
 import { generateMakefile } from './build/makefileExporter';
 import { buildProjectFromImport, importDevProject, importDspProject, importVcxproj } from './project/projectImporter';
+import { projectChangeTracker } from './project/projectChangeTracker';
 import { buildTargetExportProject } from './project/exportTarget';
 import { enumerateRecursiveSourceFiles, buildUnitXmlForTargets } from './project/recursiveAdd';
 import { renameUnitInCbpText } from './project/unitText';
@@ -994,6 +995,16 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       );
       if (confirm !== 'Remove') return;
       removeProject(filename);
+    }),
+  );
+
+  // 手动从磁盘重新加载工程（对应 CB ProjectManager::ReloadProject；监视器漏报时的兜底入口）
+  context.subscriptions.push(
+    vscode.commands.registerCommand('codeblocks.reloadProject', async (node?: any) => {
+      const filename = resolveProjectFilename(node) ?? activeProject?.filename;
+      if (!filename) return;
+      if (!openProjects.some((p) => normPath(p.filename) === normPath(filename))) return;
+      await reloadProjectFromDisk(filename, { notify: true });
     }),
   );
 
@@ -1941,12 +1952,22 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     }),
   );
 
-  // 监听 .cbp 文件的新增/删除：**增量登记**，不再触发全工作区 ripgrep 扫描
+  // 监听 .cbp 文件的新增/删除/修改：**增量登记**，不再触发全工作区 ripgrep 扫描
   // （历史上此处每次事件都会 findFiles 全工作区；父目录多工程场景下一次事件即 2 个 rg 进程）
   const cbpWatcher = vscode.workspace.createFileSystemWatcher('**/*.cbp');
   cbpWatcher.onDidCreate((uri) => handleProjectFileCreated(uri));
   cbpWatcher.onDidDelete((uri) => handleProjectFileDeleted(uri));
+  // 外部工具改写已打开的 .cbp → 询问是否重新加载（对齐 Code::Blocks 的 "Reload Project?" 弹窗）
+  cbpWatcher.onDidChange((uri) => handleProjectFileChanged(uri));
   context.subscriptions.push(cbpWatcher);
+
+  // 窗口重新获得焦点时再检查一次：`**/*.cbp` 只覆盖工作区内文件，网络盘/被 watcherExclude 的目录
+  // 以及部分编辑器的原子保存都可能漏事件 —— 这正是 Code::Blocks 在应用激活时检查的场景。
+  context.subscriptions.push(
+    vscode.window.onDidChangeWindowState((state) => {
+      if (state.focused) checkExternallyModifiedProjects();
+    }),
+  );
 
   // 初始状态：无工程时仅显示 Code::Blocks 入口，有工程时显示 Target/Build/Rebuild/Compiler
   refreshStatusBars();
@@ -2682,6 +2703,13 @@ function detectAutoOpenThreshold(): number {
 function handleProjectFileCreated(uri: vscode.Uri): void {
   const file = uri.fsPath;
   const key = normPath(file);
+  // 原子保存（写临时文件后 rename）只会产生 create：已打开的工程按"外部修改"处理。
+  // 同时恢复增量登记——rename 覆盖可能先触发 delete 事件把该文件移出 knownProjectFiles。
+  if (openProjects.some((p) => normPath(p.filename) === key)) {
+    knownProjectFiles.add(key);
+    scheduleExternalChangeCheck(file);
+    return;
+  }
   const wasKnown = knownProjectFiles.has(key);
   knownProjectFiles.add(key);
   invalidateProjectScanCache();
@@ -2703,10 +2731,23 @@ function handleProjectFileCreated(uri: vscode.Uri): void {
   });
 }
 
+/** .cbp 变更：只处理已打开的工程（未打开的工程无需重载，也不会触发工作区扫描） */
+function handleProjectFileChanged(uri: vscode.Uri): void {
+  const file = uri.fsPath;
+  if (!openProjects.some((p) => normPath(p.filename) === normPath(file))) return;
+  scheduleExternalChangeCheck(file);
+}
+
 /** .cbp 删除：增量移除（不触发全量扫描）；已打开的工程仅提示，不自动关闭 */
 function handleProjectFileDeleted(uri: vscode.Uri): void {
   const file = uri.fsPath;
   const key = normPath(file);
+  // 原子保存（临时文件 rename 覆盖）可能先报 delete：文件仍在则按"外部修改"处理，
+  // 避免把已打开工程误判为"已删除"并丢增量登记（Windows 上 ReadDirectoryChangesW 常见）。
+  if (fs.existsSync(file)) {
+    if (openProjects.some((p) => normPath(p.filename) === key)) scheduleExternalChangeCheck(file);
+    return;
+  }
   const wasKnown = knownProjectFiles.delete(key);
   invalidateProjectScanCache();
   removePendingProjectFile(file);
@@ -2716,6 +2757,169 @@ function handleProjectFileDeleted(uri: vscode.Uri): void {
     outputChannel?.info(logT('[Code::Blocks] Project file deleted: {0} (it stays in the opened list and can be removed manually)', file));
   } else if (wasKnown) {
     outputChannel?.debug(logT('[Code::Blocks] Removed a project file that no longer exists: {0}', file));
+  }
+}
+
+// ———— 外部修改检测与重载（对齐 ProjectManagerUI::CheckForExternallyModifiedProjects，projectmanagerui.cpp） ————
+
+/** 外部修改处理模式（设置 codeblocks.detect.checkExternalChanges：off / prompt / auto） */
+function detectExternalChangeMode(): 'off' | 'prompt' | 'auto' {
+  const raw = vscode.workspace.getConfiguration('codeblocks').get<string>('detect.checkExternalChanges', 'prompt');
+  return raw === 'off' || raw === 'auto' ? raw : 'prompt';
+}
+
+/** 等待用户决定的工程（normPath 键）；去抖后统一处理，一次保存只问一次 */
+const pendingExternalChanges = new Set<string>();
+/** 每个工程的去抖计时器 */
+const externalChangeTimers = new Map<string, ReturnType<typeof setTimeout>>();
+/**
+ * 同一时刻只跑一个询问循环（模态弹窗不能并发）。
+ * 必须用**先置位**的布尔守卫：若用 `promise` 作守卫，并在循环体内同步完成（如构建中直接 return），
+ * finally 会在赋值前把守卫清空，赋值随后又写回一个已完成的 promise ⇒ 之后所有检测被永久吞掉。
+ */
+let externalChangeRunning = false;
+
+/** 文件事件 → 去抖后检查（编辑器一次保存常连发多个 change 事件） */
+function scheduleExternalChangeCheck(file: string, delayMs = 200): void {
+  const key = normPath(file);
+  const prev = externalChangeTimers.get(key);
+  if (prev) clearTimeout(prev);
+  const timer = setTimeout(() => {
+    externalChangeTimers.delete(key);
+    queueExternalChange(file);
+  }, delayMs);
+  timer.unref?.();
+  externalChangeTimers.set(key, timer);
+}
+
+/** 把一个确实被外部改过、且处于打开状态的工程放进待询问队列 */
+function queueExternalChange(file: string): void {
+  if (detectExternalChangeMode() === 'off') return;
+  const project = openProjects.find((p) => normPath(p.filename) === normPath(file));
+  if (!project) return;
+  if (!projectChangeTracker.hasChanged(project.filename)) return;
+  pendingExternalChanges.add(normPath(project.filename));
+  drainExternalChanges();
+}
+
+/** 窗口重新获得焦点：检查全部已打开工程（对齐 Code::Blocks 的应用激活时检查） */
+function checkExternallyModifiedProjects(): void {
+  if (detectExternalChangeMode() === 'off') return;
+  for (const p of [...openProjects]) {
+    if (projectChangeTracker.hasChanged(p.filename)) pendingExternalChanges.add(normPath(p.filename));
+  }
+  if (!pendingExternalChanges.size) return;
+  drainExternalChanges();
+}
+
+/** 串行处理待询问队列；构建中不打扰（签名保留 ⇒ 下次获得焦点时会再问） */
+function drainExternalChanges(): void {
+  if (externalChangeRunning) return;
+  externalChangeRunning = true;
+  void (async () => {
+    try {
+      while (pendingExternalChanges.size) {
+        if (buildInProgress) return;
+        const key = [...pendingExternalChanges][0];
+        pendingExternalChanges.delete(key);
+        const project = openProjects.find((p) => normPath(p.filename) === key);
+        if (!project || !projectChangeTracker.hasChanged(project.filename)) continue;
+        const mode = detectExternalChangeMode();
+        if (mode === 'off') return;
+        if (mode === 'auto') {
+          await reloadProjectFromDisk(project.filename, { notify: true });
+          continue;
+        }
+        const hasMore = pendingExternalChanges.size > 0;
+        const reload = i18n.t('Reload');
+        const reloadAll = i18n.t('Reload All');
+        const ignore = i18n.t('Ignore');
+        const answer = await vscode.window.showWarningMessage(
+          i18n.t('Project "{0}" was modified on disk. Reload it? (targets and files are re-read)', project.title),
+          { modal: true },
+          ...(hasMore ? [reload, reloadAll, ignore] : [reload, ignore]),
+        );
+        if (answer === reload || answer === reloadAll) {
+          const ok = await reloadProjectFromDisk(project.filename);
+          if (ok && answer === reloadAll) {
+            for (const rest of [...pendingExternalChanges]) {
+              pendingExternalChanges.delete(rest);
+              const other = openProjects.find((p) => normPath(p.filename) === rest);
+              if (other && projectChangeTracker.hasChanged(other.filename)) await reloadProjectFromDisk(other.filename);
+            }
+          }
+        } else if (answer === ignore) {
+          // 等价 Code::Blocks 的 prj->Touch()：只更新基准，下次再改才再问
+          projectChangeTracker.remember(project.filename);
+          outputChannel?.info(logT('[Code::Blocks] Ignored external changes to the project file: {0}', project.filename));
+        } else {
+          // 关闭/ESC：本轮不再打扰，签名保留 ⇒ 下次获得焦点时重新询问
+          pendingExternalChanges.clear();
+          return;
+        }
+      }
+    } catch (e) {
+      // 兜底：弹窗/重载链路的意外异常不应变成未处理的 Promise 拒绝（扩展宿主会弹全局错误）
+      outputChannel?.warn(`[Code::Blocks] ${(e as Error)?.message ?? String(e)}`);
+    } finally {
+      externalChangeRunning = false;
+    }
+  })();
+}
+
+/**
+ * 从磁盘重新解析并替换已打开的工程 —— 对齐 ProjectManager::ReloadProject（projectmanager.cpp:301）：
+ * 保持工程在列表中的位置、活动工程与选中目标；工程属性面板若开着则关闭（避免旧模型保存覆盖外部改动）。
+ */
+async function reloadProjectFromDisk(filename: string, opts: { notify?: boolean } = {}): Promise<boolean> {
+  const key = normPath(filename);
+  const idx = openProjects.findIndex((p) => normPath(p.filename) === key);
+  if (idx === -1) return false;
+  const previous = openProjects[idx];
+  const previousTarget = getSelectedTarget(previous);
+  const wasActive = normPath(activeProject?.filename ?? '') === key;
+  try {
+    const project = new ProjectParser().parse(previous.filename);
+    applyGeneratedFiles(project, getCompiler);
+    projectChangeTracker.remember(project.filename);
+    openProjects[idx] = project;
+
+    ProjectPropertiesPanel.closeFor(previous);
+
+    if (wasActive || !activeProject) activeProject = project;
+    // 选中目标沿用（含虚拟目标；目标已删除/改名则回退首个支持当前平台的目标）
+    const previousTargetStillExists = !!previousTarget
+      && (project.buildTargets.some((t) => t.title === previousTarget) || project.virtualTargets.some((v) => v.title === previousTarget));
+    if (previousTargetStillExists) {
+      setSelectedTarget(project, previousTarget!);
+    } else {
+      const titles = project.buildTargets.filter((t) => supportsCurrentPlatform(t.platforms)).map((t) => t.title);
+      if (titles.length) setSelectedTarget(project, titles[0]);
+      else if (previousTarget) {
+        selectedTargets.delete(project.filename);
+        persistSelectedTargets();
+      }
+    }
+
+    invalidateOwnerIndex();
+    projectTreeProvider?.setProjects(openProjects);
+    projectTreeProvider?.setActiveProject(activeProject);
+    analysisTreeProvider?.refresh();
+    markFallbackIndexDirty();
+    refreshStatusBars();
+    void autoExcludeBuildOutputs({ notify: false });
+    // 文件/目标可能新增或删除 → 重新生成编译数据库并让 clangd 重新加载
+    restartClangdReason = 'project';
+    void generateClangdForWorkspace();
+    outputChannel.info(logT('[Code::Blocks] Project reloaded from disk: {0}', project.title));
+    if (opts.notify) vscode.window.setStatusBarMessage(i18n.t('Project "{0}" reloaded from disk', project.title), 4000);
+    return true;
+  } catch (err) {
+    // 外部工具写到一半/XML 损坏：保留旧模型；同时把当前磁盘状态记为基准，
+    // 避免每次窗口获得焦点都重复报错（文件修好后 mtime/size 会再变化 ⇒ 仍会重新询问）。
+    projectChangeTracker.remember(previous.filename);
+    vscode.window.showErrorMessage(i18n.t('Failed to reload the project from disk: {0}', (err as Error).message));
+    return false;
   }
 }
 
@@ -3001,6 +3205,8 @@ async function openProject(filename: string): Promise<void> {
     const project = new ProjectParser().parse(filename);
     // 建立 生成器 → 生成文件 关系（对齐 cbProject::AddFile 的 GenFilesHackMap，来自编译器 XML gen 属性）
     applyGeneratedFiles(project, getCompiler);
+    // 记录解析时的磁盘签名（外部改动检测基准，对应 cbProject::m_LastModified）
+    projectChangeTracker.remember(filename);
     openProjects.push(project);
     // 最近工程记录（E1；状态栏菜单按需拉取动态区）
     recordRecentProject(filename);
@@ -3154,10 +3360,27 @@ function showProjectPropertiesPanel(
   }, initialTab, focusFile);
 }
 
+/** 写回 .cbp 并立即刷新外部改动检测基准（扩展自写盘不应触发"文件已被修改"提示） */
+function writeCbpAndRemember(cbpPath: string, content: string): void {
+  fs.writeFileSync(cbpPath, content, 'utf-8');
+  projectChangeTracker.remember(cbpPath);
+}
+
+/** 读取工程文本（.cbp / .workspace）：UTF-8 严格优先、GBK 回退（旧 ANSI 工程），并返回原编码供就地回写 */
+function readProjectText(file: string): { text: string; encoding: TextEncoding } {
+  return decodeTextWithEncoding(fs.readFileSync(file));
+}
+
+/** 按原编码写回工程文本（避免把旧 ANSI 工程静默转成 UTF-8 后声明与内容不一致） */
+function writeProjectText(file: string, text: string, encoding: TextEncoding): void {
+  fs.writeFileSync(file, encodeText(text, encoding));
+  projectChangeTracker.remember(file);
+}
+
 /** 序列化写回 .cbp 并重新解析刷新（供工程属性保存 / 执行参数修改共用） */
 async function persistProjectAndReload(project: Project): Promise<void> {
   const xml = serializeProject(project);
-  fs.writeFileSync(project.filename, xml, 'utf-8');
+  writeCbpAndRemember(project.filename, xml);
   const idx = openProjects.findIndex((p) => p.filename === project.filename);
   if (idx !== -1) openProjects.splice(idx, 1);
   const wasActive = activeProject?.filename === project.filename;
@@ -4701,6 +4924,7 @@ function removeProject(filename: string): void {
   const idx = openProjects.findIndex((p) => p.filename === filename);
   if (idx === -1) return;
   const [removed] = openProjects.splice(idx, 1);
+  projectChangeTracker.forget(filename);
   invalidateOwnerIndex(); // P3：工程集合变化 → 属主索引失效
   if (activeProject?.filename === filename) {
     setActiveProject(openProjects[0], { persist: true });
@@ -4786,7 +5010,7 @@ async function editFileBuildCommand(project: Project, file: ProjectFile): Promis
 
   try {
     const xml = serializeProject(project);
-    fs.writeFileSync(project.filename, xml, 'utf-8');
+    writeCbpAndRemember(project.filename, xml);
     outputChannel.info(logT('[Code::Blocks] Custom build command updated: {0}', file.relativeFilename));
     // 重新解析项目刷新树
     const idx = openProjects.findIndex((p) => p.filename === project.filename);
@@ -4806,19 +5030,21 @@ async function editFileBuildCommand(project: Project, file: ProjectFile): Promis
 
 /** 从 .cbp 删除指定文件的 <Unit> 节点（按 filename 精确匹配） */
 function removeUnitFromCbp(cbpPath: string, relativeFilename: string): void {
-  const raw = fs.readFileSync(cbpPath, 'utf-8');
+  const src = readProjectText(cbpPath);
+  const raw = src.text;
   const escaped = relativeFilename.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   // 匹配自闭合 <Unit filename="..." /> 或成对 <Unit filename="...">...</Unit>
   const selfClose = new RegExp(`<Unit filename="${escaped}"\\s*/>`, 'g');
   const paired = new RegExp(`<Unit filename="${escaped}"\\s*>[\\s\\S]*?</Unit>`, 'g');
   let out = raw.replace(selfClose, '').replace(paired, '');
   if (out === raw) throw new Error(i18n.t('File "{0}" not found in the .cbp', relativeFilename));
-  fs.writeFileSync(cbpPath, out, 'utf-8');
+  writeProjectText(cbpPath, out, src.encoding);
 }
 
 /** 设置 .cbp 中指定文件的 <Option compile/link> 值（无则新增） */
 function setUnitOptionInCbp(cbpPath: string, relativeFilename: string, opt: 'compile' | 'link', enable: boolean): void {
-  const raw = fs.readFileSync(cbpPath, 'utf-8');
+  const src = readProjectText(cbpPath);
+  const raw = src.text;
   const escaped = relativeFilename.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const optPat = `<Option ${opt}="[01]"\\s*/>`;
 
@@ -4846,7 +5072,7 @@ function setUnitOptionInCbp(cbpPath: string, relativeFilename: string, opt: 'com
       : `<Unit filename="${relativeFilename}" />`;
     const out = raw.replace(pairedRe, newUnit);
     if (out === raw && newInner !== inner) throw new Error(i18n.t('File "{0}" not found in the .cbp', relativeFilename));
-    if (out !== raw) fs.writeFileSync(cbpPath, out, 'utf-8');
+    if (out !== raw) writeProjectText(cbpPath, out, src.encoding);
     return;
   }
 
@@ -4856,7 +5082,7 @@ function setUnitOptionInCbp(cbpPath: string, relativeFilename: string, opt: 'com
     if (enable) return;
     const newUnit = `<Unit filename="${relativeFilename}">\n\t\t\t<Option ${opt}="0" />\n\t\t</Unit>`;
     const out = raw.replace(selfCloseRe, newUnit);
-    fs.writeFileSync(cbpPath, out, 'utf-8');
+    writeProjectText(cbpPath, out, src.encoding);
     return;
   }
 
@@ -5070,10 +5296,10 @@ async function renameProjectFile(project: Project, file: ProjectFile): Promise<v
   const newRel = relDir && !relDir.startsWith('..') ? `${relDir}/${newName}` : newName;
   let cbpUpdated = false;
   try {
-    const raw = fs.readFileSync(project.filename, 'utf-8');
-    const { text, replaced } = renameUnitInCbpText(raw, oldRel, newRel);
+    const src = readProjectText(project.filename);
+    const { text, replaced } = renameUnitInCbpText(src.text, oldRel, newRel);
     if (replaced) {
-      fs.writeFileSync(project.filename, text, 'utf-8');
+      writeProjectText(project.filename, text, src.encoding);
       cbpUpdated = true;
       outputChannel.info(logT('[Code::Blocks] File renamed: {0} → {1}', oldRel, newRel));
     }
@@ -5292,16 +5518,17 @@ async function findFileCommand(node?: any): Promise<void> {
   }
 }
 
-/** 在 </Project> 之前插入 <Unit> 节点（保留原文件格式） */
+/** 在 </Project> 之前插入 <Unit> 节点（保留原文件格式与原编码） */
 function writeUnitsToCbp(cbpPath: string, units: string[]): void {
-  let raw = fs.readFileSync(cbpPath, 'utf-8');
+  const src = readProjectText(cbpPath);
+  let raw = src.text;
   // 找到 </Project> 前的缩进；简单做法：在 </Project> 前插入
   const marker = '</Project>';
   const idx = raw.lastIndexOf(marker);
   if (idx === -1) throw new Error(i18n.t('Cannot find the </Project> node'));
   const insert = units.join('\n') + '\n';
   raw = raw.slice(0, idx) + insert + raw.slice(idx);
-  fs.writeFileSync(cbpPath, raw, 'utf-8');
+  writeProjectText(cbpPath, raw, src.encoding);
 }
 
 /** P6：编译器实例结果缓存（键 = id + masterPath + compilerPrograms；配置变化自动换键重建）。
@@ -7060,10 +7287,19 @@ async function runConfiguredTool(index: number): Promise<void> {
   channel.appendLine(`\n[${tool.name}] > ${[inv.command, ...inv.args].join(' ')}${cwd ? `   (cwd: ${cwd})` : ''}`);
   try {
     const child = spawn(inv.command, inv.args, { cwd, env });
-    child.stdout?.on('data', (d: Buffer) => channel.append(d.toString()));
-    child.stderr?.on('data', (d: Buffer) => channel.append(d.toString()));
+    // 逐行解码（UTF-8 严格优先 → GBK 回退），与构建输出同一口径：
+    // 直接 Buffer.toString() 会把 GBK 工具输出与跨块多字节字符解成乱码。
+    const outDec = new OutputLineDecoder();
+    const errDec = new OutputLineDecoder();
+    const append = (text: string): void => { if (text) channel.append(text); };
+    child.stdout?.on('data', (d: Buffer) => append(outDec.push(d).text));
+    child.stderr?.on('data', (d: Buffer) => append(errDec.push(d).text));
     child.on('error', (err) => channel.appendLine(logT('[{0}] Failed to start: {1}', tool.name, err.message)));
-    child.on('close', (code) => channel.appendLine(logT('[{0}] Exit code {1}', tool.name, code ?? '?')));
+    child.on('close', (code) => {
+      append(outDec.flush().text);
+      append(errDec.flush().text);
+      channel.appendLine(logT('[{0}] Exit code {1}', tool.name, code ?? '?'));
+    });
   } catch (err) {
     channel.appendLine(logT('[{0}] Failed to start: {1}', tool.name, String(err)));
   }
@@ -7229,15 +7465,15 @@ async function editWorkspaceDependencies(): Promise<void> {
     vscode.window.showWarningMessage(i18n.t('Ignored a selection that would create a circular dependency: {0}', pickedCycle.map((s) => s.rel).join(', ')));
   }
   const newDeps = sel.filter((s) => !s.cycle).map((s) => s.rel);
-  const text = fs.readFileSync(wsFile, 'utf-8');
-  const updated = setProjectDependencies(text, targetRel, newDeps);
+  const src = readProjectText(wsFile);
+  const updated = setProjectDependencies(src.text, targetRel, newDeps);
   if (updated === null) {
     vscode.window.showErrorMessage(i18n.t('Project node not found in {0}: {1}', path.basename(wsFile), targetRel));
     return;
   }
-  if (updated !== text) {
+  if (updated !== src.text) {
     try {
-      fs.writeFileSync(wsFile, updated, 'utf-8');
+      writeProjectText(wsFile, updated, src.encoding);
     } catch (err) {
       vscode.window.showErrorMessage(i18n.t('Failed to write the .workspace: {0}', (err as Error).message));
       return;
@@ -7648,18 +7884,21 @@ async function runMakeBuild(project: Project, command: string, targetTitle: stri
     const code = await new Promise<number | null>((resolve, reject) => {
       const proc = spawn(command, { cwd, shell: true, windowsHide: true });
       cancelSource.register(proc);
-      const onData = (buf: Buffer): void => {
-        for (const line of decodeText(buf).split(/\r?\n/)) {
-          if (line.trim()) outputChannel.info(line);
-        }
+      // stdout/stderr 各用独立行解码器：只在完整行上判定 UTF-8/GBK，避免分块把汉字拆成错字
+      const outDec = new OutputLineDecoder();
+      const errDec = new OutputLineDecoder();
+      const emit = (lines: string[]): void => {
+        for (const line of lines) if (line.trim()) outputChannel.info(line);
       };
-      proc.stdout?.on('data', onData);
-      proc.stderr?.on('data', onData);
+      proc.stdout?.on('data', (b: Buffer) => emit(outDec.push(b).lines));
+      proc.stderr?.on('data', (b: Buffer) => emit(errDec.push(b).lines));
       proc.on('error', (err) => {
         outputChannel.error(logT('[Code::Blocks] Failed to execute: {0}', err.message));
         reject(err);
       });
       proc.on('close', (c) => {
+        emit(outDec.flush().lines);
+        emit(errDec.flush().lines);
         cancelSource.unregister(proc);
         resolve(c);
       });
@@ -8187,6 +8426,12 @@ export function deactivate(): void {
   // （cancel 置位 + taskkill /T /F 杀 cmd.exe→gcc→cc1/as/ld 整棵进程树），
   // 避免扩展宿主退出后遗留孤儿编译进程/未受控的半成品产物。无构建时为空操作。
   currentBuildCancel?.cancel();
+  // 外部修改检测的去抖计时器不属于 context.subscriptions，需要显式清掉：
+  // 扩展被禁用但宿主未退出时，残留计时器会回调已失效的 vscode API。
+  for (const timer of externalChangeTimers.values()) clearTimeout(timer);
+  externalChangeTimers.clear();
+  pendingExternalChanges.clear();
+  externalChangeRunning = false;
   if (outputChannel) outputChannel.dispose();
   if (diagnosticCollection) diagnosticCollection.dispose();
 }

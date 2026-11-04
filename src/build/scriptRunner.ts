@@ -11,7 +11,7 @@
  */
 import * as vscode from 'vscode';
 import { spawn } from 'child_process';
-import { decodeText } from '../tools/encoding';
+import { OutputLineDecoder } from '../tools/encoding';
 import { getWindowsSystemPath } from '../tools/windowsPath';
 import { upperDrive } from '../tools/pathCase';
 import { BuildCancelHandle, killProcessTree, reapOrphans, snapshotDescendantPids } from './cancelToken';
@@ -115,11 +115,6 @@ export function scriptCommandTimeoutMs(): number {
   return Math.min(SCRIPT_TIMEOUT_MAX_MS, Math.floor(n));
 }
 
-/** 解码子进程输出：UTF-8 严格优先，失败回退 GBK（中文 Windows） */
-function decodeOutput(buf: Buffer): string {
-  return decodeText(buf);
-}
-
 /** 合并 PATH 段并去重（Windows 分号分隔，忽略大小写去重，保持顺序） */
 function mergePath(...parts: string[]): string {
   const seen = new Set<string>();
@@ -186,49 +181,18 @@ export function runScriptCommand(
     let timedOut = false;
     /** 最近一次收到输出的时刻（用于「管道安静期」判定） */
     let lastDataAt = Date.now();
-    // 逐行解码状态：待解码字节 + 粘性编码（首个非空数据块探测一次，避免短行误判）
-    let pending: Buffer[] = [];
-    let decoder: InstanceType<typeof TextDecoder> | undefined;
-
-    /** 行解码器：UTF-8 严格成功则用 UTF-8，否则整条命令回退 GBK（与原「整段解码」结论一致） */
-    const lineDecoder = (): InstanceType<typeof TextDecoder> => {
-      if (!decoder) {
-        const head = pending.length ? Buffer.concat(pending) : Buffer.alloc(0);
-        try {
-          new TextDecoder('utf-8', { fatal: true }).decode(head);
-          decoder = new TextDecoder('utf-8', { fatal: false });
-        } catch {
-          decoder = new TextDecoder('gbk', { fatal: false });
-        }
+    // 逐行解码：只在**完整行**上判定编码（残行由解码器保留到下一块），
+    // 每行独立判 UTF-8/GBK —— 修复「首行 ASCII 就把整条命令判成 UTF-8」导致的中文乱码。
+    // stdout/stderr 各用独立解码器，避免两个流的部分行被拼成一行。
+    const outDecoder = new OutputLineDecoder();
+    const errDecoder = new OutputLineDecoder();
+    /** 取出已解码的完整行（`output` 保留换行文本，供结果对象使用） */
+    const emit = (r: { text: string; lines: string[] }): void => {
+      if (!r.text) return;
+      output += r.text;
+      if (onOutputLine) {
+        for (const line of r.lines) if (line) onOutputLine(line);
       }
-      return decoder;
-    };
-
-    /** 取出缓冲中已完成的行（按最后一个 \n 切分；\n 不属于 UTF-8/GBK 多字节序列 ⇒ 切分安全） */
-    const flushLines = (final: boolean): void => {
-      if (!pending.length) return;
-      const buf = Buffer.concat(pending);
-      const lastNl = buf.lastIndexOf(0x0a);
-      let head: Buffer;
-      let rest: Buffer;
-      if (lastNl >= 0) {
-        head = buf.subarray(0, lastNl + 1);
-        rest = buf.subarray(lastNl + 1);
-      } else {
-        head = final ? buf : Buffer.alloc(0);
-        rest = final ? Buffer.alloc(0) : buf;
-      }
-      if (head.length) {
-        const text = lineDecoder().decode(head);
-        output += text;
-        if (onOutputLine) {
-          for (const line of text.split('\n')) {
-            const trimmed = line.replace(/\r$/, '');
-            if (trimmed) onOutputLine(trimmed);
-          }
-        }
-      }
-      pending = rest.length ? [rest] : [];
     };
 
     const finish = (success: boolean, trailingBackground: boolean): void => {
@@ -247,19 +211,18 @@ export function runScriptCommand(
         timeoutTimer = undefined;
       }
       cancel?.unregister(proc);
-      // 命令已结束：把无换行的尾行也交给日志（不再等管道关闭）
-      flushLines(true);
+      // 命令已结束：把两个流里无换行结尾的残行也交给日志（不再等管道关闭）
+      emit(outDecoder.flush());
+      emit(errDecoder.flush());
       resolve({ success, output, trailingBackground, timedOut });
     };
     proc.stdout?.on('data', (d: Buffer) => {
       lastDataAt = Date.now();
-      pending.push(d);
-      flushLines(false);
+      emit(outDecoder.push(d));
     });
     proc.stderr?.on('data', (d: Buffer) => {
       lastDataAt = Date.now();
-      pending.push(d);
-      flushLines(false);
+      emit(errDecoder.push(d));
     });
     proc.on('exit', (code) => {
       // 命令本体结束（对齐 CodeBlocks wxExecute 同步等待语义）。
@@ -287,8 +250,8 @@ export function runScriptCommand(
     });
     proc.on('close', (code) => finish(code === 0, false));
     proc.on('error', (err) => {
-      pending.push(Buffer.from(err.message, 'utf-8'));
-      flushLines(true);
+      emit(outDecoder.push(Buffer.from(err.message, 'utf-8')));
+      emit(outDecoder.flush());
       finish(false, false);
     });
     // 可选超时（默认关闭）：到期强杀整棵进程树并把该命令记为失败。

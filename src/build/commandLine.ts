@@ -3,12 +3,14 @@
  *
  * Windows 下命令经 cmd.exe 执行时命令行上限 8191 字符；超长时把末尾参数
  * （通常为对象文件列表）写入响应文件（.respFile），命令改为 `... @"<respFile>"`，
- * gcc 从 @file 读取参数。响应文件内 `\` 转义为 `\\`（MinGW/gcc 要求）。
+ * gcc 从 @file 读取参数。响应文件内 `\` 转义为 `\\`（MinGW/gcc 要求）；
+ * 非 ASCII 内容按系统 ANSI 代码页写（GCC 按 ANSI 读取，写 UTF-8 会找不到中文路径）。
  */
 import * as path from 'path';
 import * as fs from 'fs';
 import * as os from 'os';
 import { ProjectFile } from '../model/types';
+import { encodeForAnsiFile } from '../tools/encoding';
 
 /** 按 weight + 文件名排序（对齐 directcommands.cpp MySortProjectFilesByWeight） */
 export function compareFilesByWeight(a: ProjectFile, b: ProjectFile): number {
@@ -102,8 +104,9 @@ export function applyResponseFile(command: string, respBase?: string, cwd?: stri
     // 对齐 CB：响应文件路径的目录结构需存在（CreateDirRecursively）
     const dir = path.dirname(respAbs);
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-    // 响应文件内 \ 转义为 \\（MinGW/gcc 要求）
-    fs.writeFileSync(respAbs, rest.replace(/\\/g, '\\\\'), 'utf-8');
+    // 响应文件内 \ 转义为 \\（MinGW/gcc 要求）；编码按系统 ANSI 代码页写（纯 ASCII 时等价 UTF-8），
+    // 否则含中文路径的参数会被 GCC 按 ANSI 解释成乱码 → 找不到文件（对齐 Code::Blocks 按 locale 写盘）。
+    fs.writeFileSync(respAbs, encodeForAnsiFile(rest.replace(/\\/g, '\\\\')));
   } catch {
     return { command };
   }

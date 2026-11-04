@@ -23,6 +23,7 @@ import {
 } from './types';
 import { fileTypeOf, defaultCompilerVar, defaultCompile, defaultLink } from './fileTypes';
 import { upperDrive } from '../tools/pathCase';
+import { decodeTextWithEncoding } from '../tools/encoding';
 import { LruCache } from '../tools/lru';
 import * as i18n from '../i18n';
 
@@ -64,13 +65,14 @@ function parseXmlCached(filename: string, parser: XMLParser, cache: LruCache<str
     st = fs.statSync(key);
   } catch {
     // 保持原行为：文件不可读时让 readFileSync 抛出原始错误
-    return parseXmlText(parser, fs.readFileSync(key, 'utf-8'));
+    return parseXmlText(parser, decodeTextWithEncoding(fs.readFileSync(key)).text);
   }
   const entry = cache.get(key);
   if (entry && entry.mtimeMs === st.mtimeMs && entry.size === st.size) {
     return entry.result;
   }
-  const raw = fs.readFileSync(key, 'utf-8');
+  // 旧工程可能按 ANSI(GBK) 保存：UTF-8 严格失败回退 GBK，避免中文标题/路径读成乱码
+  const raw = decodeTextWithEncoding(fs.readFileSync(key)).text;
   const result = parseXmlText(parser, raw);
   cache.set(key, { mtimeMs: st.mtimeMs, size: st.size, result });
   return result;

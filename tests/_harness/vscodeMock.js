@@ -77,6 +77,8 @@ function createVscodeMock(opts = {}) {
   const configChangeListeners = [];
   /** vscode.extensions.onDidChange 监听器（供 emitExtensionsChange 派发安装/启用状态变化） */
   const extensionChangeListeners = [];
+  /** vscode.window.onDidChangeWindowState 监听器（供 emitWindowState 派发焦点变化） */
+  const windowStateListeners = [];
   /** 模拟已安装扩展：id → 扩展对象（默认空；clangd 扩展检测回归用） */
   const installedExtensions = new Map();
   /** 命令处理器注册表：commandId → 处理器数组（供测试直接调用） */
@@ -254,7 +256,7 @@ function createVscodeMock(opts = {}) {
       onDidChangeActiveTextEditor: () => new Disposable(),
       onDidChangeVisibleTextEditors: () => new Disposable(),
       onDidChangeTextEditorSelection: () => new Disposable(),
-      onDidChangeWindowState: () => new Disposable(),
+      onDidChangeWindowState: (listener) => { windowStateListeners.push(listener); return new Disposable(); },
       registerWebviewPanelSerializer: () => new Disposable(),
       registerWebviewViewProvider: () => new Disposable(),
       tabGroups: { all: [], close: () => Promise.resolve(true), onDidChangeTabs: () => new Disposable() },
@@ -316,6 +318,10 @@ function createVscodeMock(opts = {}) {
       const target = fileWatchers.find((w) => String(w.pattern || '').includes('.cbp'));
       if (!target) throw new Error('未注册 .cbp 文件监视器');
       target.__emit(kind, Uri.file(fsPath));
+    },
+    /** 测试用：派发窗口焦点变化（外部修改检测的"应用激活时检查"路径） */
+    emitWindowState(focused) {
+      for (const l of [...windowStateListeners]) l({ focused });
     },
     /**
      * 测试用：派发设置变更事件。affectsConfiguration 语义与 VS Code 一致——
