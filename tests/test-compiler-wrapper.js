@@ -133,6 +133,86 @@ settings['build.compilerCache'] = 'sccache';
 clearCompilerCacheResolveCache();
 check('sccache 同样回退', new CommandGenerator(project, compiler).generate(CommandType.CompileObjectCmd, params) === baseline, null);
 
+// ---- 3.5 ccache + 非 ASCII 工程路径 → 追加 -fno-working-directory ----
+// ccache 只接受 UTF-8 预处理输出；`-g` 隐式 -fworking-directory 会把（ANSI/GBK 编码的）
+// 绝对 cwd 写进 `# 1 "<cwd>//"`，中文路径因此每次编译都被判 Uncacheable → 缓存永不命中。
+const cjkDir = path.join(dir, '中文 工程');
+fs.mkdirSync(cjkDir, { recursive: true });
+const cjkCbp = path.join(cjkDir, 'ccwrap.cbp');
+fs.copyFileSync(cbpPath, cjkCbp);
+fs.copyFileSync(path.join(dir, 'main.c'), path.join(cjkDir, 'main.c'));
+const cjkProject = new ProjectParser().parse(cjkCbp);
+const cjkParams = { ...params, target: cjkProject.buildTargets[0], pf: cjkProject.files[0] };
+settings['build.compilerCache'] = 'ccache';
+settings['build.compilerCachePath'] = wrapper;
+clearCompilerCacheResolveCache();
+const cjkCmd = new CommandGenerator(cjkProject, compiler).generate(CommandType.CompileObjectCmd, cjkParams);
+check('非 ASCII 工程 + ccache → 追加 -fno-working-directory', cjkCmd.endsWith(' -fno-working-directory'), cjkCmd);
+check('非 ASCII 工程 + ccache → 缓存前缀仍在', cjkCmd.includes('fake ccache.cmd'), cjkCmd);
+check('非 ASCII 工程 + ccache → 命令其余部分与基线一致',
+  cjkCmd.slice(0, cjkCmd.length - (' -fno-working-directory').length).endsWith(baseline), cjkCmd);
+clearCompilerCacheResolveCache();
+const asciiCmd = new CommandGenerator(project, compiler).generate(CommandType.CompileObjectCmd, params);
+check('ASCII 工程 → 不追加该开关（命令与基线逐字节一致）', asciiCmd === withPrefix, asciiCmd);
+const cjkLinkCmd = new CommandGenerator(cjkProject, compiler).generate(CommandType.LinkExeCmd, cjkParams);
+check('链接命令不追加该开关', !cjkLinkCmd.includes('-fno-working-directory'), cjkLinkCmd);
+const cjkNoCacheCmd = new CommandGenerator(cjkProject, compiler).generate(CommandType.CompileObjectCmd, { ...cjkParams, noCompilerCache: true });
+check('noCompilerCache（clangd/脚本）不追加该开关', !cjkNoCacheCmd.includes('-fno-working-directory'), cjkNoCacheCmd);
+settings['build.compilerCache'] = 'sccache';
+clearCompilerCacheResolveCache();
+const cjkSccacheCmd = new CommandGenerator(cjkProject, compiler).generate(CommandType.CompileObjectCmd, cjkParams);
+check('sccache 无该限制 → 不追加', !cjkSccacheCmd.includes('-fno-working-directory'), cjkSccacheCmd);
+const msvcCompiler = {
+  ...compiler,
+  id: 'msvc10',
+  programs: { ...compiler.programs, C: 'cl.exe', CPP: 'cl.exe' },
+};
+settings['build.compilerCache'] = 'ccache';
+clearCompilerCacheResolveCache();
+const cjkMsvcCmd = new CommandGenerator(cjkProject, msvcCompiler).generate(CommandType.CompileObjectCmd, cjkParams);
+check('MSVC（cl.exe 不认该开关）→ 不追加', !cjkMsvcCmd.includes('-fno-working-directory'), cjkMsvcCmd);
+settings['build.compilerCache'] = 'none';
+clearCompilerCacheResolveCache();
+const cjkNoneCmd = new CommandGenerator(cjkProject, compiler).generate(CommandType.CompileObjectCmd, cjkParams);
+check('cache=none → 不追加（零影响）', !cjkNoneCmd.includes('-fno-working-directory'), cjkNoneCmd);
+
+// 源路径：非 ASCII 工程 + ccache → 编译单元改用工程相对路径（绝对路径会把 GBK 字节带进
+// `# 1 "<源文件>"`，ccache 因此拒绝缓存；相对路径 + 抑制开关才是全 ASCII）
+settings['build.compilerCache'] = 'ccache';
+settings['build.compilerCachePath'] = wrapper;
+clearCompilerCacheResolveCache();
+const cjkUnits = new BuildEngine(cjkProject, compiler, makeOut([]), (id) => compiler).collectMakefileData();
+const cjkCompile = cjkUnits[0].compile.find((c) => c.source.endsWith('main.c'));
+check('非 ASCII 工程 + ccache → 编译命令用相对源路径',
+  cjkCompile && cjkCompile.command.includes(' -c main.c ') && cjkCompile.command.endsWith(' -fno-working-directory'), cjkCompile && cjkCompile.command);
+const asciiUnits = new BuildEngine(project, compiler, makeOut([]), (id) => compiler).collectMakefileData();
+const asciiCompile = asciiUnits[0].compile.find((c) => c.source.endsWith('main.c'));
+check('ASCII 工程 + ccache → 仍用绝对源路径（CB 保真：UseFullSourcePaths）',
+  asciiCompile && asciiCompile.command.includes(path.join(dir, 'main.c')) && !asciiCompile.command.includes('-fno-working-directory'),
+  asciiCompile && asciiCompile.command);
+settings['build.compilerCache'] = 'none';
+clearCompilerCacheResolveCache();
+const cjkUnitsNone = new BuildEngine(cjkProject, compiler, makeOut([]), (id) => compiler).collectMakefileData();
+check('cache=none → 非 ASCII 工程仍用绝对源路径（零影响）',
+  cjkUnitsNone[0].compile[0].command.includes(path.join(cjkDir, 'main.c')), cjkUnitsNone[0].compile[0].command);
+
+// 资源文件（windres）不前置缓存程序、也不加抑制开关 → 维持 CB 的绝对路径语义
+const resDir = path.join(dir, '中文 资源');
+fs.mkdirSync(resDir, { recursive: true });
+fs.writeFileSync(path.join(resDir, 'res.rc'), '1 VERSIONINFO\n');
+const resCbp = path.join(resDir, 'ccres.cbp');
+fs.writeFileSync(resCbp, fs.readFileSync(cbpPath, 'utf-8').replace('main.c', 'res.rc'), 'utf-8');
+const resProject = new ProjectParser().parse(resCbp);
+settings['build.compilerCache'] = 'ccache';
+settings['build.compilerCachePath'] = wrapper;
+clearCompilerCacheResolveCache();
+const resUnits = new BuildEngine(resProject, compiler, makeOut([]), (id) => compiler).collectMakefileData();
+const resCompile = resUnits[0].compile[0];
+check('资源文件（windres）不受规避影响：绝对路径 + 无抑制开关',
+  resCompile && resCompile.command.includes(path.join(resDir, 'res.rc'))
+    && !resCompile.command.includes('-fno-working-directory') && !resCompile.command.includes('fake ccache'),
+  resCompile && resCompile.command);
+
 // ---- 4. buildEngine 告警（每引擎一次） ----
 function makeOut(logs) {
   return { info: (l) => logs.push('i|' + l), warn: (l) => logs.push('w|' + l), error: (l) => logs.push('e|' + l), debug: (l) => logs.push('d|' + l), append() {}, clear() {}, show() {}, hide() {}, dispose() {} };
@@ -172,6 +252,50 @@ check('每构建重探：补齐工具后下一构建无告警（无需重载/重
 check('每构建重探：生成命令立即前置（下一个构建即生效）',
   new CommandGenerator(project, compiler).generate(CommandType.CompileObjectCmd, params)
     === path.resolve(settings['build.compilerCachePath']) + ' ' + baseline, null);
+
+// ---- 4.5 buildEngine：非 ASCII 路径说明/告警 ----
+settings['build.compilerCache'] = 'ccache';
+settings['build.compilerCachePath'] = wrapper;
+clearCompilerCacheResolveCache();
+const logsCjk = [];
+const engineCjk = new BuildEngine(cjkProject, compiler, makeOut(logsCjk), (id) => compiler);
+engineCjk.warnCompilerCacheMissing();
+engineCjk.warnCompilerCacheMissing();
+const infosCjk = logsCjk.filter((l) => l.startsWith('i|'));
+check('非 ASCII 工程路径 → info 说明已追加 -fno-working-directory（恰好一次）',
+  infosCjk.length === 1 && infosCjk[0].includes('-fno-working-directory'), logsCjk);
+const logsCjk2 = [];
+const engineCjk2 = new BuildEngine(cjkProject, compiler, makeOut(logsCjk2), (id) => compiler);
+engineCjk2.warnCompilerCacheMissing();
+check('跨引擎去抖：同一非 ASCII 工程不重复说明', logsCjk2.length === 0, logsCjk2);
+
+// 源文件名非 ASCII（工程根 ASCII）：该开关救不了 → 告警
+const srcDir = path.join(dir, 'cjk-src');
+fs.mkdirSync(srcDir, { recursive: true });
+const srcCbp = path.join(srcDir, 'ccwrap.cbp');
+fs.writeFileSync(srcCbp, fs.readFileSync(cbpPath, 'utf-8').replace('main.c', '主程序.c'), 'utf-8');
+fs.writeFileSync(path.join(srcDir, '主程序.c'), 'int main(void){return 0;}\n', 'utf-8');
+const srcProject = new ProjectParser().parse(srcCbp);
+const logsSrc = [];
+const engineSrc = new BuildEngine(srcProject, compiler, makeOut(logsSrc), (id) => compiler);
+engineSrc.warnCompilerCacheMissing();
+check('源文件名非 ASCII → 告警（含文件名 + 出路）',
+  logsSrc.some((l) => l.startsWith('w|') && l.includes('主程序.c') && l.includes('ASCII')), logsSrc);
+const logsSrcGen = [];
+const engineSrcGen = new BuildEngine(srcProject, compiler, makeOut(logsSrcGen), (id) => compiler);
+engineSrcGen.warnCompilerCacheMissing();
+check('工程根 ASCII → 不追加该开关（源码名问题只能告警）',
+  !new CommandGenerator(srcProject, compiler).generate(CommandType.CompileObjectCmd, {
+    ...params, target: srcProject.buildTargets[0], pf: srcProject.files[0], file: '主程序.c',
+  }).includes('-fno-working-directory'), null);
+
+// sccache：无该限制 → 非 ASCII 路径不产生任何提示
+settings['build.compilerCache'] = 'sccache';
+clearCompilerCacheResolveCache();
+const logsSc = [];
+const engineSc = new BuildEngine(cjkProject, compiler, makeOut(logsSc), (id) => compiler);
+engineSc.warnCompilerCacheMissing();
+check('sccache 非 ASCII 路径 → 无提示（保持原行为）', logsSc.length === 0, logsSc);
 
 // ---- 5. 静态接线（dist 源码断言） ----
 const beText = fs.readFileSync(path.resolve(__dirname, '../dist/build/buildEngine.js'), 'utf-8');

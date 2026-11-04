@@ -31,6 +31,54 @@ export function normalizeCompilerCacheKind(v: unknown): CompilerCacheKind {
   return s === 'ccache' || s === 'sccache' ? s : 'none';
 }
 
+// ---------------- 非 ASCII 路径适配（ccache 只接受 UTF-8 预处理输出） ----------------
+
+/**
+ * 是否含非 ASCII 字符。
+ *
+ * ccache 用 UTF-8 严格解码编译器的**预处理输出**；中文 Windows 上 GCC/Clang 按系统 ANSI
+ * 代码页（GBK）写入路径 —— `-g` 隐式启用 `-fworking-directory`，输出首部即
+ * `# 1 "<绝对 cwd>//"`，源文件/头文件/`-I` 目录含非 ASCII 时同样出现在 linemarker 里。
+ * 这些字节不是合法 UTF-8，ccache 记 `unsupported_source_encoding` 并**直接跑真编译器**，
+ * 该次编译根本不进缓存（`ccache -s` 表现为 Cacheable calls 0 / Uncacheable 100%）。
+ * 详见 docs/guide/usage.md §15 常见问题「ccache 不生效（Cacheable calls 恒为 0）」。
+ */
+export function hasNonAscii(value: string): boolean {
+  return /[^\x00-\x7f]/.test(String(value ?? ''));
+}
+
+/** 首个含非 ASCII 的路径（未命中 undefined；告警只取样例，避免逐条刷屏） */
+export function firstNonAscii(values: readonly string[]): string | undefined {
+  for (const v of values) if (hasNonAscii(v)) return v;
+  return undefined;
+}
+
+/** 抑制 cwd linemarker 的开关（GCC/Clang；ccache 因此可正常缓存） */
+export const WORKING_DIR_SUPPRESS_FLAG = '-fno-working-directory';
+
+/** GCC/Clang 家族编译器（按程序名判断；cl.exe / sdcc 等返回 false —— 它们不认该开关） */
+export function isGnuLikeCompilerProgram(program: string): boolean {
+  const base = path.win32.basename(String(program ?? '').replace(/\//g, '\\')).toLowerCase();
+  return /gcc|g\+\+|clang|(^|[^a-z])cc([^a-z]|$)/.test(base);
+}
+
+/**
+ * ccache 非 ASCII 路径规避是否启用（kind=ccache + 工具已解析 + GCC/Clang + 工程根路径非 ASCII）。
+ *
+ * 满足时两件事一起做才有效（实测缺一即 0% 可缓存）：
+ *  1. 追加 `-fno-working-directory` —— 抑制 `# 1 "<cwd>//"`（cwd 的 GBK 字节）；
+ *  2. 编译单元改用**工程相对源路径** —— 绝对路径会把源文件的 GBK 字节带进 `# 1 "<file>"`。
+ * 源文件相对路径本身含非 ASCII 时第 2 条无效（调用方保留绝对路径并告警）。
+ */
+export function ccacheNeedsAsciiPaths(
+  kind: CompilerCacheKind,
+  toolResolved: boolean,
+  gnuLike: boolean,
+  basePath: string,
+): boolean {
+  return kind === 'ccache' && toolResolved && gnuLike && hasNonAscii(basePath);
+}
+
 /** 可执行文件名候选（Windows 追加 .exe/.cmd/.bat，覆盖 scoop shim 与转换脚本） */
 export function exeNameCandidates(tool: string, platform: NodeJS.Platform = process.platform): string[] {
   return platform === 'win32' ? [tool, `${tool}.exe`, `${tool}.cmd`, `${tool}.bat`] : [tool];

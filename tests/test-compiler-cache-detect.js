@@ -18,6 +18,11 @@ const {
   parseToolVersion,
   buildInstallGuideItems,
   COMPILER_CACHE_INSTALL,
+  hasNonAscii,
+  firstNonAscii,
+  isGnuLikeCompilerProgram,
+  WORKING_DIR_SUPPRESS_FLAG,
+  ccacheNeedsAsciiPaths,
 } = require('../dist/build/compilerCache.js');
 
 let pass = 0, fail = 0;
@@ -151,6 +156,30 @@ if (process.platform === 'win32') {
   fs.chmodSync(plain, 0o755);
   check('POSIX：补上执行位 → 命中', resolveCompilerCachePath('ccache', plain, 'linux', {}) === path.resolve(plain), null);
 }
+
+// ---- 非 ASCII 路径适配（ccache 只接受 UTF-8 预处理输出） ----
+check('hasNonAscii：纯 ASCII / 空串为 false', !hasNonAscii('C:\\tools\\proj') && !hasNonAscii('') && !hasNonAscii('a b&(c)#d%e!f'), null);
+check('hasNonAscii：中文 / 重音字符为 true', hasNonAscii('E:\\工作\\proj') && hasNonAscii('E:\\café'), null);
+check('firstNonAscii：返回首个命中，全 ASCII 返回 undefined',
+  firstNonAscii(['a.c', '中文.c', 'b.c']) === '中文.c' && firstNonAscii(['a.c', 'b.c']) === undefined, firstNonAscii(['a.c', 'b.c']));
+check('firstNonAscii：空数组 undefined', firstNonAscii([]) === undefined, null);
+check('isGnuLikeCompilerProgram：gcc/g++/clang/交叉工具链命中',
+  isGnuLikeCompilerProgram('gcc.exe') && isGnuLikeCompilerProgram('D:\\mingw64\\bin\\g++.exe')
+    && isGnuLikeCompilerProgram('clang++') && isGnuLikeCompilerProgram('arm-none-eabi-gcc.exe') && isGnuLikeCompilerProgram('cc'),
+  null);
+check('isGnuLikeCompilerProgram：cl.exe / sdcc / 空值不命中',
+  !isGnuLikeCompilerProgram('cl.exe') && !isGnuLikeCompilerProgram('C:\\VC\\bin\\cl.exe')
+    && !isGnuLikeCompilerProgram('sdcc.exe') && !isGnuLikeCompilerProgram(''),
+  null);
+check('抑制开关名固定为 -fno-working-directory', WORKING_DIR_SUPPRESS_FLAG === '-fno-working-directory', WORKING_DIR_SUPPRESS_FLAG);
+check('ccacheNeedsAsciiPaths：四项条件全满足才启用',
+  ccacheNeedsAsciiPaths('ccache', true, true, 'E:\\工作\\proj') === true
+    && ccacheNeedsAsciiPaths('ccache', true, true, 'E:\\work\\proj') === false
+    && ccacheNeedsAsciiPaths('sccache', true, true, 'E:\\工作\\proj') === false
+    && ccacheNeedsAsciiPaths('ccache', false, true, 'E:\\工作\\proj') === false
+    && ccacheNeedsAsciiPaths('ccache', true, false, 'E:\\工作\\proj') === false
+    && ccacheNeedsAsciiPaths('none', true, true, 'E:\\工作\\proj') === false,
+  null);
 
 console.log(`编译缓存模块回归: ${pass} pass, ${fail} fail`);
 process.exit(fail ? 1 : 0);

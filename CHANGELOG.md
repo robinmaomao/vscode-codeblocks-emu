@@ -3,6 +3,26 @@
 本文件记录**正式版**里程碑；近期 dev 迭代的逐轮发布说明见 [`docs/release/`](./docs/release/)（`0.8.xx-dev.md`），
 `0.8.76`–`0.8.128` 的 dev 说明已合并归档到 [`docs/release/archive/`](./docs/release/archive/)；版本号与维护约定见 [`docs/release/00-index.md`](./docs/release/00-index.md)。
 
+## 0.8.138 — 2026-11-04
+
+**ccache 非 ASCII 路径修复（缓存从不命中）**
+
+- **根因**：`-g` 让 GCC 隐式 `-fworking-directory`，预处理输出首部 `# 1 "<绝对 cwd>//"`（以及含中文的源文件/头文件
+  linemarker）在中文 Windows 上按 **GBK** 写出，不是合法 UTF-8；ccache 记 `unsupported_source_encoding` 后
+  直接跑真编译器、不写缓存（`ccache -s`：`Cacheable calls: 0` / `Uncacheable 100%`）。纯 ASCII 的「特殊符号」
+  路径（空格 `& ( ) # % ! '`）不受影响，已实测确认。
+- **修复**：`compilerCache = ccache` + 工具已探测到 + GCC/Clang + 工程根路径含非 ASCII 时，标准编译命令追加
+  `-fno-working-directory`（抑制 cwd linemarker），编译单元改用**工程相对源路径**（绝对路径会把 GBK 字节带进
+  `# 1 "<文件>"` 标记）；两者缺一仍为 0% 可缓存。构建开始输出一次 info 说明；源文件/包含目录仍含非 ASCII 时
+  告警并给出出路（该情形无法自动修复）。
+- **边界**：ASCII 路径命令与 0.8.137 逐字节一致（不注入、不换路径）；`.text` 一致、`DW_AT_name` / `DW_AT_comp_dir`
+  正常，仅 `.debug_info` 有细微差异；资源文件（windres）/ `sccache` / `cache=none` 行为不变；新增设置项 **无**。
+- 实测效果：中文路径工程 `Cacheable calls` 0% → **100%**，二次构建 **4 次 Direct HIT**，Release 单文件 2.5 s → 0.1 s。
+- 发布说明见 [`docs/release/0.8.138.md`](./docs/release/0.8.138.md)；测试结果见
+  [`docs/testing/test-report-0.8.138.md`](./docs/testing/test-report-0.8.138.md)。
+- 规模（0.8.138 时点）：`contract 3/3`、`unit 176 FAIL=0 SKIP=1`、`visual 24/24`、`e2e 4/4`、`perf 12 pass / 1 warn`、
+  `pack 1/1`（新增 29 条编译缓存断言）。
+
 ## 0.8.137 — 2026-11-04
 
 **外部修改检测 · 编译输出编码 · 面板可用性**
@@ -20,7 +40,7 @@
 - **编译选项面板**：「应用」改为**立即写回 `.cbp`** 并重绑重解析后的工程/目标；只管理 `options_<id>.xml` 内的选项
   （手写自定义选项保留）；应用失败在面板可见，目标已被外部改名/删除时报错而不误写工程级选项。
 - 发布说明见 [`docs/release/0.8.137.md`](./docs/release/0.8.137.md)；测试结果见
-  [`docs/testing/test-report-0.8.137.md`](./docs/testing/test-report-0.8.137.md)。
+  [`docs/testing/test-report-0.8.138.md`](./docs/testing/test-report-0.8.138.md)。
 - 规模（0.8.137 时点）：`contract 2/2`、`unit 175 FAIL=0 SKIP=1`（新增 4 个脚本 / 93 断言；
   `test-webview-panels` +21、`test-i18n-webview` +1）。
 

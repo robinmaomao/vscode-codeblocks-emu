@@ -67,7 +67,7 @@ npm.cmd run compile
 npm.cmd run package
 
 # 安装（版本号以 package.json 为准）
-code --install-extension "codeblocks-vscode-0.8.137.vsix" --force
+code --install-extension "codeblocks-vscode-0.8.138.vsix" --force
 
 # 全量回归测试
 npm.cmd test
@@ -111,5 +111,6 @@ npm.cmd test
 | [0.8.135](../release/0.8.135.md) | 构建期进程/CPU 收口 + 产物排除写入用户设置 |
 | [0.8.136](../release/0.8.136.md) | 工作区路径守卫 + AI 指令扫描治理 |
 | [0.8.137](../release/0.8.137.md) | `.cbp` 外部修改检测 + 编译输出编码 + 工程属性面板修复 |
+| [0.8.138](../release/0.8.138.md) | ccache 非 ASCII 路径修复（中文/特殊符号工程路径下缓存不生效） |
 
-> 当前版本 **0.8.137**（正式版；本版发布说明见 [release/0.8.137.md](../release/0.8.137.md)，上一版见 [release/0.8.136.md](../release/0.8.136.md)）；无头回归见 `npm test`（`TOTAL=175 FAIL=0 SKIP=1`，另有契约 / E2E / 视觉 / 性能 / 打包 / 宿主分层，见 [测试方案](../testing/strategy.md)）。
+> 当前版本 **0.8.138**（正式版；本版发布说明见 [release/0.8.138.md](../release/0.8.138.md)，上一版见 [release/0.8.137.md](../release/0.8.137.md)）；无头回归见 `npm test`（`TOTAL=176 FAIL=0 SKIP=1`，另有契约 / E2E / 视觉 / 性能 / 打包 / 宿主分层，见 [测试方案](../testing/strategy.md)）。

@@ -1,7 +1,7 @@
 # Code::Blocks for VS Code — Usage Guide
 
 > Language: **English** ｜ [中文](./usage.md)
-> Version: 0.8.137 ｜ Native port of Code::Blocks core features to VS Code, driving GCC / GDB directly, **without** `tasks.json` / `launch.json`.
+> Version: 0.8.138 ｜ Native port of Code::Blocks core features to VS Code, driving GCC / GDB directly, **without** `tasks.json` / `launch.json`.
 
 ---
 
@@ -50,7 +50,7 @@ Code::Blocks for VS Code is a "mini IDE kernel": it parses `.cbp` / `.workspace`
 ### 2.1 Install from VSIX
 
 ```powershell
-code --install-extension codeblocks-vscode-0.8.137.vsix --force
+code --install-extension codeblocks-vscode-0.8.138.vsix --force
 ```
 
 ### 2.2 Build from source
@@ -58,7 +58,7 @@ code --install-extension codeblocks-vscode-0.8.137.vsix --force
 ```powershell
 npm install
 npm run package
-code --install-extension codeblocks-vscode-0.8.137.vsix --force
+code --install-extension codeblocks-vscode-0.8.138.vsix --force
 ```
 
 > `npm run package` = `vsce package` (before packaging, the `vscode:prepublish` hook runs `tsc` compilation (`dist/`, for local testing) + the **esbuild single-file bundle** (`bundle/extension.js`, the release entry));
@@ -592,7 +592,7 @@ Note: keybindings are **user-level** (shared across windows); combinations taken
 |--------|--------|------|
 | `codeblocks.saveBeforeBuild` | `true` | Save automatically before build / run / clean |
 | `codeblocks.parallelJobs` | `8` | Number of parallel compile jobs (default 8; 0 = automatic: the host's logical core count, at most 32; higher concurrency shortens full builds but pushes CPU usage toward 100%, and each compile process chain keeps tens to hundreds of MB resident — the default 8 leaves headroom for the editor. Range 0–32, an explicit value wins, 1 = serial, folder-level overrides supported. **Process budget**: whatever you set, the effective concurrency never exceeds `max(8, logical cores)`; when it is capped, the build prints a one-line note at the start) |
-| `codeblocks.build.compilerCache` | `none` | Compiler cache (protective enhancement, off by default): `none`/`ccache`/`sccache`; when enabled, only **standard compile commands** are prefixed with the cache program (linking/resource compilation/scripts/`compile_commands.json` are not injected; the expanded preview shown by Export Makefile/Show Compiler Commands reflects the enabled state; ccache suits GCC/Clang, use sccache for MSVC; PCH units go through the standard compile path and are prefixed too — ccache has limited PCH cache support, so misses are expected). Tools are detected automatically: PATH → WinGet Links / WinGet Packages (fallback for the new winget portable packages that write PATH directly) / Scoop shims / cargo bin / Chocolatey / Program Files; **when not found the build falls back to the original compiler** (the build does not fail; a warning is printed once in the Output channel; **detection is rescanned on every build while it is missing** — installing/completing it at runtime takes effect **on the next build**; a resolved path is reused and revalidated, so a removed/moved tool triggers a rescan; no window reload needed). **Detected but not enabled: you are asked on every workspace open whether to enable it** (the prompt includes the version; "Don't ask again" is available and resets automatically when this setting changes; every activation/recheck writes the detected **version and path** to the Code::Blocks Output channel). Installation guidance: run `Code::Blocks: Install Compiler Cache (ccache/sccache)…` from the Command Palette (guidance only, never a silent install); machine-overridable |
+| `codeblocks.build.compilerCache` | `none` | Compiler cache (protective enhancement, off by default): `none`/`ccache`/`sccache`; when enabled, only **standard compile commands** are prefixed with the cache program (linking/resource compilation/scripts/`compile_commands.json` are not injected; the expanded preview shown by Export Makefile/Show Compiler Commands reflects the enabled state; ccache suits GCC/Clang, use sccache for MSVC; PCH units go through the standard compile path and are prefixed too — ccache has limited PCH cache support, so misses are expected). Tools are detected automatically: PATH → WinGet Links / WinGet Packages (fallback for the new winget portable packages that write PATH directly) / Scoop shims / cargo bin / Chocolatey / Program Files; **when not found the build falls back to the original compiler** (the build does not fail; a warning is printed once in the Output channel; **detection is rescanned on every build while it is missing** — installing/completing it at runtime takes effect **on the next build**; a resolved path is reused and revalidated, so a removed/moved tool triggers a rescan; no window reload needed). **Detected but not enabled: you are asked on every workspace open whether to enable it** (the prompt includes the version; "Don't ask again" is available and resets automatically when this setting changes; every activation/recheck writes the detected **version and path** to the Code::Blocks Output channel). Installation guidance: run `Code::Blocks: Install Compiler Cache (ccache/sccache)…` from the Command Palette (guidance only, never a silent install); ccache only accepts UTF-8 preprocessed output: when the project path contains non-ASCII characters, compile units switch to project-relative source paths plus `-fno-working-directory`, while non-ASCII source files / include directories stay uncacheable (a warning is printed at build start, see §15 FAQ); machine-overridable |
 | `codeblocks.build.compilerCachePath` | `` | Explicit path to the compiler cache executable (e.g. `C:\tools\ccache\ccache.exe`); empty = auto-detect; **an invalid path counts as not found** (no silent fallback to PATH); effective only when the compiler cache is not `none`; machine-overridable |
 | `codeblocks.maxReportedErrors` | `50` | Maximum number of errors collected per build (0 = unlimited) |
 | `codeblocks.build.verboseOutput` | `false` | Verbose build output: full compile command lines, the per-file Clean deletion list, the incremental skip list (aligned with Code::Blocks verbose mode) |
@@ -812,6 +812,14 @@ A: It is a **response file**: when a link / compile command line exceeds the len
 
 **Q: The error jump path in the Build Log shows duplicated segments (Chinese paths)?**
 A: Fixed. Since 0.4.0 the character class for file paths in compiler error lines supports Chinese (`\u0080-\uFFFF`).
+
+**Q: I enabled `codeblocks.build.compilerCache = ccache`, but `ccache -s` always shows `Cacheable calls: 0` (nothing is ever cached) — most visible with Chinese characters in the project path?**
+A: This is an **encoding limitation of ccache**, not a quoting/escaping problem (the compilation itself succeeds, it is just classified as "uncacheable" every time). ccache requires the compiler's **preprocessed output to be UTF-8**; on a Chinese Windows, GCC/Clang write paths using the system ANSI code page (GBK) — `-g` implicitly enables `-fworking-directory`, so the preprocessed output starts with `# 1 "<absolute project path>//"`. Those bytes are not valid UTF-8, ccache records `unsupported_source_encoding` and **runs the real compiler directly**, so the compilation never enters the cache (`ccache -s` shows `Cacheable calls: 0` / `Uncacheable calls: 100%`). Two cases:
+
+- **Project root path contains non-ASCII (most common)**: when `compilerCache = ccache` and the tool is detected, the extension switches that project's compile units to **project-relative source paths** and appends `-fno-working-directory` (both are needed: the first removes the Chinese bytes from the source linemarker, the second removes the cwd linemarker), and explains it once in the Output channel at build start; `.text` stays identical, only the debug sections of the object files may differ slightly.
+- **Source files / headers / include directories contain non-ASCII**: neither measure helps those compilations — the Output channel warns with an example file name; rename them to ASCII or move the project to an ASCII-only path.
+
+Pure-ASCII "special characters" in paths (spaces, `&`, `()`, `#`, `%`, `!`, `'`) do **not** affect ccache — the extension's quoting and shell fallback already cover them. sccache has no such limitation. To verify: run `ccache -s` (or `ccache --show-stats`) and watch `Cacheable calls` / `Hits`.
 
 **Q: CPU stays at 100% / the fan spins up while building. How do I bring it down?**
 A: Work through "who is eating the CPU":
