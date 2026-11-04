@@ -84,6 +84,7 @@ async function activate(opts = {}) {
 
   const mock = installVscodeMock({
     config: { 'codeblocks.clangd.enabled': false, ...(opts.config || {}) },
+    inspect: opts.inspect,
     findFilesResult: opts.findFilesResult,
   });
   const vscode = mock.vscode;
@@ -220,7 +221,7 @@ async function activate(opts = {}) {
     extensionPath: ROOT,
     extensionUri: Uri.file(ROOT),
     globalState: {
-      _m: new Map(),
+      _m: new Map(Object.entries(opts.globalState || {})),
       get(k, d) { return this._m.has(k) ? this._m.get(k) : d; },
       update(k, v) { this._m.set(k, v); return Promise.resolve(); },
       keys: () => [...ctx.globalState._m.keys()],
@@ -248,6 +249,8 @@ async function activate(opts = {}) {
 
   const app = {
     mock, vscode, ctx, records, events, tmpDir, userDir, ext,
+    /** `update()` 调用记录（设置迁移回归用） */
+    configUpdates: mock.configUpdates,
     /** 直调已注册的命令处理器（后注册者优先，取最后一个） */
     async invoke(id, ...args) {
       const handlers = mock.commandHandlers.get(id);

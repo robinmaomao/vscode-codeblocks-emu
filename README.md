@@ -179,7 +179,7 @@ code --extensionDevelopmentPath="." --disable-extensions --new-window
 |--------|--------|------|
 | `codeblocks.compilerId` | `gcc` | 默认编译器 ID（对应 `options_<id>.xml`） |
 | `codeblocks.masterPath` | `` | 编译器安装根目录（留空则从 PATH 探测） |
-| `codeblocks.parallelJobs` | `8` | 并行编译任务数（默认 8；0 = 自动：逻辑核数 × 2，最多 32） |
+| `codeblocks.parallelJobs` | `8` | 并行编译任务数（默认 8；0 = 自动：当前主机逻辑核数，最多 32） |
 | `codeblocks.saveBeforeBuild` | `true` | 构建前自动保存 |
 | `codeblocks.compilerPrograms` | `{}` | 编译器程序完整路径（交叉编译器由探测自动写入） |
 | `codeblocks.astyleOptions` | `["--style=allman", "--indent=spaces=4"]` | AStyle 格式化选项 |
@@ -210,7 +210,7 @@ code --extensionDevelopmentPath="." --disable-extensions --new-window
 | `codeblocks.clangd.queryDriver` | `false` | 开启后若 `clangd.arguments` 缺 `--query-driver` 则在输出通道提示（命令 `Configure clangd --query-driver` 可一键写入） |
 | `codeblocks.clangd.extraConfig` | `""` | 自由 YAML，作为同作用域**后置**片段注入（可覆盖扩展写入的任意键；扩展自动补 `If.PathMatch`） |
 
-> 完整 83 项设置（8 个分区，中英双语描述）见 [docs/guide/usage.md](./docs/guide/usage.md) §13。另有两条 clangd 命令：`Code::Blocks: Clean Stale clangd Config Fragments`（清理失效片段 + 孤儿缓存目录，预览后确认）与 `Code::Blocks: Configure clangd --query-driver`（交叉编译器保真）。
+> 完整 82 项设置（9 个分区，中英双语描述）见 [docs/guide/settings.md](./docs/guide/settings.md)（英文版 [settings.en.md](./docs/guide/settings.en.md)）。另有两条 clangd 命令：`Code::Blocks: Clean Stale clangd Config Fragments`（清理失效片段 + 孤儿缓存目录，预览后确认）与 `Code::Blocks: Configure clangd --query-driver`（交叉编译器保真）。
 
 ## 架构
 

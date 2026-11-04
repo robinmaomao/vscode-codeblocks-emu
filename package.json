@@ -694,12 +694,6 @@
             "scope": "machine-overridable",
             "markdownDescription": "%configuration.codeblocks.build.compilerCachePath.markdownDescription%"
           },
-          "codeblocks.maxReportedErrors": {
-            "type": "number",
-            "default": 50,
-            "minimum": 0,
-            "description": "%configuration.codeblocks.maxReportedErrors.description%"
-          },
           "codeblocks.build.skipIncludeDeps": {
             "type": "boolean",
             "default": false,
@@ -750,11 +744,6 @@
             "default": false,
             "description": "%configuration.codeblocks.build.compileCommandsOnlyTargets.description%"
           },
-          "codeblocks.build.plainCbLog": {
-            "type": "boolean",
-            "default": false,
-            "description": "%configuration.codeblocks.build.plainCbLog.description%"
-          },
           "codeblocks.build.scriptExitGraceMs": {
             "type": "number",
             "default": 1500,
@@ -768,16 +757,6 @@
             "minimum": 0,
             "maximum": 3600000,
             "description": "%configuration.codeblocks.build.scriptCommandTimeoutMs.description%"
-          },
-          "codeblocks.build.persistLog": {
-            "type": "boolean",
-            "default": false,
-            "description": "%configuration.codeblocks.build.persistLog.description%"
-          },
-          "codeblocks.build.outputTimestamp": {
-            "type": "boolean",
-            "default": false,
-            "description": "%configuration.codeblocks.build.outputTimestamp.description%"
           },
           "codeblocks.build.strictQuoting": {
             "type": "boolean",
@@ -802,6 +781,33 @@
             "type": "boolean",
             "default": false,
             "description": "%configuration.codeblocks.build.cleanResponseFiles.description%"
+          }
+        }
+      },
+      {
+        "title": "%configuration.buildLog.title%",
+        "order": 30,
+        "properties": {
+          "codeblocks.maxReportedErrors": {
+            "type": "number",
+            "default": 50,
+            "minimum": 0,
+            "description": "%configuration.codeblocks.maxReportedErrors.description%"
+          },
+          "codeblocks.build.plainCbLog": {
+            "type": "boolean",
+            "default": false,
+            "description": "%configuration.codeblocks.build.plainCbLog.description%"
+          },
+          "codeblocks.build.persistLog": {
+            "type": "boolean",
+            "default": false,
+            "description": "%configuration.codeblocks.build.persistLog.description%"
+          },
+          "codeblocks.build.outputTimestamp": {
+            "type": "boolean",
+            "default": false,
+            "description": "%configuration.codeblocks.build.outputTimestamp.description%"
           },
           "codeblocks.build.saveHtmlLog": {
             "type": "boolean",
@@ -817,12 +823,38 @@
             "type": "boolean",
             "default": false,
             "description": "%configuration.codeblocks.log.english.description%"
+          },
+          "codeblocks.ui.quietSuccess": {
+            "type": "boolean",
+            "default": false,
+            "description": "%configuration.codeblocks.ui.quietSuccess.description%"
+          },
+          "codeblocks.ui.quietFailure": {
+            "type": "boolean",
+            "default": false,
+            "description": "%configuration.codeblocks.ui.quietFailure.description%"
+          },
+          "codeblocks.ui.buildLogAutoFocus": {
+            "type": "string",
+            "enum": [
+              "errors",
+              "errorsAndWarnings",
+              "always",
+              "never"
+            ],
+            "default": "errors",
+            "description": "%configuration.codeblocks.ui.buildLogAutoFocus.description%"
+          },
+          "codeblocks.ui.buildLogFocusFirstError": {
+            "type": "boolean",
+            "default": true,
+            "description": "%configuration.codeblocks.ui.buildLogFocusFirstError.description%"
           }
         }
       },
       {
         "title": "%configuration.workspace.title%",
-        "order": 25,
+        "order": 40,
         "properties": {
           "codeblocks.workspace.pathGuard": {
             "type": "string",
@@ -838,12 +870,54 @@
             ],
             "default": "prompt",
             "description": "%configuration.codeblocks.workspace.pathGuard.description%"
+          },
+          "codeblocks.detect.autoOpen": {
+            "type": "string",
+            "enum": [
+              "all",
+              "single",
+              "off"
+            ],
+            "enumDescriptions": [
+              "%configuration.codeblocks.detect.autoOpen.enumDescription.0%",
+              "%configuration.codeblocks.detect.autoOpen.enumDescription.1%",
+              "%configuration.codeblocks.detect.autoOpen.enumDescription.2%"
+            ],
+            "default": "all",
+            "description": "%configuration.codeblocks.detect.autoOpen.description%"
+          },
+          "codeblocks.detect.autoOpenThreshold": {
+            "type": "number",
+            "default": 20,
+            "minimum": 1,
+            "maximum": 1000,
+            "description": "%configuration.codeblocks.detect.autoOpenThreshold.description%"
+          },
+          "codeblocks.detect.checkExternalChanges": {
+            "type": "string",
+            "enum": [
+              "off",
+              "prompt",
+              "auto"
+            ],
+            "enumDescriptions": [
+              "%configuration.codeblocks.detect.checkExternalChanges.off%",
+              "%configuration.codeblocks.detect.checkExternalChanges.prompt%",
+              "%configuration.codeblocks.detect.checkExternalChanges.auto%"
+            ],
+            "default": "prompt",
+            "description": "%configuration.codeblocks.detect.checkExternalChanges.description%"
+          },
+          "codeblocks.projectTree.categorize": {
+            "type": "boolean",
+            "default": true,
+            "description": "%configuration.codeblocks.projectTree.categorize.description%"
           }
         }
       },
       {
         "title": "%configuration.debug.title%",
-        "order": 30,
+        "order": 50,
         "properties": {
           "codeblocks.gdbTimeoutMs": {
             "type": "number",
@@ -926,7 +1000,7 @@
       },
       {
         "title": "%configuration.intellisense.title%",
-        "order": 40,
+        "order": 60,
         "properties": {
           "codeblocks.clangd.enabled": {
             "type": "boolean",
@@ -1070,11 +1144,6 @@
             "default": "clangd",
             "description": "%configuration.codeblocks.clangd.builtinHeaders.description%"
           },
-          "codeblocks.clangd.queryDriver": {
-            "type": "boolean",
-            "default": false,
-            "description": "%configuration.codeblocks.clangd.queryDriver.description%"
-          },
           "codeblocks.clangd.extraConfig": {
             "type": "string",
             "default": "",
@@ -1084,7 +1153,7 @@
       },
       {
         "title": "%configuration.ui.title%",
-        "order": 50,
+        "order": 70,
         "properties": {
           "codeblocks.ui.language": {
             "type": "string",
@@ -1101,37 +1170,6 @@
             "default": "auto",
             "scope": "window",
             "markdownDescription": "%configuration.ui.language.description%"
-          },
-          "codeblocks.projectTree.categorize": {
-            "type": "boolean",
-            "default": true,
-            "description": "%configuration.codeblocks.projectTree.categorize.description%"
-          },
-          "codeblocks.ui.quietSuccess": {
-            "type": "boolean",
-            "default": false,
-            "description": "%configuration.codeblocks.ui.quietSuccess.description%"
-          },
-          "codeblocks.ui.quietFailure": {
-            "type": "boolean",
-            "default": false,
-            "description": "%configuration.codeblocks.ui.quietFailure.description%"
-          },
-          "codeblocks.ui.buildLogAutoFocus": {
-            "type": "string",
-            "enum": [
-              "errors",
-              "errorsAndWarnings",
-              "always",
-              "never"
-            ],
-            "default": "errors",
-            "description": "%configuration.codeblocks.ui.buildLogAutoFocus.description%"
-          },
-          "codeblocks.ui.buildLogFocusFirstError": {
-            "type": "boolean",
-            "default": true,
-            "description": "%configuration.codeblocks.ui.buildLogFocusFirstError.description%"
           },
           "codeblocks.ui.projectToolbar": {
             "type": "array",
@@ -1176,49 +1214,12 @@
             "type": "boolean",
             "default": false,
             "description": "%configuration.codeblocks.ui.findFileOpen.description%"
-          },
-          "codeblocks.detect.autoOpen": {
-            "type": "string",
-            "enum": [
-              "all",
-              "single",
-              "off"
-            ],
-            "enumDescriptions": [
-              "%configuration.codeblocks.detect.autoOpen.enumDescription.0%",
-              "%configuration.codeblocks.detect.autoOpen.enumDescription.1%",
-              "%configuration.codeblocks.detect.autoOpen.enumDescription.2%"
-            ],
-            "default": "all",
-            "description": "%configuration.codeblocks.detect.autoOpen.description%"
-          },
-          "codeblocks.detect.autoOpenThreshold": {
-            "type": "number",
-            "default": 20,
-            "minimum": 1,
-            "maximum": 1000,
-            "description": "%configuration.codeblocks.detect.autoOpenThreshold.description%"
-          },
-          "codeblocks.detect.checkExternalChanges": {
-            "type": "string",
-            "enum": [
-              "off",
-              "prompt",
-              "auto"
-            ],
-            "enumDescriptions": [
-              "%configuration.codeblocks.detect.checkExternalChanges.off%",
-              "%configuration.codeblocks.detect.checkExternalChanges.prompt%",
-              "%configuration.codeblocks.detect.checkExternalChanges.auto%"
-            ],
-            "default": "prompt",
-            "description": "%configuration.codeblocks.detect.checkExternalChanges.description%"
           }
         }
       },
       {
         "title": "%configuration.editor.title%",
-        "order": 60,
+        "order": 80,
         "properties": {
           "codeblocks.editor.autoHeaderGuard": {
             "type": "boolean",
@@ -1322,7 +1323,7 @@
       },
       {
         "title": "%configuration.keybindings.title%",
-        "order": 70,
+        "order": 90,
         "properties": {
           "codeblocks.keybindings.cbStyle": {
             "type": "boolean",

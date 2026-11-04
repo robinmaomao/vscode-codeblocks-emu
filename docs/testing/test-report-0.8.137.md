@@ -31,7 +31,7 @@
 |--------|------|--------|--------|
 | 命令 | 110 | 109 | 99% |
 | 视图 | 5 | 5 | **100%** |
-| 设置项 | 83 | 83 | **100%** |
+| 设置项 | 82 | 82 | **100%** |
 | 快捷键 | 33 | 33 | **100%** |
 | 语言/语法 | 6 | 6 | **100%** |
 | DAP 能力 | 30 | 30 | **100%** |
@@ -44,11 +44,15 @@
 | 项 | 说明 |
 |---|---|
 | 新增设置 | `codeblocks.detect.checkExternalChanges`（`prompt` / `auto` / `off`，默认 `prompt`）——已打开 `.cbp` 被其它程序修改后的处理方式（对齐 CB `environment/check_modified_files`） |
+| 设置整理 | 设置页 8 → **9 个分区**（新增「构建日志与通知」，日志/通知/工程检测类设置归位）；移除冗余的 `codeblocks.clangd.queryDriver`（只用于提示，实际开关为 `builtinHeaders=queryDriver`）；全部设置键保持原名 |
+| 行为变更 | `codeblocks.parallelJobs` 的 `0` 改为「当前主机逻辑核数（上限 32）」；升级时把显式配置的 `0` 一次性迁移为 `8`（`globalState` 标记保证只执行一次） |
+| 新增文档 | 独立设置参考 [settings.md](../guide/settings.md) / [settings.en.md](../guide/settings.en.md)：逐项类型/默认值/作用域/取值/生效时机 + 升级迁移说明 |
 | 新增命令 | `codeblocks.reloadProject`（`Code::Blocks: 从磁盘重新加载工程`；工程树右键 / Menu → Project） |
 | 行为变更 | 编译选项面板「应用」改为**立即写回 `.cbp`** 并重绑重解析后的工程/目标；只管理 `options_<id>.xml` 内的选项（手写自定义选项保留） |
 | 行为变更 | 工程属性面板保存不再依赖"先切到各 tab"；收集/写盘异常在顶栏状态区可见（悬停看全文） |
-| 新增单测 | `tests/test-external-changes.js`、`tests/test-encoding-lines.js`、`tests/test-compiler-options-apply.js`、`tests/test-project-properties-save.js`（共 93 断言） |
-| 回归同步 | `tests/test-webview-panels.js`（+21）、`tests/test-i18n-webview.js`（+1）、`tests/_harness/vscodeMock.js`（`onDidReceiveMessage` thisArg 绑定、面板 `dispose()` 幂等）、`tests/test-settings-structure.js`（设置项 **83** / 配置分组 8）、`tests/visual/baselines/{dark,light}/props-targets.png`（面板布局基线刷新）、`docs/testing/coverage-matrix.md` 重新生成 |
+| 新增单测 | `tests/test-external-changes.js`、`tests/test-encoding-lines.js`、`tests/test-compiler-options-apply.js`、`tests/test-project-properties-save.js`、`tests/test-settings-migration.js`（共 105 断言） |
+| 新增契约 | `tests/contract/test-settings-contract.js`（659 断言）：9 分区结构、全部设置 type/default/enum/min/max/scope、双语 nls、文档完整性、已删除键 |
+| 回归同步 | `tests/test-webview-panels.js`（+21）、`tests/test-i18n-webview.js`（+1）、`tests/_harness/vscodeMock.js`（`onDidReceiveMessage` thisArg 绑定、面板 `dispose()` 幂等、inspect/update 记录）、`tests/test-settings-structure.js`（设置项 **82** / 配置分组 9）、`tests/test-settings-coverage.js`（全覆盖源码读点）、`tests/test-parallel-jobs.js`（0 = 逻辑核数）、`tests/visual/baselines/{dark,light}/props-targets.png`（面板布局基线刷新）、`docs/testing/coverage-matrix.md` 重新生成 |
 | 行为边界 | 不改编译/链接流程与命令行生成；不写工作区 `.vscode/settings.json`；`.cbp` 读写保留原编码；外部修改检测只作用于已打开工程的 `.cbp` |
 | 已知限制 | `Compile File (Without Project)` 走 VS Code 任务终端（固定 UTF-8），无法解码编译器 GBK 输出（见使用说明 §16） |
 

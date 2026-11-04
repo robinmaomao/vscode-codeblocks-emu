@@ -16,7 +16,7 @@
 | 链接对象组装 | `pfDetails::Update:579-583` 逐文件 `QuoteStringIfNeeded` + objectSeparator 拼接；`flat_object` 恒扁平命名 | 逐对象 `quoteIfNeeded` 后 join；`objectPathRelativeFlat`/`linkObjectRelativeFlat` 四处传参 |
 | weight 排序 | `MySortProjectFilesByWeight`（升序，同 weight 字节序；0-100 合法，缺省 50） | `compareFilesByWeight`（字节序）；parser 显式区间判断（0 合法，非法保持 50） |
 | COMPILER_WAIT 屏障 | 同 weight 并行，跨 weight 串行 | `runInParallel` 按 weight 分组；组内 PCH 先编译 |
-| 并行任务数默认值 | `cbthreadpool.cpp:32-39`：≤0 → CPU 核数 | 默认 **8**（`parallelJobs`：0=自动、1=串行，支持文件夹级覆盖） |
+| 并行任务数默认值 | `cbthreadpool.cpp:32-39`：≤0 → CPU 核数 | 默认 **8**（`parallelJobs`：0=当前主机逻辑核数、1=串行，支持文件夹级覆盖） |
 | 增量编译 | `IsObjectOutdated`：源/头依赖 mtime；源缺失跳过；时间戳失败回退编译 | `isUpToDate` + `depsNewestMtime`（含注释/字符串剥离的 #include 扫描） |
 | 链接跳过 | `GetTargetLinkCommands` 时间戳检查（输出 ≥ 全部对象） | `linkObjectsUpToDate`（共用 `src/build/outputPath.ts`；Windows 无扩展名补 `.exe`） |
 | 外部依赖强制重链 | `AreExternalDepsOutdated`：库/`external_deps`/`additional_output` 比输出新 → 重链，缺失 → WARNING | `areExternalDepsOutdated`（先查外部依赖再判断最新；缺失同样 WARNING） |

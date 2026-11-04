@@ -161,8 +161,9 @@ async function buildWith(files, jobs, buildOptions, onEngine) {
   check('A1 未配置（undefined）→ 默认 8', resolveParallelJobs(undefined) === 8, resolveParallelJobs(undefined));
   check('A2 显式 12 → 12', resolveParallelJobs(12) === 12, resolveParallelJobs(12));
   check('A3 显式 1 → 串行', resolveParallelJobs(1) === 1, resolveParallelJobs(1));
-  check('A4 0 → 自动 = min(逻辑核数 × 2, 32)（模拟 4 核 = 8）', resolveParallelJobs(0, 4) === 8, resolveParallelJobs(0, 4));
-  check('A5 0 → 自动（模拟 20 核 = 32，受上限约束）', resolveParallelJobs(0, 20) === 32, resolveParallelJobs(0, 20));
+  check('A4 0 → 自动 = min(当前主机逻辑核数, 32)（模拟 4 核 = 4）', resolveParallelJobs(0, 4) === 4, resolveParallelJobs(0, 4));
+  check('A5 0 → 自动（模拟 20 核 = 20，未触上限）', resolveParallelJobs(0, 20) === 20, resolveParallelJobs(0, 20));
+  check('A5b 0 → 自动（模拟 64 核 = 32，受上限约束）', resolveParallelJobs(0, 64) === 32, resolveParallelJobs(0, 64));
   check('A6 旧版本遗留 64 → 截断为 32', resolveParallelJobs(64) === 32, resolveParallelJobs(64));
   check('A7 非法值（-1）→ 默认 8', resolveParallelJobs(-1) === 8, resolveParallelJobs(-1));
   check('A8 非法值（NaN）→ 默认 8', resolveParallelJobs(Number.NaN) === 8, resolveParallelJobs(Number.NaN));
@@ -177,7 +178,7 @@ async function buildWith(files, jobs, buildOptions, onEngine) {
   check('A15 进程预算 = 逻辑核数（模拟 16 核 → 16）', processBudget(16) === 16, processBudget(16));
   check('A16 默认 8 不受预算影响（模拟 16 核）', resolveJobBudget(undefined, 16) === 8, resolveJobBudget(undefined, 16));
   check('A17 0=自动 受预算收敛（模拟 16 核 → 16）', resolveJobBudget(0, 16) === 16, resolveJobBudget(0, 16));
-  check('A18 0=自动 在低核机按核数自动（模拟 2 核 → 4，预算只是上限不是下限）', resolveJobBudget(0, 2) === 4, resolveJobBudget(0, 2));
+  check('A18 0=自动 在低核机按核数自动（模拟 2 核 → 2，预算只是上限不是下限）', resolveJobBudget(0, 2) === 2, resolveJobBudget(0, 2));
   check('A19 显式 32 在高核机保留（模拟 64 核 → 32）', resolveJobBudget(32, 64) === 32, resolveJobBudget(32, 64));
   check('A20 显式 32 在低核机被收敛（模拟 4 核 → 8）', resolveJobBudget(32, 4) === 8, resolveJobBudget(32, 4));
   check('A21 显式 1 恒为串行（模拟 64 核）', resolveJobBudget(1, 64) === 1, resolveJobBudget(1, 64));
@@ -202,7 +203,7 @@ async function buildWith(files, jobs, buildOptions, onEngine) {
     // 0 = 自动，但同时受「进程预算」（并发 ≤ max(默认 8, 逻辑核数)）收敛
     const cores = Math.max(1, os.cpus().length || 1);
     const budget = Math.max(DEFAULT_PARALLEL_JOBS, cores);
-    const expectedAuto = Math.min(Math.min(cores * 2, MAX_PARALLEL_JOBS), budget);
+    const expectedAuto = Math.min(Math.min(cores, MAX_PARALLEL_JOBS), budget);
     const units = expectedAuto + 8;
     const r = await buildWith(units, 0);
     check(`B4 显式 0：自动并发 = ${expectedAuto}（本机逻辑核 ${cores}，预算 ${budget}）`, r.maxActive === expectedAuto, {

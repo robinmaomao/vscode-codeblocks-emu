@@ -78,6 +78,13 @@ import { Bookmark, toggleBookmark, nextBookmark, prevBookmark, locateBookmarkLin
 import { parseIncludeDirective, resolveIncludePath } from './tools/includeResolver';
 import { countFiles, isSourceFile } from './tools/codeStats';
 import { formatActiveDocument } from './tools/astyle';
+import {
+  PARALLEL_JOBS_MIGRATION_KEY,
+  PARALLEL_JOBS_MIGRATION_VALUE,
+  PARALLEL_JOBS_MIGRATION_VERSION,
+  hasExplicitSetting,
+  parallelJobsMigrationScopes,
+} from './settings/migration';
 import { applyHeaderGuard } from './tools/headerGuard';
 import { tidyCommentBlock } from './tools/tidyComments';
 import { parseToolsSetting, buildToolInvocation, ToolContext } from './tools/toolRunner';
@@ -180,6 +187,8 @@ const PROJECT_SCAN_EXCLUDE =
 const PROJECT_SCAN_TTL_MS = 30_000;
 /** 工程扫描结果上限（历史：两次 findFiles 各 500，合并为一次后放宽到 1000） */
 const PROJECT_SCAN_MAX_RESULTS = 1000;
+/** codeblocks.todo.keywords 默认值（与 package.json 声明一致；headless/无宿主读取时使用） */
+const TODO_KEYWORDS_DEFAULT = ['TODO', 'FIXME', 'NOTE', 'HACK', 'XXX'];
 
 /** 兜底 IntelliSense 符号索引（clangd 不可用时启用） */
 const fallbackIndex = new SymbolIndex();
@@ -215,7 +224,6 @@ let clangdExtensionPresent = false;
  * 其余 `codeblocks.clangd.*` 键不改变产物，不应触发整库重建：
  *  - buildLogDiagnostics：只决定 Build Log 展示来源
  *  - restartOnActiveProjectSwitch：只决定切换工程时是否重启 clangd
- *  - queryDriver：只影响输出通道的一次性提示
  */
 const CLANGD_GENERATED_KEYS = [
   'codeblocks.clangd.enabled',
@@ -254,6 +262,61 @@ function applyAsmCommentMode(): void {
   }
 }
 
+/**
+ * 一次性设置迁移（升级到本版本后执行一次）：
+ * - `codeblocks.parallelJobs` 显式 0（旧版「自动 = 逻辑核数 × 2」）→ 8；
+ * - 清理已移除的 `codeblocks.clangd.queryDriver` 残留配置项。
+ *
+ * 失败只写输出通道并返回，不写迁移标记（下次激活重试）；迁移绝不阻塞扩展激活。
+ */
+async function migrateSettingsOnce(context: vscode.ExtensionContext): Promise<void> {
+  if (context.globalState.get<number>(PARALLEL_JOBS_MIGRATION_KEY) === PARALLEL_JOBS_MIGRATION_VERSION) return;
+  const cfg = vscode.workspace.getConfiguration('codeblocks');
+  let parallelJobsMigrated = false;
+  let queryDriverRemoved = false;
+  const targetOf = (scope: 'global' | 'workspace' | 'workspaceFolder'): vscode.ConfigurationTarget =>
+    scope === 'global'
+      ? vscode.ConfigurationTarget.Global
+      : scope === 'workspace'
+        ? vscode.ConfigurationTarget.Workspace
+        : vscode.ConfigurationTarget.WorkspaceFolder;
+  const clearQueryDriver = async (c: vscode.WorkspaceConfiguration, target: vscode.ConfigurationTarget): Promise<void> => {
+    if (!hasExplicitSetting(c.inspect('clangd.queryDriver'))) return;
+    await c.update('clangd.queryDriver', undefined, target);
+    queryDriverRemoved = true;
+  };
+  try {
+    const folderCount = vscode.workspace.workspaceFolders?.length ?? 0;
+    for (const scope of parallelJobsMigrationScopes(cfg.inspect<number>('parallelJobs'))) {
+      // 多根工作区没有单一 resource，不能直接写 WorkspaceFolder 目标（交由下方逐文件夹处理）
+      if (scope === 'workspaceFolder' && folderCount !== 1) continue;
+      await cfg.update('parallelJobs', PARALLEL_JOBS_MIGRATION_VALUE, targetOf(scope));
+      parallelJobsMigrated = true;
+    }
+    await clearQueryDriver(cfg, vscode.ConfigurationTarget.Global);
+    await clearQueryDriver(cfg, vscode.ConfigurationTarget.Workspace);
+    // 多根工作区：逐文件夹处理文件夹级覆盖（单根已由上面的 inspect 处理，避免重复写）
+    for (const folder of folderCount === 1 ? [] : (vscode.workspace.workspaceFolders ?? [])) {
+      const folderCfg = vscode.workspace.getConfiguration('codeblocks', folder.uri);
+      if (folderCfg.inspect<number>('parallelJobs')?.workspaceFolderValue === 0) {
+        await folderCfg.update('parallelJobs', PARALLEL_JOBS_MIGRATION_VALUE, vscode.ConfigurationTarget.WorkspaceFolder);
+        parallelJobsMigrated = true;
+      }
+      await clearQueryDriver(folderCfg, vscode.ConfigurationTarget.WorkspaceFolder);
+    }
+  } catch (e) {
+    outputChannel.warn(logT('[Code::Blocks] Settings migration failed (will retry on next activation): {0}', e instanceof Error ? e.message : String(e)));
+    return;
+  }
+  await context.globalState.update(PARALLEL_JOBS_MIGRATION_KEY, PARALLEL_JOBS_MIGRATION_VERSION);
+  if (parallelJobsMigrated) {
+    outputChannel.info(logT("[Code::Blocks] Migrated codeblocks.parallelJobs from 0 (old auto) to 8 for this upgrade; set it back to 0 to use the host's logical core count."));
+  }
+  if (queryDriverRemoved) {
+    outputChannel.info(logT('[Code::Blocks] Removed the obsolete codeblocks.clangd.queryDriver setting (use codeblocks.clangd.builtinHeaders = queryDriver instead).'));
+  }
+}
+
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
   extContext = context;
   // Run 终端方案 B1：workspaceState 持久化「本扩展用过的终端名」注册表（WeakSet 重载即失效，注册表保证跨重载单一标签）
@@ -272,6 +335,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       timestamp: () => buildOutputTimestamp,
     },
   );
+  // 升级后一次性迁移设置（parallelJobs 显式 0 → 8；清理已移除的 clangd.queryDriver）
+  await migrateSettingsOnce(context);
   // DAP 跟踪（codeblocks.debug.trace）：写入本输出通道
   setDebugTraceSink((line) => outputChannel.appendLine(line));
   const applyDebugTrace = () => setDebugTraceEnabled(
@@ -301,7 +366,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   // clangd 用户配置（config.yaml 片段）由 codeblocks.clangd.* 设置驱动：变更后自动重新生成一次
   // （去抖合并；clangd 自己会重载 config.yaml），免去「改完设置还得重开工程/手动跑一次生成」的困惑。
   // 未打开工程时无从确定作用域 ⇒ 跳过，下次打开工程按新设置生成。
-  // 只影响展示/提示的键（buildLogDiagnostics / restartOnActiveProjectSwitch / queryDriver）不改变产物
+  // 只影响展示/提示的键（buildLogDiagnostics / restartOnActiveProjectSwitch）不改变产物
   // ⇒ 不触发整库重建（大工程重新收集编译命令代价高）；clangd 已关闭时也不生成（关闭已有 G4 提示）。
   context.subscriptions.push(vscode.workspace.onDidChangeConfiguration((e) => {
     if (!e.affectsConfiguration('codeblocks.clangd')) return;
@@ -4487,9 +4552,9 @@ async function generateClangdForWorkspaceInternal(interactive: boolean): Promise
       for (const w of extraConfigWarnings(extraConfig)) {
         outputChannel.warn(logT('[Code::Blocks] codeblocks.clangd.extraConfig {0}; this may make clangd discard the whole config.yaml (including this extension\'s fragment)', w));
       }
-      // queryDriver 开启但 clangd.arguments 还没配 --query-driver：给一次性可操作提示（不自动改设置）
-      if (cfg.get<boolean>('clangd.queryDriver', false) && firstCompilerPath && !clangdArgsHaveQueryDriver()) {
-        outputChannel.warn(logT('[Code::Blocks] codeblocks.clangd.queryDriver is on, but VS Code\'s clangd.arguments does not contain --query-driver yet;')
+      // builtinHeaders=queryDriver 但 clangd.arguments 还没配 --query-driver：给一次性可操作提示（不自动改设置）
+      if (cfg.get<string>('clangd.builtinHeaders', 'clangd') === 'queryDriver' && firstCompilerPath && !clangdArgsHaveQueryDriver()) {
+        outputChannel.warn(logT('[Code::Blocks] codeblocks.clangd.builtinHeaders is queryDriver, but VS Code\'s clangd.arguments does not contain --query-driver yet;')
           + logT('Run the command "Code::Blocks: Configure clangd --query-driver" to write it in one click (suggested value --query-driver={0}/*)', path.dirname(firstCompilerPath).replace(/\\/g, '/')));
       }
       outputChannel.info(logT('[Code::Blocks] clangd user config updated → {0}', clangdUserConfigPath()));
@@ -6008,7 +6073,7 @@ async function showTodoList(): Promise<void> {
   const files = project.files.map((f) => f.absolutePath);
   // R12：关键字可由设置自定义（codeblocks.todo.keywords）
   const cfg = vscode.workspace.getConfiguration('codeblocks');
-  const keywords = (cfg.get<string[]>('todo.keywords', []) ?? []).map((k) => String(k).trim()).filter(Boolean);
+  const keywords = (cfg.get<string[]>('todo.keywords', TODO_KEYWORDS_DEFAULT) ?? []).map((k) => String(k).trim()).filter(Boolean);
   const todos = scanTodos(files, keywords.length ? { startStrings: keywords, allowedTypes: keywords } : undefined);
 
   if (todos.length === 0) {
@@ -6145,8 +6210,8 @@ async function addTodoItemCmd(): Promise<void> {
   const ed = vscode.window.activeTextEditor;
   if (!ed) return;
   const cfg = vscode.workspace.getConfiguration('codeblocks');
-  const keywords = (cfg.get<string[]>('todo.keywords', []) ?? []).map((k) => String(k).trim()).filter(Boolean);
-  const list = keywords.length ? keywords : ['TODO', 'FIXME', 'NOTE', 'HACK', 'XXX'];
+  const keywords = (cfg.get<string[]>('todo.keywords', TODO_KEYWORDS_DEFAULT) ?? []).map((k) => String(k).trim()).filter(Boolean);
+  const list = keywords.length ? keywords : TODO_KEYWORDS_DEFAULT;
   const type = await vscode.window.showQuickPick(list, { placeHolder: i18n.t('TODO type (configurable via codeblocks.todo.keywords)') });
   if (!type) return;
   const userInput = await vscode.window.showInputBox({ prompt: i18n.t('User name (optional)'), value: process.env.USERNAME ?? process.env.USER ?? '' });
