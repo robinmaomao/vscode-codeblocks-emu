@@ -4,7 +4,7 @@
 > 判定口径：契约项 ID（命令/视图/设置键/键位/语言/语法/DAP 能力标记）在对应测试层源码中出现即计为命中；
 > 视觉层/性能层不引用命令 ID 字面量，按 `EXPLICIT_HITS`（面/引擎级覆盖）人工补充，明细见脚本内注释。
 > 列 `src` 表示实现存在（不算测试覆盖）；`契约/无头/E2E/视觉/性能/宿主` 为六个自动化测试层。
-> 数据来源：package.json v0.8.138 + tests/** + src/**
+> 数据来源：package.json v0.8.139 + tests/** + src/**
 
 ## 汇总
 
@@ -12,7 +12,7 @@
 |--------|------|--------|--------|--------|--------|--------|--------|--------|--------|
 | 命令 | 110 | 3 | 96 | 4 | 12 | 5 | 37 | 1 | 99% |
 | 视图 | 5 | 2 | 5 | 1 | 1 | 0 | 5 | 0 | 100% |
-| 设置 | 82 | 82 | 76 | 13 | 0 | 1 | 6 | 0 | 100% |
+| 设置 | 82 | 82 | 76 | 15 | 0 | 1 | 6 | 0 | 100% |
 | 快捷键 | 33 | 3 | 31 | 2 | 4 | 2 | 12 | 0 | 100% |
 | 语言/语法 | 6 | 0 | 6 | 3 | 2 | 1 | 3 | 0 | 100% |
 | DAP 能力 | 30 | 0 | 1 | 30 | 0 | 0 | 5 | 0 | 100% |
@@ -155,8 +155,8 @@
 | 3 | `codeblocks.compilerPrograms` |  | ✔ | ✔ | ✔ | · | · | ✔ | ✅ |
 | 4 | `codeblocks.saveBeforeBuild` |  | ✔ | ✔ | · | · | · | · | ✅ |
 | 5 | `codeblocks.parallelJobs` |  | ✔ | ✔ | · | · | · | · | ✅ |
-| 6 | `codeblocks.build.compilerCache` |  | ✔ | ✔ | · | · | · | · | ✅ |
-| 7 | `codeblocks.build.compilerCachePath` |  | ✔ | ✔ | · | · | · | · | ✅ |
+| 6 | `codeblocks.build.compilerCache` |  | ✔ | ✔ | ✔ | · | · | · | ✅ |
+| 7 | `codeblocks.build.compilerCachePath` |  | ✔ | ✔ | ✔ | · | · | · | ✅ |
 | 8 | `codeblocks.build.skipIncludeDeps` |  | ✔ | · | ✔ | · | ✔ | · | ✅ |
 | 9 | `codeblocks.build.linkInputExtensions` |  | ✔ | ✔ | · | · | · | · | ✅ |
 | 10 | `codeblocks.build.verboseOutput` |  | ✔ | · | ✔ | · | · | · | ✅ |
