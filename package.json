@@ -2431,8 +2431,10 @@
                 "variables",
                 "evaluate",
                 "continue",
-                "step"
-              ]
+                "step",
+                "run"
+              ],
+              "description": "run = start (optionally with breakpoints) and return stack/variables in one call"
             },
             "cbp": {
               "type": "string",

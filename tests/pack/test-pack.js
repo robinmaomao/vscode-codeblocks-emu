@@ -69,6 +69,7 @@ async function main() {
     const files = (ls.stdout || '').split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
     const has = (re) => files.some((f) => re.test(f));
     check('P1 清单包含入口 bundle/extension.js', has(/^bundle[\\/]extension\.js$/), files.filter((f) => f.startsWith('bundle')).slice(0, 3), 'bundle/extension.js');
+    check('P1 清单包含 Agent CLI/MCP bundle', has(/^bundle[\\/]cb-cli\.js$/) && has(/^bundle[\\/]cb-mcp\.js$/), files.filter((f) => f.startsWith('bundle')).slice(0, 5), 'bundle/cb-cli.js + bundle/cb-mcp.js');
     check('P1 清单包含语法与语言配置', has(/^syntaxes[\\/].+\.json$/) && has(/^language-configurations[\\/].+\.json$/), null, '两个目录');
     check('P1 清单包含编译器资源 XML', has(/^resources[\\/]compilers[\\/]options_gcc\.xml$/), null, 'options_gcc.xml');
     check('P1 清单包含 NLS 文件', has(/^package\.nls\.json$/) && has(/^package\.nls\.zh-cn\.json$/), null, '两个 NLS');
@@ -93,7 +94,7 @@ async function main() {
       process.exit(1);
     }
     const size = fs.statSync(vsixPath).size;
-    check('P2 VSIX 体积合理（< 20MB）', size > 100 * 1024 && size < 20 * 1024 * 1024, size, '100KB–20MB');
+    check('P2 VSIX 体积合理（< 8MB，含 Agent CLI/MCP bundle）', size > 100 * 1024 && size < 8 * 1024 * 1024, size, '100KB–8MB');
   }
 
   // ---------- P3 隔离目录安装 / 卸载 ----------

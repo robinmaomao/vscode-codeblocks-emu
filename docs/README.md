@@ -35,6 +35,7 @@ docs/
 | 文档 | 用途 |
 |------|------|
 | [guide/usage.md](./guide/usage.md) | 用户手册：安装、界面、构建、调试、快捷键、设置（§13）、FAQ、已知限制（§16）｜英文版 [guide/usage.en.md](./guide/usage.en.md) |
+| [guide/agent-control.md](./guide/agent-control.md) | **Agent / MCP / CLI 控制指南**：11 个工具参考、编辑语法、典型工作流、`cb-cli`、MCP 接入、安全门控、排障｜英文版 [guide/agent-control.en.md](./guide/agent-control.en.md) |
 | [guide/settings.md](./guide/settings.md) | **设置项完整参考**：9 个分区逐项说明类型、默认值、作用域、取值与生效时机｜英文版 [guide/settings.en.md](./guide/settings.en.md) |
 | [guide/alignment.md](./guide/alignment.md) | 与 Code::Blocks 25.03 的逐项对齐依据（CB 源码位置 + 扩展实现 + 保护性差异） |
 | [dev/progress.md](./dev/progress.md) | 恢复开发进度用：总体进度、已完成能力、构建命令、关键踩坑、版本里程碑 |

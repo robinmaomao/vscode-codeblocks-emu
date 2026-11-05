@@ -91,6 +91,10 @@
 
 - 📊 **辅助工具**：代码统计、TODO 扫描、AStyle 格式化、**Tidy 注释**、**头文件保护**（含新建自动插入）、**Swap Header / Source**、**自定义工具**（Configure tools：`codeblocks.tools` + Tools 菜单动态条目）、**编译器命令查看**（Show Compiler Commands）、**Makefile 导出**（Export Makefile）、**工程导入**（Dev-C++ / VC6 / VS2010+ → `.cbp`）、**工作区依赖编辑**（含环路检测）、**打开 default.conf**（全局设置手工编辑入口）。
 
+### AI / Agent 控制
+
+- 🤖 **Copilot agent 全控制**：11 个 Language Model Tools（读 / 改 `.cbp`、构建 / 重建 / 清理、运行、调试、编译器、导出、工作区），用自然语言即可完成「改编译选项 → 构建 → 读结构化诊断 → 运行」闭环；同一套能力还以**内置 MCP server**（任意 MCP 客户端）与 **`cb-cli`**（终端 / CI）提供。详见 [docs/guide/agent-control.md](./docs/guide/agent-control.md)。
+
 ## ⚠️ 已知限制（不支持的功能）
 
 以下 Code::Blocks 功能暂未移植，遇到相关配置时扩展会明确警告或跳过：

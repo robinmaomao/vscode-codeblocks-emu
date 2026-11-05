@@ -69,11 +69,14 @@ export function userSettingsCandidates(): string[] {
   const home = os.homedir();
   if (process.platform === 'win32') {
     const appData = process.env.APPDATA;
-    const list = appData
-      ? [path.join(appData, 'Code', 'User', 'settings.json'), path.join(appData, 'Code - Insiders', 'User', 'settings.json')]
-      : [];
-    list.push(path.join(home, 'AppData', 'Roaming', 'Code', 'User', 'settings.json'));
-    return list;
+    if (appData) {
+      // APPDATA 存在时以它为唯一来源（测试/CI 通过改 APPDATA 隔离用户设置）
+      return [
+        path.join(appData, 'Code', 'User', 'settings.json'),
+        path.join(appData, 'Code - Insiders', 'User', 'settings.json'),
+      ];
+    }
+    return [path.join(home, 'AppData', 'Roaming', 'Code', 'User', 'settings.json')];
   }
   if (process.platform === 'darwin') {
     return [
