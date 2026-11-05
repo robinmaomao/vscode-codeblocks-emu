@@ -4,6 +4,7 @@
  * 顺序很关键：`build/buildEngine` 在模块顶层 `import * as vscode`，
  * 若在替身安装前被 require，会直接抛 MODULE_NOT_FOUND。
  */
+import * as fs from 'fs';
 import * as path from 'path';
 import { installVscodeShim, ShimHandle } from './vscodeShim';
 import { loadCodeblocksSettings, CodeblocksSettings } from '../api/settingsReader';
@@ -61,18 +62,15 @@ export interface CreateRuntimeOptions {
   defaultConfPath?: string;
 }
 
-/** 推断扩展根目录：dist/cli/runtime.js → ../..（开发态）；打包后 bundle 同目录 */
+/** 推断扩展根目录：dist/cli → 仓库根；bundle → 扩展根（以 resources/compilers 是否存在为准） */
 export function defaultExtensionRoot(): string {
   const here = __dirname;
-  const candidates = [
-    path.resolve(here, '..', '..'),       // dist/cli → repo root
-    path.resolve(here, '..'),             // bundle → extension root
-    path.resolve(here, '..', '..', '..'), // 兜底
-  ];
+  const candidates = [path.resolve(here, '..'), path.resolve(here, '..', '..')];
   for (const c of candidates) {
-    if (c && path.basename(c) !== '' ) return c;
+    if (fs.existsSync(path.join(c, 'resources', 'compilers'))) return c;
   }
-  return process.cwd();
+  // 兜底：dist/cli/runtime.js → 仓库根
+  return path.resolve(here, '..', '..');
 }
 
 /** 创建 CLI/MCP 运行时 */
