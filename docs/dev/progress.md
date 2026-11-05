@@ -133,6 +133,8 @@ npm.cmd test
 - **扩展接线**：`src/lm/tools.ts` 注册 LM Tools；`src/mcp/provider.ts` 注册 MCP（`process.execPath` 启动）；
   构建 `interactive:false` 自动停调试、跳过模态确认；`BuildLogTreeProvider.getSummary()` 供 `build_status`。
 - **CLI**：`src/cli/cb-cli.ts` + `src/cli/vscodeShim.ts`（`Module._load` 拦截 `vscode`，esModuleInterop 下不可用命名空间改写）。
+- **语言**：`i18n.setUiLanguage()` 让无宿主传输层一次定下运行时文案；`createRuntime()` 按
+  `codeblocks.ui.language` / `CB_UI_LANGUAGE` 调用（CLI 解析错误、构建日志随设置切换中英）。
 - **测试**：新增 `test-api-project-edit` / `test-api-settings-reader` / `test-ai-tools-contract` / `test-cli` /
   `test-mcp-server`（无头）、`test-e2e-cli-build`（E2E）、`host/suite/agent.tests.js`（宿主）；无头 `TOTAL=182`。
 - **文档**：`docs/guide/agent-control.md` / `.en.md`；README / usage / strategy / decisions / THIRD-PARTY-NOTICES 同步。

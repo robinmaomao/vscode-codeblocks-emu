@@ -164,7 +164,9 @@ node bundle/cb-cli.js compiler info --compiler-id gcc --json
 - **stdout 只放结果**（`--json` 时是纯 JSON），构建日志与警告全部走 **stderr**；
 - 退出码：`0` 成功、`2` 用法错误、`3` 参数/校验错误、`4` 构建或运行失败、`5` 写盘 / 工程不存在；
 - 设置来源与扩展一致：用户 `settings.json` → 工作区 `.vscode/settings.json` → `CB_*` 环境变量
-  （`CB_COMPILER_ID`、`CB_MASTER_PATH`、`CB_COMPILER_PROGRAMS`、`CB_MAX_REPORTED_ERRORS`、`CB_UI_LANGUAGE`）。
+  （`CB_COMPILER_ID`、`CB_MASTER_PATH`、`CB_COMPILER_PROGRAMS`、`CB_MAX_REPORTED_ERRORS`、`CB_UI_LANGUAGE`）；
+- 文案语言跟随 `codeblocks.ui.language`（`auto` 时无宿主按英文）：`CB_UI_LANGUAGE=zh-cn` 可让错误提示与构建日志出中文，
+  示例 `CB_UI_LANGUAGE=en node bundle/cb-cli.js show app.cbp --json` 便于 CI 断言英文输出。
 
 ---
 

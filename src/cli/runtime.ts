@@ -8,6 +8,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { installVscodeShim, ShimHandle } from './vscodeShim';
 import { loadCodeblocksSettings, CodeblocksSettings } from '../api/settingsReader';
+import { setUiLanguage } from '../i18n';
 import type { ToolContext } from '../api/toolRegistry';
 import type { BuildLogSummary } from '../build/buildSummary';
 import type { BuildOutcome } from '../api/buildService';
@@ -81,6 +82,8 @@ export function createRuntime(opts: CreateRuntimeOptions = {}): CliRuntime {
     settings,
     write: echo ? (line) => process.stderr.write(line + '\n') : () => undefined,
   });
+  // 语言在替身装好之后一次定下：settings.json / CB_UI_LANGUAGE → 运行时文案（构建日志、错误提示）
+  setUiLanguage(settings.get('ui.language', 'auto'));
 
   const extensionRoot = opts.extensionRoot ?? defaultExtensionRoot();
   const resourcesDir = path.join(extensionRoot, 'resources', 'compilers');
