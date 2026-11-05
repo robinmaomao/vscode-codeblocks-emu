@@ -153,7 +153,10 @@ Conventions:
 
 - **stdout carries only the result** (pure JSON with `--json`); build logs and warnings go to **stderr**.
 - Exit codes: `0` ok, `2` usage, `3` validation/input, `4` build or run failure, `5` write/project-not-found.
-- Settings resolution matches the extension: user `settings.json` -> workspace `.vscode/settings.json` -> `CB_*` env vars.
+- Settings resolution matches the extension: user `settings.json` -> workspace `.vscode/settings.json` -> `CB_*` env vars
+  (`CB_COMPILER_ID`, `CB_MASTER_PATH`, `CB_COMPILER_PROGRAMS`, `CB_MAX_REPORTED_ERRORS`, `CB_UI_LANGUAGE`).
+- Message language follows `codeblocks.ui.language` (`auto` resolves to English without a host): set
+  `CB_UI_LANGUAGE=zh-cn` for Chinese diagnostics/build logs, keep `en` for stable CI assertions.
 
 ---
 

@@ -8,7 +8,7 @@
  * 静态贡献（命令标题 / 设置描述 / 视图名）无法运行时改语言，走 package.nls.*.json
  * 跟随 VS Code 显示语言；两者语义边界见 docs/dev/i18n.md。
  */
-import { LANGUAGE_SETTING, resolveLanguage, translate, UiLanguage, Translations } from './core';
+import { isUiLanguageSetting, LANGUAGE_SETTING, resolveLanguage, translate, UiLanguage, Translations } from './core';
 import zhCn from './strings.zh-cn.json';
 import zhCnWebview from './strings.zh-cn.webview.json';
 
@@ -20,6 +20,9 @@ const webviewTranslations: Translations = zhCnWebview;
 
 /** 缓存的生效语言（undefined = 未解析，读取时按当前设置为准） */
 let cached: UiLanguage | undefined;
+
+/** 传输层显式指定的语言（CLI / MCP；undefined = 按宿主设置解析） */
+let override: UiLanguage | undefined;
 
 /**
  * 解析当前生效语言。
@@ -38,8 +41,22 @@ function resolveFromHost(): UiLanguage {
 
 /** 当前生效语言（设置 `auto` 时读 VS Code 显示语言） */
 export function uiLanguage(): UiLanguage {
-  if (cached === undefined) cached = resolveFromHost();
+  if (cached === undefined) cached = override ?? resolveFromHost();
   return cached;
+}
+
+/**
+ * 指定生效语言（CLI / MCP 用）。
+ *
+ * 无宿主时只能靠 `resolveFromHost()` 的惰性回退，传输层拿到真实设置/环境变量后
+ * 用它一次性定下语言；`auto` 或非法值表示清除指定，回到按宿主设置解析。
+ * 扩展侧不需要调用（设置变更走 `refreshUiLanguage()`）。
+ * @param setting `auto` / `en` / `zh-cn`（非法值按 `auto` 处理）
+ */
+export function setUiLanguage(setting: unknown): UiLanguage {
+  override = isUiLanguageSetting(setting) && setting !== 'auto' ? setting : undefined;
+  cached = undefined;
+  return uiLanguage();
 }
 
 /** 设置变更后重新解析语言；返回值 = 新的生效语言 */

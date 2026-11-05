@@ -15,8 +15,12 @@ function check(name, cond, got) {
   else { fail++; console.log('FAIL ' + name + (got !== undefined ? '  got=' + JSON.stringify(got) : '')); }
 }
 
-function run(args) {
-  const r = spawnSync(process.execPath, [CLI, ...args], { encoding: 'utf-8', timeout: 120000 });
+function run(args, env) {
+  const r = spawnSync(process.execPath, [CLI, ...args], {
+    encoding: 'utf-8',
+    timeout: 120000,
+    env: env ? { ...process.env, ...env } : process.env,
+  });
   return { code: r.status, stdout: r.stdout || '', stderr: r.stderr || '' };
 }
 
@@ -74,6 +78,14 @@ const badOps = path.join(TMP, 'bad.json');
 fs.writeFileSync(badOps, '[{"op":"set","scope":"project","field":"nope","value":1}]');
 const badEdit = run(['edit', cbp, '--ops-file', badOps, '--json']);
 check('C11 非法字段 exit 3', badEdit.code === 3, { code: badEdit.code, stderr: badEdit.stderr.slice(0, 160) });
+
+// ---------- 运行时语言：CB_UI_LANGUAGE 决定 i18n 文案 ----------
+const brokenCbp = path.join(TMP, 'broken.cbp');
+fs.writeFileSync(brokenCbp, '<?xml version="1.0"?><foo></foo>');
+const enParse = run(['show', brokenCbp, '--json'], { CB_UI_LANGUAGE: 'en' });
+const zhParse = run(['show', brokenCbp, '--json'], { CB_UI_LANGUAGE: 'zh-cn' });
+check('C14 CB_UI_LANGUAGE=en → 解析错误为英文', enParse.code === 3 && /Not a valid \.cbp file/.test(enParse.stderr), enParse.stderr.slice(0, 200));
+check('C15 CB_UI_LANGUAGE=zh-cn → 解析错误为中文', zhParse.code === 3 && /不是有效的 \.cbp 文件/.test(zhParse.stderr), zhParse.stderr.slice(0, 200));
 
 // ---------- 打包后的 bundle 也能正确解析资源目录 ----------
 const bundleCli = path.join(ROOT, 'bundle', 'cb-cli.js');

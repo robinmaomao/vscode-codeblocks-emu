@@ -82,6 +82,17 @@ check('D8 切回 zh-cn 后刷新 → 中文词条', i18n.refreshUiLanguage() ===
 check('D9 词条表可读且非空', Object.keys(i18n.translationsTable()).length > 0, Object.keys(i18n.translationsTable()).length);
 mock.restore();
 
+// ---- F. setUiLanguage（CLI / MCP 传输层定语言：无宿主时不再只能回退） ----
+check('F0 setUiLanguage 已导出', typeof i18n.setUiLanguage === 'function', typeof i18n.setUiLanguage);
+check('F1 setUiLanguage("en") → 立即英文（不依赖宿主解析结果）',
+  i18n.setUiLanguage('en') === 'en' && i18n.t('Save') === 'Save', [i18n.uiLanguage(), i18n.t('Save')]);
+check('F2 setUiLanguage("zh-cn") → 立即中文',
+  i18n.setUiLanguage('zh-cn') === 'zh-cn' && i18n.t('Save') === '保存', [i18n.uiLanguage(), i18n.t('Save')]);
+check('F3 setUiLanguage("auto") → 清除指定，回到宿主解析（mock 已还原 ⇒ 中文基线）',
+  i18n.setUiLanguage('auto') === 'zh-cn' && i18n.uiLanguage() === 'zh-cn', i18n.uiLanguage());
+check('F4 非法值按 auto 处理（不抛、不残留上一次指定）',
+  i18n.setUiLanguage('en') === 'en' && i18n.setUiLanguage('jp') === 'zh-cn', i18n.uiLanguage());
+
 // ---- E. 词条文件随产物落地 ----
 const dictPath = path.join(ROOT, 'dist', 'i18n', 'strings.zh-cn.json');
 check('E1 dist/i18n/strings.zh-cn.json 已生成（编译产物含词条）', fs.existsSync(dictPath), fs.existsSync(dictPath));
