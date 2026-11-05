@@ -2099,6 +2099,515 @@
         "key": "ctrl+f7",
         "when": "config.codeblocks.keybindings.cbStyle && inDebugMode"
       }
+    ],
+    "languageModelTools": [
+      {
+        "name": "codeblocks_project_read",
+        "displayName": "%tool.codeblocks_project_read.displayName%",
+        "userDescription": "%tool.codeblocks_project_read.userDescription%",
+        "toolReferenceName": "cb_project_read",
+        "canBeReferencedInPrompt": true,
+        "modelDescription": "Read a Code::Blocks .cbp project model (summary, targets, files, options) or the editable field schema.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "cbp": {
+              "type": "string",
+              "description": "Absolute path to the .cbp (defaults to the active project)"
+            },
+            "section": {
+              "type": "string",
+              "enum": [
+                "summary",
+                "targets",
+                "files",
+                "options",
+                "schema",
+                "all"
+              ],
+              "description": "Which slice to return"
+            },
+            "target": {
+              "type": "string",
+              "description": "Restrict targets/files/options to one target title"
+            }
+          }
+        }
+      },
+      {
+        "name": "codeblocks_project_edit",
+        "displayName": "%tool.codeblocks_project_edit.displayName%",
+        "userDescription": "%tool.codeblocks_project_edit.userDescription%",
+        "toolReferenceName": "cb_project_edit",
+        "canBeReferencedInPrompt": true,
+        "modelDescription": "Apply structured edits to a .cbp (target/file/project fields, add/remove/rename targets and files). Returns before/after changes. Use dryRun to preview, format=preserve for compile/link only.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "cbp": {
+              "type": "string",
+              "description": "Absolute path to the .cbp (defaults to the active project)"
+            },
+            "ops": {
+              "type": "array",
+              "description": "Edit operations (see section=schema)",
+              "items": {
+                "type": "object"
+              }
+            },
+            "dryRun": {
+              "type": "boolean",
+              "description": "Validate and preview without writing"
+            },
+            "format": {
+              "type": "string",
+              "enum": [
+                "canonical",
+                "preserve"
+              ],
+              "description": "Write format (default canonical)"
+            },
+            "allowScripts": {
+              "type": "boolean",
+              "description": "Required to edit build scripts / pre-post commands"
+            },
+            "force": {
+              "type": "boolean",
+              "description": "Overwrite even if the file was modified externally"
+            }
+          },
+          "required": [
+            "ops"
+          ]
+        }
+      },
+      {
+        "name": "codeblocks_project_file",
+        "displayName": "%tool.codeblocks_project_file.displayName%",
+        "userDescription": "%tool.codeblocks_project_file.userDescription%",
+        "toolReferenceName": "cb_project_file",
+        "canBeReferencedInPrompt": true,
+        "modelDescription": "Add, remove or rename a source file in a .cbp project (and its target membership).",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "cbp": {
+              "type": "string",
+              "description": "Absolute path to the .cbp (defaults to the active project)"
+            },
+            "action": {
+              "type": "string",
+              "enum": [
+                "add",
+                "remove",
+                "rename"
+              ]
+            },
+            "title": {
+              "type": "string",
+              "description": "Target title (target actions)"
+            },
+            "file": {
+              "type": "string",
+              "description": "Project-relative file path with / separators (file actions)"
+            },
+            "to": {
+              "type": "string",
+              "description": "New name (rename actions)"
+            },
+            "copyFrom": {
+              "type": "string",
+              "description": "Copy settings from this target (addTarget)"
+            },
+            "targetType": {
+              "type": "number",
+              "description": "Target type for addTarget (0 exe, 1 console, 2 static, 3 dynamic)"
+            },
+            "targets": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Target membership (addFile)"
+            },
+            "compile": {
+              "type": "boolean"
+            },
+            "link": {
+              "type": "boolean"
+            },
+            "force": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "action"
+          ]
+        }
+      },
+      {
+        "name": "codeblocks_project_target",
+        "displayName": "%tool.codeblocks_project_target.displayName%",
+        "userDescription": "%tool.codeblocks_project_target.userDescription%",
+        "toolReferenceName": "cb_project_target",
+        "canBeReferencedInPrompt": true,
+        "modelDescription": "Add, remove or rename a build target in a .cbp project.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "cbp": {
+              "type": "string",
+              "description": "Absolute path to the .cbp (defaults to the active project)"
+            },
+            "action": {
+              "type": "string",
+              "enum": [
+                "add",
+                "remove",
+                "rename"
+              ]
+            },
+            "title": {
+              "type": "string",
+              "description": "Target title (target actions)"
+            },
+            "file": {
+              "type": "string",
+              "description": "Project-relative file path with / separators (file actions)"
+            },
+            "to": {
+              "type": "string",
+              "description": "New name (rename actions)"
+            },
+            "copyFrom": {
+              "type": "string",
+              "description": "Copy settings from this target (addTarget)"
+            },
+            "targetType": {
+              "type": "number",
+              "description": "Target type for addTarget (0 exe, 1 console, 2 static, 3 dynamic)"
+            },
+            "targets": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Target membership (addFile)"
+            },
+            "compile": {
+              "type": "boolean"
+            },
+            "link": {
+              "type": "boolean"
+            },
+            "force": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "action"
+          ]
+        }
+      },
+      {
+        "name": "codeblocks_build",
+        "displayName": "%tool.codeblocks_build.displayName%",
+        "userDescription": "%tool.codeblocks_build.userDescription%",
+        "toolReferenceName": "cb_build",
+        "canBeReferencedInPrompt": true,
+        "modelDescription": "Build, rebuild or clean a Code::Blocks project target. Returns structured diagnostics (file/line/column/severity).",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "cbp": {
+              "type": "string",
+              "description": "Absolute path to the .cbp (defaults to the active project)"
+            },
+            "target": {
+              "type": "string",
+              "description": "Target title (defaults to the selected/first supported target)"
+            },
+            "mode": {
+              "type": "string",
+              "enum": [
+                "build",
+                "rebuild",
+                "clean"
+              ],
+              "description": "Default build"
+            },
+            "timeoutMs": {
+              "type": "integer",
+              "description": "Cancel the build after this many milliseconds"
+            },
+            "dryRun": {
+              "type": "boolean",
+              "description": "Only report what would be built"
+            }
+          }
+        }
+      },
+      {
+        "name": "codeblocks_build_status",
+        "displayName": "%tool.codeblocks_build_status.displayName%",
+        "userDescription": "%tool.codeblocks_build_status.userDescription%",
+        "toolReferenceName": "cb_build_status",
+        "canBeReferencedInPrompt": true,
+        "modelDescription": "Return the most recent build summary (per-project stats, structured diagnostics, executed commands).",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "cbp": {
+              "type": "string",
+              "description": "Filter by project (defaults to all projects in the last build)"
+            },
+            "severity": {
+              "type": "string",
+              "enum": [
+                "error",
+                "warning",
+                "all"
+              ],
+              "description": "Filter diagnostics (default all)"
+            },
+            "tail": {
+              "type": "integer",
+              "description": "Limit the number of diagnostics returned"
+            }
+          }
+        }
+      },
+      {
+        "name": "codeblocks_run",
+        "displayName": "%tool.codeblocks_run.displayName%",
+        "userDescription": "%tool.codeblocks_run.userDescription%",
+        "toolReferenceName": "cb_run",
+        "canBeReferencedInPrompt": true,
+        "modelDescription": "Run a built target and return exit code plus captured stdout/stderr (non-interactive).",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "cbp": {
+              "type": "string",
+              "description": "Absolute path to the .cbp (defaults to the active project)"
+            },
+            "target": {
+              "type": "string",
+              "description": "Target title"
+            },
+            "args": {
+              "type": "string",
+              "description": "Override the execution arguments"
+            },
+            "cwd": {
+              "type": "string",
+              "description": "Override the working directory"
+            },
+            "timeoutMs": {
+              "type": "integer",
+              "description": "Kill the program after this many milliseconds"
+            }
+          }
+        }
+      },
+      {
+        "name": "codeblocks_debug",
+        "displayName": "%tool.codeblocks_debug.displayName%",
+        "userDescription": "%tool.codeblocks_debug.userDescription%",
+        "toolReferenceName": "cb_debug",
+        "canBeReferencedInPrompt": true,
+        "modelDescription": "Control a debug session: start/stop, set breakpoints, inspect stack/variables, evaluate expressions, continue/step.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "action": {
+              "type": "string",
+              "enum": [
+                "start",
+                "stop",
+                "breakpoints",
+                "state",
+                "stack",
+                "variables",
+                "evaluate",
+                "continue",
+                "step"
+              ]
+            },
+            "cbp": {
+              "type": "string",
+              "description": "Absolute path to the .cbp (defaults to the active project)"
+            },
+            "target": {
+              "type": "string",
+              "description": "Target title (start)"
+            },
+            "args": {
+              "type": "string",
+              "description": "Program arguments (start)"
+            },
+            "stopOnEntry": {
+              "type": "boolean",
+              "description": "Break at entry (start)"
+            },
+            "file": {
+              "type": "string",
+              "description": "Absolute source file path (breakpoints)"
+            },
+            "lines": {
+              "type": "array",
+              "items": {
+                "type": "integer"
+              },
+              "description": "Breakpoint lines (breakpoints)"
+            },
+            "frameId": {
+              "type": "integer",
+              "description": "Stack frame id (variables/evaluate)"
+            },
+            "expression": {
+              "type": "string",
+              "description": "Expression to evaluate"
+            },
+            "kind": {
+              "type": "string",
+              "enum": [
+                "next",
+                "stepIn",
+                "stepOut"
+              ],
+              "description": "Step kind"
+            }
+          },
+          "required": [
+            "action"
+          ]
+        }
+      },
+      {
+        "name": "codeblocks_compiler",
+        "displayName": "%tool.codeblocks_compiler.displayName%",
+        "userDescription": "%tool.codeblocks_compiler.userDescription%",
+        "toolReferenceName": "cb_compiler",
+        "canBeReferencedInPrompt": true,
+        "modelDescription": "Inspect the resolved compiler (programs, master path, search dirs) and list available compiler ids.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "action": {
+              "type": "string",
+              "enum": [
+                "list",
+                "info",
+                "set"
+              ]
+            },
+            "cbp": {
+              "type": "string",
+              "description": "Project path (used to resolve workspace settings)"
+            },
+            "compilerId": {
+              "type": "string",
+              "description": "Compiler id (e.g. gcc, g++)"
+            },
+            "masterPath": {
+              "type": "string",
+              "description": "Toolchain bin directory (set)"
+            }
+          },
+          "required": [
+            "action"
+          ]
+        }
+      },
+      {
+        "name": "codeblocks_export",
+        "displayName": "%tool.codeblocks_export.displayName%",
+        "userDescription": "%tool.codeblocks_export.userDescription%",
+        "toolReferenceName": "cb_export",
+        "canBeReferencedInPrompt": true,
+        "modelDescription": "Export a Makefile, compile_commands.json, or the generated compiler command list.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "cbp": {
+              "type": "string",
+              "description": "Absolute path to the .cbp (defaults to the active project)"
+            },
+            "kind": {
+              "type": "string",
+              "enum": [
+                "makefile",
+                "compile_commands",
+                "commands"
+              ]
+            },
+            "target": {
+              "type": "string",
+              "description": "Target title"
+            },
+            "out": {
+              "type": "string",
+              "description": "Output file (makefile) or directory (compile_commands)"
+            }
+          },
+          "required": [
+            "kind"
+          ]
+        }
+      },
+      {
+        "name": "codeblocks_workspace",
+        "displayName": "%tool.codeblocks_workspace.displayName%",
+        "userDescription": "%tool.codeblocks_workspace.userDescription%",
+        "toolReferenceName": "cb_workspace",
+        "canBeReferencedInPrompt": true,
+        "modelDescription": "Inspect or edit a .workspace (project list and inter-project build dependencies), and manage open projects.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "action": {
+              "type": "string",
+              "enum": [
+                "info",
+                "deps",
+                "open",
+                "close",
+                "setActive",
+                "list"
+              ]
+            },
+            "workspace": {
+              "type": "string",
+              "description": "Absolute path to the .workspace (info/deps)"
+            },
+            "project": {
+              "type": "string",
+              "description": "Project path the dependencies belong to (deps)"
+            },
+            "cbp": {
+              "type": "string",
+              "description": "Project path (open/close/setActive)"
+            },
+            "dependencies": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Dependency project paths (deps)"
+            }
+          },
+          "required": [
+            "action"
+          ]
+        }
+      }
+    ],
+    "mcpServerDefinitionProviders": [
+      {
+        "id": "codeblocks",
+        "label": "%mcp.codeblocks.label%"
+      }
     ]
   },
   "scripts": {
@@ -2106,7 +2615,7 @@
     "bundle": "esbuild src/extension.ts --bundle --platform=node --format=cjs --external:vscode --sourcemap --outfile=bundle/extension.js --log-level=warning",
     "watch": "tsc -watch -p ./",
     "package": "vsce package",
-    "vscode:prepublish": "npm run compile && npm run bundle",
+    "vscode:prepublish": "npm run compile && npm run bundle && npm run bundle:agent",
     "test": "node tests/run-all.js",
     "pretest": "npm run compile",
     "test:contract": "node tests/run-all.js --group contract",
@@ -2121,9 +2630,13 @@
     "visual:baseline": "node tests/visual/test-visual.js --update",
     "perf:baseline": "node tests/perf/test-perf.js --update-baseline",
     "perf:report": "node tests/perf/test-perf.js --report",
-    "pretest:visual": "npm run compile"
+    "pretest:visual": "npm run compile",
+    "bundle:cli": "esbuild src/cli/cb-cli.ts --bundle --platform=node --format=cjs --external:vscode --minify --outfile=bundle/cb-cli.js --log-level=warning",
+    "bundle:mcp": "esbuild src/mcp/server.ts --bundle --platform=node --format=cjs --external:vscode --minify --outfile=bundle/cb-mcp.js --log-level=warning",
+    "bundle:agent": "npm run bundle:cli && npm run bundle:mcp"
   },
   "devDependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.2",
     "@types/node": "^20.11.0",
     "@types/vscode": "1.102.0",
     "@vscode/test-electron": "^3.1.0",

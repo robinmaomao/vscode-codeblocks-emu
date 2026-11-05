@@ -16,7 +16,7 @@ import { serializeProject } from './model/projectWriter';
 import { createProjectFromTemplate, PROJECT_TEMPLATES } from './project/newProject';
 import { instantiateUserTemplate, listUserTemplates, saveAsUserTemplate } from './project/userTemplates';
 import { Compiler } from './compiler/compiler';
-import { queryCompilerVersionString } from './compiler/compilerVersion';
+import { buildCompilerInstance as buildCompilerInstanceCore } from './compiler/compilerFactory';
 import { CompilerRegistryDeps, findRegisteredCompilerId, resolveEffectiveCompilerId } from './compiler/compilerRegistry';
 import { BoundedMap, buildCompilerCacheKey } from './compiler/compilerCache';
 import { resolveProgramsForCompiler, setProgramsForCompiler } from './compiler/compilerPrograms';
@@ -29,7 +29,13 @@ import { ProjectTreeProvider } from './ui/projectTreeProvider';
 import { registerStatusBarMenu, MenuDynamicData } from './ui/statusBarMenu';
 import { BuildLogTreeProvider, BuildLogProject, BuildLogDiagnostic } from './ui/buildLogTreeProvider';
 import { buildProjectTarget } from './build/buildProject';
-import type { BuildDiagnosticsBudget } from './build/buildSummary';
+import type { BuildDiagnosticsBudget, BuildLogSummary } from './build/buildSummary';
+import type { ToolContext as AgentToolContext } from './api/toolRegistry';
+import type { CompilerProvider } from './api/compilerService';
+import type { BuildOutcome, BuildRequest } from './api/buildService';
+import { ControlError } from './api/types';
+import { registerLanguageModelTools } from './lm/tools';
+import { registerCodeblocksMcpProvider } from './mcp/provider';
 import { normalizeBuildLogAutoFocusMode, maybeAutoFocusBuildLog } from './ui/buildLogFocus';
 import { AnalysisTreeProvider, AnalysisData, AnalysisProjectInfo, LastBuildMeta } from './ui/analysisTreeProvider';
 import { SymbolTreeProvider } from './ui/symbolTreeProvider';
@@ -315,6 +321,276 @@ async function migrateSettingsOnce(context: vscode.ExtensionContext): Promise<vo
   if (queryDriverRemoved) {
     outputChannel.info(logT('[Code::Blocks] Removed the obsolete codeblocks.clangd.queryDriver setting (use codeblocks.clangd.builtinHeaders = queryDriver instead).'));
   }
+}
+
+// ———— Agent 控制层（Language Model Tools / MCP 的扩展侧接线） ————
+
+/** 扩展侧工具上下文（延迟到激活完成、provider 就绪后创建） */
+let agentToolContext: AgentToolContext | undefined;
+
+/** 合成构建摘要（makefile 模式 / 清理路径没有 BuildEngine 统计时使用） */
+function summarizeAgentBuild(
+  project: Project,
+  targetTitle: string,
+  ok: boolean,
+  startMs: number,
+  diagnostics: BuildLogDiagnostic[],
+): BuildLogSummary {
+  const entry: BuildLogProject = {
+    projectName: path.basename(path.dirname(project.filename)),
+    targetName: targetTitle,
+    compilerPath: getCompiler(project.compilerId).programs.C || getCompiler(project.compilerId).name,
+    success: ok,
+    compiledCount: 0,
+    skippedCount: 0,
+    failedCount: ok ? 0 : 1,
+    linkSuccess: ok,
+    linkSkipped: true,
+    diagnostics,
+    commands: [],
+    files: project.files.map((f) => f.absolutePath),
+    durationMs: Date.now() - startMs,
+    startTime: startMs,
+    projectTitle: project.title,
+  };
+  const errorCount = diagnostics.filter((d) => d.severity === 'error').length;
+  const warningCount = diagnostics.filter((d) => d.severity === 'warning').length;
+  return { success: ok, durationMs: entry.durationMs, startTime: startMs, projects: [entry], errorCount, warningCount };
+}
+
+/**
+ * agent 构建：复用 UI 构建路径（Build Log / Problems / 状态栏可见），
+ * 但跳过所有模态确认（Rebuild / 停止调试），并支持超时取消。
+ */
+async function agentBuild(req: BuildRequest): Promise<BuildOutcome> {
+  const cbp = path.resolve(req.cbp);
+  let project = openProjects.find((p) => normPath(p.filename) === normPath(cbp));
+  if (!project) {
+    await openProject(cbp);
+    project = openProjects.find((p) => normPath(p.filename) === normPath(cbp));
+  }
+  if (!project) throw new ControlError('project-not-found', `Project not found: ${cbp}`);
+  const targetTitle = req.target
+    ?? getSelectedTarget(project)
+    ?? project.buildTargets.find((t) => supportsCurrentPlatform(t.platforms))?.title;
+  if (!targetTitle) throw new ControlError('unsupported', 'The project has no build targets');
+  const startMs = Date.now();
+
+  if (req.mode === 'clean') {
+    if (buildInProgress) throw new ControlError('build-busy', 'A build is already running');
+    buildInProgress = true;
+    try {
+      await stopDebuggerIfRunning(false);
+      await saveAllBeforeBuild();
+      await autoExcludeBuildOutputs({ notify: false });
+      const cancelSource = new BuildCancelSource();
+      currentBuildCancel = cancelSource;
+      await cleanTargets(project, targetTitle);
+      return { ok: true, target: targetTitle, summary: summarizeAgentBuild(project, targetTitle, true, startMs, []), timedOut: false };
+    } finally {
+      buildInProgress = false;
+      currentBuildCancel = undefined;
+      flushPendingClangdRestart();
+    }
+  }
+
+  let timedOut = false;
+  const timer = req.timeoutMs && req.timeoutMs > 0
+    ? setTimeout(() => {
+        timedOut = true;
+        currentBuildCancel?.cancel();
+      }, req.timeoutMs)
+    : undefined;
+  try {
+    const ok = await buildSingleProject(project.filename, req.mode === 'rebuild', { interactive: false });
+    const summary = buildLogTreeProvider?.getSummary()
+      ?? summarizeAgentBuild(project, targetTitle, ok, startMs, []);
+    return { ok: ok && !timedOut, target: targetTitle, summary, timedOut };
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+/** 扩展侧调试桥：通过 vscode.debug + DAP customRequest 控制会话 */
+function createAgentDebugBridge(): NonNullable<AgentToolContext['debug']> {
+  const sessionOrFail = (): vscode.DebugSession => {
+    const s = vscode.debug.activeDebugSession;
+    if (!s) throw new ControlError('not-running', 'No active debug session');
+    return s;
+  };
+  const firstThreadId = async (s: vscode.DebugSession): Promise<number> => {
+    const res = await s.customRequest('threads') as { threads?: Array<{ id: number }> };
+    const id = res?.threads?.[0]?.id;
+    if (id === undefined) throw new ControlError('not-running', 'The debug session has no threads');
+    return id;
+  };
+  const topFrame = async (s: vscode.DebugSession): Promise<{ threadId: number; frameId?: number }> => {
+    const threadId = await firstThreadId(s);
+    const res = await s.customRequest('stackTrace', { threadId, startFrame: 0, levels: 1 }) as { stackFrames?: Array<{ id: number }> };
+    return { threadId, frameId: res?.stackFrames?.[0]?.id };
+  };
+
+  return {
+    async start({ cbp, target, args, stopOnEntry }) {
+      const filename = cbp ? path.resolve(cbp) : activeProject?.filename;
+      if (!filename) throw new ControlError('invalid-input', 'No project selected for debugging');
+      if (!openProjects.some((p) => normPath(p.filename) === normPath(filename))) await openProject(filename);
+      const project = openProjects.find((p) => normPath(p.filename) === normPath(filename));
+      if (project) setActiveProject(project, { persist: true });
+      const derived = await deriveDebugLaunchConfig(target);
+      if ('error' in derived) throw new ControlError('invalid-input', derived.error);
+      const config = { ...derived.config } as vscode.DebugConfiguration;
+      if (args !== undefined) config.args = splitCommandLine(args);
+      if (stopOnEntry === true) config.stopOnEntry = true;
+      const ok = await vscode.debug.startDebugging(undefined, config);
+      if (!ok) throw new ControlError('unsupported', 'Failed to start the debug session');
+      // 等待会话真正就绪（startDebugging 返回后 activeDebugSession 可能尚未赋值）
+      for (let i = 0; i < 50 && !vscode.debug.activeDebugSession; i++) {
+        await new Promise((r) => setTimeout(r, 100));
+      }
+      const s = vscode.debug.activeDebugSession;
+      return { ok: true, session: s ? { id: s.id, name: s.name, type: s.type } : null };
+    },
+    async stop() {
+      const s = sessionOrFail();
+      await vscode.debug.stopDebugging(s);
+      return { ok: true };
+    },
+    async setBreakpoints({ file, lines }) {
+      if (!file) throw new ControlError('invalid-input', 'An absolute source file path is required');
+      const uri = vscode.Uri.file(file);
+      const existing = vscode.debug.breakpoints.filter((bp) =>
+        bp instanceof vscode.SourceBreakpoint && normPath(bp.location.uri.fsPath) === normPath(uri.fsPath));
+      if (existing.length) vscode.debug.removeBreakpoints(existing);
+      const added = lines
+        .filter((l) => Number.isInteger(l) && l > 0)
+        .map((l) => new vscode.SourceBreakpoint(new vscode.Location(uri, new vscode.Position(l - 1, 0))));
+      if (added.length) vscode.debug.addBreakpoints(added);
+      return { ok: true, file: uri.fsPath, lines };
+    },
+    async state() {
+      const s = vscode.debug.activeDebugSession;
+      return s ? { active: true, id: s.id, name: s.name, type: s.type } : { active: false };
+    },
+    async stack() {
+      const s = sessionOrFail();
+      const threadId = await firstThreadId(s);
+      const res = await s.customRequest('stackTrace', { threadId, startFrame: 0, levels: 30 }) as {
+        stackFrames?: Array<{ id: number; name: string; line: number; column: number; source?: { path?: string; name?: string } }>;
+      };
+      return {
+        threadId,
+        frames: (res?.stackFrames ?? []).map((f) => ({
+          id: f.id, name: f.name, file: f.source?.path ?? f.source?.name ?? '', line: f.line, column: f.column,
+        })),
+      };
+    },
+    async variables(req) {
+      const s = sessionOrFail();
+      const resolvedFrame = req?.frameId ?? (await topFrame(s)).frameId;
+      if (resolvedFrame === undefined) return { scopes: [] };
+      const scopesRes = await s.customRequest('scopes', { frameId: resolvedFrame }) as { scopes?: Array<{ name: string; variablesReference: number; expensive: boolean }> };
+      const scopes = [];
+      for (const scope of scopesRes?.scopes ?? []) {
+        if (!scope.variablesReference || scope.expensive) {
+          scopes.push({ name: scope.name, variables: [] });
+          continue;
+        }
+        const varsRes = await s.customRequest('variables', { variablesReference: scope.variablesReference }) as {
+          variables?: Array<{ name: string; value: string; type?: string; variablesReference?: number }>;
+        };
+        scopes.push({
+          name: scope.name,
+          variables: (varsRes?.variables ?? []).map((v) => ({ name: v.name, value: v.value, type: v.type, children: v.variablesReference ?? 0 })),
+        });
+      }
+      return { frameId: resolvedFrame, scopes };
+    },
+    async evaluate({ expression, frameId }) {
+      const s = sessionOrFail();
+      const resolvedFrame = frameId ?? (await topFrame(s)).frameId;
+      const res = await s.customRequest('evaluate', { expression, frameId: resolvedFrame, context: 'watch' }) as { result?: string; type?: string };
+      return { expression, result: res?.result ?? '', type: res?.type };
+    },
+    async continue() {
+      const s = sessionOrFail();
+      const threadId = await firstThreadId(s);
+      await s.customRequest('continue', { threadId });
+      return { ok: true, threadId };
+    },
+    async step({ kind }) {
+      const s = sessionOrFail();
+      const threadId = await firstThreadId(s);
+      const command = kind === 'stepIn' ? 'stepIn' : kind === 'stepOut' ? 'stepOut' : 'next';
+      await s.customRequest(command, { threadId });
+      return { ok: true, threadId, command };
+    },
+  };
+}
+
+/** 构造扩展侧的 ToolContext（与 CLI/MCP 共用同一份 handler） */
+function createAgentToolContext(): AgentToolContext {
+  const settings = {
+    get<T>(key: string, defaultValue: T): T {
+      return vscode.workspace.getConfiguration('codeblocks').get<T>(key, defaultValue);
+    },
+  };
+  const compiler: CompilerProvider = {
+    resourcesDir: compilerResourcesDir,
+    getCompiler: (id?: string) => getCompiler(id),
+    resolveTargetCompiler: (id: string) => resolveTargetCompiler(id),
+  };
+  return {
+    settings,
+    compiler,
+    output: outputChannel,
+    loadProject: async (cbp: string) => {
+      const abs = path.resolve(cbp);
+      const open = openProjects.find((p) => normPath(p.filename) === normPath(abs));
+      return open ?? new ProjectParser().parse(abs);
+    },
+    saveProject: async (project, saveOpts) => {
+      if (!saveOpts.force && projectChangeTracker.hasChanged(project.filename)) {
+        throw new ControlError('external-modified', `The project file was modified outside the editor: ${project.filename}`, {
+          hint: 'Pass force: true to overwrite, or reload the project in VS Code first.',
+        });
+      }
+      const open = openProjects.find((p) => normPath(p.filename) === normPath(project.filename));
+      if (open) {
+        // 写回内存模型 → 序列化 → 重新解析并刷新树/状态栏（不触发「外部修改」弹窗）
+        Object.assign(open, project);
+        await persistProjectAndReload(open);
+      } else {
+        writeCbpAndRemember(project.filename, serializeProject(project));
+      }
+    },
+    reloadProject: async (cbp: string) => {
+      await reloadProjectFromDisk(cbp, { notify: false });
+    },
+    isExternallyModified: (file: string) => projectChangeTracker.hasChanged(file),
+    listOpenProjects: () => openProjects.map((p) => ({
+      filename: p.filename,
+      title: p.title,
+      active: !!activeProject && normPath(activeProject.filename) === normPath(p.filename),
+    })),
+    setActiveProject: async (cbp: string) => {
+      const p = openProjects.find((x) => normPath(x.filename) === normPath(cbp));
+      if (p) setActiveProject(p, { persist: true });
+    },
+    openProject: async (cbp: string) => {
+      if (!openProjects.some((x) => normPath(x.filename) === normPath(cbp))) await openProject(cbp);
+    },
+    closeProject: async (cbp: string) => {
+      removeProject(cbp);
+    },
+    build: agentBuild,
+    lastBuild: () => buildLogTreeProvider?.getSummary(),
+    isBuildInProgress: () => buildInProgress,
+    get cancelBuild() {
+      return currentBuildCancel;
+    },
+    debug: createAgentDebugBridge(),
+  };
 }
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
@@ -2052,6 +2328,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   // 初始状态：无工程时仅显示 Code::Blocks 入口，有工程时显示 Target/Build/Rebuild/Compiler
   refreshStatusBars();
+
+  // Agent 控制层：Language Model Tools（+ MCP，见 registerCodeblocksMcpProvider）。
+  // 旧宿主 / 未安装 Copilot 时注册函数内部静默跳过，不影响扩展激活。
+  agentToolContext = createAgentToolContext();
+  registerLanguageModelTools(context, agentToolContext);
+  registerCodeblocksMcpProvider(context);
 
   return;
 }
@@ -5642,68 +5924,8 @@ function buildCompilerInstance(
   masterPath: string,
   cfg: vscode.WorkspaceConfiguration,
 ): Compiler {
-  // 编译器全局搜索目录 + 链接库（default.conf /compiler_sets/<id>，对齐 Compiler::LoadSettings）
-  const applyGlobalDirs = (compiler: Compiler): Compiler => {
-    const uc = codeBlocksConfig?.find(id);
-    if (uc?.name) compiler.name = uc.name; // 显示名对齐 CB（取 default.conf 中用户编译器的 NAME）
-    const sd = codeBlocksConfig?.searchDirs(id);
-    if (sd) {
-      compiler.includeDirs = sd.includeDirs;
-      compiler.libDirs = sd.libDirs;
-      compiler.resIncludeDirs = sd.resIncludeDirs;
-      compiler.linkLibs = sd.linkLibs;
-      compiler.extraPaths = sd.extraPaths;
-      compiler.includePrjCwd = codeBlocksConfig?.includePrjCwd() ?? false;
-      compiler.includeFileCwd = codeBlocksConfig?.includeFileCwd() ?? false;
-      compiler.compilerOptions = sd.compilerOptions;
-      compiler.linkerOptions = sd.linkerOptions;
-      compiler.resourceCompilerOptions = sd.resourceCompilerOptions;
-    }
-    // 用户自定义错误正则按索引覆盖/追加（对齐 Compiler::LoadSettings:699-737）
-    codeBlocksConfig?.applyUserRegexes(id, compiler.regexes);
-    return compiler;
-  };
-  if (compilerLoader) {
-    const compiler = compilerLoader.load(id);
-    compiler.masterPath = masterPath;
-
-    // 优先：CodeBlocks 用户自定义编译器（如交叉编译器）——从 default.conf 解析程序路径
-    const userPrograms = codeBlocksConfig?.resolvePrograms(id);
-    if (userPrograms) {
-      compiler.programs = {
-        ...compiler.programs,
-        C: userPrograms.C,
-        CPP: userPrograms.CPP,
-        LD: userPrograms.LD,
-        LIB: userPrograms.LIB,
-        WINDRES: compiler.programs.WINDRES || '',
-        MAKE: compiler.programs.MAKE || '',
-        DBGconfig: compiler.programs.DBGconfig || 'gdb_debugger:Default',
-      };
-      compiler.masterPath = userPrograms.masterPath;
-      return applyGlobalDirs(compiler);
-    }
-
-    // 次优：探测到的完整程序路径（交叉编译器如 RISC-V）——**只作用于本家族**：
-    // 旧扁平形态视为「写入时的全局 compilerId 的程序路径」，其它家族不受影响（D-20：否则选定交叉编译器后
-    // `<Option compiler="gcc">` 的工程会被静默改用交叉工具链构建）
-    const programs = resolveProgramsForCompiler(
-      cfg.get<unknown>('compilerPrograms', {}),
-      id,
-      cfg.get<string>('compilerId', 'gcc'),
-    );
-    if (programs && programs.C) {
-      compiler.programs = { ...compiler.programs, ...programs } as any;
-    }
-    // PCH include 前置需要 gcc 主版本号（对齐 Compiler::m_VersionString），惰性查询一次并缓存
-    if (compiler.switches.supportsPCH && !compiler.versionString) {
-      compiler.versionString = queryCompilerVersionString(compiler);
-    }
-    return applyGlobalDirs(compiler);
-  }
-  // 回退：内置 GCC
-  const { createGccCompiler } = require('./compiler/compiler');
-  return applyGlobalDirs(createGccCompiler(process.platform, masterPath));
+  // 实现已下沉到 compiler/compilerFactory.ts（CLI/MCP 共用同一装配逻辑）
+  return buildCompilerInstanceCore(id, masterPath, cfg, { loader: compilerLoader, codeBlocksConfig });
 }
 
 /** compilerRegistry 纯模块的宿主依赖（X1：空 ID 缺省链与注册判定） */
@@ -6432,9 +6654,15 @@ async function confirmRebuild(): Promise<boolean> {
  * 构建前停止调试会话 —— 对齐 StopRunningDebugger（compilergcc.cpp:879-905）：
  * 调试器运行中 → 模态询问；确认则停止并继续，否则记录 Aborting (re-)build. 并中止构建。
  */
-async function stopDebuggerIfRunning(): Promise<boolean> {
+async function stopDebuggerIfRunning(interactive = true): Promise<boolean> {
   const session = vscode.debug.activeDebugSession;
   if (!session) return true;
+  if (!interactive) {
+    // agent 调用：无需确认，直接停止（否则模态框会卡住工具调用）
+    outputChannel.info('[Code::Blocks] Stopping debugger (agent build)...');
+    await vscode.debug.stopDebugging(session);
+    return true;
+  }
   const choice = await vscode.window.showWarningMessage(
     'The debugger must be stopped to do a (re-)build.\nDo you want to stop the debugger now?',
     { modal: true },
@@ -6700,11 +6928,11 @@ async function buildWorkspaceLocked(rebuild: boolean, clearLog: boolean): Promis
 }
 
 /** 构建单个项目（右键菜单的 Build/Rebuild 与主 Build 命令使用，对齐 CB 单活动项目 Build） */
-async function buildSingleProject(filename: string, rebuild: boolean): Promise<boolean> {
+async function buildSingleProject(filename: string, rebuild: boolean, opts: { interactive?: boolean } = {}): Promise<boolean> {
   // 构建互斥：置位必须先于任何 await（D-15，防止同 tick 双发并发双跑）
   if (!claimBuildMutex()) return false;
   try {
-    return await buildSingleProjectLocked(filename, rebuild);
+    return await buildSingleProjectLocked(filename, rebuild, opts);
   } finally {
     buildInProgress = false;
     currentBuildCancel = undefined;
@@ -6713,14 +6941,15 @@ async function buildSingleProject(filename: string, rebuild: boolean): Promise<b
 }
 
 /** 构建单个项目主体（互斥已由 buildSingleProject 占有） */
-async function buildSingleProjectLocked(filename: string, rebuild: boolean): Promise<boolean> {
+async function buildSingleProjectLocked(filename: string, rebuild: boolean, opts: { interactive?: boolean } = {}): Promise<boolean> {
+  const interactive = opts.interactive !== false;
   // 对齐 DoBuild:2897：构建前须先停止调试会话
-  if (!(await stopDebuggerIfRunning())) {
+  if (!(await stopDebuggerIfRunning(interactive))) {
     return false;
   }
 
-  // Rebuild 前由用户确认（对齐 Code::Blocks 的 Rebuild 确认对话框）
-  if (rebuild && !(await confirmRebuild())) {
+  // Rebuild 前由用户确认（对齐 Code::Blocks 的 Rebuild 确认对话框）；agent 调用时跳过
+  if (rebuild && interactive && !(await confirmRebuild())) {
     return false;
   }
 
@@ -6922,10 +7151,10 @@ async function buildOneProject(project: Project, targetTitle: string, rebuild: b
     resolveCompiler: (id) => resolveTargetCompiler(id),
     budget: buildDiagnosticsBudget,
     maxErrors: vscode.workspace.getConfiguration('codeblocks').get<number>('maxReportedErrors', 50),
-    // clangd ?? Build Log ????????? buildLogUsesClangdDiagnostics?
+    // clangd 接管 Build Log 诊断时不收集（对齐 buildLogUsesClangdDiagnostics）
     collectDiagnostics: !(clangdDiagnosticsEnabled && buildLogUsesClangdDiagnostics()),
     onDiagnostic: (diag, fileUri) => {
-      // clangd ??????Problems ??? clangd ?????????????????
+      // clangd 接管诊断时，Problems 面板由 clangd 产出，构建引擎不再写入（避免重复）
       if (clangdDiagnosticsEnabled) return;
       publishBuildDiagnostic((fileUri as vscode.Uri | undefined) ?? vscode.Uri.file(project.basePath), diag as vscode.Diagnostic);
     },
