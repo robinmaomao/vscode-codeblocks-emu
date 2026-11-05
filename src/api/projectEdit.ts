@@ -166,8 +166,22 @@ function ensureUniqueTargetTitle(project: Project, title: string): void {
 
 function detachTargetFromFiles(project: Project, title: string): void {
   for (const f of project.files) {
+    if (!f.buildTargets.includes(title)) continue;
     f.buildTargets = f.buildTargets.filter((t) => t !== title);
-    if (f.buildTargets.length === 0) f.explicitTargets = false;
+    // 显式归属的文件在目标被删后仍保持"显式但为空"（= 不属于任何目标），
+    // 不能退回 implicit（那样会变成"属于所有目标"）。
+    f.explicitTargets = true;
+  }
+}
+
+/**
+ * 重建 target.files（引擎按 target.files 决定编译哪些文件）。
+ * 归属规则对齐 Code::Blocks：显式归属看 buildTargets；未显式归属的文件属于所有目标。
+ * 保持与 project.files 同一对象引用，后续字段编辑才能同时生效。
+ */
+export function syncTargetFiles(project: Project): void {
+  for (const target of project.buildTargets) {
+    target.files = project.files.filter((f) => !f.explicitTargets || f.buildTargets.includes(target.title));
   }
 }
 
@@ -195,7 +209,11 @@ export function applyEdits(project: Project, ops: EditOp[], opts: EditOptions = 
         } else if (op.scope === 'file') {
           const file = findFile(project, op.file) as unknown as Record<string, unknown>;
           const change = applyFieldEdit(file, op, opts, `file[${normalizeRelativePath(op.file!)}].${op.field}`);
-          if (change) changed.push(change);
+          if (change) {
+            changed.push(change);
+            // 显式设置归属列表 = 该文件从此按显式归属处理
+            if (op.field === 'buildTargets') (file as unknown as ProjectFile).explicitTargets = true;
+          }
         } else {
           const vt = project.virtualTargets.find((v) => v.title === op.target || v.title === op.field);
           if (!vt) fail('invalid-input', `Virtual target not found: ${op.target ?? op.field}`);
@@ -267,28 +285,14 @@ export function applyEdits(project: Project, ops: EditOp[], opts: EditOptions = 
         const abs = path.resolve(project.basePath, rel);
         if (!fs.existsSync(abs)) fail('invalid-input', `File does not exist: ${abs}`);
         const targets = (op.targets ?? []).map((t) => findTarget(project, t).title);
-        for (const t of targets) {
-          const target = project.buildTargets.find((x) => x.title === t)!;
-          target.files.push({
-            relativeFilename: rel,
-            relativeToCommonTopLevelPath: rel,
-            absolutePath: abs,
-            buildTargets: targets,
-            explicitTargets: targets.length > 0,
-            compilerVar: '',
-            compile: op.compile !== false,
-            link: op.link !== false,
-            customBuildCommands: {},
-            weight: op.weight ?? 50,
-            virtualFolder: op.virtualFolder ?? '',
-            generatedFiles: [],
-          });
-        }
-        project.files.push({
+        // 未显式指定 = 属于所有目标（writer 以「目标数 == 项目目标数」判定隐式归属）
+        const buildTargets = targets.length ? targets : project.buildTargets.map((t) => t.title);
+        // 单个对象：project.files 与各 target.files 共享引用（否则后续字段编辑不会影响构建）
+        const entry: ProjectFile = {
           relativeFilename: rel,
           relativeToCommonTopLevelPath: rel,
           absolutePath: abs,
-          buildTargets: targets,
+          buildTargets,
           explicitTargets: targets.length > 0,
           compilerVar: '',
           compile: op.compile !== false,
@@ -297,7 +301,9 @@ export function applyEdits(project: Project, ops: EditOp[], opts: EditOptions = 
           weight: op.weight ?? 50,
           virtualFolder: op.virtualFolder ?? '',
           generatedFiles: [],
-        });
+        };
+        project.files.push(entry);
+        syncTargetFiles(project);
         changed.push({ path: `file[${rel}]`, after: { targets, compile: op.compile !== false, link: op.link !== false } });
         break;
       }
@@ -356,6 +362,8 @@ export function applyEdits(project: Project, ops: EditOp[], opts: EditOptions = 
         fail('invalid-input', `Unknown op: ${(op as { op: string }).op}`);
     }
   }
+  // 目标增删改/文件归属变化后重建 target.files（引擎按它决定编译哪些文件）
+  syncTargetFiles(project);
   return { changed, warnings };
 }
 
