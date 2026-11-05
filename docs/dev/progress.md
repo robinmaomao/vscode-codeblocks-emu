@@ -135,6 +135,9 @@ npm.cmd test
 - **CLI**：`src/cli/cb-cli.ts` + `src/cli/vscodeShim.ts`（`Module._load` 拦截 `vscode`，esModuleInterop 下不可用命名空间改写）。
 - **语言**：`i18n.setUiLanguage()` 让无宿主传输层一次定下运行时文案；`createRuntime()` 按
   `codeblocks.ui.language` / `CB_UI_LANGUAGE` 调用（CLI 解析错误、构建日志随设置切换中英）。
-- **测试**：新增 `test-api-project-edit` / `test-api-settings-reader` / `test-ai-tools-contract` / `test-cli` /
-  `test-mcp-server`（无头）、`test-e2e-cli-build`（E2E）、`host/suite/agent.tests.js`（宿主）；无头 `TOTAL=182`。
+- **测试**：新增 `test-api-project-edit`（含 query / preserve 用例）/ `test-api-settings-reader` / `test-api-tool-guards` /
+  `test-ai-tools-contract` / `test-cli` / `test-mcp-server`（无头）、`test-e2e-cli-build`（E2E）、
+  `host/suite/agent.tests.js`（宿主）；无头 `TOTAL=183`。
+- **写盘守卫**：签名在**读盘前**捕获（`project_edit` / `project_file` / `project_target`），读盘期间被外部改动即
+  `external-modified`；扩展侧另由 `projectChangeTracker` 拦截，`force: true` 可覆盖。
 - **文档**：`docs/guide/agent-control.md` / `.en.md`；README / usage / strategy / decisions / THIRD-PARTY-NOTICES 同步。

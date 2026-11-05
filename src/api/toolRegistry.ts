@@ -176,8 +176,9 @@ const projectEdit: ToolDefinition = {
       return { ok: true, cbp, format, written: !dryRun && next !== text, changed, warnings: [] };
     }
 
-    const project = await loadForEdit(ctx, cbp);
+    // 先取签名再读盘：读盘与写盘之间文件被外部改动 ⇒ signatureChanged 命中
     const guard = captureSignature(cbp);
+    const project = await loadForEdit(ctx, cbp);
     const outcome = applyEdits(project, ops, { allowScripts: input.allowScripts === true });
     const warnings = [...outcome.warnings];
     if (format === 'preserve') warnings.push('preserve mode only supports file compile/link edits; falling back to canonical rewrite.');
@@ -229,9 +230,13 @@ function structuralTool(
     async handler(ctx, input) {
       const cbp = resolveCbp(ctx, input);
       const op = toOp(input);
+      const guard = captureSignature(cbp);
       const project = await loadForEdit(ctx, cbp);
       const outcome = applyEdits(project, [op]);
       if (outcome.changed.length > 0) {
+        if (input.force !== true && signatureChanged(cbp, guard)) {
+          fail('external-modified', `The project file was modified while editing: ${cbp}`, { hint: 'Pass force: true to overwrite.' });
+        }
         await ctx.saveProject(project, { force: input.force === true, isExternallyModified: ctx.isExternallyModified });
       }
       return { ok: true, cbp, written: outcome.changed.length > 0, changed: outcome.changed, warnings: outcome.warnings };
