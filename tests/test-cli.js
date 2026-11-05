@@ -75,6 +75,18 @@ fs.writeFileSync(badOps, '[{"op":"set","scope":"project","field":"nope","value":
 const badEdit = run(['edit', cbp, '--ops-file', badOps, '--json']);
 check('C11 非法字段 exit 3', badEdit.code === 3, { code: badEdit.code, stderr: badEdit.stderr.slice(0, 160) });
 
+// ---------- 打包后的 bundle 也能正确解析资源目录 ----------
+const bundleCli = path.join(ROOT, 'bundle', 'cb-cli.js');
+if (fs.existsSync(bundleCli)) {
+  const rb = spawnSync(process.execPath, [bundleCli, 'compiler', 'list', '--json'], { encoding: 'utf-8', timeout: 120000 });
+  let bj;
+  try { bj = JSON.parse(rb.stdout || ''); } catch { bj = undefined; }
+  check('C12 bundle CLI 可用', rb.status === 0 && !!bj, (rb.stderr || '').slice(0, 200));
+  check('C13 bundle CLI 资源目录正确', !!bj && /resources[\\/]compilers$/.test(bj.resourcesDir || '') && fs.existsSync(bj.resourcesDir), bj && bj.resourcesDir);
+} else {
+  console.log('SKIP C12/C13 bundle CLI（bundle/cb-cli.js 未构建）');
+}
+
 fs.rmSync(TMP, { recursive: true, force: true });
 console.log(`\ncb-cli: ${pass} pass, ${fail} fail`);
 process.exit(fail ? 1 : 0);
