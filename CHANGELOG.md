@@ -19,8 +19,9 @@
   自动启用（诊断模式），无需额外设置。
 - **不改变**：`[profile]` 计时块、`build.traceProcesses` 子进程统计行、`build.sampleSystem` 系统 CPU 汇总块、
   `plainCb` 纯日志模式、并行编译与增量判定流程；采样本身照旧运行，只是告警输出被门控。
-- 契约测试设置项计数 82 → **83**；`README` / `README.en` / `settings.md(.en)` / `usage.md(.en)` 四张设置表与
-  双语 nls 文案同步。
+- 契约测试设置项计数 82 → **83**；新增回归 `tests/test-build-performance-advisor.js`（31 断言：配置面 +
+  dist 源码门控接线 + 行为级 `emitBuildProfile()` 验证）；`README` / `README.en` / `settings.md(.en)` /
+  `usage.md(.en)` 四张设置表与双语 nls 文案同步。
 - 发布说明见 [`docs/release/0.8.140.md`](./docs/release/0.8.140.md)。
 - 规模（0.8.140 时点）：`contract 3/3`（契约 44 + 文档一致性 6 + 设置契约 665 断言）、`unit 177 FAIL=0 SKIP=1`、
   `e2e 5/5`（288 pass / 8 skip）、`visual 24/24`、`perf 13 pass / 0 warn`、`pack 1/1`（14 断言）、`host 24/24`。

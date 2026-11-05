@@ -84,5 +84,94 @@ check(
   check('C4 English usage guide covers the setting', read('docs/guide/usage.en.md').includes(KEY), true);
 }
 
+// ---------- D. 行为面（真实 dist + vscode mock） ----------
+{
+  const os = require('os');
+  const { installVscodeMock } = require('./_harness/vscodeMock');
+  const mock = installVscodeMock({ config: {} });
+  const vscode = require('vscode');
+  const { BuildEngine } = require(path.join(ROOT, 'dist', 'build', 'buildEngine.js'));
+  const { BuildProfiler } = require(path.join(ROOT, 'dist', 'build', 'buildProfiler.js'));
+
+  const setCfg = (obj) => {
+    for (const k of Object.keys(mock.configStore)) if (k.startsWith('codeblocks.')) delete mock.configStore[k];
+    Object.assign(mock.configStore, obj);
+  };
+
+  /** 构造只带「构建收尾」所需状态的引擎（不实例化 vscode 依赖的完整对象） */
+  const makeEngine = (prof) => {
+    const warns = [], infos = [];
+    const eng = Object.create(BuildEngine.prototype);
+    eng.output = {
+      info: (m) => infos.push(String(m)), warn: (m) => warns.push(String(m)),
+      error: (m) => warns.push(String(m)), debug: () => {}, trace: () => {},
+      append: () => {}, appendLine: () => {}, clear: () => {}, show: () => {}, hide: () => {}, dispose: () => {}, raw: {},
+    };
+    eng.prof = prof;
+    eng.profBuildStartMs = Date.now() - 12_000;
+    eng.project = { filename: path.join(ROOT, 'test-project', 'hello-cb.cbp'), basePath: path.join(ROOT, 'test-project') };
+    eng.scopeConfig = () => vscode.workspace.getConfiguration('codeblocks', vscode.Uri.file(eng.project.filename));
+    eng.maxJobs = () => 8;
+    // 模拟「宿主卡顿 60% / 最长 975 ms」的一轮构建统计
+    eng.lagActive = false;
+    eng.lagSamples = 60;
+    eng.lagSumMs = 6000;
+    eng.lagMaxMs = 975;
+    eng.lagWindowStartMs = Date.now() - 10_000;
+    eng.dispatchWaitMs = 11;
+    eng.dispatchWaitMaxMs = 5;
+    eng.spawnCount = 57;
+    eng.profTotalCompileMs = 5000;
+    eng.demotedSpawns = 0;
+    eng.peakSpawns = 8;
+    eng.sysSampler = undefined;
+    eng.sysSamples = [];
+    eng.sysBuf = '';
+    return { eng, warns, infos };
+  };
+
+  /** 在低内存（1%）下调用构建开始检查；os 打桩后必定还原 */
+  const runHeadroom = (eng) => {
+    const total = os.totalmem, free = os.freemem;
+    os.totalmem = () => 100;
+    os.freemem = () => 1;
+    try { eng.reportSystemHeadroom(); } finally { os.totalmem = total; os.freemem = free; }
+  };
+
+  setCfg({});
+  {
+    const { eng, warns, infos } = makeEngine(undefined);
+    eng.emitBuildProfile();
+    check('D1 默认构建收尾无 ⚠️ 归因输出', warns.length === 0, warns);
+    check('D2 默认无 [profile] 块', !infos.some((l) => l.includes('[profile]')), infos);
+    const before = warns.length;
+    runHeadroom(eng);
+    check('D3 默认低内存检查静默', warns.length === before, warns);
+  }
+
+  setCfg({ [KEY]: true });
+  {
+    const { eng, warns, infos } = makeEngine(undefined);
+    eng.emitBuildProfile();
+    check('D4 打开后输出 4 行归因告警', warns.length === 4, warns.length);
+    check('D5 含卡顿占比与最长滞后', /60%|60 %/.test(warns[0]) && /975/.test(warns[0]), warns[0]);
+    check('D6 含 dispatch wait 判定', warns.some((w) => w.includes('dispatch wait')), true);
+    check('D7 打开后仍不输出 [profile] 块', !infos.some((l) => l.includes('[profile]')), true);
+    const before = warns.length;
+    runHeadroom(eng);
+    check('D8 打开后低内存检查会提示', warns.length === before + 1, warns.slice(before));
+  }
+
+  setCfg({ 'codeblocks.build.profile': true });
+  {
+    const { eng, warns, infos } = makeEngine(new BuildProfiler());
+    eng.emitBuildProfile();
+    check('D9 诊断模式（profile）自动输出归因告警', warns.length === 4, warns.length);
+    check('D10 诊断模式同时输出 [profile] 块', infos.some((l) => l.includes('[profile]')), true);
+  }
+
+  mock.restore();
+}
+
 console.log(`\n构建性能顾问: ${pass} pass, ${fail} fail`);
 process.exit(fail ? 1 : 0);
