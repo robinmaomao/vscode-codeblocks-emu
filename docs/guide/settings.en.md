@@ -58,6 +58,7 @@ Example:
 | `codeblocks.build.lowerCompilerPriority` | boolean | `false` |  | Run compiler/link children at below-normal priority; can make I/O-bound builds slower, so it is off by default. |
 | `codeblocks.build.autoExcludeOutputs` | boolean | `true` |  | Before each build, add object/output directories to `files.watcherExclude` and `search.exclude` in **user settings** so VS Code stops re-scanning build outputs. |
 | `codeblocks.build.sampleSystem` | boolean | `false` |  | Sample CPU attribution (machine / editor / security software / file scanner) once per second during builds (Windows only). Not enabled automatically with `build.profile`. |
+| `codeblocks.build.performanceAdvisor` | boolean | `false` |  | Performance advisor: attribution warnings at build end (host stalls / CPU saturation / antivirus / file-scanner storms) plus the build-start low-memory check. Off by default; enabled automatically by `build.profile` or `build.sampleSystem`. |
 | `codeblocks.build.compileCommandsOnlyTargets` | boolean | `false` |  | Whether CommandsOnly targets (type=4) compile their files; default runs only pre/post scripts. |
 | `codeblocks.build.scriptExitGraceMs` | number | `1500` |  | Exit grace period for pre/post-build script commands (0–60000 ms); `0` fully matches CB's "wait for the command only". |
 | `codeblocks.build.scriptCommandTimeoutMs` | number | `0` |  | Per-command script timeout (0 = no timeout, max 3600000 ms); on timeout the process tree is killed and the build fails. |

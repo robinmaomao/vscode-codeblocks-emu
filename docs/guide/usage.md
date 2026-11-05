@@ -2,7 +2,7 @@
 
 > 语言：**中文** ｜ [English](./usage.en.md)
 >
-> 版本：0.8.139 ｜ 本扩展为 Code::Blocks 核心功能的原生移植，直接驱动 GCC / GDB，**不依赖** `tasks.json` / `launch.json`。
+> 版本：0.8.140 ｜ 本扩展为 Code::Blocks 核心功能的原生移植，直接驱动 GCC / GDB，**不依赖** `tasks.json` / `launch.json`。
 
 ---
 
@@ -51,7 +51,7 @@ Code::Blocks for VS Code 是一个「迷你 IDE 内核」：直接解析 `.cbp` 
 ### 2.1 从 VSIX 安装
 
 ```powershell
-code --install-extension codeblocks-vscode-0.8.139.vsix --force
+code --install-extension codeblocks-vscode-0.8.140.vsix --force
 ```
 
 ### 2.2 从源码构建
@@ -59,7 +59,7 @@ code --install-extension codeblocks-vscode-0.8.139.vsix --force
 ```powershell
 npm install
 npm run package
-code --install-extension codeblocks-vscode-0.8.139.vsix --force
+code --install-extension codeblocks-vscode-0.8.140.vsix --force
 ```
 
 > `npm run package` = `vsce package`（打包前自动执行 `vscode:prepublish` 钩子 = `tsc` 编译（`dist/`，本地测试用）+ **esbuild 单文件打包**（`bundle/extension.js`，发布入口））；
@@ -604,6 +604,7 @@ Build Log 视图位于**底部 Panel**（打开方式：`Ctrl+J` 后选择「Bui
 | `codeblocks.build.autoExcludeOutputs` | `true` | 构建前自动把工程的目标文件/输出目录写入**用户设置**的 `files.watcherExclude` 与 `search.exclude`（**不再写入工作区 `.vscode/settings.json`**，因此不会被提交到仓库）：含 `object_output`（未配置时为默认 `.objs`）、`deps_output`（未配置时为默认 `.deps`）、输出文件所在目录，以及展开 `$(…)` 宏后的路径。旧版本写进工作区的同名条目会被自动清理，用户自己添加的其它条目保留。主 Build / Build Workspace / Clean / Clean Workspace / 右键单工程 Build / 单文件编译 / Rebuild All 全部入口都会先排除。**这是构建期 CPU 被吃满的主要原因之一**：构建写出几十个 `.o` 会让 VS Code 反复全工作区枚举（隔离实验：`rg.exe` 峰值 **281**，每个还带一个 `conhost`），加上排除后峰值为 **0**。首次真正添加时提示一次（含「重载窗口」按钮）；关闭后行为与旧版一致 |
 | `codeblocks.workspace.pathGuard` | `prompt` | 工作区路径守卫：检查工作区路径里是否含 **glob 元字符**（`[ ] { } * ?`）。路径里出现 `[内部]xxx` 这类目录名时，VS Code 的 AI 指令定位器（`PromptFilesLocator`）会把搜索根**截断到祖先目录**，之后每次文件变更都用 `rg --files`（不带任何 `-g` 过滤）把整棵树枚举一遍——实测这正是构建时 `Code.exe` 进程组暴增、CPU 打满 100% 的直接原因。命中时会在 Code::Blocks 输出通道和通知里给出**命中的路径段**与 **VS Code 实际使用的搜索根**（含该根下的文件数），并在你确认后把 `.github/instructions` 与 `.claude/rules` 两处扫描写进**用户设置**的 `chat.instructionsFilesLocations`（值为 `false`，**不写工作区 `.vscode/settings.json`**），立刻生效；`off` = 不检查，`prompt` = 提示并询问，`auto` = 直接写入并提示。手动检查：命令 `Code::Blocks: 检查工作区路径` |
 | `codeblocks.build.sampleSystem` | `false` | 系统 CPU 归属采样（每 ~1 s：整机利用率 + 编辑器/安全软件/VS Code 文件扫描器各占多少，剩余归为「工具链 + 其它程序 + 系统」）——整机 CPU 利用率（`PerformanceCounter`，任务管理器口径）+ 「编辑器 / 已知安全软件 / `rg`+`conhost` 扫描器」各组的 CPU 占用，构建结束输出归属块，并在实时防护 ≥10% 或扫描器 ≥8% 时点名告警。用于回答「构建慢时 CPU 被谁吃掉了」。不再跟随 profile 自动开启（构建期它自身会占 ~3% CPU）；仅 Windows，每次构建多一个隐藏 PowerShell 进程（采样本身约 0.1 核） |
+| `codeblocks.build.performanceAdvisor` | `false` | 构建性能顾问（归因告警总开关）：构建结束输出「扩展宿主卡顿 / CPU 饱和 / 第三方实时防护 / VS Code 文件扫描器风暴」，构建开始做低内存检查（可用内存 <15%）。**默认关闭**——宿主卡顿占比取自 100 ms 定时器漂移，并行编译跑满全部核心时扩展宿主自身也被调度出去，占比会被算高（同一轮 `dispatch wait` 可能只有十几毫秒），对正常构建是噪音；判断扩展开销请看 `dispatch wait`。打开 `build.profile` 或 `build.sampleSystem` 时自动启用（诊断模式） |
 | `codeblocks.build.skipIncludeDeps` | `false` | 增量编译跳过 `#include` 头文件依赖扫描（对齐 Code::Blocks /skip_include_deps 设置，可加速大工程增量判断） |
 | `codeblocks.build.linkInputExtensions` | `["xm"]` | 增量编译识别的工程内链接输入扩展名（**默认仅 `.xm`**，可按需添加 `.ld`/`.lds` 链接脚本、`.icf`、`.def` 等）：改动后自动重链接 / 重新打包（保护性增强；CB 需手动填 External dependencies）。支持 `xm` / `.xm` / `*.xm`（大小写不敏感，可填逗号分隔字符串，误配回退默认）；设 `[]` 关闭。仅作用于未显式参与编译（compile=false）的链接输入（含带自定义命令者）；带 `compile="1"` 的文件走 CB 条目计数强制（见构建行为，每次构建都重链） |
 | `codeblocks.build.compileCommandsOnlyTargets` | `false` | CommandsOnly 目标（type=4）是否编译其文件（对齐 CB：以空选项/空 include 编译；默认关闭仅执行 pre/post 脚本） |

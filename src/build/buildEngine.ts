@@ -299,10 +299,12 @@ export class BuildEngine {
     // 峰值并发子进程：无论 profile 是否开启都先记录，traceProcesses 也复用同一份数据
     if (prof) prof.max(logT('spawn peak (live child processes)'), this.peakSpawns);
     this.traceProcessSummary();
-    this.reportHostStalls(lagSum, lagMax, lagSamples);
-    this.reportSecurityCpu(sys);
-    this.reportWatcherStorm(sys);
-    this.reportMeasuredSaturation(sys);
+    if (this.adviceEnabled()) {
+      this.reportHostStalls(lagSum, lagMax, lagSamples);
+      this.reportSecurityCpu(sys);
+      this.reportWatcherStorm(sys);
+      this.reportMeasuredSaturation(sys);
+    }
     if (!prof) {
       // 只开采样、不开 profile：仍然输出归属结果（否则设置看起来没生效）
       this.renderSystemSummary(sys, (s) => this.output.info(s));
@@ -339,6 +341,27 @@ export class BuildEngine {
       return this.scopeConfig().get<boolean>('build.sampleSystem', false) === true;
     } catch {
       // 读配置失败按未开启处理
+      return false;
+    }
+  }
+
+  /**
+   * 性能建议（⚠️ 归因告警）总开关 `codeblocks.build.performanceAdvisor`，**默认关闭**。
+   *
+   * 宿主卡顿判据取自 100 ms 定时器的实际漂移：并行编译跑满全部核心时，扩展宿主自己
+   * 也抢不到时间片，占比会被算高（同一轮 `dispatch wait` 却可能只有十几毫秒），对正常
+   * 构建属于噪音。因此默认静默，仅在诊断模式（`build.profile` / `build.sampleSystem`）
+   * 或显式开启时输出。
+   */
+  private adviceEnabled(): boolean {
+    if (this.prof !== undefined) return true;
+    try {
+      const cfg = this.scopeConfig();
+      return cfg.get<boolean>('build.performanceAdvisor', false) === true
+        || cfg.get<boolean>('build.profile', false) === true
+        || cfg.get<boolean>('build.sampleSystem', false) === true;
+    } catch {
+      // 读配置失败按未开启处理（与 sampleSystemEnabled 一致）
       return false;
     }
   }
@@ -578,9 +601,11 @@ export class BuildEngine {
    *
    * 现场排查经验：同一份工程在裸命令行里编完只要十几秒、在 VS Code 里要一分钟时，
    * 往往不是派生方式的问题，而是**整机内存被其它程序占满**（提交量远超物理内存 → 编译器
-   * 工作集被反复回收/换页）。这里只在余量确实很低时提示一次，避免正常机器上的噪音。
+   * 工作集被反复回收/换页）。这里只在余量确实很低时提示一次，避免正常机器上的噪音；
+   * 与其它归因告警同受 `codeblocks.build.performanceAdvisor` 门控。
    */
   private reportSystemHeadroom(): void {
+    if (!this.adviceEnabled()) return;
     try {
       const total = os.totalmem();
       const free = os.freemem();

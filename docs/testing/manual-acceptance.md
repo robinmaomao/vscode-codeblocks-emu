@@ -131,6 +131,7 @@
 - [ ] **异常路径文案**：无工程时执行 `Code::Blocks: Build`（提示「请先打开一个 Code::Blocks 项目 (.cbp)」）中英两态一致且可读
 - [ ] **构建日志（批次 2 已全覆盖）**：英文显示语言下输出通道日志为英文；切回中文即中文。另设 `codeblocks.log.english=true` 时**恒定英文**（对齐 CB 原文，与 `ui.language` 无关），关闭后回到跟随 `ui.language`
 - [ ] **构建阶段剖析**：`CB_BUILD_PROFILE=1` 构建 → `[profile]` 块的标题/分组/计数单位随语言切换（`Build phase timings` ↔ 「构建阶段计时」）；`log.english=true` 时恒英文
+- [ ] **性能顾问开关（`build.performanceAdvisor`）**：默认（`false`）构建 → 输出通道不再出现 ⚠️ 归因行（宿主卡顿/杀软/扫描器/CPU 饱和/低内存）；`build.profile=true` 或 `build.sampleSystem=true` → 自动恢复；仅把 `performanceAdvisor` 设为 `true`（不开 profile）→ 只出现归因行、无 `[profile]` 块
 - [ ] **树视图节点**：工程 / 符号 / 分析 / 构建日志 / 寄存器视图的节点、分组与空态文案随 `ui.language` 切换（重开视图）
 - [ ] **调试层文案**：启动失败、GDB 异常退出、断点/寄存器禁用等提示中英两态一致（重点：错误提示仍含可定位的命令名/路径）
 - [ ] **WebView 面板正文**：工程属性 9 页、快捷键面板、编译选项面板的字段标签/按钮/校验提示随语言切换；**工程名与备注等数据不被翻译**（源级插桩的边界）

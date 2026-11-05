@@ -1,7 +1,7 @@
 # Code::Blocks for VS Code — Usage Guide
 
 > Language: **English** ｜ [中文](./usage.md)
-> Version: 0.8.139 ｜ Native port of Code::Blocks core features to VS Code, driving GCC / GDB directly, **without** `tasks.json` / `launch.json`.
+> Version: 0.8.140 ｜ Native port of Code::Blocks core features to VS Code, driving GCC / GDB directly, **without** `tasks.json` / `launch.json`.
 
 ---
 
@@ -50,7 +50,7 @@ Code::Blocks for VS Code is a "mini IDE kernel": it parses `.cbp` / `.workspace`
 ### 2.1 Install from VSIX
 
 ```powershell
-code --install-extension codeblocks-vscode-0.8.139.vsix --force
+code --install-extension codeblocks-vscode-0.8.140.vsix --force
 ```
 
 ### 2.2 Build from source
@@ -58,7 +58,7 @@ code --install-extension codeblocks-vscode-0.8.139.vsix --force
 ```powershell
 npm install
 npm run package
-code --install-extension codeblocks-vscode-0.8.139.vsix --force
+code --install-extension codeblocks-vscode-0.8.140.vsix --force
 ```
 
 > `npm run package` = `vsce package` (before packaging, the `vscode:prepublish` hook runs `tsc` compilation (`dist/`, for local testing) + the **esbuild single-file bundle** (`bundle/extension.js`, the release entry));
@@ -602,6 +602,7 @@ Note: keybindings are **user-level** (shared across windows); combinations taken
 | `codeblocks.build.autoExcludeOutputs` | `true` | Before each build, add the project's object/output directories to **your user settings** `files.watcherExclude` and `search.exclude` (**never** to the workspace `.vscode/settings.json`, so nothing is committed to the repository): `object_output` (defaults to `.objs` when unset), `deps_output` (defaults to `.deps` when unset), the output file's directory, and `$(…)`-expanded paths. Entries that older versions wrote into workspace settings are removed automatically while your own entries are kept. Every entry point excludes them first: Build / Build Workspace / Clean / Clean Workspace / single-project Build from the context menu / single-file compile / Rebuild All. **This is one of the main reasons builds pin the CPU**: the dozens of `.o` files a build writes make VS Code re-enumerate the whole workspace (isolated experiment: `rg.exe` peak **281**, each with its own `conhost`); with the exclusions the peak is **0**. Prompts once when it actually adds entries (with a "Reload Window" button); turning it off restores the previous behaviour |
 | `codeblocks.workspace.pathGuard` | `prompt` | Workspace path guard: checks whether the workspace path contains **glob metacharacters** (`[ ] { } * ?`). A folder named like `[internal]xxx` makes VS Code's AI instruction locator (`PromptFilesLocator`) **truncate its search root to an ancestor directory**; from then on every file change runs `rg --files` (with no `-g` filter at all) over that whole tree — measured as the direct cause of the `Code.exe` process group exploding and CPU hitting 100% during builds. When a problem is found the extension reports the **offending path segment** and the **search root VS Code actually uses** (plus its file count) in the Code::Blocks output channel and in a notification, and — after your confirmation — writes `chat.instructionsFilesLocations` = `false` for `.github/instructions` and `.claude/rules` into your **USER settings** (`false`, never the workspace `.vscode/settings.json`), which takes effect immediately. `off` = never check, `prompt` = report and ask, `auto` = write immediately and report. Manual check: `Code::Blocks: Check Workspace Path` |
 | `codeblocks.build.sampleSystem` | `false` | System CPU attribution (every ~1 s: machine-wide utilisation plus how much the editor, security software and the VS Code file scanner each used; the remainder is reported as "toolchain + other apps + system") — machine-wide CPU utilization (`PerformanceCounter`, same scale as Task Manager) plus the CPU used by the editor / known security software / the `rg`+`conhost` file scanners, prints the breakdown when the build ends and warns with the product name when real-time protection takes ≥10% or the scanners take ≥8%. Answers "who ate the CPU while the build crawled". No longer enabled automatically by `codeblocks.build.profile` (it costs ~3% CPU itself during a build); Windows only, adds one hidden PowerShell process per build (~0.1 core of sampling overhead) |
+| `codeblocks.build.performanceAdvisor` | `false` | Performance advisor (master switch for the attribution warnings): at the end of a build, report extension-host stalls / CPU saturation / third-party real-time protection / VS Code file-scanner storms; at the start of a build, run the low-memory check (<15% free). **Off by default** — the host-stall ratio is derived from 100 ms timer drift, and while parallel compilers saturate every core the extension host is descheduled too, which inflates that ratio even when the build never waited on the editor (the same build can show `dispatch wait` of only a few ms); judge this extension by `dispatch wait`. Enabled automatically by `build.profile` or `build.sampleSystem` (diagnostic mode) |
 | `codeblocks.build.skipIncludeDeps` | `false` | Incremental builds skip the `#include` header dependency scan (aligned with the Code::Blocks /skip_include_deps setting; speeds up incremental decisions on large projects) |
 | `codeblocks.build.linkInputExtensions` | `["xm"]` | Link input extensions inside the project recognized by incremental builds (**default `.xm` only**; add `.ld`/`.lds` linker scripts, `.icf`, `.def` etc. as needed): changing them triggers an automatic relink / repack (protective enhancement; CB requires manual External dependencies). Accepts `xm` / `.xm` / `*.xm` (case-insensitive; a comma-separated string is accepted and a bad value falls back to the default); set `[]` to disable. Applies only to link inputs that do not explicitly take part in compilation (compile=false), including those with custom commands; files with `compile="1"` follow the CB item-count forcing (see build behavior: relink on every build) |
 | `codeblocks.build.compileCommandsOnlyTargets` | `false` | Whether CommandsOnly targets (type=4) compile their files (aligned with CB: compiled with empty options/empty includes; off by default, so only pre/post scripts run) |

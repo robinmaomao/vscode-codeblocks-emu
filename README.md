@@ -6,7 +6,7 @@
 
 直接在 VS Code 中打开 `.cbp` / `.workspace` 工程，即可获得与 Code::Blocks 对齐的构建、调试与工程浏览体验。
 
-> **作者**：Robinmaomao ｜ **版本**：0.8.139
+> **作者**：Robinmaomao ｜ **版本**：0.8.140
 
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](./LICENSE.md)
 
@@ -120,10 +120,10 @@ code --install-extension robinmaomao.codeblocks-vscode
 
 ### 方式二：从 GitHub Releases 安装
 
-从 [Releases](https://github.com/robinmaomao/vscode-codeblocks-emu/releases) 下载最新 `codeblocks-vscode-0.8.139.vsix`：
+从 [Releases](https://github.com/robinmaomao/vscode-codeblocks-emu/releases) 下载最新 `codeblocks-vscode-0.8.140.vsix`：
 
 ```powershell
-code --install-extension codeblocks-vscode-0.8.139.vsix --force
+code --install-extension codeblocks-vscode-0.8.140.vsix --force
 ```
 
 ### 方式三：从源码构建
@@ -131,7 +131,7 @@ code --install-extension codeblocks-vscode-0.8.139.vsix --force
 ```powershell
 npm install
 npm run package
-code --install-extension codeblocks-vscode-0.8.139.vsix --force
+code --install-extension codeblocks-vscode-0.8.140.vsix --force
 ```
 
 > `npm run package` = `vsce package`（打包前会自动执行 `vscode:prepublish` 钩子 = `tsc` 编译（`dist/`，本地测试用）+ esbuild 单文件打包（`bundle/extension.js`，发布入口））；直接运行 `npx vsce package` / `npx vsce publish` 同样会自动构建，不会打进过期或缺失的 `bundle/`；Windows 下建议使用 `npm.cmd` / `npx.cmd`（PSReadLine 执行策略）。
@@ -186,6 +186,7 @@ code --extensionDevelopmentPath="." --disable-extensions --new-window
 | `codeblocks.maxReportedErrors` | `50` | 单次构建最多收集的错误数（0 = 不限制） |
 | `codeblocks.build.verboseOutput` | `false` | 构建详细输出：完整编译命令行、Clean 逐文件删除列表、增量跳过列表（对齐 Code::Blocks 详细模式） |
 | `codeblocks.build.profile` | `false` | 构建性能探针：构建结束输出 `[profile]` 阶段计时块（与 `CB_BUILD_PROFILE=1` 等效） |
+| `codeblocks.build.performanceAdvisor` | `false` | 构建性能顾问：输出归因告警（宿主卡顿 / CPU 饱和 / 杀软 / 文件扫描器 / 低内存）；默认关闭，`build.profile` 或 `build.sampleSystem` 开启时自动生效 |
 | `codeblocks.build.skipIncludeDeps` | `false` | 增量编译跳过 `#include` 头文件依赖扫描（对齐 Code::Blocks /skip_include_deps 设置） |
 | `codeblocks.build.compilerCache` | `none` | 编译缓存（ccache/sccache，保护性增强，默认关）：启用后仅标准编译命令前置缓存程序（链接/资源/脚本不注入）；未找到工具时构建回退原编译器（不使构建失败）；命令「Install Compiler Cache (ccache/sccache)…」提供安装引导 |
 | `codeblocks.build.compilerCachePath` | `` | 编译缓存工具显式路径（留空 = 自动探测 PATH 与常见安装目录；显式路径无效等同未找到） |
@@ -210,7 +211,7 @@ code --extensionDevelopmentPath="." --disable-extensions --new-window
 | `codeblocks.clangd.queryDriver` | `false` | 开启后若 `clangd.arguments` 缺 `--query-driver` 则在输出通道提示（命令 `Configure clangd --query-driver` 可一键写入） |
 | `codeblocks.clangd.extraConfig` | `""` | 自由 YAML，作为同作用域**后置**片段注入（可覆盖扩展写入的任意键；扩展自动补 `If.PathMatch`） |
 
-> 完整 82 项设置（9 个分区，中英双语描述）见 [docs/guide/settings.md](./docs/guide/settings.md)（英文版 [settings.en.md](./docs/guide/settings.en.md)）。另有两条 clangd 命令：`Code::Blocks: Clean Stale clangd Config Fragments`（清理失效片段 + 孤儿缓存目录，预览后确认）与 `Code::Blocks: Configure clangd --query-driver`（交叉编译器保真）。
+> 完整 83 项设置（9 个分区，中英双语描述）见 [docs/guide/settings.md](./docs/guide/settings.md)（英文版 [settings.en.md](./docs/guide/settings.en.md)）。另有两条 clangd 命令：`Code::Blocks: Clean Stale clangd Config Fragments`（清理失效片段 + 孤儿缓存目录，预览后确认）与 `Code::Blocks: Configure clangd --query-driver`（交叉编译器保真）。
 
 ## 架构
 

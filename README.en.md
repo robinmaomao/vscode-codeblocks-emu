@@ -6,7 +6,7 @@ An extension that natively ports the Code::Blocks core features to VS Code — a
 
 Open a `.cbp` / `.workspace` project directly in VS Code and get a build, debug, and project browsing experience aligned with Code::Blocks.
 
-> **Author**: Robinmaomao ｜ **Version**: 0.8.139
+> **Author**: Robinmaomao ｜ **Version**: 0.8.140
 
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](./LICENSE.md)
 
@@ -117,10 +117,10 @@ code --install-extension robinmaomao.codeblocks-vscode
 
 ### Option 2: install from GitHub Releases
 
-Download the latest `codeblocks-vscode-0.8.139.vsix` from [Releases](https://github.com/robinmaomao/vscode-codeblocks-emu/releases):
+Download the latest `codeblocks-vscode-0.8.140.vsix` from [Releases](https://github.com/robinmaomao/vscode-codeblocks-emu/releases):
 
 ```powershell
-code --install-extension codeblocks-vscode-0.8.139.vsix --force
+code --install-extension codeblocks-vscode-0.8.140.vsix --force
 ```
 
 ### Option 3: build from source
@@ -128,7 +128,7 @@ code --install-extension codeblocks-vscode-0.8.139.vsix --force
 ```powershell
 npm install
 npm run package
-code --install-extension codeblocks-vscode-0.8.139.vsix --force
+code --install-extension codeblocks-vscode-0.8.140.vsix --force
 ```
 
 > `npm run package` = `vsce package` (packaging runs the `vscode:prepublish` hook automatically = `tsc` compile (`dist/`, for local tests) + esbuild single-file bundle (`bundle/extension.js`, the release entry)); running `npx vsce package` / `npx vsce publish` directly also builds automatically and never packs a stale or missing `bundle/`; on Windows, prefer `npm.cmd` / `npx.cmd` (PSReadLine execution policy).
@@ -183,6 +183,7 @@ Project tree operations (multi-project drag ordering / per-file compile·link to
 | `codeblocks.maxReportedErrors` | `50` | Maximum number of errors collected per build (0 = unlimited) |
 | `codeblocks.build.verboseOutput` | `false` | Verbose build output: full compile command lines, per-file delete list for Clean, incremental skip list (aligned with Code::Blocks verbose mode) |
 | `codeblocks.build.profile` | `false` | Build performance probe: prints a `[profile]` phase timing block at the end of the build (equivalent to `CB_BUILD_PROFILE=1`) |
+| `codeblocks.build.performanceAdvisor` | `false` | Performance advisor: attribution warnings (host stalls / CPU saturation / antivirus / file-scanner storms / low memory); off by default, enabled automatically by `build.profile` or `build.sampleSystem` |
 | `codeblocks.build.skipIncludeDeps` | `false` | Incremental builds skip `#include` header dependency scanning (aligned with the Code::Blocks /skip_include_deps setting) |
 | `codeblocks.build.compilerCache` | `none` | Compiler cache (ccache/sccache, an additive safeguard, off by default): when enabled, only standard compile commands get the cache program prefixed (link/resource/script commands are not injected); if the tool is not found the build falls back to the original compiler (the build does not fail); the "Install Compiler Cache (ccache/sccache)…" command provides installation guidance |
 | `codeblocks.build.compilerCachePath` | `` | Explicit path to the compiler cache tool (empty = detect PATH and common install directories; an invalid explicit path is treated as not found) |
@@ -207,7 +208,7 @@ Project tree operations (multi-project drag ordering / per-file compile·link to
 | `codeblocks.clangd.queryDriver` | `false` | When enabled, warns in the Output channel if `clangd.arguments` lacks `--query-driver` (the `Configure clangd --query-driver` command writes it in one click) |
 | `codeblocks.clangd.extraConfig` | `""` | Free-form YAML injected as a **trailing** fragment in the same scope (can override any key written by the extension; the extension adds `If.PathMatch` automatically) |
 
-> The complete set of 82 settings (9 sections, bilingual descriptions) is in [Settings reference](./docs/guide/settings.en.md) (Chinese [settings.md](./docs/guide/settings.md)). There are also two clangd commands: `Code::Blocks: Clean Stale clangd Config Fragments` (cleans stale fragments + orphan cache directories, with a preview before confirming) and `Code::Blocks: Configure clangd --query-driver` (cross-compiler fidelity).
+> The complete set of 83 settings (9 sections, bilingual descriptions) is in [Settings reference](./docs/guide/settings.en.md) (Chinese [settings.md](./docs/guide/settings.md)). There are also two clangd commands: `Code::Blocks: Clean Stale clangd Config Fragments` (cleans stale fragments + orphan cache directories, with a preview before confirming) and `Code::Blocks: Configure clangd --query-driver` (cross-compiler fidelity).
 
 ## Architecture
 
