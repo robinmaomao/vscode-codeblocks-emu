@@ -3,6 +3,27 @@
 本文件记录**正式版**里程碑；近期 dev 迭代的逐轮发布说明见 [`docs/release/`](./docs/release/)（`0.8.xx-dev.md`），
 `0.8.76`–`0.8.128` 的 dev 说明已合并归档到 [`docs/release/archive/`](./docs/release/archive/)；版本号与维护约定见 [`docs/release/00-index.md`](./docs/release/00-index.md)。
 
+## 0.8.141-agent-control — 2026-11-05
+
+**分支预发布版：Agent 全控制（`feat/agent-control` 专用，不合并 main）**
+
+> 版本号带 `-agent-control` 后缀，用于区分「未合并的功能分支构建」；安装前请勿与正式版混用。
+
+- **能力**：让 Copilot agent / 任意 MCP 客户端 / CI 完整控制工程——读取与增量修改 `.cbp`/`.workspace`
+  （canonical 或 preserve 定点改写）、构建 / 重建 / 清理、运行、调试、导出、编译器探测。
+- **接入**：`engines.vscode` 抬到 `^1.102.0`；11 个 `contributes.languageModelTools`；
+  `contributes.mcpServerDefinitionProviders`（`bundle/cb-mcp.js`）；独立 CLI（`bundle/cb-cli.js`）。
+- **架构**：`src/api/*` 无顶层 vscode 依赖的控制内核，三种传输共用同一份 `toolRegistry`；
+  构建内核 `src/build/buildProject.ts` 与 UI 同源。
+- **安全**：字段白名单、`dryRun`、`allowScripts` 门控、构建互斥 `build-busy`、
+  写盘签名在读盘前捕获（并发外部修改 → `external-modified`，`force: true` 可覆盖）。
+- **测试**：新增 8 个回归文件（`test-api-project-edit` / `test-api-settings-reader` / `test-api-tool-guards` /
+  `test-api-build-service` / `test-ai-tools-contract` / `test-cli` / `test-mcp-server` / `test-e2e-cli-build`）
+  与宿主套件 `host/suite/agent.tests.js`；规模 `unit TOTAL=184 FAIL=0 SKIP=1`、`contract 3/3`、`e2e 6/6`、
+  `visual 24/24`、`pack 15/15`、`host 30/30`。
+- **文档**：新增 [`docs/guide/agent-control.md`](./docs/guide/agent-control.md) / `.en.md`；
+  发布说明见 [`docs/release/0.8.141-agent-control.md`](./docs/release/0.8.141-agent-control.md)。
+
 ## 0.8.140 — 2026-11-05
 
 **构建性能归因告警改为可选（默认关闭）**
@@ -38,7 +59,7 @@
   UTF-8/GBK 与原路径；资源文件断言兼容 8.3 短路径；`test-drive-case.js` 新增 4 条 `shortPathWin` 回归；
   新增 `tests/e2e/test-e2e-ccache.js`（21 断言，真实 ccache + 中文路径）。
 - 发布说明见 [`docs/release/0.8.139.md`](./docs/release/0.8.139.md)；测试结果见
-  [`docs/testing/test-report-0.8.140.md`](./docs/testing/test-report-0.8.140.md)，完整复核见
+  [`docs/testing/test-report-0.8.141-agent-control.md`](./docs/testing/test-report-0.8.141-agent-control.md)，完整复核见
   [`docs/testing/test-report-0.8.139-full.md`](./docs/testing/test-report-0.8.139-full.md)。
 - 规模（0.8.139 时点）：`contract 3/3`、`unit 176 FAIL=0 SKIP=1`、`visual 24/24`、`e2e 5/5`（288 pass / 8 skip）、
   `perf 13 pass / 0 warn`、`pack 1/1`、`host 24/24`；全量 `188 FAIL=0 SKIP=1`。
@@ -59,7 +80,7 @@
   正常，仅 `.debug_info` 有细微差异；资源文件（windres）/ `sccache` / `cache=none` 行为不变；新增设置项 **无**。
 - 实测效果：中文路径工程 `Cacheable calls` 0% → **100%**，二次构建 **4 次 Direct HIT**，Release 单文件 2.5 s → 0.1 s。
 - 发布说明见 [`docs/release/0.8.138.md`](./docs/release/0.8.138.md)；测试结果见
-  [`docs/testing/test-report-0.8.140.md`](./docs/testing/test-report-0.8.140.md)。
+  [`docs/testing/test-report-0.8.141-agent-control.md`](./docs/testing/test-report-0.8.141-agent-control.md)。
 - 规模（0.8.138 时点）：`contract 3/3`、`unit 176 FAIL=0 SKIP=1`、`visual 24/24`、`e2e 4/4`、`perf 12 pass / 1 warn`、
   `pack 1/1`（新增 29 条编译缓存断言）。
 
@@ -80,7 +101,7 @@
 - **编译选项面板**：「应用」改为**立即写回 `.cbp`** 并重绑重解析后的工程/目标；只管理 `options_<id>.xml` 内的选项
   （手写自定义选项保留）；应用失败在面板可见，目标已被外部改名/删除时报错而不误写工程级选项。
 - 发布说明见 [`docs/release/0.8.137.md`](./docs/release/0.8.137.md)；测试结果见
-  [`docs/testing/test-report-0.8.140.md`](./docs/testing/test-report-0.8.140.md)。
+  [`docs/testing/test-report-0.8.141-agent-control.md`](./docs/testing/test-report-0.8.141-agent-control.md)。
 - 规模（0.8.137 时点）：`contract 2/2`、`unit 175 FAIL=0 SKIP=1`（新增 4 个脚本 / 93 断言；
   `test-webview-panels` +21、`test-i18n-webview` +1）。
 

@@ -1,7 +1,10 @@
 // 宿主集成：Agent 控制面（LM Tools 声明与注册、MCP provider 声明）
 const assert = require('assert');
+const fs = require('fs');
+const path = require('path');
 const vscode = require('vscode');
 const { suite } = require('./framework');
+const U = require('./hostUtil');
 
 const EXT_ID = 'robinmaomao.codeblocks-vscode';
 const EXPECTED = [
@@ -59,5 +62,71 @@ suite('宿主集成 · Agent 控制面', (t) => {
     const data = JSON.parse(text);
     assert.strictEqual(data.summary.title, 'hello-cb');
     assert.strictEqual(data.summary.targetCount, 2);
+  });
+
+  // ---- Agent 全链路：改 .cbp → 构建 → 读构建状态（真实工具链） ----
+  const callTool = async (name, input) => {
+    const result = await vscode.lm.invokeTool(name, { input }, undefined);
+    const text = (result.content || [])
+      .filter((part) => part instanceof vscode.LanguageModelTextPart)
+      .map((part) => part.value)
+      .join('');
+    return JSON.parse(text);
+  };
+
+  t.test('invokeTool 改 .cbp → 构建 → 构建状态（Agent 全链路）', async (ctx) => {
+    if (!U.findTool('gcc')) {
+      console.log('SKIP 宿主内 Agent 构建：未找到 gcc');
+      ctx.skip();
+    }
+    const ws = U.workspaceDir();
+    if (!ws) {
+      console.log('SKIP 宿主内 Agent 构建：无工作区文件夹');
+      ctx.skip();
+    }
+    const projDir = path.join(ws, 'cb-agent-build');
+    fs.rmSync(projDir, { recursive: true, force: true });
+    const cbp = U.copyHelloProject(projDir, 'hello-cb');
+    const exePath = path.join(projDir, 'bin', 'Debug', 'hello.exe');
+    await U.setConfig('clangd.enabled', false);
+    try {
+      const edit = await callTool('codeblocks_project_edit', {
+        cbp,
+        ops: [{ op: 'add', scope: 'target', target: 'Debug', field: 'compilerOptions', value: '-DAGENT_TOOL_PROBE' }],
+      });
+      assert.strictEqual(edit.ok, true, JSON.stringify(edit));
+      assert.strictEqual(edit.written, true, '编辑未写盘');
+
+      const read = await callTool('codeblocks_project_read', { cbp, section: 'targets', target: 'Debug' });
+      assert.ok(read.targets[0].compilerOptions.includes('-DAGENT_TOOL_PROBE'), '编辑结果未读回');
+
+      assert.ok(!fs.existsSync(exePath), '前置失败：产物已存在');
+      const build = await U.withTimeout(
+        callTool('codeblocks_build', { cbp, target: 'Debug' }),
+        170000,
+        'codeblocks_build',
+      );
+      assert.strictEqual(build.ok, true, `构建失败：${JSON.stringify(build.summary && build.summary.errorCount)}`);
+      assert.strictEqual(build.target, 'Debug');
+      const built = await U.waitFor(() => (fs.existsSync(exePath) ? exePath : undefined), 20000);
+      assert.ok(built, `构建结束但产物不存在：${exePath}`);
+
+      const status = await callTool('codeblocks_build_status', { cbp });
+      assert.strictEqual(status.ok, true, JSON.stringify(status).slice(0, 200));
+      assert.ok(Array.isArray(status.projects) && status.projects.length === 1, '构建状态缺少本项目摘要');
+      assert.strictEqual(status.projects[0].success, true);
+    } finally {
+      fs.rmSync(projDir, { recursive: true, force: true });
+    }
+  });
+
+  // ---- 调试桥：无会话时的状态语义（扩展侧 vscode.debug 接线） ----
+  t.test('invokeTool codeblocks_debug：state=inactive / stop=not-running', async () => {
+    const state = await callTool('codeblocks_debug', { action: 'state' });
+    assert.strictEqual(state.active, false, `预期无活动会话：${JSON.stringify(state)}`);
+
+    const stopped = await callTool('codeblocks_debug', { action: 'stop' });
+    assert.strictEqual(stopped.ok, false, '无会话 stop 应返回错误');
+    assert.strictEqual(stopped.error && stopped.error.code, 'not-running', JSON.stringify(stopped));
   });
 });

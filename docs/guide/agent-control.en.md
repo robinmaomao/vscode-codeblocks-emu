@@ -1,6 +1,6 @@
 # Agent Control (Copilot / MCP / CLI)
 
-> Version: 0.8.140+ | Requires VS Code **1.102.0+**
+> Version: **0.8.141-agent-control** (pre-release build of `feat/agent-control`) | Requires VS Code **1.102.0+**
 >
 > This page explains how AI agents (GitHub Copilot Chat agent mode) and any MCP client or shell
 > can fully control Code::Blocks projects through this extension: read/edit `.cbp`, build, rebuild,
