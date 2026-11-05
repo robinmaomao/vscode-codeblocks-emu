@@ -149,6 +149,44 @@ function emptySummary(project: Project, targetTitle: string, compiler: Compiler,
   };
 }
 
+/** makefile 模式：Clean（对齐 UseMake → DoCleanWithMake） */
+export async function cleanProjectTarget(
+  project: Project,
+  targetTitle: string,
+  deps: BuildProjectDeps,
+): Promise<BuildProjectResult> {
+  const startMs = Date.now();
+  const vt = project.virtualTargets.find((v) => v.title === targetTitle);
+  const titles: string[] = vt ? vt.targets : [targetTitle];
+  const compiler = deps.getCompiler(project.compilerId);
+  const summary = emptySummary(project, targetTitle, compiler, true, startMs);
+  let ok = true;
+
+  for (const title of titles) {
+    const target = project.buildTargets.find((t) => t.title === title);
+    if (!target) continue;
+    if (project.makefileIsCustom) {
+      const cleanCmd = getMakeCommand(project, target, 'clean', deps.getCompiler);
+      if (cleanCmd) {
+        const cwd = project.executionDir ? path.resolve(project.basePath, project.executionDir) : project.basePath;
+        const code = await runShellCommand(cleanCmd, cwd, deps.output, deps.cancel);
+        if (code !== null && (code < 0 || code > (deps.getCompiler(target.compilerId || project.compilerId).switches.statusSuccess ?? 0))) {
+          ok = false;
+        }
+        continue;
+      }
+    }
+    const targetCompiler = deps.getCompiler(target.compilerId || project.compilerId);
+    new BuildEngine(project, targetCompiler, deps.output, (id) => deps.resolveCompiler(id)).cleanTarget(target);
+  }
+
+  return {
+    ok,
+    reportToUi: false,
+    summary: { ...summary, success: ok, failedCount: ok ? 0 : 1, linkSuccess: ok, durationMs: Date.now() - startMs },
+  };
+}
+
 /**
  * 构建单个项目的一个目标（支持虚拟目标展开）。
  *
