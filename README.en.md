@@ -88,6 +88,10 @@ Open a `.cbp` / `.workspace` project directly in VS Code and get a build, debug,
 
 - 📊 **Helper tools**: code statistics, TODO scan, AStyle formatting, **Tidy comments**, **header guards** (including auto-insert for new files), **Swap Header / Source**, **custom tools** (Configure tools: `codeblocks.tools` + dynamic Tools menu entries), **show compiler commands**, **Makefile export**, **project import** (Dev-C++ / VC6 / VS2010+ → `.cbp`), **workspace dependency editing** (with cycle detection), **Open default.conf** (entry point for editing global settings by hand).
 
+### AI / agent control
+
+- 🤖 **Full agent control**: 11 Language Model Tools (read/edit `.cbp`, build/rebuild/clean, run, debug, compiler, export, workspace) let natural language drive the whole loop "edit options -> build -> read structured diagnostics -> run"; the same surface is exposed as a **bundled MCP server** (any MCP client) and **`cb-cli`** (terminal / CI). See [docs/guide/agent-control.en.md](./docs/guide/agent-control.en.md).
+
 ## ⚠️ Known limitations (unsupported features)
 
 The following Code::Blocks features have not been ported yet; the extension warns explicitly or skips when it encounters the related configuration:

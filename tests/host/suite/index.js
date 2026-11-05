@@ -9,6 +9,7 @@ require('./debug.tests');
 require('./webview.tests');
 require('./build.tests');
 require('./toolchain.tests');
+require('./agent.tests');
 
 exports.run = async (testsRoot, callback) => {
   try {

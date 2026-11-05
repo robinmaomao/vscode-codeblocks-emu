@@ -115,4 +115,24 @@ npm.cmd test
 | [0.8.139](../release/0.8.139.md) | 8.3 短路径拼接修复（windres / Use83Paths）+ CI 回归与全量复核 |
 | [0.8.140](../release/0.8.140.md) | 构建性能归因告警改为可选（`build.performanceAdvisor`，默认关闭） |
 
-> 当前版本 **0.8.140**（正式版；本版发布说明见 [release/0.8.140.md](../release/0.8.140.md)，上一版见 [release/0.8.139.md](../release/0.8.139.md)）；无头回归见 `npm test`（`TOTAL=177 FAIL=0 SKIP=1`，另有契约 / E2E / 视觉 / 性能 / 打包 / 宿主分层，见 [测试方案](../testing/strategy.md)）。
+> 当前版本 **0.8.140**（正式版；本版发布说明见 [release/0.8.140.md](../release/0.8.140.md)，上一版见 [release/0.8.139.md](../release/0.8.139.md)）；无头回归见 `npm test`（`TOTAL=182 FAIL=0 SKIP=1`，另有契约 / E2E / 视觉 / 性能 / 打包 / 宿主分层，见 [测试方案](../testing/strategy.md)）。
+
+## 九、Agent 全控制（feat/agent-control，0.8.140 基线）
+
+目标：让 Copilot agent / 任意 MCP 客户端 / CI 完整控制工程。
+
+- **接入**：`engines.vscode` 抬到 `^1.102.0`（`@types/vscode` 固定 1.102.0）；11 个 `contributes.languageModelTools`；
+  `contributes.mcpServerDefinitionProviders`；随包 `bundle/cb-cli.js` 与 `bundle/cb-mcp.js`。
+- **内核**：`src/api/*` 无顶层 vscode 依赖（i18n 惰性回退），承载工程读改、构建/清理、运行、导出、编译器、调试。
+  - 构建内核 `src/build/buildProject.ts` + 摘要类型 `src/build/buildSummary.ts`：UI / Agent / CLI 共用同一实现。
+  - 编译器装配 `src/compiler/compilerFactory.ts`：设置读取以接口注入，扩展与 CLI 一致。
+  - 写盘：`canonical`（`serializeProject`）默认；`compile`/`link` 支持 `preserve` 定点改写；原子写 + 编码保持。
+  - 安全：字段白名单、`dryRun`、`external-modified` 保护、`allowScripts` 门控、构建互斥 `build-busy`。
+- **工具（11）**：`project_read` / `project_edit` / `project_file` / `project_target` / `build` / `build_status` /
+  `run` / `debug` / `compiler` / `export` / `workspace`。
+- **扩展接线**：`src/lm/tools.ts` 注册 LM Tools；`src/mcp/provider.ts` 注册 MCP（`process.execPath` 启动）；
+  构建 `interactive:false` 自动停调试、跳过模态确认；`BuildLogTreeProvider.getSummary()` 供 `build_status`。
+- **CLI**：`src/cli/cb-cli.ts` + `src/cli/vscodeShim.ts`（`Module._load` 拦截 `vscode`，esModuleInterop 下不可用命名空间改写）。
+- **测试**：新增 `test-api-project-edit` / `test-api-settings-reader` / `test-ai-tools-contract` / `test-cli` /
+  `test-mcp-server`（无头）、`test-e2e-cli-build`（E2E）、`host/suite/agent.tests.js`（宿主）；无头 `TOTAL=182`。
+- **文档**：`docs/guide/agent-control.md` / `.en.md`；README / usage / strategy / decisions / THIRD-PARTY-NOTICES 同步。
