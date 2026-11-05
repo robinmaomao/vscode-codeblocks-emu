@@ -58,6 +58,7 @@
 | `codeblocks.build.lowerCompilerPriority` | boolean | `false` |  | 把编译/链接子进程降到低于正常优先级；I/O 瓶颈构建上可能更慢，默认关闭。 |
 | `codeblocks.build.autoExcludeOutputs` | boolean | `true` |  | 构建前把目标文件/输出目录写入**用户设置**的 `files.watcherExclude` 与 `search.exclude`，避免 VS Code 反复扫描产物目录。 |
 | `codeblocks.build.sampleSystem` | boolean | `false` |  | 构建期间每秒采样整机 / 编辑器 / 安全软件 / 文件扫描器的 CPU 归属（仅 Windows）；不跟随 `build.profile` 自动开启。 |
+| `codeblocks.build.performanceAdvisor` | boolean | `false` |  | 构建性能顾问：构建结束输出归因告警（宿主卡顿 / CPU 饱和 / 杀软 / 文件扫描器）并在构建开始时做低内存检查。默认关闭；`build.profile` 或 `build.sampleSystem` 开启时自动生效。 |
 | `codeblocks.build.compileCommandsOnlyTargets` | boolean | `false` |  | CommandsOnly 目标（type=4）是否编译其文件；默认仅执行 pre/post 脚本。 |
 | `codeblocks.build.scriptExitGraceMs` | number | `1500` |  | pre/post-build 脚本命令结束宽限（0–60000 ms）；`0` 完全对齐 CB「只等命令本体」。 |
 | `codeblocks.build.scriptCommandTimeoutMs` | number | `0` |  | 单条脚本命令超时（0 = 不超时，上限 3600000 ms）；超时强杀整棵进程树并把构建记为失败。 |

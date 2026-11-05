@@ -2,7 +2,7 @@
   "name": "codeblocks-vscode",
   "displayName": "%extension.displayName%",
   "description": "%extension.description%",
-  "version": "0.8.139",
+  "version": "0.8.140",
   "icon": "resources/icon.png",
   "publisher": "robinmaomao",
   "author": {
@@ -738,6 +738,11 @@
             "type": "boolean",
             "default": false,
             "description": "%configuration.codeblocks.build.sampleSystem.description%"
+          },
+          "codeblocks.build.performanceAdvisor": {
+            "type": "boolean",
+            "default": false,
+            "description": "%configuration.codeblocks.build.performanceAdvisor.description%"
           },
           "codeblocks.build.compileCommandsOnlyTargets": {
             "type": "boolean",
