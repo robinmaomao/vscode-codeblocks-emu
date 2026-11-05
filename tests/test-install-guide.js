@@ -19,7 +19,8 @@ const ext = fs.readFileSync(path.resolve(__dirname, '../dist/extension.js'), 'ut
 const mod = fs.readFileSync(path.resolve(__dirname, '../dist/build/compilerCache.js'), 'utf-8');
 
 // ---- 1. package.json 贡献面 ----
-check(`版本 ${pkg.version} 为语义化版本`, /^\d+\.\d+\.\d+$/.test(pkg.version), pkg.version);
+// 允许预发布后缀（分支构建版本，如 0.8.141-agent-control）
+check(`版本 ${pkg.version} 为语义化版本`, /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(pkg.version), pkg.version);
 const cmd = (pkg.contributes.commands || []).find((c) => c.command === 'codeblocks.installCompilerCache');
 check('命令 codeblocks.installCompilerCache 已贡献', !!cmd && /Compiler Cache/.test(cmdTitle('codeblocks.installCompilerCache') || ''), cmd);
 const cfg = pkg.contributes.configuration;

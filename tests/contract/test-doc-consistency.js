@@ -55,7 +55,7 @@ const UNCOVERED = '未覆盖';
 /** 解析 docs/testing/coverage-matrix.md：版本行 / 汇总行 / 各节明细（ID 序列 + 层命中单元格 + 状态） */
 function parseMatrixDoc(text) {
   const out = { version: null, summary: [], sections: [] };
-  const vm = text.match(/数据来源：package\.json v([\d.]+)/);
+  const vm = text.match(new RegExp(`数据来源：package\\.json v(${VERSION_RE})`));
   out.version = vm ? vm[1] : null;
   let cur = null;
   for (const line of text.split(/\r?\n/)) {
@@ -304,38 +304,43 @@ function checkDocLinks(docs /* [{rel, text}] */, exists) {
 
 // ---------- D5 版本标记 ----------
 
+// 版本号允许 semver 预发布后缀（分支构建，如 0.8.141-agent-control）
+const VERSION_RE = String.raw`\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?`;
+
 function checkVersionMarkers(pkgVersion, docsByRel) {
   const v = [];
+  const reportNameRe = new RegExp(`^test-report-(${VERSION_RE})\\.md$`);
+  // `test-report-<ver>-full.md` 是独立复核报告（版本可早于当前滚动报告），不参与本规则
   const reports = fs.readdirSync(path.join(ROOT, 'docs', 'testing'))
-    .filter((f) => /^test-report-\d+\.\d+\.\d+\.md$/.test(f));
+    .filter((f) => reportNameRe.test(f) && !/-full\.md$/.test(f));
   if (!reports.length) v.push('docs/testing/ 缺少「test-report-<版本>.md」');
   for (const f of reports) {
-    const ver = f.match(/^test-report-([\d.]+)\.md$/)[1];
+    const ver = f.match(reportNameRe)[1];
     if (ver !== pkgVersion) v.push(`docs/testing/${f} 文件名版本 got=${ver} want=${pkgVersion}`);
   }
   const report = docsByRel[`docs/testing/test-report-${pkgVersion}.md`];
   if (report) {
-    const h1 = report.match(/^#\s+测试执行报告（([\d.]+)/m);
+    const h1 = report.match(new RegExp(`^#\\s+测试执行报告（(${VERSION_RE})`, 'm'));
     if (!h1 || h1[1] !== pkgVersion) v.push(`docs/testing/test-report-${pkgVersion}.md:1 标题版本 got=${h1 ? h1[1] : '(未匹配)'} want=${pkgVersion}`);
   }
   const matrix = docsByRel['docs/testing/coverage-matrix.md'];
   if (matrix) {
-    const ver = (matrix.match(/数据来源：package\.json v([\d.]+)/) || [])[1];
+    const ver = (matrix.match(new RegExp(`数据来源：package\\.json v(${VERSION_RE})`)) || [])[1];
     if (ver !== pkgVersion) v.push(`docs/testing/coverage-matrix.md:7 数据来源版本 got=${ver} want=${pkgVersion}`);
   }
   const usage = docsByRel['docs/guide/usage.md'];
   if (usage) {
-    const ver = (usage.match(/^>\s*版本：([\d.]+)/m) || [])[1];
+    const ver = (usage.match(new RegExp(`^>\\s*版本：(${VERSION_RE})`, 'm')) || [])[1];
     if (ver !== pkgVersion) v.push(`docs/guide/usage.md:3 「版本：」 got=${ver} want=${pkgVersion}`);
-    for (const m of usage.matchAll(/codeblocks-vscode-([\d.]+)\.vsix/g)) {
+    for (const m of usage.matchAll(new RegExp(`codeblocks-vscode-(${VERSION_RE})\\.vsix`, 'g'))) {
       if (m[1] !== pkgVersion) v.push(`docs/guide/usage.md VSIX 文件名版本 got=${m[1]} want=${pkgVersion}`);
     }
   }
   const progress = docsByRel['docs/dev/progress.md'];
   if (progress) {
-    const ver = (progress.match(/当前版本\s*\*\*([\d.]+)\*\*/) || [])[1];
+    const ver = (progress.match(new RegExp(`当前版本\\s*\\*\\*(${VERSION_RE})\\*\\*`)) || [])[1];
     if (ver !== pkgVersion) v.push(`docs/dev/progress.md 「当前版本」 got=${ver} want=${pkgVersion}`);
-    for (const m of progress.matchAll(/codeblocks-vscode-([\d.]+)\.vsix/g)) {
+    for (const m of progress.matchAll(new RegExp(`codeblocks-vscode-(${VERSION_RE})\\.vsix`, 'g'))) {
       if (m[1] !== pkgVersion) v.push(`docs/dev/progress.md VSIX 文件名版本 got=${m[1]} want=${pkgVersion}`);
     }
   }
@@ -355,7 +360,9 @@ function runAll() {
   for (const rel of allDocRels()) docsByRel[rel] = readDoc(rel);
   const mainDocs = mainDocRels().map((rel) => ({ rel, text: docsByRel[rel] !== undefined ? docsByRel[rel] : readDoc(rel) }));
   const linkDocs = allDocRels().map((rel) => ({ rel, text: docsByRel[rel] }));
-  const reportRel = fs.readdirSync(path.join(ROOT, 'docs', 'testing')).find((f) => /^test-report-\d+\.\d+\.\d+\.md$/.test(f));
+  const rollingReportRe = new RegExp(`^test-report-${VERSION_RE}\\.md$`);
+  const reportRel = fs.readdirSync(path.join(ROOT, 'docs', 'testing'))
+    .find((f) => rollingReportRe.test(f) && !/-full\.md$/.test(f));
   const matrixText = readDoc('docs/testing/coverage-matrix.md');
 
   return [
@@ -431,9 +438,9 @@ if (process.argv.includes('--self-test')) {
 
   expectClean('D5 基线', checkVersionMarkers(pkg.version, { 'docs/guide/usage.md': usage, 'docs/dev/progress.md': progress }));
   expectViolation('D5 篡改「版本：」标记',
-    () => checkVersionMarkers(pkg.version, { 'docs/guide/usage.md': usage.replace(/^>\s*版本：[\d.]+/m, '> 版本：0.0.1'), 'docs/dev/progress.md': progress }), '版本');
+    () => checkVersionMarkers(pkg.version, { 'docs/guide/usage.md': usage.replace(new RegExp(`^>\\s*版本：${VERSION_RE}`, 'm'), '> 版本：0.0.1'), 'docs/dev/progress.md': progress }), '版本');
   expectViolation('D5 篡改「当前版本」标记',
-    () => checkVersionMarkers(pkg.version, { 'docs/guide/usage.md': usage, 'docs/dev/progress.md': progress.replace(/当前版本\s\*\*[\d.]+\*\*/, '当前版本 **0.0.1**') }), '当前版本');
+    () => checkVersionMarkers(pkg.version, { 'docs/guide/usage.md': usage, 'docs/dev/progress.md': progress.replace(new RegExp(`当前版本\\s*\\*\\*${VERSION_RE}\\*\\*`), '当前版本 **0.0.1**') }), '当前版本');
 
   console.log(`\ndoc-consistency 自证: ${stPass} pass, ${stFail} fail`);
   process.exit(stFail ? 1 : 0);

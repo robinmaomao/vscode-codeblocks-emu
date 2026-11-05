@@ -1,6 +1,6 @@
 # Agent 控制（Copilot / MCP / CLI）
 
-> 版本：0.8.140+ ｜ 需要 VS Code **1.102.0+**
+> 版本：**0.8.141-agent-control**（`feat/agent-control` 预发布构建） ｜ 需要 VS Code **1.102.0+**
 >
 > 本页说明如何让 AI agent（GitHub Copilot Chat 的 Agent 模式）以及任意 MCP 客户端 / 命令行
 > 完整控制本扩展的 Code::Blocks 工程：读取与修改 `.cbp`、构建/重建/清理、运行、调试。

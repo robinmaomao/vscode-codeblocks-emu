@@ -67,7 +67,7 @@ npm.cmd run compile
 npm.cmd run package
 
 # 安装（版本号以 package.json 为准）
-code --install-extension "codeblocks-vscode-0.8.140.vsix" --force
+code --install-extension "codeblocks-vscode-0.8.141-agent-control.vsix" --force
 
 # 全量回归测试
 npm.cmd test
@@ -114,10 +114,13 @@ npm.cmd test
 | [0.8.138](../release/0.8.138.md) | ccache 非 ASCII 路径修复（中文/特殊符号工程路径下缓存不生效） |
 | [0.8.139](../release/0.8.139.md) | 8.3 短路径拼接修复（windres / Use83Paths）+ CI 回归与全量复核 |
 | [0.8.140](../release/0.8.140.md) | 构建性能归因告警改为可选（`build.performanceAdvisor`，默认关闭） |
+| [0.8.141-agent-control](../release/0.8.141-agent-control.md) | 分支预发布版：Agent 全控制（LM Tools + MCP + CLI），`feat/agent-control` 专用 |
 
-> 当前版本 **0.8.140**（正式版；本版发布说明见 [release/0.8.140.md](../release/0.8.140.md)，上一版见 [release/0.8.139.md](../release/0.8.139.md)）；无头回归见 `npm test`（`TOTAL=182 FAIL=0 SKIP=1`，另有契约 / E2E / 视觉 / 性能 / 打包 / 宿主分层，见 [测试方案](../testing/strategy.md)）。
+> 当前版本 **0.8.141-agent-control**（分支预发布版，`feat/agent-control` 专用；发布说明见
+> [release/0.8.141-agent-control.md](../release/0.8.141-agent-control.md)，上一正式版见 [release/0.8.140.md](../release/0.8.140.md)）；
+> 无头回归见 `npm test`（`TOTAL=184 FAIL=0 SKIP=1`，另有契约 / E2E / 视觉 / 性能 / 打包 / 宿主分层，见 [测试方案](../testing/strategy.md)）。
 
-## 九、Agent 全控制（feat/agent-control，0.8.140 基线）
+## 九、Agent 全控制（feat/agent-control，0.8.141-agent-control）
 
 目标：让 Copilot agent / 任意 MCP 客户端 / CI 完整控制工程。
 
@@ -136,8 +139,9 @@ npm.cmd test
 - **语言**：`i18n.setUiLanguage()` 让无宿主传输层一次定下运行时文案；`createRuntime()` 按
   `codeblocks.ui.language` / `CB_UI_LANGUAGE` 调用（CLI 解析错误、构建日志随设置切换中英）。
 - **测试**：新增 `test-api-project-edit`（含 query / preserve 用例）/ `test-api-settings-reader` / `test-api-tool-guards` /
-  `test-ai-tools-contract` / `test-cli` / `test-mcp-server`（无头）、`test-e2e-cli-build`（E2E）、
-  `host/suite/agent.tests.js`（宿主）；无头 `TOTAL=183`。
+  `test-api-build-service`（超时取消 / clean / 目标选择）/ `test-ai-tools-contract` / `test-cli` / `test-mcp-server`（无头）、
+  `test-e2e-cli-build`（E2E）、`host/suite/agent.tests.js`（宿主 6 项，含 invokeTool 改工程 → 构建 → 构建状态）；
+  无头 `TOTAL=184`，宿主 `30/30`。
 - **写盘守卫**：签名在**读盘前**捕获（`project_edit` / `project_file` / `project_target`），读盘期间被外部改动即
   `external-modified`；扩展侧另由 `projectChangeTracker` 拦截，`force: true` 可覆盖。
 - **文档**：`docs/guide/agent-control.md` / `.en.md`；README / usage / strategy / decisions / THIRD-PARTY-NOTICES 同步。

@@ -198,10 +198,12 @@ check('F4 LICENSE / README / CHANGELOG / THIRD-PARTY-NOTICES 齐备',
 check('F5 bundle/extension.js 存在（宿主与 VSIX 均依赖）', fs.existsSync(path.join(root, 'bundle', 'extension.js')), null, 'bundle/extension.js');
 
 // ---------- G. 版本与文档一致性 ----------
+// 版本号允许 semver 预发布后缀（分支构建，如 0.8.141-agent-control）
+const VER = String.raw`\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?`;
 const changelog = fs.readFileSync(path.join(root, 'CHANGELOG.md'), 'utf-8');
-const changelogTop = (changelog.match(/^##\s+(\d+\.\d+\.\d+)/m) || [])[1];
+const changelogTop = (changelog.match(new RegExp(`^##\\s+(${VER})`, 'm')) || [])[1];
 const readme = fs.readFileSync(path.join(root, 'README.md'), 'utf-8');
-const readmeVer = (readme.match(/版本\*\*[：:]\s*([0-9.]+)/) || readme.match(/\*\*版本\*\*[^\d]*([0-9.]+)/) || [])[1];
+const readmeVer = (readme.match(new RegExp(`版本\\*\\*[：:]\\s*(${VER})`)) || readme.match(new RegExp(`\\*\\*版本\\*\\*[^\\d]*(${VER})`)) || [])[1];
 check('G1 CHANGELOG 顶部版本 == package.json version', changelogTop === pkg.version, changelogTop, pkg.version);
 check('G2 README 标注版本 == package.json version', readmeVer === pkg.version, readmeVer, pkg.version);
 

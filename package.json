@@ -2,7 +2,7 @@
   "name": "codeblocks-vscode",
   "displayName": "%extension.displayName%",
   "description": "%extension.description%",
-  "version": "0.8.140",
+  "version": "0.8.141-agent-control",
   "icon": "resources/icon.png",
   "publisher": "robinmaomao",
   "author": {
