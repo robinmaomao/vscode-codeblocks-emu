@@ -122,7 +122,7 @@ function createVscodeMock(opts = {}) {
   };
 
   const vscode = {
-    version: '1.85.0',
+    version: '1.102.0',
     Uri,
     Position,
     Range,

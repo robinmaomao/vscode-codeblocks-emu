@@ -1,7 +1,7 @@
 // L2 VS Code 宿主集成测试启动器
 //
 // 设计要点：
-//  - 默认使用**声明的最低支持版本** VS Code（engines.vscode，本仓库 ^1.85.0）→ 由 @vscode/test-electron
+//  - 默认使用**声明的最低支持版本** VS Code（engines.vscode，本仓库 ^1.102.0）→ 由 @vscode/test-electron
 //    下载一次到 .vscode-test/（仅首次联网）；这是兼容性测试的正确靶点。
 //  - 也可指定本机安装复跑：设置 CB_VSCODE_PATH=<Code.exe>（实测本机 1.141.0 可正常跑通全部宿主用例）。
 //  - 工作区使用临时目录（无 .cbp，避免激活时弹「检测到项目」选择框干扰）

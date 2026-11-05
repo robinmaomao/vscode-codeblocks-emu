@@ -37,6 +37,7 @@
 |---|---|---|---|
 | 审计 2.5 | 无 CI / Lint 门禁 | 最小 GitHub Actions（compile + 全量回归 + vsce 冒烟） | ✔ 已实施（0.8.129-dev：测试分层七层 + `.github/workflows/ci.yml`） |
 | 审计 3.2 | 巨型模块拆分 | 按域拆包（无功能影响，低优先） | ☐ 待确认（无排期） |
+| 审计 3.3 | 最低 VS Code 版本 1.85 限制 AI 能力接入 | 抬到 `^1.102.0`（LM Tools 稳定 + MCP GA）；`@types/vscode` 固定 1.102.0，避免误用更高版本 API | ✔ 已实施（feat/agent-control：Agent 全控制改造） |
 
 > 其余审计 P1–P3 已于 0.8.97-dev 实施；F1/F1b（0.8.95-dev）、F5/F8（0.8.94-dev）、N1/N3（0.8.110-dev）、
 > N2（0.8.109-dev + 0.8.113-dev）、N6（0.8.111-dev + 0.8.112-dev）、P1–P8/G1/G3（0.8.114-dev）、
