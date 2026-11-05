@@ -105,7 +105,7 @@ The following Code::Blocks features have not been ported yet; the extension warn
 
 ## Installation
 
-> Requires VS Code **1.85.0+**; if features do not work after installing or updating, run **Reload Window**.
+> Requires VS Code **1.102.0+**; if features do not work after installing or updating, run **Reload Window**.
 
 ### Option 1: install from the VS Code Marketplace (recommended)
 

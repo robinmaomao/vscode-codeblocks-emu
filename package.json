@@ -18,7 +18,7 @@
     "url": "https://github.com/robinmaomao/vscode-codeblocks-emu/issues"
   },
   "engines": {
-    "vscode": "^1.85.0"
+    "vscode": "^1.102.0"
   },
   "categories": [
     "Programming Languages",
@@ -2125,7 +2125,7 @@
   },
   "devDependencies": {
     "@types/node": "^20.11.0",
-    "@types/vscode": "^1.85.0",
+    "@types/vscode": "1.102.0",
     "@vscode/test-electron": "^3.1.0",
     "@vscode/vsce": "^4.0.0",
     "esbuild": "^0.28.2",

@@ -183,7 +183,7 @@ jobs:
         continue-on-error: true
         run: npm run test:perf
 
-      - name: VS Code 宿主集成（自动下载 engines 最低版本 1.85.0）
+      - name: VS Code 宿主集成（自动下载 engines 最低版本 1.102.0）
         id: host
         continue-on-error: true
         run: npm run test:host

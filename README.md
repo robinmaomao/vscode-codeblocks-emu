@@ -108,7 +108,7 @@
 
 ## 安装
 
-> 要求 VS Code **1.85.0+**；安装或更新后如功能未生效，请执行 **Reload Window**。
+> 要求 VS Code **1.102.0+**；安装或更新后如功能未生效，请执行 **Reload Window**。
 
 ### 方式一：从 VS Code Marketplace 安装（推荐）
 
