@@ -28,6 +28,8 @@ import { ProjectPropertiesPanel, TargetEditData, FileEditData, BuildOptionsEditD
 import { ProjectTreeProvider } from './ui/projectTreeProvider';
 import { registerStatusBarMenu, MenuDynamicData } from './ui/statusBarMenu';
 import { BuildLogTreeProvider, BuildLogProject, BuildLogDiagnostic } from './ui/buildLogTreeProvider';
+import { buildProjectTarget } from './build/buildProject';
+import type { BuildDiagnosticsBudget } from './build/buildSummary';
 import { normalizeBuildLogAutoFocusMode, maybeAutoFocusBuildLog } from './ui/buildLogFocus';
 import { AnalysisTreeProvider, AnalysisData, AnalysisProjectInfo, LastBuildMeta } from './ui/analysisTreeProvider';
 import { SymbolTreeProvider } from './ui/symbolTreeProvider';
@@ -136,10 +138,8 @@ let lastBuildMeta: LastBuildMeta | undefined;
 let extContext: vscode.ExtensionContext | undefined;
 /** 当前一次构建累积的项目摘要（供 Build Log 视图） */
 const currentBuildProjects: BuildLogProject[] = [];
-/** 本次构建已收集的错误总数（用于 maxReportedErrors 截断判断） */
-let currentBuildErrorCount = 0;
-/** 本次构建是否因达到 maxReportedErrors 上限而被截断 */
-let maxErrorsReached = false;
+/** 本次构建的诊断预算（跨项目累计；maxReportedErrors 截断判断） */
+const buildDiagnosticsBudget: BuildDiagnosticsBudget = { errorCount: 0, truncated: false };
 /** 当前构建的取消源（「停止构建」命令与通知取消按钮共用） */
 let currentBuildCancel: BuildCancelSource | undefined;
 /** 构建进行中互斥标志（防止双开构建进程打架） */
@@ -6623,8 +6623,8 @@ async function buildWorkspaceLocked(rebuild: boolean, clearLog: boolean): Promis
 
   const buildStartMs = Date.now();
   currentBuildProjects.length = 0;
-  currentBuildErrorCount = 0;
-  maxErrorsReached = false;
+  buildDiagnosticsBudget.errorCount = 0;
+  buildDiagnosticsBudget.truncated = false;
 
   const total = openProjects.length;
   let done = 0;
@@ -6759,8 +6759,8 @@ async function buildSingleProjectLocked(filename: string, rebuild: boolean): Pro
 
   const buildStartMs = Date.now();
   currentBuildProjects.length = 0;
-  currentBuildErrorCount = 0;
-  maxErrorsReached = false;
+  buildDiagnosticsBudget.errorCount = 0;
+  buildDiagnosticsBudget.truncated = false;
 
   let ok = false;
   let cancelled = false;
@@ -6916,134 +6916,28 @@ async function cleanSingleFile(project: Project, file: ProjectFile): Promise<voi
 
 /** 构建单个项目的一个目标（被 build / buildSingleProject 复用）；支持虚拟目标展开 */
 async function buildOneProject(project: Project, targetTitle: string, rebuild: boolean, cancel?: BuildCancelHandle): Promise<boolean> {
-  // 虚拟目标：展开为其包含的物理目标，在同一个 engine.build 调用里逐个构建
-  // （项目级 pre/post 只执行一次，对齐 CodeBlocks 状态机 bsProjectPreBuild/bsProjectPostBuild）
-  const vt = project.virtualTargets.find((v) => v.title === targetTitle);
-  const targetTitles: string[] = vt ? vt.targets : [targetTitle];
-
-  const target = vt
-    ? project.buildTargets.find((t) => vt.targets.includes(t.title))
-    : project.buildTargets.find((t) => t.title === targetTitle);
-  if (!target || !supportsCurrentPlatform(target.platforms)) {
-    outputChannel.warn(logT('[Code::Blocks] Project "{0}" has no target "{1}" (or does not support the current platform), skipped', project.title, targetTitle));
-    return true;
-  }
-
-  // makefile 项目模式（对齐 UseMake：Build/Rebuild 走 make 命令而非内部引擎，GetMakeCommandFor:2178-2197）
-  if (project.makefileIsCustom) {
-    if (rebuild) {
-      const cleanCmd = getMakeCommand(project, target, 'clean');
-      if (cleanCmd && !(await runMakeBuild(project, cleanCmd, targetTitle))) return false;
-    }
-    const buildCmd = getMakeCommand(project, target, 'build');
-    if (!buildCmd) {
-      outputChannel.error(logT('[Code::Blocks] Makefile project "{0}" has no <MakeCommands><Build command=...> configured', project.title));
-      return false;
-    }
-    // 对齐 compilergcc.cpp:2560-2585：Build 前执行 askRebuildNeeded（0=已最新跳过构建）；
-    // 审计修复：原 spawnSync 无超时同步阻塞主线程 → 改异步 spawn + 30s 超时 + 取消注册（语义同 CB）
-    const mkCompiler = getCompiler(target.compilerId || project.compilerId);
-    const askCmd = getMakeCommand(project, target, 'askRebuildNeeded');
-    if (askCmd) {
-      if (mkCompiler.switches.logging === 'full') {
-        outputChannel.info(`[Code::Blocks] Checking if target is up-to-date: ${askCmd}`);
-      }
-      const askCwd = project.executionDir ? path.resolve(project.basePath, project.executionDir) : project.basePath;
-      const askCode = await runMakeAskRebuild(askCmd, askCwd, cancel);
-      if (askCode === 0) {
-        outputChannel.info(`[Code::Blocks] Target '${targetTitle}' is up to date. Nothing to be done.`);
-        return true;
-      }
-    }
-    if (mkCompiler.switches.logging !== 'full') {
-      const silentCmd = getMakeCommand(project, target, 'silentBuild');
-      if (silentCmd) return await runMakeBuild(project, silentCmd, targetTitle);
-    }
-    return await runMakeBuild(project, buildCmd, targetTitle);
-  }
-
-  const compiler = getCompiler(target.compilerId || project.compilerId);
-  // 构建 Banner 由引擎在项目 pre-build 之后、每个目标构建前打印（对齐 bsTargetPreBuild 的 PrintBanner）
-
-  // 本次项目构建的摘要数据（供 Build Log 视图）
-  const diagnostics: BuildLogDiagnostic[] = [];
-  const startMs = Date.now();
-
-  const engine = new BuildEngine(project, compiler, outputChannel, (id) => resolveTargetCompiler(id));
-  const ok = await engine.build(targetTitles, {
-    rebuild,
-    cancel,
-    onLine: (line, severity) => {
-      if (severity === 'error') outputChannel.error(line);
-      else if (severity === 'warning') outputChannel.warn(line);
-      else outputChannel.info(line);
-    },
+  const result = await buildProjectTarget(project, targetTitle, rebuild, {
+    output: outputChannel,
+    getCompiler: (id) => getCompiler(id),
+    resolveCompiler: (id) => resolveTargetCompiler(id),
+    budget: buildDiagnosticsBudget,
+    maxErrors: vscode.workspace.getConfiguration('codeblocks').get<number>('maxReportedErrors', 50),
+    // clangd ?? Build Log ????????? buildLogUsesClangdDiagnostics?
+    collectDiagnostics: !(clangdDiagnosticsEnabled && buildLogUsesClangdDiagnostics()),
     onDiagnostic: (diag, fileUri) => {
-      // clangd 接管诊断时，Problems 面板由 clangd 产出，构建引擎不再写入（避免重复）
+      // clangd ??????Problems ??? clangd ?????????????????
       if (clangdDiagnosticsEnabled) return;
-      // 按具体文件 URI 分组挂到 Problems 面板；无文件则回退到项目根
-      // 性能：归集 + 节流发布（每文件一次 set），避免每条诊断一次跨进程提交（见 DiagnosticPublisher）
-      publishBuildDiagnostic(fileUri ?? vscode.Uri.file(project.basePath), diag);
+      publishBuildDiagnostic((fileUri as vscode.Uri | undefined) ?? vscode.Uri.file(project.basePath), diag as vscode.Diagnostic);
     },
-    onStructuredDiagnostic: (d) => {
-      // Build Log 使用 clangd 诊断时，不再收集构建引擎的结构化诊断
-      if (clangdDiagnosticsEnabled && buildLogUsesClangdDiagnostics()) return;
-      // maxReportedErrors 截断：达到上限后停止收集（CodeBlocks max_reported_errors）
-      const maxErrors = vscode.workspace.getConfiguration('codeblocks').get<number>('maxReportedErrors', 50);
-      if (d.severity === 'error') {
-        if (maxErrors > 0 && currentBuildErrorCount >= maxErrors) {
-          maxErrorsReached = true;
-          return;
-        }
-        currentBuildErrorCount++;
-      }
-      diagnostics.push(d);
-    },
+    cancel,
   });
 
-  const durationMs = Date.now() - startMs;
-  const stats = engine.lastStats ?? { success: ok, compiledCount: 0, skippedCount: 0, failedCount: 0, linkSuccess: ok, linkSkipped: true, hadCommands: false, outputFilename: undefined };
-  // 取消判定：引擎统计标记或取消源已置位（用户中途停止）
-  const cancelled = !!stats.cancelled || !!cancel?.isCancelled();
-  const projectName = path.basename(path.dirname(project.filename));
+  if (result.reportToUi) currentBuildProjects.push(result.summary);
 
-  // 输出顺序调整：构建完成汇总块不再在此输出，统一由 printBuildSummaryBlocks()
-  // 在「构建成功/失败」行之后输出（构建输出的最末尾）。
-
-  // 项目源文件绝对路径（供「Build Log 使用 clangd 诊断」模式收集诊断）
-  const projectFiles = new Set<string>();
-  for (const f of project.files) projectFiles.add(f.absolutePath);
-  for (const t of project.buildTargets) {
-    for (const f of t.files) projectFiles.add(f.absolutePath);
-  }
-
-  currentBuildProjects.push({
-    projectName,
-    targetName: targetTitle,
-    compilerPath: compiler.programs.C || compiler.name,
-    success: ok,
-    compiledCount: stats.compiledCount,
-    skippedCount: stats.skippedCount,
-    failedCount: stats.failedCount,
-    linkSuccess: stats.linkSuccess,
-    linkSkipped: stats.linkSkipped,
-    outputFilename: stats.outputFilename,
-    diagnostics,
-    // 第六轮 F8：HTML 构建日志 full_command_line 命令行块（build.saveHtmlLogFullCommandLine 开启时渲染）
-    commands: [...engine.lastCommands],
-    files: [...projectFiles],
-    durationMs,
-    startTime: startMs,
-    // 输出顺序调整：汇总块数据（取消标记 / 标题 / 最慢 Top3），在输出最末尾渲染
-    cancelled,
-    projectTitle: project.title,
-    topTimings: [...engine.lastCompileTimings],
-  });
-
-  if (!ok && !cancelled) {
+  if (!result.ok && !result.summary.cancelled) {
     outputChannel.error(logT('[Code::Blocks] Project "{0}" compile failed', project.title));
   }
-  return ok;
+  return result.ok;
 }
 
 /**
@@ -7777,10 +7671,10 @@ function finishBuildSummary(allOk: boolean, buildStartMs: number): void {
     projects: [...currentBuildProjects],
     errorCount,
     warningCount,
-    truncated: maxErrorsReached,
+    truncated: buildDiagnosticsBudget.truncated,
   });
   // 达到上限时提示（CodeBlocks "More errors follow but not being shown"）
-  if (maxErrorsReached) {
+  if (buildDiagnosticsBudget.truncated) {
     outputChannel.warn(logT('[Code::Blocks] Error limit reached; further errors are no longer shown (adjust codeblocks.maxReportedErrors in the settings)'));
   }
   // 第六轮 F1：按设置决定是否自动聚焦（对齐 CB message_manager：默认仅错误时动作，成功/取消不动作；
