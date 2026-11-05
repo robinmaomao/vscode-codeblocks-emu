@@ -208,10 +208,15 @@ settings['build.compilerCachePath'] = wrapper;
 clearCompilerCacheResolveCache();
 const resUnits = new BuildEngine(resProject, compiler, makeOut([]), (id) => compiler).collectMakefileData();
 const resCompile = resUnits[0].compile[0];
+const resCmd = resCompile && resCompile.command;
+// windres 使用 8.3 短路径（目录可能被压缩为 RUNNER~1/中文资~1），不能断言原始长路径；
+// 只校验 -i 参数是存在的绝对路径、basename 为 res.rc，且未注入 cache/抑制开关。
+const resArg = resCmd && /(?:^|\s)-i\s+(?:"([^"]+)"|(\S+))/.exec(resCmd);
+const resPath = resArg && (resArg[1] || resArg[2]);
 check('资源文件（windres）不受规避影响：绝对路径 + 无抑制开关',
-  resCompile && resCompile.command.includes(path.join(resDir, 'res.rc'))
-    && !resCompile.command.includes('-fno-working-directory') && !resCompile.command.includes('fake ccache'),
-  resCompile && resCompile.command);
+  !!resPath && path.isAbsolute(resPath) && /(^|[\\/])res\.rc$/.test(resPath) && fs.existsSync(resPath)
+    && !resCmd.includes('-fno-working-directory') && !resCmd.includes('fake ccache'),
+  resCmd);
 
 // ---- 4. buildEngine 告警（每引擎一次） ----
 function makeOut(logs) {

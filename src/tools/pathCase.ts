@@ -8,6 +8,7 @@
  */
 
 import { spawnSync } from 'child_process';
+import { existsSync } from 'fs';
 import { decodeText } from './encoding';
 import { LruCache } from './lru';
 
@@ -33,14 +34,23 @@ export function shortPathWin(p: string): string {
   if (hit !== undefined) return hit;
   try {
     // for %I in ("path") do @echo %~sI —— 与 cb 的 GetShortPathName 等价
-    const r = spawnSync('cmd', ['/d', '/s', '/c', `for %I in ("${p}") do @echo %~sI`], {
+    // Node 默认会给含空格的 /c 参数整体再加一层引号，cmd /s 解析后会把结果拼成
+    // `E:\"C:\...\"`（非合法路径）；windowsVerbatimArguments 保留命令行原样。
+    // /u 让内部命令以 UTF-16LE 输出，避免非中文代码页把中文短路径写成 `??`。
+    const r = spawnSync('cmd', ['/u', '/d', '/s', '/c', `for %I in ("${p}") do @echo %~sI`], {
       encoding: 'buffer',
       windowsHide: true,
+      windowsVerbatimArguments: true,
       timeout: 2000,
     });
-    // 短路径可能含中文目录名：必须按 UTF-8 严格优先、GBK 回退解码（否则命令行里的路径会失效）
-    const out = decodeText(r.stdout ?? Buffer.alloc(0)).trim();
-    const resolved = out && !out.toLowerCase().includes('not found') ? out : p;
+    const raw = r.stdout ?? Buffer.alloc(0);
+    // cmd /u 输出 UTF-16LE；若宿主未按 /u 输出，再回退 UTF-8/GBK。
+    // 只有真实存在的路径才可用：畸形拼接 / 代码页丢失（??）都会在此被过滤。
+    const out = [
+      raw.toString('utf16le').replace(/^\uFEFF/, '').replace(/\0+$/, '').trim(),
+      decodeText(raw).trim(),
+    ].find((v) => v && !/not found/i.test(v) && existsSync(v));
+    const resolved = out || p;
     shortPathCache.set(key, resolved);
     return resolved;
   } catch {
