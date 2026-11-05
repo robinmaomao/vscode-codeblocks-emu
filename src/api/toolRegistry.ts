@@ -15,6 +15,7 @@ import { buildProject, BuildMode, BuildOutcome, BuildRequest, selectBuildTarget 
 import { runProject, RunOutcome, RunRequest } from './runService';
 import { exportProject, ExportKind, ExportOutcome } from './exportService';
 import { loadWorkspace, requireCbpPath, updateWorkspaceDependencies } from './projectStore';
+import { captureSignature, signatureChanged } from './projectStore';
 import { applyUnitOptionToText, isPreserveCapable } from './projectEdit';
 import { readProjectText, writeTextAtomic } from './projectStore';
 import type { CompilerProvider } from './compilerService';
@@ -179,10 +180,14 @@ const projectEdit: ToolDefinition = {
     }
 
     const project = await loadForEdit(ctx, cbp);
+    const guard = captureSignature(cbp);
     const outcome = applyEdits(project, ops, { allowScripts: input.allowScripts === true });
     const warnings = [...outcome.warnings];
     if (format === 'preserve') warnings.push('preserve mode only supports file compile/link edits; falling back to canonical rewrite.');
     if (!dryRun && outcome.changed.length > 0) {
+      if (!input.force && signatureChanged(cbp, guard)) {
+        fail('external-modified', `The project file was modified while editing: ${cbp}`, { hint: 'Pass force: true to overwrite.' });
+      }
       await ctx.saveProject(project, { force: input.force === true, isExternallyModified: ctx.isExternallyModified });
     }
     return {

@@ -77,6 +77,24 @@ check('E7 新增文件', r3.ok && r3.written, r3.changed);
 const afterAdd = new ProjectParser().parse(cbp);
 const added = afterAdd.files.find((f) => f.relativeFilename === 'added.c');
 check('E8 新文件属性', !!added && added.compile === true && added.link === false && added.buildTargets.includes('Debug'), added && { compile: added.compile, link: added.link, targets: added.buildTargets });
+const dbg = afterAdd.buildTargets.find((t) => t.title === 'Debug');
+const rel = afterAdd.buildTargets.find((t) => t.title === 'Release');
+check('E8b 目标 files 同步（仅 Debug）', dbg.files.some((f) => f.relativeFilename === 'added.c') && !rel.files.some((f) => f.relativeFilename === 'added.c'), {
+  debug: dbg.files.map((f) => f.relativeFilename), release: rel.files.map((f) => f.relativeFilename),
+});
+check('E8c project.files 与 target.files 同一对象', dbg.files.find((f) => f.relativeFilename === 'added.c') === added);
+
+// 无 targets 的新文件 = 属于所有目标
+fs.writeFileSync(path.join(path.dirname(cbp), 'all.c'), 'int all_fn(void){return 1;}\n');
+const rAll = editProject(cbp, [{ op: 'addFile', file: 'all.c' }]);
+const afterAll = new ProjectParser().parse(cbp);
+const allEntry = afterAll.files.find((f) => f.relativeFilename === 'all.c');
+check('E8d 无 targets 归属所有目标', rAll.ok && afterAll.buildTargets.every((t) => t.files.some((f) => f.relativeFilename === 'all.c')), afterAll.buildTargets.map((t) => t.title));
+
+// 编辑已加入文件后，目标侧引用同步（共享对象）
+editProject(cbp, [{ op: 'set', scope: 'file', file: 'added.c', field: 'compile', value: false }]);
+const afterToggle = new ProjectParser().parse(cbp);
+check('E8e 文件编辑影响目标列表', afterToggle.buildTargets.find((t) => t.title === 'Debug').files.find((f) => f.relativeFilename === 'added.c').compile === false);
 
 // 校验：未知字段 / 枚举越界 / 脚本门控 / 不安全路径
 function expectFail(name, fn, code) {

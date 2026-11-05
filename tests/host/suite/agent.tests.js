@@ -45,4 +45,19 @@ suite('宿主集成 · Agent 控制面', (t) => {
     assert.strictEqual(providers[0].id, 'codeblocks');
     assert.strictEqual(typeof vscode.lm.registerMcpServerDefinitionProvider, 'function');
   });
+
+  t.test('invokeTool 端到端可调用（project_read）', async () => {
+    const ext = vscode.extensions.getExtension(EXT_ID);
+    const root = process.env.CB_REPO_ROOT || ext.extensionPath;
+    const cbp = require('path').join(root, 'test-project', 'hello-cb.cbp');
+    // 宿主内直接调用（token 在真实聊天中由 VS Code 注入；这里传 undefined 等价于无会话上下文）
+    const result = await vscode.lm.invokeTool('codeblocks_project_read', { input: { cbp, section: 'summary' } }, undefined);
+    const text = (result.content || [])
+      .filter((part) => part instanceof vscode.LanguageModelTextPart)
+      .map((part) => part.value)
+      .join('');
+    const data = JSON.parse(text);
+    assert.strictEqual(data.summary.title, 'hello-cb');
+    assert.strictEqual(data.summary.targetCount, 2);
+  });
 });
