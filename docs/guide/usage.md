@@ -2,7 +2,7 @@
 
 > 语言：**中文** ｜ [English](./usage.en.md)
 >
-> 版本：0.8.141 ｜ 本扩展为 Code::Blocks 核心功能的原生移植，直接驱动 GCC / GDB，**不依赖** `tasks.json` / `launch.json`。
+> 版本：0.8.142 ｜ 本扩展为 Code::Blocks 核心功能的原生移植，直接驱动 GCC / GDB，**不依赖** `tasks.json` / `launch.json`。
 
 ---
 
@@ -51,7 +51,7 @@ Code::Blocks for VS Code 是一个「迷你 IDE 内核」：直接解析 `.cbp` 
 ### 2.1 从 VSIX 安装
 
 ```powershell
-code --install-extension codeblocks-vscode-0.8.141.vsix --force
+code --install-extension codeblocks-vscode-0.8.142.vsix --force
 ```
 
 ### 2.2 从源码构建
@@ -59,7 +59,7 @@ code --install-extension codeblocks-vscode-0.8.141.vsix --force
 ```powershell
 npm install
 npm run package
-code --install-extension codeblocks-vscode-0.8.141.vsix --force
+code --install-extension codeblocks-vscode-0.8.142.vsix --force
 ```
 
 > `npm run package` = `vsce package`（打包前自动执行 `vscode:prepublish` 钩子 = `tsc` 编译（`dist/`，本地测试用）+ **esbuild 单文件打包**（`bundle/extension.js`，发布入口））；

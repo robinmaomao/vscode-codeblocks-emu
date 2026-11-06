@@ -4,7 +4,7 @@
 > 一句话结论：**工作区路径里成对的 `[ ]` 被 VS Code 当成 glob**，AI 指令发现的搜索根因此从工程目录被截断到祖先目录，
 > 之后每次文件变更都用 `rg --files`（无任何 `-g` 过滤）枚举整棵树 ⇒ `rg.exe` + `conhost.exe` 洪水、CPU 100%。
 
-相关实现：[`src/build/workspacePathGuard.ts`](../../src/build/workspacePathGuard.ts) ｜ 发布说明：[`docs/release/0.8.136.md`](../release/0.8.136.md) ｜ 测试：[`docs/testing/test-report-0.8.141.md`](../testing/test-report-0.8.141.md)
+相关实现：[`src/build/workspacePathGuard.ts`](../../src/build/workspacePathGuard.ts) ｜ 发布说明：[`docs/release/0.8.136.md`](../release/0.8.136.md) ｜ 测试：[`docs/testing/test-report-0.8.142.md`](../testing/test-report-0.8.142.md)
 
 ---
 
