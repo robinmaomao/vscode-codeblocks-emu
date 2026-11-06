@@ -67,7 +67,7 @@ npm.cmd run compile
 npm.cmd run package
 
 # 安装（版本号以 package.json 为准）
-code --install-extension "codeblocks-vscode-0.8.140.vsix" --force
+code --install-extension "codeblocks-vscode-0.8.141.vsix" --force
 
 # 全量回归测试
 npm.cmd test
@@ -114,5 +114,6 @@ npm.cmd test
 | [0.8.138](../release/0.8.138.md) | ccache 非 ASCII 路径修复（中文/特殊符号工程路径下缓存不生效） |
 | [0.8.139](../release/0.8.139.md) | 8.3 短路径拼接修复（windres / Use83Paths）+ CI 回归与全量复核 |
 | [0.8.140](../release/0.8.140.md) | 构建性能归因告警改为可选（`build.performanceAdvisor`，默认关闭） |
+| [0.8.141](../release/0.8.141.md) | 打开工程后 clangd 不重启（不分析）修复 + 编译错误自动跳转修复 |
 
-> 当前版本 **0.8.140**（正式版；本版发布说明见 [release/0.8.140.md](../release/0.8.140.md)，上一版见 [release/0.8.139.md](../release/0.8.139.md)）；无头回归见 `npm test`（`TOTAL=177 FAIL=0 SKIP=1`，另有契约 / E2E / 视觉 / 性能 / 打包 / 宿主分层，见 [测试方案](../testing/strategy.md)）。
+> 当前版本 **0.8.141**（正式版；本版发布说明见 [release/0.8.141.md](../release/0.8.141.md)，上一版见 [release/0.8.140.md](../release/0.8.140.md)）；无头回归见 `npm test`（`TOTAL=178 FAIL=0 SKIP=1`，另有契约 / E2E / 视觉 / 性能 / 打包 / 宿主分层，见 [测试方案](../testing/strategy.md)）。

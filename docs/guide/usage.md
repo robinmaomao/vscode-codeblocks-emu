@@ -2,7 +2,7 @@
 
 > 语言：**中文** ｜ [English](./usage.en.md)
 >
-> 版本：0.8.140 ｜ 本扩展为 Code::Blocks 核心功能的原生移植，直接驱动 GCC / GDB，**不依赖** `tasks.json` / `launch.json`。
+> 版本：0.8.141 ｜ 本扩展为 Code::Blocks 核心功能的原生移植，直接驱动 GCC / GDB，**不依赖** `tasks.json` / `launch.json`。
 
 ---
 
@@ -51,7 +51,7 @@ Code::Blocks for VS Code 是一个「迷你 IDE 内核」：直接解析 `.cbp` 
 ### 2.1 从 VSIX 安装
 
 ```powershell
-code --install-extension codeblocks-vscode-0.8.140.vsix --force
+code --install-extension codeblocks-vscode-0.8.141.vsix --force
 ```
 
 ### 2.2 从源码构建
@@ -59,7 +59,7 @@ code --install-extension codeblocks-vscode-0.8.140.vsix --force
 ```powershell
 npm install
 npm run package
-code --install-extension codeblocks-vscode-0.8.140.vsix --force
+code --install-extension codeblocks-vscode-0.8.141.vsix --force
 ```
 
 > `npm run package` = `vsce package`（打包前自动执行 `vscode:prepublish` 钩子 = `tsc` 编译（`dist/`，本地测试用）+ **esbuild 单文件打包**（`bundle/extension.js`，发布入口））；
@@ -398,6 +398,13 @@ code --extensionDevelopmentPath="." --disable-extensions --new-window
 1. 命令 `Code::Blocks: Configure clangd --query-driver` —— 按当前活动工程的编译器路径生成 `--query-driver=<编译器目录>/*` 并**合并**进 VS Code 的 `clangd.arguments`（可选择写入工作区设置 / 用户设置 / 仅复制到剪贴板；写入前有预览确认，不覆盖你已有的其它参数）。
 2. 设置 `codeblocks.clangd.builtinHeaders = queryDriver` —— 让 clangd 使用从交叉编译器提取的内建头（`stddef.h` 等），而不是 clangd 自带的内建头。
 3. 把 `codeblocks.clangd.builtinHeaders` 设为 `queryDriver` 后，若 `clangd.arguments` 里还没有 `--query-driver`，扩展会在输出通道给出一条可操作提示（不会自动改你的设置）。
+
+**clangd 没按预期分析时：**
+
+- 每次**打开工程**（含从状态栏「Code::Blocks projects」入口打开检测到的工程）都会重新生成编译数据库与用户级配置；只要数据库或配置**实际变化**，扩展就会重启 clangd，
+  让已启动的语言服务器按新配置重新分析（不受 `codeblocks.clangd.restartOnActiveProjectSwitch` 限制）。
+- 输出通道会打印一行原因，例如「已打开工程，重启 clangd 以套用新的编译数据库 / 配置」，可据此确认是否触发了重启。
+- 需要手动触发时：命令 `Code::Blocks: Restart clangd Language Server`（菜单 `Code::Blocks → Settings → Restart clangd Language Server`）。
 
 
 **未安装 clangd 时的兜底（轻量符号补全）：**

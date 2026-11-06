@@ -85,8 +85,10 @@ async function main() {
     const fnChildren = sym.getChildren(fnGroup);
     check('B5 组内符号按名称排序', fnChildren.map((n) => String(n.label)).join(',') === 'main,util_add', fnChildren.map((n) => String(n.label)));
     const item = sym.getTreeItem(fnChildren[0]);
-    check('B6 符号节点带跳转 command（vscode.open，2 个参数）',
-      !!item.command && item.command.command === 'vscode.open' && item.command.arguments.length === 2, item.command);
+    check('B6 符号节点带跳转 command（codeblocks.openLocation，参数为纯标量 file/line）',
+      !!item.command && item.command.command === 'codeblocks.openLocation'
+      && item.command.arguments.length === 1
+      && item.command.arguments[0].file === 'main.c' && item.command.arguments[0].line === 3, item.command);
     check('B7 符号节点 description 显示「文件:行」', /main\.c:3/.test(String(item.description)), item.description);
 
     // ---------- C. RegistersTreeProvider（设置门控 + 适配器数据） ----------

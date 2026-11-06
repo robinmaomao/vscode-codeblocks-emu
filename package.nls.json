@@ -89,6 +89,7 @@
   "command.codeblocks.renameFile.title": "Rename File...",
   "command.codeblocks.renameVirtualFolder.title": "Rename Virtual Folder...",
   "command.codeblocks.resetViewLayout.title": "Code::Blocks: Reset View Layout",
+  "command.codeblocks.restartClangd.title": "Code::Blocks: Restart clangd Language Server",
   "command.codeblocks.run.title": "Code::Blocks: Run",
   "command.codeblocks.runTool.title": "Code::Blocks: Run Tool",
   "command.codeblocks.saveProjectAsTemplate.title": "Code::Blocks: Save Project as Template…",
