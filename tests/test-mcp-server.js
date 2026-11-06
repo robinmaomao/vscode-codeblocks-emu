@@ -1,4 +1,6 @@
-// MCP server 协议回归：initialize → tools/list → tools/call（成功 + 错误分支）
+// MCP server 协议回归：initialize → tools/list → tools/call（成功 + 错误分支 + 开关/只读门控）
+const fs = require('fs');
+const os = require('os');
 const path = require('path');
 const { Client } = require('@modelcontextprotocol/sdk/client/index.js');
 const { StdioClientTransport } = require('@modelcontextprotocol/sdk/client/stdio.js');
@@ -42,6 +44,50 @@ function check(name, cond, got) {
   check('M6 未知工具报错', unknown.isError === true && /Unknown tool/.test(unknown.content?.[0]?.text ?? ''));
 
   await client.close();
+
+  /** 用给定工作区设置启动一个独立 server（cwd 指向临时工作区，隔离用户设置） */
+  const startWith = async (settings) => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cb-mcp-off-'));
+    fs.mkdirSync(path.join(dir, '.vscode'), { recursive: true });
+    fs.writeFileSync(path.join(dir, '.vscode', 'settings.json'), JSON.stringify(settings), 'utf-8');
+    const transport = new StdioClientTransport({
+      command: process.execPath,
+      args: [SERVER],
+      cwd: dir,
+      env: { ...process.env, APPDATA: dir },
+      stderr: 'pipe',
+    });
+    const c = new Client({ name: 'cb-mcp-test', version: '1.0.0' }, { capabilities: {} });
+    await c.connect(transport);
+    return { c, dir };
+  };
+
+  const off = await startWith({ 'codeblocks.agent.enabled': false });
+  try {
+    const offList = await off.c.listTools();
+    check('M7 总闸关闭 → tools/list 为空', offList.tools.length === 0, offList.tools.length);
+    const denied = await off.c.callTool({ name: 'codeblocks_project_read', arguments: { cbp: CBP, section: 'summary' } });
+    check('M8 总闸关闭 → 调用返回 disabled',
+      denied.isError === true && /disabled/.test(denied.content?.[0]?.text ?? ''), (denied.content?.[0]?.text ?? '').slice(0, 160));
+  } finally {
+    await off.c.close();
+    fs.rmSync(off.dir, { recursive: true, force: true });
+  }
+
+  const ro = await startWith({ 'codeblocks.agent.readOnly': true });
+  try {
+    const roRead = await ro.c.callTool({ name: 'codeblocks_project_read', arguments: { cbp: CBP, section: 'summary' } });
+    check('M9 只读模式 → 查询仍可用', roRead.isError !== true, (roRead.content?.[0]?.text ?? '').slice(0, 120));
+    const roEdit = await ro.c.callTool({
+      name: 'codeblocks_project_edit',
+      arguments: { cbp: CBP, ops: [{ op: 'set', scope: 'project', field: 'title', value: 'nope' }] },
+    });
+    check('M10 只读模式 → 写操作返回 read-only',
+      roEdit.isError === true && /read-only/.test(roEdit.content?.[0]?.text ?? ''), (roEdit.content?.[0]?.text ?? '').slice(0, 160));
+  } finally {
+    await ro.c.close();
+    fs.rmSync(ro.dir, { recursive: true, force: true });
+  }
 })().then(() => {
   console.log(`\nMCP server: ${pass} pass, ${fail} fail`);
   process.exit(fail ? 1 : 0);

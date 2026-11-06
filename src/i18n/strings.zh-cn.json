@@ -787,6 +787,8 @@
   "The default compiler is unavailable — detect or configure a compiler first": "默认编译器不可用，请先探测/配置编译器",
   "The executable does not exist — build first ({0})": "可执行文件不存在，请先构建（{0}）",
   "[Code::Blocks] The first error has no navigable source location (linker/general error) — see the Build Log view": "[Code::Blocks] 首个错误没有可跳转的源码位置（链接期/通用错误），详见 Build Log 视图",
+  "[Code::Blocks] Agent control disabled ({0})": "[Code::Blocks] 已关闭 Agent 控制（{0}）",
+  "[Code::Blocks] Agent control enabled: {0} tools (read-only={1})": "[Code::Blocks] 已启用 Agent 控制：{0} 个工具（只读={1}）",
   "The host program does not exist — build first ({0})": "宿主程序不存在，请先构建（{0}）",
   "The official download page has been opened; after installing, run this command again and choose \"Re-detect and enable\".": "已打开官方下载页；安装完成后请再次运行本命令并选择「重新检测并启用」。",
   "The output has no executable extension ({0}), so Windows cannot start debugging; add the extension to the target \"Output filename\" (e.g. .exe)": "产物缺少可执行扩展名（{0}），Windows 无法启动调试；请在目标「输出文件名」中写明扩展名（如 .exe）",

@@ -36,6 +36,7 @@ import type { BuildOutcome, BuildRequest } from './api/buildService';
 import { ControlError } from './api/types';
 import { registerLanguageModelTools } from './lm/tools';
 import { registerCodeblocksMcpProvider } from './mcp/provider';
+import { isAgentEnabled, isAgentReadOnly } from './api/agentPolicy';
 import { normalizeBuildLogAutoFocusMode, maybeAutoFocusBuildLog } from './ui/buildLogFocus';
 import { openFileAtLocation } from './ui/openLocation';
 import { buildDiagnosticPathIndex, createDiagnosticResolver } from './build/diagnosticPath';
@@ -332,6 +333,79 @@ async function migrateSettingsOnce(context: vscode.ExtensionContext): Promise<vo
 
 /** 扩展侧工具上下文（延迟到激活完成、provider 就绪后创建） */
 let agentToolContext: AgentToolContext | undefined;
+
+/** 已注册的 LM Tools 句柄（设置切换时整体注销后重建，无需重载窗口） */
+let agentToolsDisposables: vscode.Disposable[] = [];
+/** 当前注册时生效的只读标记（与设置不一致时需重建上下文） */
+let agentAppliedReadOnly: boolean | undefined;
+/** MCP provider 的「定义已变化」事件（设置切换后通知宿主重新拉取） */
+const agentMcpChange = new vscode.EventEmitter<void>();
+
+/**
+ * Agent 控制面是否允许暴露：设置总闸开启 **且** 工作区受信任。
+ * 不受信任的工作区不自动获得写盘 / 执行 / 调试能力（对齐 VS Code 工作区信任模型）。
+ */
+function agentSurfaceAllowed(): boolean {
+  if (!vscode.workspace.isTrusted) return false;
+  return isAgentEnabled(vscode.workspace.getConfiguration('codeblocks'));
+}
+
+function disposeAgentTools(): void {
+  for (const d of agentToolsDisposables) {
+    try {
+      d.dispose();
+    } catch {
+      // 单个注销失败不阻断其余
+    }
+  }
+  agentToolsDisposables = [];
+  agentToolContext = undefined;
+  agentAppliedReadOnly = undefined;
+}
+
+/** 按当前设置注册 / 注销 Agent 控制面（可重入；切换即时生效） */
+function applyAgentSurface(reason: string): void {
+  if (!agentSurfaceAllowed()) {
+    const had = agentToolsDisposables.length > 0;
+    disposeAgentTools();
+    if (had) outputChannel.info(logT('[Code::Blocks] Agent control disabled ({0})', reason));
+    agentMcpChange.fire();
+    return;
+  }
+  const readOnly = isAgentReadOnly(vscode.workspace.getConfiguration('codeblocks'));
+  // 只读切换也要重建上下文（readOnly 是注册时快照，不能只改设置）
+  if (!agentToolsDisposables.length || agentAppliedReadOnly !== readOnly) {
+    disposeAgentTools();
+    const ctx = createAgentToolContext();
+    if (readOnly) ctx.readOnly = true;
+    agentToolContext = ctx;
+    // 审计日志：每次工具调用一行（工具名 / 结果 / 耗时）
+    agentToolsDisposables = registerLanguageModelTools(ctx, { log: (line) => outputChannel.info(line) });
+    agentAppliedReadOnly = readOnly;
+    outputChannel.info(logT('[Code::Blocks] Agent control enabled: {0} tools (read-only={1})', agentToolsDisposables.length, readOnly));
+  }
+  agentMcpChange.fire();
+}
+
+/** 初始化 Agent 控制面：注册 MCP provider + 监听设置/信任变化（LM Tools 由 applyAgentSurface 负责） */
+function initAgentSurface(context: vscode.ExtensionContext): void {
+  const mcpProvider = registerCodeblocksMcpProvider(context, {
+    isEnabled: agentSurfaceAllowed,
+    onDidChange: agentMcpChange.event,
+  });
+  if (mcpProvider) context.subscriptions.push(mcpProvider);
+  context.subscriptions.push(agentMcpChange);
+  // 扩展停用时注销已注册的工具（正常情况下宿主也会回收，这里保证 dispose 语义完整）
+  context.subscriptions.push(new vscode.Disposable(() => disposeAgentTools()));
+  context.subscriptions.push(vscode.workspace.onDidChangeConfiguration((e) => {
+    if (!e.affectsConfiguration('codeblocks.agent')) return;
+    applyAgentSurface('settings changed');
+  }));
+  if (typeof vscode.workspace.onDidGrantWorkspaceTrust === 'function') {
+    context.subscriptions.push(vscode.workspace.onDidGrantWorkspaceTrust(() => applyAgentSurface('workspace trusted')));
+  }
+  applyAgentSurface('activation');
+}
 
 /** 合成构建摘要（makefile 模式 / 清理路径没有 BuildEngine 统计时使用） */
 function summarizeAgentBuild(
@@ -2364,11 +2438,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   // 初始状态：无工程时仅显示 Code::Blocks 入口，有工程时显示 Target/Build/Rebuild/Compiler
   refreshStatusBars();
 
-  // Agent 控制层：Language Model Tools（+ MCP，见 registerCodeblocksMcpProvider）。
+  // Agent 控制层：LM Tools + MCP provider，受 codeblocks.agent.enabled / readOnly 与工作区信任门控。
   // 旧宿主 / 未安装 Copilot 时注册函数内部静默跳过，不影响扩展激活。
-  agentToolContext = createAgentToolContext();
-  registerLanguageModelTools(context, agentToolContext);
-  registerCodeblocksMcpProvider(context);
+  initAgentSurface(context);
 
   return;
 }

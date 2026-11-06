@@ -81,7 +81,8 @@
 | 2026-10-12 | 候选缺陷 D-12/D-13/D-20 + 能力缺口 C-01 | 全部实施（随 0.8.129-dev） |
 | 2026-10-12 | 边界/异常 E2E 新发现 D-14…D-19 | 全部修复（随 0.8.129-dev） |
 | 2026-11-04 | 审计 2.5 复核 | 已由 0.8.129-dev 测试分层 + CI 落地，状态改为 ✔；仅审计 3.2 保持待确认 |
-| 2026-11-05 | Agent 控制分支版本号 | 功能分支用 semver 预发布后缀 `0.8.141-agent-control`（不占用正式版号、可并存安装）；契约测试的版本正则同步支持 `-\w+` 后缀 |
+| 2026-11-05 | Agent 控制分支版本号 | 功能分支用 semver 预发布后缀（不占用正式版号、可并存安装）；契约测试的版本正则同步支持 `-\w+` 后缀。当前分支版本 `0.8.143-agent-control` |
+| 2026-11-06 | Agent 控制设置开关 | 总闸 `codeblocks.agent.enabled` **默认开启**（保持既有行为）、作用域 = LM Tools + 内嵌 MCP（CLI 不受影响，避免 CI 被工作区设置意外锁死）；只读 `codeblocks.agent.readOnly` 用白名单（`project_read` / `build_status` / `compiler list,info` / `workspace info,deps,list` / `debug state`）；**未受信任工作区强制按关闭处理**；策略集中在 `src/api/agentPolicy.ts` 并由 `invokeTool()` 统一拦截 |
 
 ## 3. 仍开放项
 

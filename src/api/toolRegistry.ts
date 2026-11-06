@@ -19,6 +19,7 @@ import type { CompilerProvider } from './compilerService';
 import type { CompilerSettingsLike } from '../compiler/compilerFactory';
 import type { CbOutput } from '../build/cbChannel';
 import { ControlError, EditChange, EditOp, fail, WriteFormat } from './types';
+import { isReadOnlyToolCall, READ_ONLY_HINT } from './agentPolicy';
 
 export interface OpenProjectInfo {
   filename: string;
@@ -64,6 +65,8 @@ export interface ToolContext {
   isBuildInProgress?: () => boolean;
   cancelBuild?: BuildCancelHandle;
   debug?: DebugBridge;
+  /** 只读模式（LM Tools / MCP 按设置注入；CLI 不注入 ⇒ 行为不变） */
+  readOnly?: boolean;
 }
 
 export interface ToolInputSchema {
@@ -591,5 +594,9 @@ export function findTool(name: string): ToolDefinition | undefined {
 export async function invokeTool(ctx: ToolContext, name: string, input: Record<string, unknown>): Promise<unknown> {
   const tool = findTool(name);
   if (!tool) throw new ControlError('invalid-input', `Unknown tool: ${name}`, { tools: TOOL_DEFINITIONS.map((t) => t.name) });
-  return tool!.handler(ctx, input ?? {});
+  const args = input ?? {};
+  if (ctx.readOnly && !isReadOnlyToolCall(name, args)) {
+    fail('read-only', `${name} is not allowed in read-only mode`, { hint: READ_ONLY_HINT, tool: name, action: args.action });
+  }
+  return tool!.handler(ctx, args);
 }

@@ -2,7 +2,7 @@
   "name": "codeblocks-vscode",
   "displayName": "%extension.displayName%",
   "description": "%extension.description%",
-  "version": "0.8.142",
+  "version": "0.8.143-agent-control",
   "icon": "resources/icon.png",
   "publisher": "robinmaomao",
   "author": {
@@ -1344,6 +1344,24 @@
             "type": "object",
             "default": {},
             "markdownDescription": "%configuration.codeblocks.keybindings.overrides.markdownDescription%"
+          }
+        }
+      },
+      {
+        "title": "%configuration.agent.title%",
+        "order": 100,
+        "properties": {
+          "codeblocks.agent.enabled": {
+            "type": "boolean",
+            "default": true,
+            "description": "%configuration.codeblocks.agent.enabled.description%",
+            "markdownDescription": "%configuration.codeblocks.agent.enabled.markdownDescription%"
+          },
+          "codeblocks.agent.readOnly": {
+            "type": "boolean",
+            "default": false,
+            "description": "%configuration.codeblocks.agent.readOnly.description%",
+            "markdownDescription": "%configuration.codeblocks.agent.readOnly.markdownDescription%"
           }
         }
       }

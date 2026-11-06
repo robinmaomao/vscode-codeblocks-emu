@@ -28,7 +28,7 @@ const nlsOf = (v) => {
 };
 
 const sections = pkg.contributes.configuration;
-check('configuration 是数组且为 9 个分区', Array.isArray(sections) && sections.length === 9, sections.length);
+check('configuration 是数组且为 10 个分区', Array.isArray(sections) && sections.length === 10, sections.length);
 check('分区 order 严格递增', sections.every((s, i) => i === 0 || sections[i - 1].order < s.order), sections.map((s) => s.order));
 check('分区标题均为 nls 占位符', sections.every((s) => nlsOf(s.title)), sections.map((s) => s.title));
 
@@ -40,7 +40,7 @@ for (const s of sections) {
     byKey[k] = v;
   }
 }
-check('设置项总数 = 83', keys.length === 83, keys.length);
+check('设置项总数 = 85', keys.length === 85, keys.length);
 check('设置键唯一', new Set(keys).size === keys.length, keys.length - new Set(keys).size);
 check('已移除 clangd.queryDriver', !Object.prototype.hasOwnProperty.call(byKey, 'codeblocks.clangd.queryDriver'), keys.filter((k) => /queryDriver$/.test(k)));
 

@@ -6,7 +6,7 @@ An extension that natively ports the Code::Blocks core features to VS Code — a
 
 Open a `.cbp` / `.workspace` project directly in VS Code and get a build, debug, and project browsing experience aligned with Code::Blocks.
 
-> **Author**: Robinmaomao ｜ **Version**: 0.8.142
+> **Author**: Robinmaomao ｜ **Version**: 0.8.143-agent-control
 
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](./LICENSE.md)
 
@@ -88,6 +88,12 @@ Open a `.cbp` / `.workspace` project directly in VS Code and get a build, debug,
 
 - 📊 **Helper tools**: code statistics, TODO scan, AStyle formatting, **Tidy comments**, **header guards** (including auto-insert for new files), **Swap Header / Source**, **custom tools** (Configure tools: `codeblocks.tools` + dynamic Tools menu entries), **show compiler commands**, **Makefile export**, **project import** (Dev-C++ / VC6 / VS2010+ → `.cbp`), **workspace dependency editing** (with cycle detection), **Open default.conf** (entry point for editing global settings by hand).
 
+### Agent (Copilot / MCP / CLI)
+
+- 🤖 **Agent control** (new in this branch): 11 Language Model Tools + embedded MCP server + standalone `cb-cli`, so a Copilot agent / MCP client / CI can read and edit `.cbp`, build/clean, run, debug, export and probe compilers — all three transports share one implementation.
+- 🔒 **Switches**: `codeblocks.agent.enabled` (default on) turns every tool and the MCP exposure off; `codeblocks.agent.readOnly` (default off) allows inspection tools only. Untrusted workspaces are always treated as off, and changes apply immediately.
+- See [Agent control (Copilot / MCP / CLI)](./docs/guide/agent-control.en.md).
+
 ## ⚠️ Known limitations (unsupported features)
 
 The following Code::Blocks features have not been ported yet; the extension warns explicitly or skips when it encounters the related configuration:
@@ -105,7 +111,7 @@ The following Code::Blocks features have not been ported yet; the extension warn
 
 ## Installation
 
-> Requires VS Code **1.85.0+**; if features do not work after installing or updating, run **Reload Window**.
+> Requires VS Code **1.102.0+** (the Language Model Tools / MCP provider APIs used by agent control need 1.102); if features do not work after installing or updating, run **Reload Window**.
 
 ### Option 1: install from the VS Code Marketplace (recommended)
 
@@ -117,10 +123,10 @@ code --install-extension robinmaomao.codeblocks-vscode
 
 ### Option 2: install from GitHub Releases
 
-Download the latest `codeblocks-vscode-0.8.142.vsix` from [Releases](https://github.com/robinmaomao/vscode-codeblocks-emu/releases):
+Download the latest `codeblocks-vscode-0.8.143-agent-control.vsix` from [Releases](https://github.com/robinmaomao/vscode-codeblocks-emu/releases):
 
 ```powershell
-code --install-extension codeblocks-vscode-0.8.142.vsix --force
+code --install-extension codeblocks-vscode-0.8.143-agent-control.vsix --force
 ```
 
 ### Option 3: build from source
@@ -128,7 +134,7 @@ code --install-extension codeblocks-vscode-0.8.142.vsix --force
 ```powershell
 npm install
 npm run package
-code --install-extension codeblocks-vscode-0.8.142.vsix --force
+code --install-extension codeblocks-vscode-0.8.143-agent-control.vsix --force
 ```
 
 > `npm run package` = `vsce package` (packaging runs the `vscode:prepublish` hook automatically = `tsc` compile (`dist/`, for local tests) + esbuild single-file bundle (`bundle/extension.js`, the release entry)); running `npx vsce package` / `npx vsce publish` directly also builds automatically and never packs a stale or missing `bundle/`; on Windows, prefer `npm.cmd` / `npx.cmd` (PSReadLine execution policy).

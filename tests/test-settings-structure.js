@@ -1,5 +1,5 @@
 // 设置结构回归（配置整理）：
-//  - configuration 为 9 个分区块（title+order），设置项总数 83、无重复键
+//  - configuration 为 10 个分区块（title+order），设置项总数 85、无重复键
 //  - 关键默认值/枚举/scope/数值校验/DBGconfig/描述无轮次标记
 //  - 全部设置键在 dist 中被读取（无死配置；ui.symbolsView 由 when 子句使用）
 //  - 已移除的 clangd.queryDriver 不再出现
@@ -17,7 +17,7 @@ const { nlsText } = require('./_harness/nls');
 const cfg = pkg.contributes.configuration;
 check('configuration 为数组（分区块）', Array.isArray(cfg), typeof cfg);
 if (!Array.isArray(cfg)) { console.log('设置结构: 0 pass, 1 fail'); process.exit(1); }
-check('分区块数量 = 9', cfg.length === 9, cfg.length);
+check('分区块数量 = 10', cfg.length === 10, cfg.length);
 check('每块含 title + order', cfg.every((b) => typeof b.title === 'string' && b.title && Number.isFinite(b.order)), cfg.map((b) => [b.title, b.order]));
 check('order 严格递增', cfg.every((b, i) => i === 0 || cfg[i - 1].order < b.order), cfg.map((b) => b.order));
 
@@ -39,7 +39,7 @@ for (const b of cfg) {
     byKey[k] = v;
   }
 }
-check('设置项总数 = 83', keys.length === 83, keys.length);
+check('设置项总数 = 85', keys.length === 85, keys.length);
 check('已移除冗余设置 clangd.queryDriver', !keys.includes('codeblocks.clangd.queryDriver'), keys.filter((k) => /queryDriver$/.test(k)));
 check('无重复键', new Set(keys).size === keys.length, keys.length - new Set(keys).size);
 check('disableInit 默认 true（对齐 CB disable_init）', byKey['codeblocks.debug.disableInit']?.default === true, byKey['codeblocks.debug.disableInit']);
