@@ -39,10 +39,11 @@ function checkPage(file, text) {
   const name = path.basename(file);
   const ver = versionOf(file);
   const v = [];
-  const lines = text.split(/\r?\n/);
+  // 换行容错：Windows 检出（core.autocrlf=true）可能是 CRLF，统一按 LF 校验内容
+  text = text.replace(/\r\n/g, '\n');
+  const lines = text.split('\n');
 
   if (!text.endsWith('\n')) v.push('文件末尾缺少换行');
-  if (/\r/.test(text)) v.push('含 CRLF（发布页统一 LF）');
   if (/[ \t]+$/m.test(text)) v.push('存在行尾空白');
 
   // 1) H1
