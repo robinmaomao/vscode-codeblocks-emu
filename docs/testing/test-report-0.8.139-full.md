@@ -3,7 +3,7 @@
 > 生成时间：2026-11-05 ｜ 执行环境：Windows 10 x64 ｜ Node v24.19.0 / npm 11.17.0 ｜ CPU i3-10105 ×8 @ 3.70GHz ｜ 15.8GB
 > 代码版本：`0.8.139`（0.8.138 + 8.3 短路径修复），发布提交见仓库历史
 > 方案见 [测试方案](./strategy.md)；覆盖台账见 [测试覆盖矩阵](./coverage-matrix.md)；性能数据见 [性能基准](./performance-baseline.md)。
-> 本报告为**独立复核**，不改动滚动报告 [test-report-0.8.141-agent-control.md](./test-report-0.8.141-agent-control.md)，也不刷新视觉/性能基线。
+> 本报告为**独立复核**，不改动滚动报告 [test-report-0.8.142.md](./test-report-0.8.142.md)，也不刷新视觉/性能基线。
 
 ## 1. 结论摘要
 

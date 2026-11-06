@@ -40,6 +40,8 @@ const INTERNAL_RUNTIME_COMMANDS = new Set([
   'codeblocks.menu.show',
   'codeblocks.openDetectedProject',
   'codeblocks.projectManager',
+  // 跳转内部命令：由树节点 command 直接调用（纯标量参数），不需要出现在命令面板
+  'codeblocks.openLocation',
 ]);
 
 /** 在 src 中检索命令字面量（覆盖循环注册：['codeblocks.x', ...] 也含字面量） */

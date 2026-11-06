@@ -4,13 +4,13 @@
 > 判定口径：契约项 ID（命令/视图/设置键/键位/语言/语法/DAP 能力标记）在对应测试层源码中出现即计为命中；
 > 视觉层/性能层不引用命令 ID 字面量，按 `EXPLICIT_HITS`（面/引擎级覆盖）人工补充，明细见脚本内注释。
 > 列 `src` 表示实现存在（不算测试覆盖）；`契约/无头/E2E/视觉/性能/宿主` 为六个自动化测试层。
-> 数据来源：package.json v0.8.141-agent-control + tests/** + src/**
+> 数据来源：package.json v0.8.142 + tests/** + src/**
 
 ## 汇总
 
 | 契约项 | 总数 | 契约层 | 无头层 | E2E 层 | 视觉层 | 性能层 | 宿主层 | 未覆盖 | 覆盖率 |
 |--------|------|--------|--------|--------|--------|--------|--------|--------|--------|
-| 命令 | 110 | 3 | 96 | 4 | 12 | 5 | 37 | 1 | 99% |
+| 命令 | 111 | 3 | 96 | 4 | 12 | 5 | 37 | 2 | 98% |
 | 视图 | 5 | 2 | 5 | 1 | 1 | 0 | 5 | 0 | 100% |
 | 设置 | 83 | 83 | 77 | 15 | 0 | 1 | 6 | 0 | 100% |
 | 快捷键 | 33 | 3 | 31 | 2 | 4 | 2 | 12 | 0 | 100% |
@@ -56,83 +56,84 @@
 | 33 | `codeblocks.projectProperties` | Code::Blocks: 工程属性 | · | ✔ | · | ✔ | · | ✔ | ✅ |
 | 34 | `codeblocks.generateCompileCommands` | Code::Blocks: 生成 compile_commands.json (IntelliSense) | · | ✔ | · | · | ✔ | ✔ | ✅ |
 | 35 | `codeblocks.cleanClangdConfig` | Code::Blocks: 清理失效的 clangd 配置片段 | · | ✔ | · | · | · | · | ✅ |
-| 36 | `codeblocks.clangd.applyQueryDriver` | Code::Blocks: 配置 clangd --query-driver | · | ✔ | · | · | · | · | ✅ |
-| 37 | `codeblocks.debug` | Code::Blocks: 调试 | · | ✔ | ✔ | · | · | ✔ | ✅ |
-| 38 | `codeblocks.codeStats` | Code::Blocks: 代码统计 | · | · | · | · | · | ✔ | ✅ |
-| 39 | `codeblocks.todoList` | Code::Blocks: TODO 列表 | · | · | · | · | · | ✔ | ✅ |
-| 40 | `codeblocks.todo.add` | Code::Blocks: 添加 TODO 项... | · | ✔ | · | · | · | · | ✅ |
-| 41 | `codeblocks.bookmarks.toggle` | Code::Blocks: 切换书签 | · | ✔ | · | · | · | · | ✅ |
-| 42 | `codeblocks.bookmarks.prev` | Code::Blocks: 上一个书签 | · | ✔ | · | · | · | · | ✅ |
-| 43 | `codeblocks.bookmarks.next` | Code::Blocks: 下一个书签 | · | ✔ | · | · | · | · | ✅ |
-| 44 | `codeblocks.bookmarks.clearAll` | Code::Blocks: 清除全部书签 | · | ✔ | · | · | · | · | ✅ |
-| 45 | `codeblocks.openIncludeFile` | Code::Blocks: 打开包含文件 | ✔ | · | · | · | · | · | ✅ |
-| 46 | `codeblocks.format` | Code::Blocks: 使用 AStyle 格式化 | · | ✔ | · | · | · | · | ✅ |
-| 47 | `codeblocks.insertHeaderGuard` | Code::Blocks: 插入头文件保护 | · | ✔ | · | · | · | · | ✅ |
-| 48 | `codeblocks.tidyComments` | Code::Blocks: 整理注释 | · | ✔ | · | · | · | · | ✅ |
-| 49 | `codeblocks.swapHeaderSource` | Code::Blocks: 切换头文件 / 源文件 | · | ✔ | · | · | · | · | ✅ |
-| 50 | `codeblocks.runTool` | Code::Blocks: 运行工具 | · | ✔ | · | · | · | · | ✅ |
-| 51 | `codeblocks.configureTools` | Code::Blocks: 配置工具... | · | ✔ | · | · | · | · | ✅ |
-| 52 | `codeblocks.showCompilerCommands` | Code::Blocks: 显示编译命令 | · | ✔ | · | · | · | ✔ | ✅ |
-| 53 | `codeblocks.exportMakefile` | Code::Blocks: 导出 Makefile | · | ✔ | · | · | · | · | ✅ |
-| 54 | `codeblocks.workspace.editDependencies` | Code::Blocks: 编辑工作区依赖 | · | ✔ | · | · | · | · | ✅ |
-| 55 | `codeblocks.importProject` | Code::Blocks: 导入工程 (Dev-C++ / VC6 / VS2010+) | · | ✔ | · | · | · | · | ✅ |
-| 56 | `codeblocks.exportTargetAsProject` | Code::Blocks: 从目标创建工程... | · | ✔ | · | · | · | · | ✅ |
-| 57 | `codeblocks.openDefaultConfig` | Code::Blocks: 打开 default.conf | · | ✔ | · | · | · | · | ✅ |
-| 58 | `codeblocks.ui.switchLanguage` | Code::Blocks: 切换界面语言… | · | ✔ | · | · | · | · | ✅ |
-| 59 | `codeblocks.moveProjectUp` | 上移 | · | ✔ | · | · | · | · | ✅ |
-| 60 | `codeblocks.moveProjectDown` | 下移 | · | ✔ | · | · | · | · | ✅ |
-| 61 | `codeblocks.removeProject` | 移除工程 | · | ✔ | · | · | · | · | ✅ |
-| 62 | `codeblocks.reloadProject` | Code::Blocks: 从磁盘重新加载工程 | · | ✔ | · | · | · | · | ✅ |
-| 63 | `codeblocks.buildProject` | 构建 | · | ✔ | · | · | · | · | ✅ |
-| 64 | `codeblocks.rebuildProject` | 重新构建 | · | ✔ | · | · | · | · | ✅ |
-| 65 | `codeblocks.cleanProject` | 清理 | · | ✔ | · | · | · | · | ✅ |
-| 66 | `codeblocks.addFile` | 添加文件... | · | ✔ | · | · | · | · | ✅ |
-| 67 | `codeblocks.addFilesRecursively` | 递归添加文件... | · | ✔ | · | · | · | · | ✅ |
-| 68 | `codeblocks.findFile` | 查找文件... | · | ✔ | · | · | · | · | ✅ |
-| 69 | `codeblocks.fileProperties` | 属性... | · | ✔ | · | · | · | ✔ | ✅ |
-| 70 | `codeblocks.renameFile` | 重命名文件... | · | ✔ | · | · | · | · | ✅ |
-| 71 | `codeblocks.newVirtualFolder` | 新建虚拟文件夹... | · | ✔ | · | · | · | · | ✅ |
-| 72 | `codeblocks.renameVirtualFolder` | 重命名虚拟文件夹... | · | ✔ | · | · | · | · | ✅ |
-| 73 | `codeblocks.deleteVirtualFolder` | 删除虚拟文件夹 | · | ✔ | · | · | · | · | ✅ |
-| 74 | `codeblocks.removeFile` | 从工程移除文件 | · | ✔ | · | · | · | · | ✅ |
-| 75 | `codeblocks.openContainingFolder` | 打开所在文件夹 | · | ✔ | · | · | · | · | ✅ |
-| 76 | `codeblocks.toggleCompile` | 编译文件 | · | ✔ | · | · | · | · | ✅ |
-| 77 | `codeblocks.toggleLink` | 链接文件 | · | ✔ | · | · | · | · | ✅ |
-| 78 | `codeblocks.compileFile` | 构建文件 | · | ✔ | · | · | ✔ | · | ✅ |
-| 79 | `codeblocks.cleanFile` | 清理文件 | · | ✔ | · | · | · | · | ✅ |
-| 80 | `codeblocks.editFileBuildCommand` | 编辑自定义构建命令... | · | ✔ | · | · | · | · | ✅ |
-| 81 | `codeblocks.nextError` | Code::Blocks: 下一个错误 | · | ✔ | · | · | · | ✔ | ✅ |
-| 82 | `codeblocks.prevError` | Code::Blocks: 上一个错误 | · | · | · | · | · | ✔ | ✅ |
-| 83 | `codeblocks.compileCurrentFile` | Code::Blocks: 编译当前文件 | · | ✔ | · | · | · | ✔ | ✅ |
-| 84 | `codeblocks.clearErrors` | Code::Blocks: 清除全部错误 | · | ✔ | · | · | · | ✔ | ✅ |
-| 85 | `codeblocks.activatePriorProject` | Code::Blocks: 激活上一个工程 | · | ✔ | · | · | · | · | ✅ |
-| 86 | `codeblocks.activateNextProject` | Code::Blocks: 激活下一个工程 | · | ✔ | · | · | · | · | ✅ |
-| 87 | `codeblocks.toggleCategorize` | Code::Blocks: 按文件类型分组显示工程树 | · | ✔ | · | · | · | ✔ | ✅ |
-| 88 | `codeblocks.clearRecentProjects` | Code::Blocks: 清除最近工程 | · | ✔ | · | · | · | · | ✅ |
-| 89 | `codeblocks.projectNotes` | Code::Blocks: 工程备注 | · | ✔ | · | · | · | · | ✅ |
-| 90 | `codeblocks.setProgramArguments` | Code::Blocks: 设置程序参数 | · | ✔ | · | · | · | · | ✅ |
-| 91 | `codeblocks.showGlobalVariables` | Code::Blocks: 显示全局变量 | · | ✔ | · | · | · | ✔ | ✅ |
-| 92 | `codeblocks.clearBacktickCache` | Code::Blocks: 清除反引号缓存 | · | ✔ | · | · | · | · | ✅ |
-| 93 | `codeblocks.keybindings.check` | Code::Blocks: 检查快捷键冲突 | · | · | · | · | · | ✔ | ✅ |
-| 94 | `codeblocks.keybindings.apply` | Code::Blocks: 应用快捷键 | · | · | · | · | · | ✔ | ✅ |
-| 95 | `codeblocks.keybindings.configure` | Code::Blocks: 配置快捷键... | · | ✔ | · | · | · | · | ✅ |
-| 96 | `codeblocks.keybindings.reset` | Code::Blocks: 重置快捷键 | · | · | · | · | · | ✔ | ✅ |
-| 97 | `codeblocks.keybindings.panel` | Code::Blocks: 快捷键设置 | · | ✔ | · | ✔ | · | ✔ | ✅ |
-| 98 | `codeblocks.keybindings.export` | Code::Blocks: 导出快捷键方案 | · | ✔ | · | · | · | · | ✅ |
-| 99 | `codeblocks.keybindings.import` | Code::Blocks: 导入快捷键方案 | · | ✔ | · | · | · | · | ✅ |
-| 100 | `codeblocks.debug.refreshRegisters` | Code::Blocks: 刷新寄存器 | · | · | · | · | · | ✔ | ✅ |
-| 101 | `codeblocks.debug.sendGdbCommand` | Code::Blocks: 发送 GDB 命令... | · | ✔ | · | · | · | · | ✅ |
-| 102 | `codeblocks.debug.setNextStatement` | Code::Blocks: 设置下一条语句 | · | ✔ | · | · | · | ✔ | ✅ |
-| 103 | `codeblocks.debug.attachToProcess` | Code::Blocks: 附加到进程... | · | ✔ | · | · | · | · | ✅ |
-| 104 | `codeblocks.debug.detach` | Code::Blocks: 分离调试 | · | ✔ | · | · | · | · | ✅ |
-| 105 | `codeblocks.debug.addSymbolFile` | Code::Blocks: 添加符号文件... | · | ✔ | · | · | · | · | ✅ |
-| 106 | `codeblocks.debug.infoFrame` | Code::Blocks: 调试信息 · 当前栈帧 | · | ✔ | · | · | · | ✔ | ✅ |
-| 107 | `codeblocks.debug.infoSharedLibrary` | Code::Blocks: 调试信息 · 已加载库 | · | ✔ | · | · | · | · | ✅ |
-| 108 | `codeblocks.debug.infoFiles` | Code::Blocks: 调试信息 · 目标与文件 | · | ✔ | · | · | · | ✔ | ✅ |
-| 109 | `codeblocks.debug.infoFloat` | Code::Blocks: 调试信息 · FPU 状态 | · | ✔ | · | · | · | · | ✅ |
-| 110 | `codeblocks.debug.infoSignals` | Code::Blocks: 调试信息 · 信号处理 | · | ✔ | · | · | · | · | ✅ |
+| 36 | `codeblocks.restartClangd` | Code::Blocks: 重启 clangd 语言服务器 | · | · | · | · | · | · | ⚠ 未覆盖 |
+| 37 | `codeblocks.clangd.applyQueryDriver` | Code::Blocks: 配置 clangd --query-driver | · | ✔ | · | · | · | · | ✅ |
+| 38 | `codeblocks.debug` | Code::Blocks: 调试 | · | ✔ | ✔ | · | · | ✔ | ✅ |
+| 39 | `codeblocks.codeStats` | Code::Blocks: 代码统计 | · | · | · | · | · | ✔ | ✅ |
+| 40 | `codeblocks.todoList` | Code::Blocks: TODO 列表 | · | · | · | · | · | ✔ | ✅ |
+| 41 | `codeblocks.todo.add` | Code::Blocks: 添加 TODO 项... | · | ✔ | · | · | · | · | ✅ |
+| 42 | `codeblocks.bookmarks.toggle` | Code::Blocks: 切换书签 | · | ✔ | · | · | · | · | ✅ |
+| 43 | `codeblocks.bookmarks.prev` | Code::Blocks: 上一个书签 | · | ✔ | · | · | · | · | ✅ |
+| 44 | `codeblocks.bookmarks.next` | Code::Blocks: 下一个书签 | · | ✔ | · | · | · | · | ✅ |
+| 45 | `codeblocks.bookmarks.clearAll` | Code::Blocks: 清除全部书签 | · | ✔ | · | · | · | · | ✅ |
+| 46 | `codeblocks.openIncludeFile` | Code::Blocks: 打开包含文件 | ✔ | · | · | · | · | · | ✅ |
+| 47 | `codeblocks.format` | Code::Blocks: 使用 AStyle 格式化 | · | ✔ | · | · | · | · | ✅ |
+| 48 | `codeblocks.insertHeaderGuard` | Code::Blocks: 插入头文件保护 | · | ✔ | · | · | · | · | ✅ |
+| 49 | `codeblocks.tidyComments` | Code::Blocks: 整理注释 | · | ✔ | · | · | · | · | ✅ |
+| 50 | `codeblocks.swapHeaderSource` | Code::Blocks: 切换头文件 / 源文件 | · | ✔ | · | · | · | · | ✅ |
+| 51 | `codeblocks.runTool` | Code::Blocks: 运行工具 | · | ✔ | · | · | · | · | ✅ |
+| 52 | `codeblocks.configureTools` | Code::Blocks: 配置工具... | · | ✔ | · | · | · | · | ✅ |
+| 53 | `codeblocks.showCompilerCommands` | Code::Blocks: 显示编译命令 | · | ✔ | · | · | · | ✔ | ✅ |
+| 54 | `codeblocks.exportMakefile` | Code::Blocks: 导出 Makefile | · | ✔ | · | · | · | · | ✅ |
+| 55 | `codeblocks.workspace.editDependencies` | Code::Blocks: 编辑工作区依赖 | · | ✔ | · | · | · | · | ✅ |
+| 56 | `codeblocks.importProject` | Code::Blocks: 导入工程 (Dev-C++ / VC6 / VS2010+) | · | ✔ | · | · | · | · | ✅ |
+| 57 | `codeblocks.exportTargetAsProject` | Code::Blocks: 从目标创建工程... | · | ✔ | · | · | · | · | ✅ |
+| 58 | `codeblocks.openDefaultConfig` | Code::Blocks: 打开 default.conf | · | ✔ | · | · | · | · | ✅ |
+| 59 | `codeblocks.ui.switchLanguage` | Code::Blocks: 切换界面语言… | · | ✔ | · | · | · | · | ✅ |
+| 60 | `codeblocks.moveProjectUp` | 上移 | · | ✔ | · | · | · | · | ✅ |
+| 61 | `codeblocks.moveProjectDown` | 下移 | · | ✔ | · | · | · | · | ✅ |
+| 62 | `codeblocks.removeProject` | 移除工程 | · | ✔ | · | · | · | · | ✅ |
+| 63 | `codeblocks.reloadProject` | Code::Blocks: 从磁盘重新加载工程 | · | ✔ | · | · | · | · | ✅ |
+| 64 | `codeblocks.buildProject` | 构建 | · | ✔ | · | · | · | · | ✅ |
+| 65 | `codeblocks.rebuildProject` | 重新构建 | · | ✔ | · | · | · | · | ✅ |
+| 66 | `codeblocks.cleanProject` | 清理 | · | ✔ | · | · | · | · | ✅ |
+| 67 | `codeblocks.addFile` | 添加文件... | · | ✔ | · | · | · | · | ✅ |
+| 68 | `codeblocks.addFilesRecursively` | 递归添加文件... | · | ✔ | · | · | · | · | ✅ |
+| 69 | `codeblocks.findFile` | 查找文件... | · | ✔ | · | · | · | · | ✅ |
+| 70 | `codeblocks.fileProperties` | 属性... | · | ✔ | · | · | · | ✔ | ✅ |
+| 71 | `codeblocks.renameFile` | 重命名文件... | · | ✔ | · | · | · | · | ✅ |
+| 72 | `codeblocks.newVirtualFolder` | 新建虚拟文件夹... | · | ✔ | · | · | · | · | ✅ |
+| 73 | `codeblocks.renameVirtualFolder` | 重命名虚拟文件夹... | · | ✔ | · | · | · | · | ✅ |
+| 74 | `codeblocks.deleteVirtualFolder` | 删除虚拟文件夹 | · | ✔ | · | · | · | · | ✅ |
+| 75 | `codeblocks.removeFile` | 从工程移除文件 | · | ✔ | · | · | · | · | ✅ |
+| 76 | `codeblocks.openContainingFolder` | 打开所在文件夹 | · | ✔ | · | · | · | · | ✅ |
+| 77 | `codeblocks.toggleCompile` | 编译文件 | · | ✔ | · | · | · | · | ✅ |
+| 78 | `codeblocks.toggleLink` | 链接文件 | · | ✔ | · | · | · | · | ✅ |
+| 79 | `codeblocks.compileFile` | 构建文件 | · | ✔ | · | · | ✔ | · | ✅ |
+| 80 | `codeblocks.cleanFile` | 清理文件 | · | ✔ | · | · | · | · | ✅ |
+| 81 | `codeblocks.editFileBuildCommand` | 编辑自定义构建命令... | · | ✔ | · | · | · | · | ✅ |
+| 82 | `codeblocks.nextError` | Code::Blocks: 下一个错误 | · | ✔ | · | · | · | ✔ | ✅ |
+| 83 | `codeblocks.prevError` | Code::Blocks: 上一个错误 | · | · | · | · | · | ✔ | ✅ |
+| 84 | `codeblocks.compileCurrentFile` | Code::Blocks: 编译当前文件 | · | ✔ | · | · | · | ✔ | ✅ |
+| 85 | `codeblocks.clearErrors` | Code::Blocks: 清除全部错误 | · | ✔ | · | · | · | ✔ | ✅ |
+| 86 | `codeblocks.activatePriorProject` | Code::Blocks: 激活上一个工程 | · | ✔ | · | · | · | · | ✅ |
+| 87 | `codeblocks.activateNextProject` | Code::Blocks: 激活下一个工程 | · | ✔ | · | · | · | · | ✅ |
+| 88 | `codeblocks.toggleCategorize` | Code::Blocks: 按文件类型分组显示工程树 | · | ✔ | · | · | · | ✔ | ✅ |
+| 89 | `codeblocks.clearRecentProjects` | Code::Blocks: 清除最近工程 | · | ✔ | · | · | · | · | ✅ |
+| 90 | `codeblocks.projectNotes` | Code::Blocks: 工程备注 | · | ✔ | · | · | · | · | ✅ |
+| 91 | `codeblocks.setProgramArguments` | Code::Blocks: 设置程序参数 | · | ✔ | · | · | · | · | ✅ |
+| 92 | `codeblocks.showGlobalVariables` | Code::Blocks: 显示全局变量 | · | ✔ | · | · | · | ✔ | ✅ |
+| 93 | `codeblocks.clearBacktickCache` | Code::Blocks: 清除反引号缓存 | · | ✔ | · | · | · | · | ✅ |
+| 94 | `codeblocks.keybindings.check` | Code::Blocks: 检查快捷键冲突 | · | · | · | · | · | ✔ | ✅ |
+| 95 | `codeblocks.keybindings.apply` | Code::Blocks: 应用快捷键 | · | · | · | · | · | ✔ | ✅ |
+| 96 | `codeblocks.keybindings.configure` | Code::Blocks: 配置快捷键... | · | ✔ | · | · | · | · | ✅ |
+| 97 | `codeblocks.keybindings.reset` | Code::Blocks: 重置快捷键 | · | · | · | · | · | ✔ | ✅ |
+| 98 | `codeblocks.keybindings.panel` | Code::Blocks: 快捷键设置 | · | ✔ | · | ✔ | · | ✔ | ✅ |
+| 99 | `codeblocks.keybindings.export` | Code::Blocks: 导出快捷键方案 | · | ✔ | · | · | · | · | ✅ |
+| 100 | `codeblocks.keybindings.import` | Code::Blocks: 导入快捷键方案 | · | ✔ | · | · | · | · | ✅ |
+| 101 | `codeblocks.debug.refreshRegisters` | Code::Blocks: 刷新寄存器 | · | · | · | · | · | ✔ | ✅ |
+| 102 | `codeblocks.debug.sendGdbCommand` | Code::Blocks: 发送 GDB 命令... | · | ✔ | · | · | · | · | ✅ |
+| 103 | `codeblocks.debug.setNextStatement` | Code::Blocks: 设置下一条语句 | · | ✔ | · | · | · | ✔ | ✅ |
+| 104 | `codeblocks.debug.attachToProcess` | Code::Blocks: 附加到进程... | · | ✔ | · | · | · | · | ✅ |
+| 105 | `codeblocks.debug.detach` | Code::Blocks: 分离调试 | · | ✔ | · | · | · | · | ✅ |
+| 106 | `codeblocks.debug.addSymbolFile` | Code::Blocks: 添加符号文件... | · | ✔ | · | · | · | · | ✅ |
+| 107 | `codeblocks.debug.infoFrame` | Code::Blocks: 调试信息 · 当前栈帧 | · | ✔ | · | · | · | ✔ | ✅ |
+| 108 | `codeblocks.debug.infoSharedLibrary` | Code::Blocks: 调试信息 · 已加载库 | · | ✔ | · | · | · | · | ✅ |
+| 109 | `codeblocks.debug.infoFiles` | Code::Blocks: 调试信息 · 目标与文件 | · | ✔ | · | · | · | ✔ | ✅ |
+| 110 | `codeblocks.debug.infoFloat` | Code::Blocks: 调试信息 · FPU 状态 | · | ✔ | · | · | · | · | ✅ |
+| 111 | `codeblocks.debug.infoSignals` | Code::Blocks: 调试信息 · 信号处理 | · | ✔ | · | · | · | · | ✅ |
 
-未覆盖 1 项：`codeblocks.detectCompilers`
+未覆盖 2 项：`codeblocks.detectCompilers`、`codeblocks.restartClangd`
 
 ## 2. 视图
 

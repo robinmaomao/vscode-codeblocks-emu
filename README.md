@@ -6,7 +6,7 @@
 
 直接在 VS Code 中打开 `.cbp` / `.workspace` 工程，即可获得与 Code::Blocks 对齐的构建、调试与工程浏览体验。
 
-> **作者**：Robinmaomao ｜ **版本**：0.8.141-agent-control
+> **作者**：Robinmaomao ｜ **版本**：0.8.142
 
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](./LICENSE.md)
 
@@ -91,10 +91,6 @@
 
 - 📊 **辅助工具**：代码统计、TODO 扫描、AStyle 格式化、**Tidy 注释**、**头文件保护**（含新建自动插入）、**Swap Header / Source**、**自定义工具**（Configure tools：`codeblocks.tools` + Tools 菜单动态条目）、**编译器命令查看**（Show Compiler Commands）、**Makefile 导出**（Export Makefile）、**工程导入**（Dev-C++ / VC6 / VS2010+ → `.cbp`）、**工作区依赖编辑**（含环路检测）、**打开 default.conf**（全局设置手工编辑入口）。
 
-### AI / Agent 控制
-
-- 🤖 **Copilot agent 全控制**：11 个 Language Model Tools（读 / 改 `.cbp`、构建 / 重建 / 清理、运行、调试、编译器、导出、工作区），用自然语言即可完成「改编译选项 → 构建 → 读结构化诊断 → 运行」闭环；同一套能力还以**内置 MCP server**（任意 MCP 客户端）与 **`cb-cli`**（终端 / CI）提供。详见 [docs/guide/agent-control.md](./docs/guide/agent-control.md)。
-
 ## ⚠️ 已知限制（不支持的功能）
 
 以下 Code::Blocks 功能暂未移植，遇到相关配置时扩展会明确警告或跳过：
@@ -112,7 +108,7 @@
 
 ## 安装
 
-> 要求 VS Code **1.102.0+**；安装或更新后如功能未生效，请执行 **Reload Window**。
+> 要求 VS Code **1.85.0+**；安装或更新后如功能未生效，请执行 **Reload Window**。
 
 ### 方式一：从 VS Code Marketplace 安装（推荐）
 
@@ -124,10 +120,10 @@ code --install-extension robinmaomao.codeblocks-vscode
 
 ### 方式二：从 GitHub Releases 安装
 
-从 [Releases](https://github.com/robinmaomao/vscode-codeblocks-emu/releases) 下载最新 `codeblocks-vscode-0.8.141-agent-control.vsix`：
+从 [Releases](https://github.com/robinmaomao/vscode-codeblocks-emu/releases) 下载最新 `codeblocks-vscode-0.8.142.vsix`：
 
 ```powershell
-code --install-extension codeblocks-vscode-0.8.141-agent-control.vsix --force
+code --install-extension codeblocks-vscode-0.8.142.vsix --force
 ```
 
 ### 方式三：从源码构建
@@ -135,7 +131,7 @@ code --install-extension codeblocks-vscode-0.8.141-agent-control.vsix --force
 ```powershell
 npm install
 npm run package
-code --install-extension codeblocks-vscode-0.8.141-agent-control.vsix --force
+code --install-extension codeblocks-vscode-0.8.142.vsix --force
 ```
 
 > `npm run package` = `vsce package`（打包前会自动执行 `vscode:prepublish` 钩子 = `tsc` 编译（`dist/`，本地测试用）+ esbuild 单文件打包（`bundle/extension.js`，发布入口））；直接运行 `npx vsce package` / `npx vsce publish` 同样会自动构建，不会打进过期或缺失的 `bundle/`；Windows 下建议使用 `npm.cmd` / `npx.cmd`（PSReadLine 执行策略）。

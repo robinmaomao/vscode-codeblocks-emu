@@ -9,10 +9,19 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import * as i18n from '../i18n';
 import type { BuildLogDiagnostic, BuildLogProject, BuildLogSummary } from '../build/buildSummary';
+import { openFileAtLocation } from './openLocation';
 
 // 类型已下沉到 build/buildSummary.ts（构建内核与 Agent/CLI 共用）；此处仅做兼容重导出。
 export type { BuildLogDiagnostic, BuildLogProject, BuildLogSummary, BuildLogSeverity } from '../build/buildSummary';
 type BuildLogKind = 'root' | 'project' | 'info' | 'group' | 'diagnostic';
+
+/**
+ * 是否为「链接期伪文件」——`ld.exe: cannot find -lfoo` / `collect2.exe: error: ld returned 1`
+ * 之类被正则当文件名捕获的工具名，磁盘上不存在、也没有源码位置 ⇒ 不能作为跳转目标。
+ */
+function isPseudoDiagnosticFile(file: string): boolean {
+  return /^(ld|ld64|lld|collect2|link|cl)(\.exe)?$/i.test(path.basename(file));
+}
 
 class BuildLogNode extends vscode.TreeItem {
   /** 子节点（覆盖默认，允许后续赋值） */
@@ -86,7 +95,8 @@ export class BuildLogTreeProvider implements vscode.TreeDataProvider<BuildLogNod
     if (summary) {
       for (const p of summary.projects) {
         for (const d of p.diagnostics) {
-          if (d.severity === 'error' && d.file) {
+          // 链接期伪文件（ld.exe / collect2.exe / link.exe）没有源码位置，跳过去必然失败 ⇒ 不进导航列表
+          if (d.severity === 'error' && d.file && !isPseudoDiagnosticFile(d.file)) {
             this.errorList.push(d);
           }
         }
@@ -100,37 +110,46 @@ export class BuildLogTreeProvider implements vscode.TreeDataProvider<BuildLogNod
     return this.errorList.length > 0;
   }
 
-  /** 跳转到下一个错误（循环），返回是否成功 */
-  gotoNextError(): boolean {
-    if (this.errorList.length === 0) return false;
-    this.currentErrorIndex = (this.currentErrorIndex + 1) % this.errorList.length;
-    return this.gotoError(this.errorList[this.currentErrorIndex]);
+  /** 跳转到下一个错误（循环；跳过打不开的条目），返回命中的诊断或 undefined */
+  async gotoNextError(): Promise<BuildLogDiagnostic | undefined> {
+    return this.gotoByStep(1);
   }
 
   /** 跳转到第一个错误（对齐 CB auto_focus_build_errors：构建结束聚焦首个错误；不循环） */
-  gotoFirstError(): boolean {
-    if (this.errorList.length === 0) return false;
-    this.currentErrorIndex = 0;
-    return this.gotoError(this.errorList[0]);
+  async gotoFirstError(): Promise<BuildLogDiagnostic | undefined> {
+    for (let i = 0; i < this.errorList.length; i++) {
+      const d = this.errorList[i];
+      if (await this.gotoError(d)) {
+        this.currentErrorIndex = i;
+        return d;
+      }
+    }
+    return undefined;
   }
 
-  /** 跳转到上一个错误（循环），返回是否成功 */
-  gotoPreviousError(): boolean {
-    if (this.errorList.length === 0) return false;
-    this.currentErrorIndex = this.currentErrorIndex <= 0
-      ? this.errorList.length - 1
-      : this.currentErrorIndex - 1;
-    return this.gotoError(this.errorList[this.currentErrorIndex]);
+  /** 跳转到上一个错误（循环；跳过打不开的条目），返回命中的诊断或 undefined */
+  async gotoPreviousError(): Promise<BuildLogDiagnostic | undefined> {
+    return this.gotoByStep(-1);
   }
 
-  /** 打开错误所在文件并定位 */
-  private gotoError(d: BuildLogDiagnostic): boolean {
-    if (!d.file) return false;
-    const line0 = d.line && d.line > 0 ? d.line - 1 : 0;
-    const col0 = d.column && d.column > 0 ? d.column - 1 : 0;
-    const range = new vscode.Range(line0, col0, line0, col0);
-    vscode.commands.executeCommand('vscode.open', vscode.Uri.file(d.file), { selection: range, preview: true });
-    return true;
+  /** 按步长循环找下一条**能真正打开**的诊断（每条只试一次，全失败返回 undefined） */
+  private async gotoByStep(step: 1 | -1): Promise<BuildLogDiagnostic | undefined> {
+    const total = this.errorList.length;
+    if (total === 0) return undefined;
+    for (let i = 0; i < total; i++) {
+      this.currentErrorIndex = this.currentErrorIndex < 0
+        ? (step > 0 ? 0 : total - 1)
+        : (this.currentErrorIndex + step + total) % total;
+      const d = this.errorList[this.currentErrorIndex];
+      if (await this.gotoError(d)) return d;
+    }
+    return undefined;
+  }
+
+  /** 打开错误所在文件并定位（失败返回 false，由调用方继续找下一条） */
+  private gotoError(d: BuildLogDiagnostic): Promise<boolean> {
+    if (!d.file) return Promise.resolve(false);
+    return openFileAtLocation(d.file, d.line, d.column);
   }
 
   getTreeItem(element: BuildLogNode): vscode.TreeItem {
@@ -277,13 +296,11 @@ export class BuildLogTreeProvider implements vscode.TreeDataProvider<BuildLogNod
     node.tooltip = md;
 
     if (d.file) {
-      const line0 = d.line && d.line > 0 ? d.line - 1 : 0;
-      const col0 = d.column && d.column > 0 ? d.column - 1 : 0;
-      const range = new vscode.Range(line0, col0, line0, col0);
+      // 经命令跳转：参数必须是纯标量（`vscode.open` 的 `{ selection: Range }` 序列化后不再是 IRange ⇒ 不定位）
       node.command = {
-        command: 'vscode.open',
+        command: 'codeblocks.openLocation',
         title: i18n.t('Open file'),
-        arguments: [vscode.Uri.file(d.file), { selection: range, preview: true }],
+        arguments: [{ file: d.file, line: d.line ?? 1, column: d.column ?? 1 }],
       };
     }
     return node;

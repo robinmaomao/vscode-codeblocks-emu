@@ -26,6 +26,7 @@ docs/
     manual-acceptance.md   手工验收清单
     performance-baseline.md 性能基准（自动生成）
   release/                 逐版本发布说明（见 00-index.md）
+    pages/<tag>.md         GitHub Release 页面正文（绝对链接，固定模板）
   archive/                 仍有取证价值的历史报告
   images/                  文档截图与 GIF
 ```
@@ -35,7 +36,6 @@ docs/
 | 文档 | 用途 |
 |------|------|
 | [guide/usage.md](./guide/usage.md) | 用户手册：安装、界面、构建、调试、快捷键、设置（§13）、FAQ、已知限制（§16）｜英文版 [guide/usage.en.md](./guide/usage.en.md) |
-| [guide/agent-control.md](./guide/agent-control.md) | **Agent / MCP / CLI 控制指南**：11 个工具参考、编辑语法、典型工作流、`cb-cli`、MCP 接入、安全门控、排障｜英文版 [guide/agent-control.en.md](./guide/agent-control.en.md) |
 | [guide/settings.md](./guide/settings.md) | **设置项完整参考**：9 个分区逐项说明类型、默认值、作用域、取值与生效时机｜英文版 [guide/settings.en.md](./guide/settings.en.md) |
 | [guide/alignment.md](./guide/alignment.md) | 与 Code::Blocks 25.03 的逐项对齐依据（CB 源码位置 + 扩展实现 + 保护性差异） |
 | [dev/progress.md](./dev/progress.md) | 恢复开发进度用：总体进度、已完成能力、构建命令、关键踩坑、版本里程碑 |
@@ -49,7 +49,7 @@ docs/
 |------|------|
 | [testing/strategy.md](./testing/strategy.md) | 分层测试体系（L-1…L5 + CI）：覆盖范围、运行方式、环境约束、工具链安装 |
 | [testing/coverage-matrix.md](./testing/coverage-matrix.md) | 命令/视图/设置/键位/语言语法/DAP 能力逐项覆盖台账（`npm run coverage:matrix` 生成） |
-| [testing/test-report-0.8.141-agent-control.md](./testing/test-report-0.8.141-agent-control.md) | 当前版本的测试执行报告（滚动更新）：分层结果、覆盖台账、本版变更与缺陷处置 |
+| [testing/test-report-0.8.142.md](./testing/test-report-0.8.142.md) | 当前版本的测试执行报告（滚动更新）：分层结果、覆盖台账、本版变更与缺陷处置 |
 | [testing/test-report-0.8.139-full.md](./testing/test-report-0.8.139-full.md) | 0.8.139 完整独立复核：七层结果、失败/SKIP 取证、ccache 与短路径专项、性能明细 |
 | [testing/manual-acceptance.md](./testing/manual-acceptance.md) | 需人工 GUI 会话执行的验收项与留档要求（自动化不可覆盖的交互） |
 | [testing/performance-baseline.md](./testing/performance-baseline.md) | 微基准 + 真实构建的性能数据与预算（`npm run perf:report` 更新，含趋势） |
@@ -82,6 +82,7 @@ docs/
 
 ## 维护约定
 
-- 测试类文档维护时机：**视觉基线**在 UI/WebView 变更后刷新（`npm run visual:baseline`，随 PR 附基线 PNG）；**性能基准**在构建链路或依赖变化后刷新（`npm run perf:baseline`）并同步 [testing/performance-baseline.md](./testing/performance-baseline.md)（`npm run perf:report`）；**覆盖矩阵**在新增/调整用例后刷新（`npm run coverage:matrix`），并与当版 [测试报告](./testing/test-report-0.8.141-agent-control.md) §2 台账保持一致。
+- 测试类文档维护时机：**视觉基线**在 UI/WebView 变更后刷新（`npm run visual:baseline`，随 PR 附基线 PNG）；**性能基准**在构建链路或依赖变化后刷新（`npm run perf:baseline`）并同步 [testing/performance-baseline.md](./testing/performance-baseline.md)（`npm run perf:report`）；**覆盖矩阵**在新增/调整用例后刷新（`npm run coverage:matrix`），并与当版 [测试报告](./testing/test-report-0.8.142.md) §2 台账保持一致。
 - **文档一致性巡检**：`tests/contract/test-doc-consistency.js`（随 `npm run test:contract` 自动跑）校验「文档里的命令/相对链接真实存在」「覆盖矩阵与性能基准的计数与产物一致」「版本标记与 `package.json` 一致」；改文档后可单独跑一次，`--self-test` 自检规则本身。
+- **GitHub Release 页面**：正文放 [release/pages/](./release/pages/)（文件名 = tag，链接必须绝对），模板与发布步骤见 [release/00-index.md](./release/00-index.md#github-release-页面pages)；新增/修改后跑 `node tests/contract/gen-release-notes.js --check`，发布时用 `gh release edit <tag> --title <纯版本号> --notes-file …`（Release 标题不带主题与英文）。
 - 代码约定（空 catch 需注释、无 `console.*`、无 `@ts-ignore`、**已迁移 i18n 的文件 UI 语境禁中文字面量**）由 `tests/test-code-conventions.js` 自动检查；i18n 三条守卫 `tests/test-i18n-{nls,dict}.js` + `tests/test-i18n-runtime.js` 约定见 [dev/i18n.md](./dev/i18n.md) §6。

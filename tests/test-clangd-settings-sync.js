@@ -295,6 +295,28 @@ const sameItems = (got, want) => JSON.stringify(got) === JSON.stringify(want);
     if (v === undefined) delete process.env[k]; else process.env[k] = v;
   }
 
+  // ---------- 13) 弹窗取消后从状态栏再打开工程 → 必须重启 clangd ----------
+  //  用户场景：自动检测弹窗被 Esc 关掉 → 从状态栏「Code::Blocks projects」再打开工程 →
+  //  上一会话残留的 clangd 进程仍按旧配置（或"没有编译数据库"）在跑 ⇒ 看起来"没触发分析"。
+  //  期望：打开工程（'open' 原因）在数据库/配置有变化时重启 clangd，且不受 restartOnActiveProjectSwitch 限制。
+  app.setConfig('codeblocks.clangd.enabled', true);
+  app.setConfig('codeblocks.clangd.restartOnActiveProjectSwitch', false);
+  mock.setInstalledExtension('llvm-vs-code-extensions.vscode-clangd', { id: 'llvm-vs-code-extensions.vscode-clangd', isActive: true });
+  app.vscode.window.visibleTextEditors = []; // 没有任何 C/C++ 编辑器（状态栏打开工程的典型情况）
+  app.vscode.window.activeTextEditor = undefined;
+  app.setWarningButton('Remove');
+  await app.invoke('codeblocks.removeProject'); // 回到"未打开任何工程"（等价于弹窗被取消的状态）
+  app.records.executeCommand.length = 0;
+  const linesBefore13 = channel ? channel.lines.length : 0;
+  app.setConfig('codeblocks.clangd.suppressedWarnings', ['-Wunused-function', '-Wreopen-restart']);
+  await app.invoke('codeblocks.openProject', cbp);
+  check('打开工程：数据库/配置变化 → 重启 clangd（不受 restartOnActiveProjectSwitch=false 限制）',
+    await waitFor(() => app.records.executeCommand.some((c) => c.id === 'clangd.restart')),
+    app.records.executeCommand.map((c) => c.id));
+  check('打开工程：输出通道留痕重启原因（可排查「没触发分析」）',
+    await waitFor(() => logHas(/已打开工程，重启 clangd/, linesBefore13)),
+    channel && channel.lines.slice(linesBefore13));
+
   await app.deactivate();
   try { fs.rmSync(tmpRoot, { recursive: true, force: true }); } catch { /* 文件句柄占用时忽略 */ }
   console.log(`\nclangd 设置同步: ${pass} pass, ${fail} fail`);

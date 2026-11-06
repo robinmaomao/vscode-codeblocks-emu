@@ -67,7 +67,7 @@ npm.cmd run compile
 npm.cmd run package
 
 # 安装（版本号以 package.json 为准）
-code --install-extension "codeblocks-vscode-0.8.141-agent-control.vsix" --force
+code --install-extension "codeblocks-vscode-0.8.142.vsix" --force
 
 # 全量回归测试
 npm.cmd test
@@ -114,34 +114,15 @@ npm.cmd test
 | [0.8.138](../release/0.8.138.md) | ccache 非 ASCII 路径修复（中文/特殊符号工程路径下缓存不生效） |
 | [0.8.139](../release/0.8.139.md) | 8.3 短路径拼接修复（windres / Use83Paths）+ CI 回归与全量复核 |
 | [0.8.140](../release/0.8.140.md) | 构建性能归因告警改为可选（`build.performanceAdvisor`，默认关闭） |
-| [0.8.141-agent-control](../release/0.8.141-agent-control.md) | 分支预发布版：Agent 全控制（LM Tools + MCP + CLI），`feat/agent-control` 专用 |
+| [0.8.141](../release/0.8.141.md) | 打开工程后 clangd 不重启（不分析）修复 + 编译错误自动跳转修复 |
+| [0.8.142](../release/0.8.142.md) | 链接期错误（undefined reference）定位与跳转修复 |
 
-> 当前版本 **0.8.141-agent-control**（分支预发布版，`feat/agent-control` 专用；发布说明见
-> [release/0.8.141-agent-control.md](../release/0.8.141-agent-control.md)，上一正式版见 [release/0.8.140.md](../release/0.8.140.md)）；
-> 无头回归见 `npm test`（`TOTAL=184 FAIL=0 SKIP=1`，另有契约 / E2E / 视觉 / 性能 / 打包 / 宿主分层，见 [测试方案](../testing/strategy.md)）。
+> 当前版本 **0.8.142**（正式版；本版发布说明见 [release/0.8.142.md](../release/0.8.142.md)，上一版见 [release/0.8.141.md](../release/0.8.141.md)）；无头回归见 `npm test`（`TOTAL=178 FAIL=0 SKIP=1`，另有契约 / E2E / 视觉 / 性能 / 打包 / 宿主分层，见 [测试方案](../testing/strategy.md)）。
 
-## 九、Agent 全控制（feat/agent-control，0.8.141-agent-control）
+## 文档：GitHub Release 页面格式统一
 
-目标：让 Copilot agent / 任意 MCP 客户端 / CI 完整控制工程。
-
-- **接入**：`engines.vscode` 抬到 `^1.102.0`（`@types/vscode` 固定 1.102.0）；11 个 `contributes.languageModelTools`；
-  `contributes.mcpServerDefinitionProviders`；随包 `bundle/cb-cli.js` 与 `bundle/cb-mcp.js`。
-- **内核**：`src/api/*` 无顶层 vscode 依赖（i18n 惰性回退），承载工程读改、构建/清理、运行、导出、编译器、调试。
-  - 构建内核 `src/build/buildProject.ts` + 摘要类型 `src/build/buildSummary.ts`：UI / Agent / CLI 共用同一实现。
-  - 编译器装配 `src/compiler/compilerFactory.ts`：设置读取以接口注入，扩展与 CLI 一致。
-  - 写盘：`canonical`（`serializeProject`）默认；`compile`/`link` 支持 `preserve` 定点改写；原子写 + 编码保持。
-  - 安全：字段白名单、`dryRun`、`external-modified` 保护、`allowScripts` 门控、构建互斥 `build-busy`。
-- **工具（11）**：`project_read` / `project_edit` / `project_file` / `project_target` / `build` / `build_status` /
-  `run` / `debug` / `compiler` / `export` / `workspace`。
-- **扩展接线**：`src/lm/tools.ts` 注册 LM Tools；`src/mcp/provider.ts` 注册 MCP（`process.execPath` 启动）；
-  构建 `interactive:false` 自动停调试、跳过模态确认；`BuildLogTreeProvider.getSummary()` 供 `build_status`。
-- **CLI**：`src/cli/cb-cli.ts` + `src/cli/vscodeShim.ts`（`Module._load` 拦截 `vscode`，esModuleInterop 下不可用命名空间改写）。
-- **语言**：`i18n.setUiLanguage()` 让无宿主传输层一次定下运行时文案；`createRuntime()` 按
-  `codeblocks.ui.language` / `CB_UI_LANGUAGE` 调用（CLI 解析错误、构建日志随设置切换中英）。
-- **测试**：新增 `test-api-project-edit`（含 query / preserve 用例）/ `test-api-settings-reader` / `test-api-tool-guards` /
-  `test-api-build-service`（超时取消 / clean / 目标选择）/ `test-ai-tools-contract` / `test-cli` / `test-mcp-server`（无头）、
-  `test-e2e-cli-build`（E2E）、`host/suite/agent.tests.js`（宿主 6 项，含 invokeTool 改工程 → 构建 → 构建状态）；
-  无头 `TOTAL=184`，宿主 `30/30`。
-- **写盘守卫**：签名在**读盘前**捕获（`project_edit` / `project_file` / `project_target`），读盘期间被外部改动即
-  `external-modified`；扩展侧另由 `projectChangeTracker` 拦截，`force: true` 可覆盖。
-- **文档**：`docs/guide/agent-control.md` / `.en.md`；README / usage / strategy / decisions / THIRD-PARTY-NOTICES 同步。
+- **背景**：Release 页面标题漂移成「`0.8.NNN — 中文主题 / English theme`」，正文也从 0.8.133 起逐步变成英文 / 中英混排，与 `0.8.127`–`0.8.131` 的发布页格式不一致。
+- **统一后的格式**：标题 = **纯版本号**；正文 = `# Code::Blocks for VS Code <ver>` + `> 发布日期…｜ 正式版（上一版 → 本版 里程碑汇总）` + `## 概述`（要点 + 规模）+ 主题分节 + `## ✅ 验证` / `## ⚠️ 行为变化与升级提示` / `## 📦 安装` / `## 📬 完整变更`；链接一律绝对 URL。
+- **落地**：新增 [`release/pages/`](../release/pages/)（12 条发布页，文件名 = tag）与生成器/守卫 `tests/contract/gen-release-notes.js`（`--check` / `--emit` / `--all`）；`docs/release/*.md` 的 H1 统一为 `# <ver>`，原副标题保留为 `> **主题**：…`；`0.8.136`–`0.8.141` 的发布日期行补齐「里程碑汇总」；12 条 GitHub Release 已按新格式更新（`Latest` 仅 0.8.141），原正文已备份到 `.cb-tools/releases-backup.json`。
+- **约定**：见 [release/00-index.md](../release/00-index.md#github-release-页面pages)（模板 + `gh` 发布步骤）与 [docs/README.md](../README.md) 维护约定。
+- **回归**：`npm run test:contract` 全绿（文档一致性 D3/D4/D5 覆盖 `release/pages/**` 的命令、链接与版本标记）；`node tests/contract/gen-release-notes.js --check` 12/12 通过。

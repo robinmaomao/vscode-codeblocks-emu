@@ -89,6 +89,7 @@
   "command.codeblocks.renameFile.title": "重命名文件...",
   "command.codeblocks.renameVirtualFolder.title": "重命名虚拟文件夹...",
   "command.codeblocks.resetViewLayout.title": "Code::Blocks: 重置视图布局",
+  "command.codeblocks.restartClangd.title": "Code::Blocks: 重启 clangd 语言服务器",
   "command.codeblocks.run.title": "Code::Blocks: 运行",
   "command.codeblocks.runTool.title": "Code::Blocks: 运行工具",
   "command.codeblocks.saveProjectAsTemplate.title": "Code::Blocks: 另存为工程模板...",
