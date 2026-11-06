@@ -3,6 +3,20 @@
 本文件记录**正式版**里程碑；近期 dev 迭代的逐轮发布说明见 [`docs/release/`](./docs/release/)（`0.8.xx-dev.md`），
 `0.8.76`–`0.8.128` 的 dev 说明已合并归档到 [`docs/release/archive/`](./docs/release/archive/)；版本号与维护约定见 [`docs/release/00-index.md`](./docs/release/00-index.md)。
 
+## 0.8.142 — 2026-11-06
+
+**链接期错误（undefined reference）定位与跳转修复**
+
+- **现象**：Build Log 的 **Errors** 条目（`func_bt.c:(.text.func_bt_warning_discon+0x2e)`）点击无反应、构建结束也不自动跳；同一份日志的 **Warnings** 点击可正常跳转。0.8.141 修的是「错误跳转走 `vscode.open` 丢定位」，链接期错误则是**目标路径本身不存在**。
+- **根因**：GNU ld 输出 `obj\...\x.o:x.c:(.text+0x9): undefined reference to '…'`（或 `x.c:(.text.函数+0x2e)`）——解析器把 `obj:src:(section)` 整串当成文件名且没有行号；相对路径再按**链接命令的 cwd**（工程执行目录）拼接，得到的路径并不存在 ⇒ `openTextDocument` 失败（既不跳转也不报错）。
+- **修复**：新增纯逻辑模块 `src/build/diagnosticPath.ts`（IO 注入、按文件缓存）并在构建引擎新增 `resolveFile` 钩子：① 文件按 basename 落回工程源码（`x.o` → `x.c` 回退，同名多份取路径后缀匹配）；② 段名带函数名 → 定位到该函数，只有 `.text` 时用消息里的未定义符号 → 定位到**调用处**（跳过 `extern` 声明）。Problems 与 Build Log 共用同一份修正（含行号重算 range）。
+- **兼容**：绝对路径 + 行号已正确的诊断原样透传（resolver 返回 `undefined`）；工程外文件不猜测；`.o/.obj` 仅在工程文件表内回退；无新增设置项/命令。
+- 新增回归：`tests/test-diagnostic-path.js`（18 断言）、`tests/e2e/test-e2e-linker-diagnostic.js`（7 断言，真实 gcc 链接失败 → 诊断指向真实源文件与调用行）。
+- 发布说明见 [`docs/release/0.8.142.md`](./docs/release/0.8.142.md)；测试结果见
+  [`docs/testing/test-report-0.8.142.md`](./docs/testing/test-report-0.8.142.md)。
+- 规模（0.8.142 时点）：命令 **111**、设置 **83**、视图 5 个（均不变）；`contract 3/3`、`unit 179 FAIL=0 SKIP=1`、
+  `e2e 6/6`、`visual 24/24`、`pack 1/1`。
+
 ## 0.8.141 — 2026-11-06
 
 **打开工程后 clangd 不分析 · 编译错误不自动跳转**
@@ -29,7 +43,7 @@
 - 新增回归：`tests/test-error-navigation.js`（15 断言，含行为级导航）、`test-clangd-settings-sync.js` 第 13 步
   （复现"弹窗取消 → 状态栏打开"，`restartOnActiveProjectSwitch=false` + 无可见源文件仍重启）。
 - 发布说明见 [`docs/release/0.8.141.md`](./docs/release/0.8.141.md)；测试结果见
-  [`docs/testing/test-report-0.8.141.md`](./docs/testing/test-report-0.8.141.md)。
+  [`docs/testing/test-report-0.8.142.md`](./docs/testing/test-report-0.8.142.md)。
 - 规模（0.8.141 时点）：`contract 3/3`（契约 44 + 文档一致性 6 + 设置契约 665 断言）、`unit 178 FAIL=0 SKIP=1`、
   `e2e 5/5`（288 pass / 8 skip）、`pack 1/1`、`visual 24/24`、`all 189 FAIL=0`；
   `perf` 13 项本轮受本机负载影响（B10 真实单文件编译硬预算失败，同一时刻手工 `gcc -c` 也需 1.5 s，基线 0.14 s）。
@@ -69,7 +83,7 @@
   UTF-8/GBK 与原路径；资源文件断言兼容 8.3 短路径；`test-drive-case.js` 新增 4 条 `shortPathWin` 回归；
   新增 `tests/e2e/test-e2e-ccache.js`（21 断言，真实 ccache + 中文路径）。
 - 发布说明见 [`docs/release/0.8.139.md`](./docs/release/0.8.139.md)；测试结果见
-  [`docs/testing/test-report-0.8.141.md`](./docs/testing/test-report-0.8.141.md)，完整复核见
+  [`docs/testing/test-report-0.8.142.md`](./docs/testing/test-report-0.8.142.md)，完整复核见
   [`docs/testing/test-report-0.8.139-full.md`](./docs/testing/test-report-0.8.139-full.md)。
 - 规模（0.8.139 时点）：`contract 3/3`、`unit 176 FAIL=0 SKIP=1`、`visual 24/24`、`e2e 5/5`（288 pass / 8 skip）、
   `perf 13 pass / 0 warn`、`pack 1/1`、`host 24/24`；全量 `188 FAIL=0 SKIP=1`。
@@ -90,7 +104,7 @@
   正常，仅 `.debug_info` 有细微差异；资源文件（windres）/ `sccache` / `cache=none` 行为不变；新增设置项 **无**。
 - 实测效果：中文路径工程 `Cacheable calls` 0% → **100%**，二次构建 **4 次 Direct HIT**，Release 单文件 2.5 s → 0.1 s。
 - 发布说明见 [`docs/release/0.8.138.md`](./docs/release/0.8.138.md)；测试结果见
-  [`docs/testing/test-report-0.8.141.md`](./docs/testing/test-report-0.8.141.md)。
+  [`docs/testing/test-report-0.8.142.md`](./docs/testing/test-report-0.8.142.md)。
 - 规模（0.8.138 时点）：`contract 3/3`、`unit 176 FAIL=0 SKIP=1`、`visual 24/24`、`e2e 4/4`、`perf 12 pass / 1 warn`、
   `pack 1/1`（新增 29 条编译缓存断言）。
 
@@ -111,7 +125,7 @@
 - **编译选项面板**：「应用」改为**立即写回 `.cbp`** 并重绑重解析后的工程/目标；只管理 `options_<id>.xml` 内的选项
   （手写自定义选项保留）；应用失败在面板可见，目标已被外部改名/删除时报错而不误写工程级选项。
 - 发布说明见 [`docs/release/0.8.137.md`](./docs/release/0.8.137.md)；测试结果见
-  [`docs/testing/test-report-0.8.141.md`](./docs/testing/test-report-0.8.141.md)。
+  [`docs/testing/test-report-0.8.142.md`](./docs/testing/test-report-0.8.142.md)。
 - 规模（0.8.137 时点）：`contract 2/2`、`unit 175 FAIL=0 SKIP=1`（新增 4 个脚本 / 93 断言；
   `test-webview-panels` +21、`test-i18n-webview` +1）。
 

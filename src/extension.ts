@@ -30,6 +30,7 @@ import { registerStatusBarMenu, MenuDynamicData } from './ui/statusBarMenu';
 import { BuildLogTreeProvider, BuildLogProject, BuildLogDiagnostic } from './ui/buildLogTreeProvider';
 import { normalizeBuildLogAutoFocusMode, maybeAutoFocusBuildLog } from './ui/buildLogFocus';
 import { openFileAtLocation } from './ui/openLocation';
+import { buildDiagnosticPathIndex, createDiagnosticResolver } from './build/diagnosticPath';
 import { AnalysisTreeProvider, AnalysisData, AnalysisProjectInfo, LastBuildMeta } from './ui/analysisTreeProvider';
 import { SymbolTreeProvider } from './ui/symbolTreeProvider';
 import { BuildSpinRenderState, nextBuildSpinRender } from './ui/buildStatusRender';
@@ -7028,10 +7029,37 @@ async function buildOneProject(project: Project, targetTitle: string, rebuild: b
   const diagnostics: BuildLogDiagnostic[] = [];
   const startMs = Date.now();
 
+  // 项目源文件绝对路径（供「Build Log 使用 clangd 诊断」模式收集诊断 + 链接期诊断位置修正）
+  const projectFiles = new Set<string>();
+  for (const f of project.files) projectFiles.add(f.absolutePath);
+  for (const t of project.buildTargets) {
+    for (const f of t.files) projectFiles.add(f.absolutePath);
+  }
+  // 链接期错误（`func_bt.c:(.text.f+0x2e): undefined reference`）的定位修正：
+  // 文件按 basename 落回工程源码，行号从函数段名推出（否则 Problems / Build Log 都会打开不存在的路径）
+  const diagnoseIndex = buildDiagnosticPathIndex([...projectFiles], project.basePath);
+  const resolveDiagnostic = createDiagnosticResolver(diagnoseIndex, {
+    exists: (p) => {
+      try {
+        return fs.statSync(p).isFile();
+      } catch {
+        return false;
+      }
+    },
+    readFile: (p) => {
+      try {
+        return fs.readFileSync(p, 'utf-8');
+      } catch {
+        return undefined;
+      }
+    },
+  });
+
   const engine = new BuildEngine(project, compiler, outputChannel, (id) => resolveTargetCompiler(id));
   const ok = await engine.build(targetTitles, {
     rebuild,
     cancel,
+    resolveFile: (parsed, cwd) => resolveDiagnostic(parsed, cwd),
     onLine: (line, severity) => {
       if (severity === 'error') outputChannel.error(line);
       else if (severity === 'warning') outputChannel.warn(line);
@@ -7068,13 +7096,6 @@ async function buildOneProject(project: Project, targetTitle: string, rebuild: b
 
   // 输出顺序调整：构建完成汇总块不再在此输出，统一由 printBuildSummaryBlocks()
   // 在「构建成功/失败」行之后输出（构建输出的最末尾）。
-
-  // 项目源文件绝对路径（供「Build Log 使用 clangd 诊断」模式收集诊断）
-  const projectFiles = new Set<string>();
-  for (const f of project.files) projectFiles.add(f.absolutePath);
-  for (const t of project.buildTargets) {
-    for (const f of t.files) projectFiles.add(f.absolutePath);
-  }
 
   currentBuildProjects.push({
     projectName,

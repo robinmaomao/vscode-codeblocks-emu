@@ -63,6 +63,15 @@ export interface BuildOptions {
   onDiagnostic?: (diag: vscode.Diagnostic, fileUri?: vscode.Uri) => void;
   /** 结构化诊断回调（Build Log 视图收集错误/警告） */
   onStructuredDiagnostic?: (d: StructuredDiagnostic) => void;
+  /**
+   * 诊断位置修正（可选）：链接期错误常把 `func_bt.c:(.text.f+0x2e)` 当成文件名、或缺少行号，
+   * 且相对路径按链接命令的 cwd 解析往往不存在。由调用方（扩展）注入工程文件索引来落到真实源码。
+   * 返回 undefined = 不做修正（保持原行为）。
+   */
+  resolveFile?: (
+    parsed: ParsedLine,
+    cwd: string,
+  ) => { file?: string; line?: number; column?: number } | undefined;
   /** 取消句柄（null 时不支持取消；提供后各检查点查询 + 活动子进程注册强杀） */
   cancel?: BuildCancelHandle;
 }
@@ -3151,11 +3160,21 @@ export class BuildEngine {
             : parsed?.type === CompilerLineType.Warning ? 'warning' as const : 'info' as const;
           options.onLine?.(line, severity);
           if (!parsed) continue;
+          // 链接期错误位置修正（注入的工程索引）：文件落到真实源码、必要时从段名补出行号
+          const resolved = parsed.file ? options.resolveFile?.(parsed, cwd) : undefined;
+          const effective = resolved?.line && resolved.line !== parsed.line
+            ? { ...parsed, line: resolved.line }
+            : parsed;
           if (wantDiagnostic) {
-            const diag = parser.toDiagnosticFrom(parsed);
-            if (diag) options.onDiagnostic?.(diag, parser.resolveFileUriFrom(parsed, cwd));
+            const diag = parser.toDiagnosticFrom(effective);
+            if (diag) {
+              const uri = resolved?.file
+                ? vscode.Uri.file(resolved.file)
+                : parser.resolveFileUriFrom(parsed, cwd);
+              options.onDiagnostic?.(diag, uri);
+            }
           }
-          if (wantStructured) this.emitStructuredDiagnosticFrom(parsed, cwd, options);
+          if (wantStructured) this.emitStructuredDiagnosticFrom(effective, cwd, options, resolved?.file);
         }
       };
 
@@ -3222,7 +3241,12 @@ export class BuildEngine {
   }
 
   /** 由已解析结果上报结构化诊断（与 Problems 诊断共用同一次 parseLine） */
-  private emitStructuredDiagnosticFrom(parsed: ParsedLine | null, cwd: string, options: BuildOptions): void {
+  private emitStructuredDiagnosticFrom(
+    parsed: ParsedLine | null,
+    cwd: string,
+    options: BuildOptions,
+    resolvedFile?: string,
+  ): void {
     if (!options.onStructuredDiagnostic) return;
     if (!parsed) return;
     if (parsed.type !== CompilerLineType.Error && parsed.type !== CompilerLineType.Warning) return;
@@ -3233,7 +3257,9 @@ export class BuildEngine {
     if (/^note\b/i.test(message)) return;
 
     let absFile: string | undefined;
-    if (parsed.file) {
+    if (resolvedFile) {
+      absFile = resolvedFile;
+    } else if (parsed.file) {
       absFile = path.isAbsolute(parsed.file) ? parsed.file : path.join(cwd, parsed.file);
     }
     options.onStructuredDiagnostic({
