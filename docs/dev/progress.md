@@ -117,3 +117,11 @@ npm.cmd test
 | [0.8.141](../release/0.8.141.md) | 打开工程后 clangd 不重启（不分析）修复 + 编译错误自动跳转修复 |
 
 > 当前版本 **0.8.141**（正式版；本版发布说明见 [release/0.8.141.md](../release/0.8.141.md)，上一版见 [release/0.8.140.md](../release/0.8.140.md)）；无头回归见 `npm test`（`TOTAL=178 FAIL=0 SKIP=1`，另有契约 / E2E / 视觉 / 性能 / 打包 / 宿主分层，见 [测试方案](../testing/strategy.md)）。
+
+## 文档：GitHub Release 页面格式统一
+
+- **背景**：Release 页面标题漂移成「`0.8.NNN — 中文主题 / English theme`」，正文也从 0.8.133 起逐步变成英文 / 中英混排，与 `0.8.127`–`0.8.131` 的发布页格式不一致。
+- **统一后的格式**：标题 = **纯版本号**；正文 = `# Code::Blocks for VS Code <ver>` + `> 发布日期…｜ 正式版（上一版 → 本版 里程碑汇总）` + `## 概述`（要点 + 规模）+ 主题分节 + `## ✅ 验证` / `## ⚠️ 行为变化与升级提示` / `## 📦 安装` / `## 📬 完整变更`；链接一律绝对 URL。
+- **落地**：新增 [`release/pages/`](../release/pages/)（12 条发布页，文件名 = tag）与生成器/守卫 `tests/contract/gen-release-notes.js`（`--check` / `--emit` / `--all`）；`docs/release/*.md` 的 H1 统一为 `# <ver>`，原副标题保留为 `> **主题**：…`；`0.8.136`–`0.8.141` 的发布日期行补齐「里程碑汇总」；12 条 GitHub Release 已按新格式更新（`Latest` 仅 0.8.141），原正文已备份到 `.cb-tools/releases-backup.json`。
+- **约定**：见 [release/00-index.md](../release/00-index.md#github-release-页面pages)（模板 + `gh` 发布步骤）与 [docs/README.md](../README.md) 维护约定。
+- **回归**：`npm run test:contract` 全绿（文档一致性 D3/D4/D5 覆盖 `release/pages/**` 的命令、链接与版本标记）；`node tests/contract/gen-release-notes.js --check` 12/12 通过。
