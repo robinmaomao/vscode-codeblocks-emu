@@ -2,7 +2,7 @@
   "name": "codeblocks-vscode",
   "displayName": "%extension.displayName%",
   "description": "%extension.description%",
-  "version": "0.8.140",
+  "version": "0.8.141",
   "icon": "resources/icon.png",
   "publisher": "robinmaomao",
   "author": {
@@ -212,6 +212,11 @@
         "command": "codeblocks.cleanClangdConfig",
         "title": "%command.codeblocks.cleanClangdConfig.title%",
         "icon": "$(trash)"
+      },
+      {
+        "command": "codeblocks.restartClangd",
+        "title": "%command.codeblocks.restartClangd.title%",
+        "icon": "$(debug-restart)"
       },
       {
         "command": "codeblocks.clangd.applyQueryDriver",

@@ -1,7 +1,7 @@
 # Code::Blocks for VS Code — Usage Guide
 
 > Language: **English** ｜ [中文](./usage.md)
-> Version: 0.8.140 ｜ Native port of Code::Blocks core features to VS Code, driving GCC / GDB directly, **without** `tasks.json` / `launch.json`.
+> Version: 0.8.141 ｜ Native port of Code::Blocks core features to VS Code, driving GCC / GDB directly, **without** `tasks.json` / `launch.json`.
 
 ---
 
@@ -50,7 +50,7 @@ Code::Blocks for VS Code is a "mini IDE kernel": it parses `.cbp` / `.workspace`
 ### 2.1 Install from VSIX
 
 ```powershell
-code --install-extension codeblocks-vscode-0.8.140.vsix --force
+code --install-extension codeblocks-vscode-0.8.141.vsix --force
 ```
 
 ### 2.2 Build from source
@@ -58,7 +58,7 @@ code --install-extension codeblocks-vscode-0.8.140.vsix --force
 ```powershell
 npm install
 npm run package
-code --install-extension codeblocks-vscode-0.8.140.vsix --force
+code --install-extension codeblocks-vscode-0.8.141.vsix --force
 ```
 
 > `npm run package` = `vsce package` (before packaging, the `vscode:prepublish` hook runs `tsc` compilation (`dist/`, for local testing) + the **esbuild single-file bundle** (`bundle/extension.js`, the release entry));
@@ -396,6 +396,12 @@ By default the extension uses "`--target` + hand-written `-isystem`/`-include`" 
 1. Command `Code::Blocks: Configure clangd --query-driver` — generates `--query-driver=<compiler directory>/*` from the active project's compiler path and **merges** it into VS Code's `clangd.arguments` (you can choose to write to workspace settings / user settings / copy to the clipboard only; there is a preview confirmation before writing, and your other existing arguments are not overwritten).
 2. Setting `codeblocks.clangd.builtinHeaders = queryDriver` — makes clangd use the built-in headers extracted from the cross compiler (`stddef.h` etc.) instead of clangd's own built-in headers.
 3. With `codeblocks.clangd.builtinHeaders = queryDriver`, if `clangd.arguments` does not contain `--query-driver` yet, the extension prints an actionable hint in the Output channel (your settings are never changed automatically).
+
+**When clangd does not analyze as expected:**
+
+- Every **project open** (including opening a detected project from the status bar "Code::Blocks projects" entry) regenerates the compile database and the user-level config. Whenever the database or the config actually changes, the extension restarts clangd so an already running language server picks up the new configuration (not gated by `codeblocks.clangd.restartOnActiveProjectSwitch`).
+- The Output channel prints the reason, for example "Project opened; restarting clangd to apply the new compile database / config", so you can confirm the restart was triggered.
+- To trigger it manually: command `Code::Blocks: Restart clangd Language Server` (menu `Code::Blocks → Settings → Restart clangd Language Server`).
 
 
 **Fallback when clangd is not installed (lightweight symbol completion):**
