@@ -37,4 +37,50 @@
 - `0.8.47-dev`–`0.8.75-dev` 未单独出发布说明，逐轮记录见 [`docs/dev/progress.md`](../dev/progress.md) 与
   [`docs/archive/progress-history-0.8.89.md`](../archive/progress-history-0.8.89.md)。
 
-> 维护约定：新增发布说明用 `0.8.xx-dev.md`；发布后正式版里程碑同步进 [CHANGELOG](../../CHANGELOG.md)；提交日志不写轮次编号。
+## GitHub Release 页面（pages/）
+
+[`pages/`](./pages/) 存放**发布页正文**（每条 release 一个文件，文件名 = tag）。它们与里程碑说明的区别：
+
+| | `release/<ver>.md` | `release/pages/<tag>.md` |
+|---|---|---|
+| 面向 | 仓库读者（历史与对齐依据） | GitHub Releases 页面访客 |
+| 链接 | 相对（可点进仓库） | **绝对 URL**（Release 页面无仓库上下文） |
+| 结构 | 自由（现象 / 根因 / 修复 / 验证） | **固定模板**（见下） |
+
+生成与校验（`tests/contract/gen-release-notes.js`）：
+
+```powershell
+node tests/contract/gen-release-notes.js --check        # 校验全部发布页（CI/契约用）
+node tests/contract/gen-release-notes.js --emit <tag>   # 输出到 .cb-tools/release-body/<tag>.md
+node tests/contract/gen-release-notes.js --all          # 批量输出
+```
+
+发布页模板（对齐 `0.8.127`–`0.8.131`）：
+
+```markdown
+# Code::Blocks for VS Code <ver>
+
+> 发布日期：YYYY-MM-DD ｜ 正式版（<上一版> → <ver> 里程碑汇总）
+
+## 概述            ← 1 段定位 + 3–6 条 emoji 要点 + 「同时包含：…」
+## <emoji> <主题>   ← 按主线分节，问题 / 根因 / 修复
+## ✅ 验证          ← 分层回归数字 + 真机实测
+## ⚠️ 行为变化与升级提示
+## 📦 安装          ← 附件名 codeblocks-vscode-<ver>.vsix + VS Code 1.85.0+
+## 📬 完整变更      ← 里程碑说明 + 提交对比（绝对链接）
+```
+
+发布步骤（`gh` 从仓库根执行）：
+
+```powershell
+node tests/contract/gen-release-notes.js --emit 0.8.142
+gh release create 0.8.142 "release/codeblocks-vscode-0.8.142.vsix" `
+  --title "0.8.142" --notes-file ".cb-tools/release-body/0.8.142.md"
+gh release edit 0.8.142 --latest=true
+```
+
+约定：**Release 标题 = 纯版本号**（不带主题、不带英文）；正文一律用 `--notes-file` 传入（避免中文 / 反引号转义）；
+`Latest` 只给最新一个版本；历史 tag（`v0.8.11-stable`）标题用纯版本号 `0.8.11`。
+
+> 维护约定：新增发布说明用 `0.8.xx-dev.md`；发布后正式版里程碑同步进 [CHANGELOG](../../CHANGELOG.md)；
+> 同时补一份 `pages/<tag>.md` 并跑 `--check`；提交日志不写轮次编号。
