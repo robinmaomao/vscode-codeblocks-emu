@@ -1,7 +1,7 @@
 # Code::Blocks for VS Code — Usage Guide
 
 > Language: **English** ｜ [中文](./usage.md)
-> Version: 0.8.141-agent-control ｜ Native port of Code::Blocks core features to VS Code, driving GCC / GDB directly, **without** `tasks.json` / `launch.json`.
+> Version: 0.8.142 ｜ Native port of Code::Blocks core features to VS Code, driving GCC / GDB directly, **without** `tasks.json` / `launch.json`.
 
 ---
 
@@ -23,7 +23,6 @@
 14. [Complete RISC-V cross-compilation example](#14-complete-risc-v-cross-compilation-example)
 15. [FAQ](#15-faq)
 16. [Unsupported features](#16-unsupported-features-known-limitations)
-17. [AI / agent control](#17-ai--agent-control)
 
 ---
 
@@ -51,7 +50,7 @@ Code::Blocks for VS Code is a "mini IDE kernel": it parses `.cbp` / `.workspace`
 ### 2.1 Install from VSIX
 
 ```powershell
-code --install-extension codeblocks-vscode-0.8.141-agent-control.vsix --force
+code --install-extension codeblocks-vscode-0.8.142.vsix --force
 ```
 
 ### 2.2 Build from source
@@ -59,7 +58,7 @@ code --install-extension codeblocks-vscode-0.8.141-agent-control.vsix --force
 ```powershell
 npm install
 npm run package
-code --install-extension codeblocks-vscode-0.8.141-agent-control.vsix --force
+code --install-extension codeblocks-vscode-0.8.142.vsix --force
 ```
 
 > `npm run package` = `vsce package` (before packaging, the `vscode:prepublish` hook runs `tsc` compilation (`dist/`, for local testing) + the **esbuild single-file bundle** (`bundle/extension.js`, the release entry));
@@ -397,6 +396,12 @@ By default the extension uses "`--target` + hand-written `-isystem`/`-include`" 
 1. Command `Code::Blocks: Configure clangd --query-driver` — generates `--query-driver=<compiler directory>/*` from the active project's compiler path and **merges** it into VS Code's `clangd.arguments` (you can choose to write to workspace settings / user settings / copy to the clipboard only; there is a preview confirmation before writing, and your other existing arguments are not overwritten).
 2. Setting `codeblocks.clangd.builtinHeaders = queryDriver` — makes clangd use the built-in headers extracted from the cross compiler (`stddef.h` etc.) instead of clangd's own built-in headers.
 3. With `codeblocks.clangd.builtinHeaders = queryDriver`, if `clangd.arguments` does not contain `--query-driver` yet, the extension prints an actionable hint in the Output channel (your settings are never changed automatically).
+
+**When clangd does not analyze as expected:**
+
+- Every **project open** (including opening a detected project from the status bar "Code::Blocks projects" entry) regenerates the compile database and the user-level config. Whenever the database or the config actually changes, the extension restarts clangd so an already running language server picks up the new configuration (not gated by `codeblocks.clangd.restartOnActiveProjectSwitch`).
+- The Output channel prints the reason, for example "Project opened; restarting clangd to apply the new compile database / config", so you can confirm the restart was triggered.
+- To trigger it manually: command `Code::Blocks: Restart clangd Language Server` (menu `Code::Blocks → Settings → Restart clangd Language Server`).
 
 
 **Fallback when clangd is not installed (lightweight symbol completion):**
@@ -940,16 +945,6 @@ The following Code::Blocks features (round 5 batch 3 T1/T4/T5) were assessed as 
 > T5 cross-library symbol search, Export Makefile in the Build menu (the command exists but currently lives in the Tools menu).
 > For details and the decision record, see the [unimplemented-feature backlog](../dev/backlog.md) §2 (not-ported list).
 > Reminder: the extensions above are community/vendor products; evaluate them before installing. This extension neither bundles nor ships them.
-
-## 17. AI / agent control
-
-The extension exposes 11 Language Model Tools to Copilot agents, plus a bundled MCP server and `cb-cli`,
-covering the full loop "read/edit `.cbp` -> build -> structured diagnostics -> run/debug".
-
-Full reference (tool arguments, edit syntax, workflows, CLI, MCP setup, safety gates and troubleshooting):
-[agent-control.en.md](./agent-control.en.md).
-
----
 
 ## License
 

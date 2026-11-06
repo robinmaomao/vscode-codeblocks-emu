@@ -6,6 +6,7 @@
  *
  * 调用方负责：构建互斥、活动工程切换、工作区级拓扑顺序、日志可见性。
  */
+import * as fs from 'fs';
 import * as path from 'path';
 import { spawn } from 'child_process';
 import { BuildTarget, Project, supportsCurrentPlatform } from '../model/types';
@@ -16,6 +17,7 @@ import type { CbOutput } from './cbChannel';
 import { OutputLineDecoder } from '../tools/encoding';
 import { cbBuiltinVars, envVarMap, replaceCbMacros } from '../compiler/cbMacros';
 import { logT } from './logLang';
+import { buildDiagnosticPathIndex, createDiagnosticResolver } from './diagnosticPath';
 import type { BuildDiagnosticsBudget, BuildLogDiagnostic, BuildLogProject } from './buildSummary';
 
 /** `$make` / `$makefile` / `$target` 宏使用的命令键 */
@@ -261,10 +263,38 @@ export async function buildProjectTarget(
   const compiler = deps.getCompiler(target.compilerId || project.compilerId);
   const diagnostics: BuildLogDiagnostic[] = [];
   const collectDiagnostics = deps.collectDiagnostics !== false;
+
+  // 工程源文件绝对路径（供 Build Log 摘要 + 链接期诊断位置修正）
+  const projectFiles = new Set<string>();
+  for (const f of project.files) projectFiles.add(f.absolutePath);
+  for (const t of project.buildTargets) {
+    for (const f of t.files) projectFiles.add(f.absolutePath);
+  }
+  // 链接期错误（`func_bt.c:(.text.f+0x2e): undefined reference`）的定位修正：
+  // 文件按 basename 落回工程源码，行号从函数段名推出（否则 Problems / Build Log 都会打开不存在的路径）
+  const diagnoseIndex = buildDiagnosticPathIndex([...projectFiles], project.basePath);
+  const resolveDiagnostic = createDiagnosticResolver(diagnoseIndex, {
+    exists: (p) => {
+      try {
+        return fs.statSync(p).isFile();
+      } catch {
+        return false;
+      }
+    },
+    readFile: (p) => {
+      try {
+        return fs.readFileSync(p, 'utf-8');
+      } catch {
+        return undefined;
+      }
+    },
+  });
+
   const engine = new BuildEngine(project, compiler, deps.output, (id) => deps.resolveCompiler(id));
   const ok = await engine.build(targetTitles, {
     rebuild,
     cancel: deps.cancel,
+    resolveFile: (parsed, cwd) => resolveDiagnostic(parsed, cwd),
     onLine: (line, severity) => {
       if (severity === 'error') deps.output.error(line);
       else if (severity === 'warning') deps.output.warn(line);
@@ -289,11 +319,6 @@ export async function buildProjectTarget(
   const durationMs = Date.now() - startMs;
   const stats = engine.lastStats ?? { success: ok, compiledCount: 0, skippedCount: 0, failedCount: 0, linkSuccess: ok, linkSkipped: true, hadCommands: false, outputFilename: undefined };
   const cancelled = !!stats.cancelled || !!deps.cancel?.isCancelled();
-  const projectFiles = new Set<string>();
-  for (const f of project.files) projectFiles.add(f.absolutePath);
-  for (const t of project.buildTargets) {
-    for (const f of t.files) projectFiles.add(f.absolutePath);
-  }
 
   return {
     ok,

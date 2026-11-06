@@ -126,12 +126,9 @@ export class SymbolTreeProvider implements vscode.TreeDataProvider<SymbolNode> {
     node.description = `${basename}:${e.line}`;
     node.tooltip = e.detail ? `${e.detail}\n${e.file}:${e.line}` : `${e.file}:${e.line}`;
     node.command = {
-      command: 'vscode.open',
+      command: 'codeblocks.openLocation',
       title: i18n.t('Open symbol definition'),
-      arguments: [
-        vscode.Uri.file(e.file),
-        { selection: new vscode.Range(e.line - 1, 0, e.line - 1, 0), preview: true },
-      ],
+      arguments: [{ file: e.file, line: e.line, column: 1 }],
     };
     return node;
   }

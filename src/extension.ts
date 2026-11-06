@@ -37,6 +37,8 @@ import { ControlError } from './api/types';
 import { registerLanguageModelTools } from './lm/tools';
 import { registerCodeblocksMcpProvider } from './mcp/provider';
 import { normalizeBuildLogAutoFocusMode, maybeAutoFocusBuildLog } from './ui/buildLogFocus';
+import { openFileAtLocation } from './ui/openLocation';
+import { buildDiagnosticPathIndex, createDiagnosticResolver } from './build/diagnosticPath';
 import { AnalysisTreeProvider, AnalysisData, AnalysisProjectInfo, LastBuildMeta } from './ui/analysisTreeProvider';
 import { SymbolTreeProvider } from './ui/symbolTreeProvider';
 import { BuildSpinRenderState, nextBuildSpinRender } from './ui/buildStatusRender';
@@ -211,12 +213,15 @@ let clangdGenPending = false;
 /** 被合并的请求中是否含交互式（手动命令）：有则重跑时保留交互提示 */
 let clangdGenPendingInteractive = false;
 /**
- * 本次生成后是否需要重启 clangd（仅当编译数据库实际变化时执行）与触发原因：
+ * 本次生成后是否需要重启 clangd（仅当编译数据库/配置实际变化时执行）与触发原因：
+ *  - 'open'：打开工程（含从状态栏打开检测到的工程）——新工程首次生成数据库/配置，
+ *    或重新打开时配置有变化；打开动作本身就是"让它开始按本工程分析"，
+ *    故**不受** codeblocks.clangd.restartOnActiveProjectSwitch 限制
  *  - 'project'：切换活动工程（受 codeblocks.clangd.restartOnActiveProjectSwitch 控制）
  *  - 'compiler'：编译器设置变化（compilerId / masterPath / compilerPrograms）——已打开文件的诊断/补全
  *    全部基于旧编译命令推导，必须重启才会按新编译器重新分析
  */
-let restartClangdReason: 'project' | 'compiler' | undefined;
+let restartClangdReason: 'project' | 'compiler' | 'open' | undefined;
 /** clangd.enabled 的上次取值（只在「开 → 关」时提醒既有片段仍在生效，避免其它设置变更重复弹窗） */
 let clangdEnabledLast = true;
 
@@ -1110,10 +1115,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   context.subscriptions.push(...registerFallbackIntelliSense(fallbackIndex, () => fallbackEnabled, requestFallbackIndexBuild));
 
   // 聚焦 Build Log 视图（菜单项 / 构建完成后引导）——位于底部 Panel 容器
+  // 返回内部命令的 Promise：构建结束后的「首个错误跳转」需要先等容器激活完成，否则两边抢焦点
   context.subscriptions.push(
-    vscode.commands.registerCommand('codeblocks.buildLog.focus', () => {
-      vscode.commands.executeCommand('workbench.view.extension.codeblocks-buildPanel');
-    }),
+    vscode.commands.registerCommand('codeblocks.buildLog.focus', () =>
+      vscode.commands.executeCommand('workbench.view.extension.codeblocks-buildPanel')),
   );
 
   // 聚焦 Project 视图（菜单 View → Project）——先打开侧栏容器再聚焦，避免容器未打开时聚焦无效
@@ -1128,6 +1133,36 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   context.subscriptions.push(
     vscode.commands.registerCommand('codeblocks.generateCompileCommands', async () => {
       await generateClangdForWorkspace(true);
+    }),
+  );
+
+  // 手动重启 clangd（排查"改了配置/换了工程但 clangd 没重新分析"）
+  context.subscriptions.push(
+    vscode.commands.registerCommand('codeblocks.restartClangd', async () => {
+      const restarted = await restartClangd();
+      if (!restarted) {
+        vscode.window.showWarningMessage(i18n.t('The clangd extension is not installed or its restart command is unavailable'));
+        return;
+      }
+      outputChannel.info(logT('[Code::Blocks] clangd restart requested manually'));
+      vscode.window.setStatusBarMessage(i18n.t('clangd language server restarted'), 3000);
+    }),
+  );
+
+  // 打开文件并定位（Build Log 诊断 / Symbols 视图共用）——参数必须是纯标量：
+  // `vscode.open` 的 `{ selection: Range }` 经命令参数序列化后变成数组（Range.toJSON），主进程不再认作 IRange
+  context.subscriptions.push(
+    vscode.commands.registerCommand('codeblocks.openLocation', async (arg?: unknown) => {
+      const t = (arg ?? {}) as { file?: unknown; line?: unknown; column?: unknown };
+      const file = typeof t.file === 'string' ? t.file : '';
+      if (!file) return false;
+      const line = Number(t.line) > 0 ? Number(t.line) : 1;
+      const column = Number(t.column) > 0 ? Number(t.column) : 1;
+      const ok = await openFileAtLocation(file, line, column);
+      if (!ok) {
+        outputChannel.warn(logT('[Code::Blocks] Cannot open the file (missing or unreadable): {0}', file));
+      }
+      return ok;
     }),
   );
 
@@ -1147,23 +1182,23 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   // 下一个错误（F4）
   context.subscriptions.push(
-    vscode.commands.registerCommand('codeblocks.nextError', () => {
+    vscode.commands.registerCommand('codeblocks.nextError', async () => {
       if (!buildLogTreeProvider?.hasErrors()) {
         vscode.window.showInformationMessage(i18n.t('No compile errors to navigate'));
         return;
       }
-      buildLogTreeProvider.gotoNextError();
+      await buildLogTreeProvider.gotoNextError();
     }),
   );
 
   // 上一个错误（Shift+F4）
   context.subscriptions.push(
-    vscode.commands.registerCommand('codeblocks.prevError', () => {
+    vscode.commands.registerCommand('codeblocks.prevError', async () => {
       if (!buildLogTreeProvider?.hasErrors()) {
         vscode.window.showInformationMessage(i18n.t('No compile errors to navigate'));
         return;
       }
-      buildLogTreeProvider.gotoPreviousError();
+      await buildLogTreeProvider.gotoPreviousError();
     }),
   );
 
@@ -3561,6 +3596,8 @@ async function openProject(filename: string): Promise<void> {
 
     // 已打开则跳过解析/入列表，但仍重新生成 clangd 配置文件（每次打开都刷新）
     if (openProjects.some((p) => p.filename === filename)) {
+      // 打开动作用户期望"立刻能分析"：数据库/配置有变化时必须重启 clangd（不受 restartOnActiveProjectSwitch 限制）
+      restartClangdReason = 'open';
       void generateClangdForWorkspace();
       return;
     }
@@ -3609,7 +3646,9 @@ async function openProject(filename: string): Promise<void> {
 
     vscode.window.showInformationMessage(i18n.t('Code::Blocks project opened: {0}', project.title));
 
-    // 生成 compile_commands.json（clangd 补全，写到工作区外缓存），失败不阻塞
+    // 生成 compile_commands.json（clangd 补全，写到工作区外缓存），失败不阻塞。
+    // 打开工程后 clangd 必须按新数据库重新分析（首开工程时旧 clangd 进程可能还按"无数据库"的状态在跑）
+    restartClangdReason = 'open';
     void generateClangdForWorkspace();
   } catch (err) {
     vscode.window.showErrorMessage(i18n.t('Failed to open the project: {0}', (err as Error).message));
@@ -4185,12 +4224,26 @@ function hasOpenSourceFile(): boolean {
   );
 }
 
-/** 重启 clangd（最佳努力；clangd 扩展未安装时静默忽略） */
-async function restartClangd(): Promise<void> {
+/**
+ * clangd 扩展是否已激活（= 语言服务器已在跑）。
+ * 重启只为"让已启动的服务器读新数据库/配置"——服务器没跑时无需唤醒（下次打开源文件会自然读到新配置）。
+ */
+function clangdExtensionActive(): boolean {
+  try {
+    return vscode.extensions.getExtension(CLANGD_EXTENSION_ID)?.isActive === true;
+  } catch {
+    return false;
+  }
+}
+
+/** 重启 clangd（最佳努力；clangd 扩展未安装时静默忽略）；返回是否已成功发出重启命令 */
+async function restartClangd(): Promise<boolean> {
   try {
     await vscode.commands.executeCommand('clangd.restart');
+    return true;
   } catch {
     // 忽略：clangd 扩展不存在或命令不可用
+    return false;
   }
 }
 
@@ -4755,20 +4808,8 @@ async function generateClangdForWorkspaceInternal(interactive: boolean): Promise
       ? logT('compile_commands.json is unchanged, skipping the write')
       : logT('Regenerated compile_commands.json ({0} compile command(s)) → {1}', count, outPath)}`);
 
-    // 编译数据库实际变化 → 重启 clangd，让已打开文件按新编译命令重新分析：
-    //  - 切换活动工程：尊重 clangd.restartOnActiveProjectSwitch（重启会触发重新索引，允许关闭）
-    //  - 编译器设置变化：必须重启（已打开文件的诊断/补全全部基于旧编译命令，不重启等于设置没生效）
-    if (
-      restartReason
-      && !skipped
-      && (restartReason === 'compiler' || cfg.get<boolean>('clangd.restartOnActiveProjectSwitch', true))
-      && hasOpenSourceFile()
-    ) {
-      outputChannel.info(restartReason === 'compiler'
-        ? logT('[Code::Blocks] Compiler settings changed; restarting clangd to refresh the open files')
-        : logT('[Code::Blocks] Active project switched; restarting clangd to refresh the open files'));
-      scheduleClangdRestart();
-    }
+    // 是否写入了新的 clangd 配置片段（配置变了同样需要重启，见下方 restart 判定）
+    let configWritten = false;
 
     if (clangd) {
       // 头文件回退 flag：编译数据库里只有 .c 条目，头文件需靠 Add 提供 -I/-isystem/--target
@@ -4804,7 +4845,7 @@ async function generateClangdForWorkspaceInternal(interactive: boolean): Promise
       const suppressedWarnings = readStringArraySetting(cfg, 'clangd.suppressedWarnings', SUPPRESSED_WARNINGS_DEFAULT);
       // 片段内其余键：默认值与历史硬编码值一致（产物不变）；'omit'/'default' ⇒ 该键不写，交给 clangd 默认值或用户自有配置
       const extraConfig = cfg.get<string>('clangd.extraConfig', '');
-      const { removed } = updateClangdUserConfig([{
+      const { written, removed } = updateClangdUserConfig([{
         dir: scope,
         databaseDir: cacheDir,
         headerFlags,
@@ -4840,6 +4881,7 @@ async function generateClangdForWorkspaceInternal(interactive: boolean): Promise
           + logT('Run the command "Code::Blocks: Configure clangd --query-driver" to write it in one click (suggested value --query-driver={0}/*)', path.dirname(firstCompilerPath).replace(/\\/g, '/')));
       }
       outputChannel.info(logT('[Code::Blocks] clangd user config updated → {0}', clangdUserConfigPath()));
+      configWritten = written;
       outputChannel.info(logT('[Code::Blocks] clangd detected: {0}', clangd));
       if (interactive) {
         vscode.window.showInformationMessage(i18n.t('compile_commands.json generated ({0} entries) and clangd detected — completion / navigation are ready', count));
@@ -4858,6 +4900,24 @@ async function generateClangdForWorkspaceInternal(interactive: boolean): Promise
           vscode.env.openExternal(vscode.Uri.parse('https://clangd.llvm.org/installation.html'));
         }
       }
+    }
+
+    // 编译数据库/配置实际变化 → 重启 clangd，让已打开文件按新编译命令与配置重新分析：
+    //  - 'open'（打开工程）：必须重启（不受开关限制）——打开动作本身就是"让它开始按本工程分析"；
+    //    否则上次会话遗留的 clangd 进程仍按旧配置（或"没有编译数据库"）继续工作，看起来就是"没触发分析"
+    //  - 'compiler'（编译器设置变化）：必须重启（不重启等于设置没生效）
+    //  - 'project'（切换活动工程）：尊重 clangd.restartOnActiveProjectSwitch（重启会触发重新索引，允许关闭）
+    // 门槛：clangd 扩展已激活（服务器在跑，重启才有意义）或存在已打开 C/C++ 文件（重启只为刷新它们）
+    const restartAllowed = restartReason === 'compiler'
+      || restartReason === 'open'
+      || cfg.get<boolean>('clangd.restartOnActiveProjectSwitch', true);
+    if (restartReason && (!skipped || configWritten) && restartAllowed && (clangdExtensionActive() || hasOpenSourceFile())) {
+      outputChannel.info(restartReason === 'compiler'
+        ? logT('[Code::Blocks] Compiler settings changed; restarting clangd to refresh the open files')
+        : restartReason === 'open'
+          ? logT('[Code::Blocks] Project opened; restarting clangd to apply the new compile database / config')
+          : logT('[Code::Blocks] Active project switched; restarting clangd to refresh the open files'));
+      scheduleClangdRestart();
     }
   } catch (err) {
     vscode.window.showErrorMessage(i18n.t('Failed to generate compile_commands.json: {0}', (err as Error).message));
@@ -6921,7 +6981,7 @@ async function buildWorkspaceLocked(rebuild: boolean, clearLog: boolean): Promis
   reportBuildResult(allOk && !cancelled, cancelled, buildStartMs, errorCount, warningCount);
   // 输出顺序调整：汇总块在「构建成功/失败」行之后输出（构建输出的最末尾）
   printBuildSummaryBlocks();
-  finishBuildSummary(allOk && !cancelled, buildStartMs);
+  await finishBuildSummary(allOk && !cancelled, buildStartMs);
   saveHtmlBuildLog(buildStartMs, 'workspace');
 
   return allOk && !cancelled;
@@ -7027,7 +7087,7 @@ async function buildSingleProjectLocked(filename: string, rebuild: boolean, opts
   reportBuildResult(ok && !cancelled, cancelled, buildStartMs, errorCount, warningCount);
   // 输出顺序调整：汇总块在「构建成功/失败」行之后输出（构建输出的最末尾）
   printBuildSummaryBlocks();
-  finishBuildSummary(ok && !cancelled, buildStartMs);
+  await finishBuildSummary(ok && !cancelled, buildStartMs);
   saveHtmlBuildLog(buildStartMs, 'project', project);
   return ok && !cancelled;
 }
@@ -7871,7 +7931,7 @@ function computeAnalysisData(): AnalysisData {
 }
 
 /** 构建结束：汇总所有项目摘要，写入 Build Log 树视图 */
-function finishBuildSummary(allOk: boolean, buildStartMs: number): void {
+async function finishBuildSummary(allOk: boolean, buildStartMs: number): Promise<void> {
   if (!buildLogTreeProvider) return;
 
   // clangd 接管诊断且配置为 clangd 来源时，用 clangd 的诊断填充 Build Log
@@ -7908,15 +7968,22 @@ function finishBuildSummary(allOk: boolean, buildStartMs: number): void {
   }
   // 第六轮 F1：按设置决定是否自动聚焦（对齐 CB message_manager：默认仅错误时动作，成功/取消不动作；
   // 构建开始时的 outputChannel.show(true) 与 CB PrintBanner 一致，保持无条件）
+  // 面板聚焦是异步命令：先捕获其 Promise，跳转前 await —— 否则面板激活与编辑器打开竞争焦点，
+  // 用户看到的就是"构建失败但没跳到错误处"。
+  let focusDone: Thenable<unknown> | undefined;
   maybeAutoFocusBuildLog(
     normalizeBuildLogAutoFocusMode(vscode.workspace.getConfiguration('codeblocks').get<string>('ui.buildLogAutoFocus')),
     errorCount,
     warningCount,
-    () => { void vscode.commands.executeCommand('codeblocks.buildLog.focus'); },
+    () => { focusDone = vscode.commands.executeCommand('codeblocks.buildLog.focus'); },
   );
   // 第六轮 F1（auto_focus_build_errors，默认 true）：存在错误时跳转到第一个错误（独立开关）
   if (errorCount > 0 && focusFirstErrorOnBuildEnd()) {
-    buildLogTreeProvider.gotoFirstError();
+    if (focusDone) await focusDone;
+    const first = await buildLogTreeProvider.gotoFirstError();
+    outputChannel.info(first
+      ? logT('[Code::Blocks] Jumped to the first error: {0}:{1}:{2}', first.file ?? '', first.line ?? 1, first.column ?? 1)
+      : logT('[Code::Blocks] The first error has no navigable source location (linker/general error) — see the Build Log view'));
   }
 }
 
