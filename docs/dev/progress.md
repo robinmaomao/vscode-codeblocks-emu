@@ -67,7 +67,7 @@ npm.cmd run compile
 npm.cmd run package
 
 # 安装（版本号以 package.json 为准）
-code --install-extension "codeblocks-vscode-0.8.142.vsix" --force
+code --install-extension "codeblocks-vscode-0.8.143-agent-control.vsix" --force
 
 # 全量回归测试
 npm.cmd test
@@ -116,8 +116,11 @@ npm.cmd test
 | [0.8.140](../release/0.8.140.md) | 构建性能归因告警改为可选（`build.performanceAdvisor`，默认关闭） |
 | [0.8.141](../release/0.8.141.md) | 打开工程后 clangd 不重启（不分析）修复 + 编译错误自动跳转修复 |
 | [0.8.142](../release/0.8.142.md) | 链接期错误（undefined reference）定位与跳转修复 |
+| [0.8.143-agent-control](../release/0.8.143-agent-control.md) | 分支预发布版：Agent 全控制（LM Tools + MCP + CLI）+ 总闸 / 只读开关 |
 
-> 当前版本 **0.8.142**（正式版；本版发布说明见 [release/0.8.142.md](../release/0.8.142.md)，上一版见 [release/0.8.141.md](../release/0.8.141.md)）；无头回归见 `npm test`（`TOTAL=178 FAIL=0 SKIP=1`，另有契约 / E2E / 视觉 / 性能 / 打包 / 宿主分层，见 [测试方案](../testing/strategy.md)）。
+> 当前版本 **0.8.143-agent-control**（`feat/agent-control` 分支预发布版，**不合并 main**；发布说明见
+> [release/0.8.143-agent-control.md](../release/0.8.143-agent-control.md)，上游正式版见 [release/0.8.142.md](../release/0.8.142.md)）；
+> 无头回归见 `npm test`（`TOTAL=187 FAIL=0 SKIP=1`），另有契约 / E2E / 视觉 / 性能 / 打包 / 宿主分层，见 [测试方案](../testing/strategy.md)。
 
 ## 文档：GitHub Release 页面格式统一
 
@@ -126,3 +129,27 @@ npm.cmd test
 - **落地**：新增 [`release/pages/`](../release/pages/)（12 条发布页，文件名 = tag）与生成器/守卫 `tests/contract/gen-release-notes.js`（`--check` / `--emit` / `--all`）；`docs/release/*.md` 的 H1 统一为 `# <ver>`，原副标题保留为 `> **主题**：…`；`0.8.136`–`0.8.141` 的发布日期行补齐「里程碑汇总」；12 条 GitHub Release 已按新格式更新（`Latest` 仅 0.8.141），原正文已备份到 `.cb-tools/releases-backup.json`。
 - **约定**：见 [release/00-index.md](../release/00-index.md#github-release-页面pages)（模板 + `gh` 发布步骤）与 [docs/README.md](../README.md) 维护约定。
 - **回归**：`npm run test:contract` 全绿（文档一致性 D3/D4/D5 覆盖 `release/pages/**` 的命令、链接与版本标记）；`node tests/contract/gen-release-notes.js --check` 12/12 通过。
+
+## Agent 全控制（feat/agent-control，0.8.143-agent-control）
+
+目标：让 Copilot agent / 任意 MCP 客户端 / CI 完整控制工程，并可用设置**一键关闭**。
+
+- **接入**：`engines.vscode` 抬到 `^1.102.0`；11 个 `contributes.languageModelTools`；
+  `contributes.mcpServerDefinitionProviders`；随包 `bundle/cb-cli.js` 与 `bundle/cb-mcp.js`。
+- **内核**：`src/api/*` 无顶层 vscode 依赖（i18n 惰性回退），承载工程读改、构建/清理、运行、导出、编译器、调试；
+  构建内核 `src/build/buildProject.ts` 与 UI 同源（含 main 的链接期诊断定位 `resolveFile`）。
+- **开关（本轮新增）**：
+  - `codeblocks.agent.enabled`（默认 `true`）：关闭后 LM Tools 不注册、内嵌 MCP 不暴露，
+    外部客户端直启的 `cb-mcp.js` 也拒绝调用（`disabled`）；**工作区未受信任一律按关闭处理**；切换即时生效。
+  - `codeblocks.agent.readOnly`（默认 `false`）：只放行 `project_read` / `build_status` /
+    `compiler list,info` / `workspace info,deps,list` / `debug state`，其余返回 `read-only`。
+  - 策略集中在 `src/api/agentPolicy.ts`，由 `invokeTool()` 统一拦截（LM Tools 与 MCP 共用；CLI 不接入）。
+  - 审计：每次工具调用向 Code::Blocks 输出通道写一行（工具名 / 结果 / 耗时）。
+- **工具（11）**：`project_read` / `project_edit` / `project_file` / `project_target` / `build` / `build_status` /
+  `run` / `debug` / `compiler` / `export` / `workspace`。
+- **测试**：`test-api-project-edit`（含 query / preserve）/ `test-api-settings-reader` / `test-api-tool-guards` /
+  `test-api-build-service` / `test-agent-policy`（开关与只读白名单）/ `test-ai-tools-contract` / `test-cli` /
+  `test-mcp-server`（含关闭与只读门控）/ `test-e2e-cli-build`（E2E）/ `host/suite/agent.tests.js`（宿主，含开关切换）；
+  无头 `TOTAL=187`、宿主 `32/32`。
+- **文档**：`docs/guide/agent-control.md` / `.en.md`、`settings.md` / `.en.md`（第 10 分区 Agent）、
+  README / usage / strategy / decisions / 发布说明同步。

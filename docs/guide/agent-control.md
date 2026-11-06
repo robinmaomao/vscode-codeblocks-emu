@@ -1,6 +1,6 @@
 # Agent 控制（Copilot / MCP / CLI）
 
-> 版本：**0.8.141-agent-control**（`feat/agent-control` 预发布构建） ｜ 需要 VS Code **1.102.0+**
+> 版本：**0.8.143-agent-control**（`feat/agent-control` 预发布构建） ｜ 需要 VS Code **1.102.0+**
 >
 > 本页说明如何让 AI agent（GitHub Copilot Chat 的 Agent 模式）以及任意 MCP 客户端 / 命令行
 > 完整控制本扩展的 Code::Blocks 工程：读取与修改 `.cbp`、构建/重建/清理、运行、调试。
@@ -201,10 +201,36 @@ node bundle/cb-cli.js compiler info --compiler-id gcc --json
 
 ---
 
-## 7. 安全与权限
+## 7. 开关与安全模式
+
+两个设置（`settings.json`，切换**即时生效、无需重载窗口**）：
+
+| 设置 | 默认 | 行为 |
+|---|---|---|
+| `codeblocks.agent.enabled` | `true` | 总闸。关闭后 11 个 Language Model Tools **不再注册**（Copilot 看不到也调不到），内嵌 MCP server 不再暴露；外部客户端直接启动的 `cb-mcp.js` 也会拒绝调用（`disabled`）。**未受信任的工作区一律按关闭处理**。独立的 `cb-cli` 不受影响。 |
+| `codeblocks.agent.readOnly` | `false` | 只读模式。只放行 `project_read` / `build_status` / `compiler list,info` / `workspace info,deps,list` / `debug state`；其余返回 `read-only`，工程文件字节不变。 |
+
+```jsonc
+// .vscode/settings.json
+{
+  "codeblocks.agent.enabled": true,
+  "codeblocks.agent.readOnly": false
+}
+```
+
+> 关闭开关后，如果正在运行的 MCP server 是外部客户端启动的，请重启该客户端；VS Code 内嵌的 server 会随 provider 的定义变化自动停止暴露。
+>
+> 工具**调用**在切换后立即生效（关闭后报未知工具、只读模式下报 `read-only`）；但 VS Code 的工具**列表快照**
+> （Configure Tools 面板 / `vscode.lm.tools`）可能滞后到下次窗口重载才刷新，这不影响权限判定。
+
+---
+
+## 8. 安全与权限
 
 | 关卡 | 行为 |
 |---|---|
+| 总闸 | `codeblocks.agent.enabled`（见上表）；未受信任工作区强制关闭 |
+| 只读模式 | `codeblocks.agent.readOnly`（见上表），拦截在 `invokeTool` 统一入口 |
 | 工具启用 | VS Code 的 **Tools** 选择器逐个开关；也可在自定义 agent 里固定工具集 |
 | 审批 | 由 VS Code 的权限等级决定；写操作返回 before/after，便于复核 |
 | `dryRun` | `project_edit` / `build` 支持只校验不落盘 |
@@ -215,7 +241,7 @@ node bundle/cb-cli.js compiler info --compiler-id gcc --json
 
 ---
 
-## 8. 与扩展状态的交互
+## 9. 与扩展状态的交互
 
 - **LM Tools（扩展内）**：编辑走内存模型 → `persistProjectAndReload`，不会触发"外部修改，是否重载"弹窗，
   Build Log / Problems / 状态栏都会同步更新。
@@ -226,7 +252,7 @@ node bundle/cb-cli.js compiler info --compiler-id gcc --json
 
 ---
 
-## 9. 排障
+## 10. 排障
 
 | 现象 | 处理 |
 |---|---|
@@ -240,7 +266,7 @@ node bundle/cb-cli.js compiler info --compiler-id gcc --json
 
 ---
 
-## 10. 已知限制
+## 11. 已知限制
 
 - `codeblocks_run` 不提供 stdin；交互式程序请用终端。
 - `preserve` 格式仅覆盖 `compile` / `link`（其余操作降级 canonical）。

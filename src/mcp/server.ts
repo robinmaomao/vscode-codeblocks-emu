@@ -25,7 +25,19 @@ function packageVersion(): string {
 async function main(): Promise<void> {
   const { createRuntime } = require('../cli/runtime') as typeof import('../cli/runtime');
   const runtime = createRuntime({ echoBuildLog: true });
-  const { TOOL_DEFINITIONS } = require('../api/toolRegistry') as typeof import('../api/toolRegistry');
+  const { TOOL_DEFINITIONS, invokeTool } = require('../api/toolRegistry') as typeof import('../api/toolRegistry');
+  const { loadCodeblocksSettings } = require('../api/settingsReader') as typeof import('../api/settingsReader');
+  const { isAgentEnabled, isAgentReadOnly, AGENT_DISABLED_HINT } = require('../api/agentPolicy') as typeof import('../api/agentPolicy');
+
+  // 每次请求重新读设置：外部客户端可能在 VS Code 未运行的情况下直接启动本 server，
+  // 关闭开关 / 只读模式应当立即生效，而不是等进程重启。
+  // 以进程工作目录为锚点向上找 `.vscode/settings.json`，让工作区级开关对外部客户端同样生效。
+  const path = require('path') as typeof import('path');
+  const settingsNow = () => loadCodeblocksSettings({ target: path.join(process.cwd(), '.codeblocks-mcp-probe') });
+  const disabledPayload = (): string => JSON.stringify({
+    ok: false,
+    error: { code: 'disabled', message: 'Agent control is disabled by settings', details: { hint: AGENT_DISABLED_HINT } },
+  }, null, 2);
 
   const server = new Server(
     { name: 'codeblocks-vscode', version: packageVersion() },
@@ -38,16 +50,23 @@ async function main(): Promise<void> {
     },
   );
 
-  server.setRequestHandler(ListToolsRequestSchema, () => ({
-    tools: TOOL_DEFINITIONS.map((t) => ({
-      name: t.name,
-      description: t.description,
-      inputSchema: t.inputSchema as unknown as { type: 'object'; properties?: Record<string, object> },
-    })),
-  }));
+  server.setRequestHandler(ListToolsRequestSchema, () => {
+    if (!isAgentEnabled(settingsNow())) return { tools: [] };
+    return {
+      tools: TOOL_DEFINITIONS.map((t) => ({
+        name: t.name,
+        description: t.description,
+        inputSchema: t.inputSchema as unknown as { type: 'object'; properties?: Record<string, object> },
+      })),
+    };
+  });
 
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
     const { name, arguments: args } = request.params;
+    const settings = settingsNow();
+    if (!isAgentEnabled(settings)) {
+      return { isError: true, content: [{ type: 'text' as const, text: disabledPayload() }] };
+    }
     const def = TOOL_DEFINITIONS.find((t) => t.name === name);
     if (!def) {
       return {
@@ -55,8 +74,9 @@ async function main(): Promise<void> {
         content: [{ type: 'text' as const, text: `Unknown tool: ${name}. Available: ${TOOL_DEFINITIONS.map((t) => t.name).join(', ')}` }],
       };
     }
+    const ctx = isAgentReadOnly(settings) ? { ...runtime.context, readOnly: true } : runtime.context;
     try {
-      const value = await def.handler(runtime.context, (args ?? {}) as Record<string, unknown>);
+      const value = await invokeTool(ctx, name, (args ?? {}) as Record<string, unknown>);
       return { content: [{ type: 'text' as const, text: JSON.stringify(value, null, 2) }] };
     } catch (err) {
       const e = err as { code?: string; message?: string; details?: unknown };

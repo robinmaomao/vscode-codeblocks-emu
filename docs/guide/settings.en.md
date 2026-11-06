@@ -16,7 +16,7 @@
 - **Upgrade migration** (this version):
   - `codeblocks.parallelJobs` `0` changed from "logical cores × 2" to "the host's logical core count". On upgrade, an **explicitly configured 0** is rewritten to `8` once; set it back to `0` afterwards to use the logical core count.
   - `codeblocks.clangd.queryDriver` was removed (it only printed a hint). Use `codeblocks.clangd.builtinHeaders = queryDriver` and run `Code::Blocks: Configure clangd --query-driver`.
-  - Settings were reorganized into 9 sections; **setting keys were not renamed**, so existing configuration files keep working.
+  - Settings were reorganized into 9 sections (now **10** with the Agent section); **setting keys were not renamed**, so existing configuration files keep working.
 
 ---
 
@@ -195,7 +195,27 @@ Example:
 
 ---
 
-## 10. When changes take effect
+## 10. Agent (Copilot / MCP)
+
+| Setting | Type | Default | Scope | Description |
+|---------|------|---------|-------|-------------|
+| `codeblocks.agent.enabled` | boolean | `true` |  | Master switch for agent control: when off, the 11 Language Model Tools are not registered and the bundled MCP server is not exposed (an already-running MCP server refuses calls too). **Untrusted workspaces are always treated as off.** Applies immediately; the standalone `cb-cli` is not affected. |
+| `codeblocks.agent.readOnly` | boolean | `false` |  | Read-only mode: only `project_read`, `build_status`, `compiler list/info`, `workspace info/deps/list` and `debug state` are allowed; edits, builds, runs and debugging fail with `read-only`. Applies immediately. |
+
+Example:
+
+```jsonc
+{
+  "codeblocks.agent.enabled": true,
+  "codeblocks.agent.readOnly": false
+}
+```
+
+See [Agent control (Copilot / MCP / CLI)](./agent-control.en.md).
+
+---
+
+## 11. When changes take effect
 
 | Setting | Takes effect |
 |---------|--------------|
@@ -206,3 +226,4 @@ Example:
 | `debug.*` | Next debug session |
 | `compilerId` / `masterPath` / `compilerPrograms` | Status bar refreshes immediately; clangd database regenerates as needed |
 | `editor.*` / `astyleOptions` / `todo.keywords` / `tools` | Immediately (tool menus refresh on next open) |
+| `agent.enabled` / `agent.readOnly` | Immediately (tool registration / read-only gating changes at once, no reload) |

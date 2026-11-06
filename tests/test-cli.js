@@ -87,6 +87,19 @@ const zhParse = run(['show', brokenCbp, '--json'], { CB_UI_LANGUAGE: 'zh-cn' });
 check('C14 CB_UI_LANGUAGE=en → 解析错误为英文', enParse.code === 3 && /Not a valid \.cbp file/.test(enParse.stderr), enParse.stderr.slice(0, 200));
 check('C15 CB_UI_LANGUAGE=zh-cn → 解析错误为中文', zhParse.code === 3 && /不是有效的 \.cbp 文件/.test(zhParse.stderr), zhParse.stderr.slice(0, 200));
 
+// ---------- CLI 不受扩展 Agent 开关影响（独立工具） ----------
+const cliSettings = path.join(TMP, '.vscode');
+fs.mkdirSync(cliSettings, { recursive: true });
+fs.writeFileSync(path.join(cliSettings, 'settings.json'), JSON.stringify({
+  'codeblocks.agent.enabled': false,
+  'codeblocks.agent.readOnly': true,
+}), 'utf-8');
+const cliOps2 = path.join(TMP, 'ops2.json');
+fs.writeFileSync(cliOps2, JSON.stringify([{ op: 'add', scope: 'target', target: 'Debug', field: 'compilerOptions', value: '-DCLI_UNGATED=1' }]));
+const cliEdit = run(['edit', cbp, '--ops-file', cliOps2, '--json']);
+check('C16 CLI 不受 agent.enabled / readOnly 影响（仍可写盘）',
+  cliEdit.code === 0 && JSON.parse(cliEdit.stdout).written === true, cliEdit.stdout.slice(0, 120) || cliEdit.stderr.slice(0, 160));
+
 // ---------- 打包后的 bundle 也能正确解析资源目录 ----------
 const bundleCli = path.join(ROOT, 'bundle', 'cb-cli.js');
 if (fs.existsSync(bundleCli)) {

@@ -2,7 +2,7 @@
 
 > 语言：**中文** ｜ [English](./usage.en.md)
 >
-> 版本：0.8.142 ｜ 本扩展为 Code::Blocks 核心功能的原生移植，直接驱动 GCC / GDB，**不依赖** `tasks.json` / `launch.json`。
+> 版本：0.8.143-agent-control ｜ 本扩展为 Code::Blocks 核心功能的原生移植，直接驱动 GCC / GDB，**不依赖** `tasks.json` / `launch.json`。
 
 ---
 
@@ -51,7 +51,7 @@ Code::Blocks for VS Code 是一个「迷你 IDE 内核」：直接解析 `.cbp` 
 ### 2.1 从 VSIX 安装
 
 ```powershell
-code --install-extension codeblocks-vscode-0.8.142.vsix --force
+code --install-extension codeblocks-vscode-0.8.143-agent-control.vsix --force
 ```
 
 ### 2.2 从源码构建
@@ -59,7 +59,7 @@ code --install-extension codeblocks-vscode-0.8.142.vsix --force
 ```powershell
 npm install
 npm run package
-code --install-extension codeblocks-vscode-0.8.142.vsix --force
+code --install-extension codeblocks-vscode-0.8.143-agent-control.vsix --force
 ```
 
 > `npm run package` = `vsce package`（打包前自动执行 `vscode:prepublish` 钩子 = `tsc` 编译（`dist/`，本地测试用）+ **esbuild 单文件打包**（`bundle/extension.js`，发布入口））；
@@ -705,6 +705,13 @@ Build Log 视图位于**底部 Panel**（打开方式：`Ctrl+J` 后选择「Bui
 | `codeblocks.keybindings.cbStyle` | `false` | CB 保真键位：启用与 VS Code 默认冲突的 Code::Blocks 键位（F5 断点 / F2 Build Log / Ctrl+R 替换 等 12 项，详见 §12.3）；关闭即恢复 VS Code 默认 |
 | `codeblocks.keybindings.overrides` | `{}` | 逐命令自定义快捷键（键名 = 命令短 id，值 = 键位串或空 = 解绑）；推荐用可视化面板（§12.5）修改（**扩展设置界面该项描述内即有一键入口**）；修改后**自动写入用户 `keybindings.json`**（仅托管条目 + 首次备份） |
 
+### 13.8 Agent（Copilot / MCP）
+
+| 设置项 | 默认值 | 说明 |
+|--------|--------|------|
+| `codeblocks.agent.enabled` | `true` | Agent 控制总闸：关闭后 11 个 Language Model Tools 不注册、内嵌 MCP server 不暴露；未受信任工作区一律按关闭处理。切换即时生效（独立的 `cb-cli` 不受影响） |
+| `codeblocks.agent.readOnly` | `false` | 只读模式：只放行 `project_read` / `build_status` / `compiler list,info` / `workspace info,deps,list` / `debug state`，其余返回 `read-only` |
+
 ---
 
 ## 14. RISC-V 交叉编译完整示例
@@ -947,6 +954,20 @@ A：**已全覆盖**（0.8.132 批次 2）。构建引擎日志、树视图节�
 > T5 跨库符号搜索、Export Makefile 入 Build 菜单（命令已具备，当前位于 Tools 菜单）。
 > 详情与决策见 [未实现功能待办](../dev/backlog.md) §2（明确不移植清单）。
 > 提醒：以上扩展为社区/厂商产品，请自行评估安装；本扩展不内置或捆绑它们。
+
+## 17. AI / CLI 自动化（Agent 控制）
+
+本版本（`0.8.143-agent-control` 分支预发布版）把工程控制能力开放给 Copilot agent、MCP 客户端与 CI：
+
+| 方式 | 用法 | 说明 |
+|---|---|---|
+| **Language Model Tools** | 在 Copilot Chat 的 Agent 模式下直接说"把 Debug 目标加上 `-std=c++17` 然后构建" | 扩展自动注册 11 个 `Code::Blocks:` 工具，无需配置 |
+| **MCP server** | `MCP: List Servers` → 启动 `Code::Blocks`；或外部客户端运行 `node <扩展>/bundle/cb-mcp.js` | 与 LM Tools 同一份实现 |
+| **CLI** | `node <扩展>/bundle/cb-cli.js build app.cbp --target Debug --json` | 不启动 VS Code，适合 CI；**不受扩展开关影响** |
+
+- **总闸**：`codeblocks.agent.enabled`（默认 `true`）；**只读模式**：`codeblocks.agent.readOnly`（默认 `false`）。
+  未受信任工作区一律按关闭处理；切换**即时生效**（无重载窗口）。
+- 工具清单、参数、典型工作流、排障见 [Agent 控制（Copilot / MCP / CLI）](./agent-control.md)。
 
 ## 许可证
 

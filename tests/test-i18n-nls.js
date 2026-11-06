@@ -21,7 +21,8 @@ const en = readJson('package.nls.json');
 const zh = readJson('package.nls.zh-cn.json');
 
 /** 无需翻译（产品名 / 专名）：中英文可相同或不需要中文 */
-const NO_TRANSLATION = new Set(['extension.displayName', 'viewsContainer.codeblocks.title', 'configuration.intellisense.title']);
+// Agent 分区标题按专名保留英文（与 IntelliSense 同款处理）
+const NO_TRANSLATION = new Set(['extension.displayName', 'viewsContainer.codeblocks.title', 'configuration.intellisense.title', 'configuration.agent.title']);
 const PLACEHOLDER = /^%[A-Za-z0-9_.\-]+%$/;
 
 // ---- 1. 收集「用户可见文案」的 jsonPath → 值 ----

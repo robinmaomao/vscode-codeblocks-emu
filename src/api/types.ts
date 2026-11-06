@@ -19,6 +19,8 @@ export type ControlErrorCode =
   | 'unsupported'
   | 'timeout'
   | 'not-running'
+  | 'disabled'
+  | 'read-only'
   | 'io-error';
 
 export interface ControlErrorShape {

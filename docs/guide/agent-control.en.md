@@ -1,6 +1,6 @@
 # Agent Control (Copilot / MCP / CLI)
 
-> Version: **0.8.141-agent-control** (pre-release build of `feat/agent-control`) | Requires VS Code **1.102.0+**
+> Version: **0.8.143-agent-control** (pre-release build of `feat/agent-control`) | Requires VS Code **1.102.0+**
 >
 > This page explains how AI agents (GitHub Copilot Chat agent mode) and any MCP client or shell
 > can fully control Code::Blocks projects through this extension: read/edit `.cbp`, build, rebuild,
@@ -186,10 +186,37 @@ logs go to stderr only (stdout is the protocol channel).
 
 ---
 
-## 7. Safety and permissions
+## 7. Switches and safety modes
+
+Two settings in `settings.json` (both apply **immediately, no reload**):
+
+| Setting | Default | Behaviour |
+|---|---|---|
+| `codeblocks.agent.enabled` | `true` | Master switch. When off, the 11 Language Model Tools are **not registered** (Copilot cannot see or call them) and the bundled MCP server is not exposed; an externally launched `cb-mcp.js` also refuses calls (`disabled`). **Untrusted workspaces are always treated as off.** The standalone `cb-cli` is not affected. |
+| `codeblocks.agent.readOnly` | `false` | Read-only mode. Only `project_read` / `build_status` / `compiler list,info` / `workspace info,deps,list` / `debug state` are allowed; everything else fails with `read-only` and project bytes stay unchanged. |
+
+```jsonc
+// .vscode/settings.json
+{
+  "codeblocks.agent.enabled": true,
+  "codeblocks.agent.readOnly": false
+}
+```
+
+> If an MCP client launched the server itself, restart that client after turning the switch off; the in-editor server stops being exposed as soon as the provider definition changes.
+>
+> Tool **invocation** respects the switch immediately (unknown tool when off, `read-only` in read-only mode), but the
+> editor's tool **list snapshot** (Configure Tools / `vscode.lm.tools`) may lag until the next window reload — this does
+> not affect enforcement.
+
+---
+
+## 8. Safety and permissions
 
 | Gate | Behaviour |
 |---|---|
+| Master switch | `codeblocks.agent.enabled` (above); untrusted workspaces are forced off |
+| Read-only mode | `codeblocks.agent.readOnly` (above), enforced centrally in `invokeTool` |
 | Tool enablement | Per-tool toggles in the VS Code **Tools** picker |
 | Approval | Governed by VS Code permission levels; edits return before/after |
 | `dryRun` | `project_edit` / `build` validate without writing |
@@ -200,7 +227,7 @@ logs go to stderr only (stdout is the protocol channel).
 
 ---
 
-## 8. Interaction with the editor
+## 9. Interaction with the editor
 
 - **LM Tools (in-process)**: edits go through the in-memory model and `persistProjectAndReload`; no
   "externally modified, reload?" prompt, and Build Log / Problems / status bar stay in sync.
@@ -210,7 +237,7 @@ logs go to stderr only (stdout is the protocol channel).
 
 ---
 
-## 9. Troubleshooting
+## 10. Troubleshooting
 
 | Symptom | Fix |
 |---|---|
@@ -224,7 +251,7 @@ logs go to stderr only (stdout is the protocol channel).
 
 ---
 
-## 10. Known limitations
+## 11. Known limitations
 
 - `codeblocks_run` has no stdin; use the terminal for interactive programs.
 - `preserve` only covers `compile` / `link`; everything else falls back to canonical.

@@ -129,4 +129,65 @@ suite('宿主集成 · Agent 控制面', (t) => {
     assert.strictEqual(stopped.ok, false, '无会话 stop 应返回错误');
     assert.strictEqual(stopped.error && stopped.error.code, 'not-running', JSON.stringify(stopped));
   });
+
+  // ---- 总闸：关闭后调用被拒，重开恢复（无需重载窗口） ----
+  // 注意：`vscode.lm.tools` 是宿主的快照，注销后可能滞后到重载窗口才刷新；
+  // 用户可见语义以「能否调用」为准，故断言放在 invokeTool 上。
+  t.test('开关 agent.enabled：关闭 → 调用被拒；重开 → 恢复', async () => {
+    const ext = vscode.extensions.getExtension(EXT_ID);
+    const cbp = path.join(process.env.CB_REPO_ROOT || ext.extensionPath, 'test-project', 'hello-cb.cbp');
+    const canRead = async () => {
+      try {
+        const r = await vscode.lm.invokeTool('codeblocks_project_read', { input: { cbp, section: 'summary' } }, undefined);
+        const text = (r.content || [])
+          .filter((p) => p instanceof vscode.LanguageModelTextPart)
+          .map((p) => p.value)
+          .join('');
+        return JSON.parse(text).summary?.title === 'hello-cb';
+      } catch {
+        return false;
+      }
+    };
+    assert.ok(await canRead(), '前置：工具应可调用');
+
+    try {
+      await U.setConfig('agent.enabled', false);
+      const denied = await U.waitFor(async () => ((await canRead()) ? undefined : true), 15000);
+      assert.ok(denied, '关闭后工具仍可调用（应报未知工具）');
+    } finally {
+      await U.setConfig('agent.enabled', true);
+    }
+
+    const back = await U.waitFor(canRead, 15000);
+    assert.ok(back, '重新开启后工具未恢复');
+    const snapshot = (vscode.lm.tools || []).filter((x) => EXPECTED.includes(x.name)).length;
+    console.log(`[probe] 开关切换完成；lm.tools 快照=${snapshot}（快照可能滞后到重载窗口）`);
+  });
+
+  // ---- 只读模式：写/执行被拒且提示设置键，查询类仍可用 ----
+  t.test('只读模式 agent.readOnly：build 返回 read-only，project_read 仍可用', async () => {
+    const ext = vscode.extensions.getExtension(EXT_ID);
+    const cbp = path.join(process.env.CB_REPO_ROOT || ext.extensionPath, 'test-project', 'hello-cb.cbp');
+    try {
+      await U.setConfig('agent.readOnly', true);
+      const denied = await U.waitFor(async () => {
+        const r = await callTool('codeblocks_build', { cbp, dryRun: true });
+        return r && r.ok === false && r.error && r.error.code === 'read-only' ? r : undefined;
+      }, 15000);
+      assert.ok(denied, '只读模式下 build 未被拒绝');
+      assert.ok(String(denied.error.details && denied.error.details.hint || '').includes('codeblocks.agent.readOnly'),
+        '只读错误缺少解除提示');
+
+      const read = await callTool('codeblocks_project_read', { cbp, section: 'summary' });
+      assert.strictEqual(read.summary.title, 'hello-cb', '只读模式下 project_read 应仍可用');
+    } finally {
+      await U.setConfig('agent.readOnly', false);
+    }
+
+    const allowed = await U.waitFor(async () => {
+      const r = await callTool('codeblocks_build', { cbp, dryRun: true });
+      return r && r.ok === true && r.dryRun === true ? r : undefined;
+    }, 15000);
+    assert.ok(allowed, '关闭只读模式后 build 仍被拒绝');
+  });
 });

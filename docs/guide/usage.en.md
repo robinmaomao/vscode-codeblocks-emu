@@ -1,7 +1,7 @@
 # Code::Blocks for VS Code — Usage Guide
 
 > Language: **English** ｜ [中文](./usage.md)
-> Version: 0.8.142 ｜ Native port of Code::Blocks core features to VS Code, driving GCC / GDB directly, **without** `tasks.json` / `launch.json`.
+> Version: 0.8.143-agent-control ｜ Native port of Code::Blocks core features to VS Code, driving GCC / GDB directly, **without** `tasks.json` / `launch.json`.
 
 ---
 
@@ -50,7 +50,7 @@ Code::Blocks for VS Code is a "mini IDE kernel": it parses `.cbp` / `.workspace`
 ### 2.1 Install from VSIX
 
 ```powershell
-code --install-extension codeblocks-vscode-0.8.142.vsix --force
+code --install-extension codeblocks-vscode-0.8.143-agent-control.vsix --force
 ```
 
 ### 2.2 Build from source
@@ -58,7 +58,7 @@ code --install-extension codeblocks-vscode-0.8.142.vsix --force
 ```powershell
 npm install
 npm run package
-code --install-extension codeblocks-vscode-0.8.142.vsix --force
+code --install-extension codeblocks-vscode-0.8.143-agent-control.vsix --force
 ```
 
 > `npm run package` = `vsce package` (before packaging, the `vscode:prepublish` hook runs `tsc` compilation (`dist/`, for local testing) + the **esbuild single-file bundle** (`bundle/extension.js`, the release entry));
@@ -702,6 +702,13 @@ Note: keybindings are **user-level** (shared across windows); combinations taken
 | `codeblocks.keybindings.cbStyle` | `false` | CB fidelity keys: enables the Code::Blocks keys that conflict with VS Code defaults (F5 breakpoint / F2 Build Log / Ctrl+R replace and 9 more, 12 in total; see §12.3); disabling restores the VS Code defaults |
 | `codeblocks.keybindings.overrides` | `{}` | Per-command custom keybindings (key = command short id, value = keybinding string, or empty = unbind); the visual panel (§12.5) is recommended for changes (**a one-click entry is right in this setting's description in the extension settings UI**); after a change it is **written to the user's `keybindings.json` automatically** (managed entries only + first-time backup) |
 
+### 13.8 Agent (Copilot / MCP)
+
+| Setting | Default | Description |
+|--------|--------|------|
+| `codeblocks.agent.enabled` | `true` | Master switch: when off, the 11 Language Model Tools are not registered and the embedded MCP server is not exposed; untrusted workspaces are always treated as off. Applies immediately (the standalone `cb-cli` is not affected) |
+| `codeblocks.agent.readOnly` | `false` | Read-only mode: only `project_read` / `build_status` / `compiler list,info` / `workspace info,deps,list` / `debug state` are allowed; everything else fails with `read-only` |
+
 ---
 
 ## 14. Complete RISC-V cross-compilation example
@@ -945,6 +952,20 @@ The following Code::Blocks features (round 5 batch 3 T1/T4/T5) were assessed as 
 > T5 cross-library symbol search, Export Makefile in the Build menu (the command exists but currently lives in the Tools menu).
 > For details and the decision record, see the [unimplemented-feature backlog](../dev/backlog.md) §2 (not-ported list).
 > Reminder: the extensions above are community/vendor products; evaluate them before installing. This extension neither bundles nor ships them.
+
+## 17. AI / CLI automation (agent control)
+
+This version (`0.8.143-agent-control`, branch pre-release) exposes project control to Copilot agents, MCP clients and CI:
+
+| Transport | How | Notes |
+|---|---|---|
+| **Language Model Tools** | In Copilot Chat agent mode, ask e.g. "add `-std=c++17` to the Debug target and build" | The extension registers 11 `Code::Blocks:` tools automatically |
+| **MCP server** | `MCP: List Servers` → start `Code::Blocks`; or run `node <extension>/bundle/cb-mcp.js` from an external client | Same implementation as the LM tools |
+| **CLI** | `node <extension>/bundle/cb-cli.js build app.cbp --target Debug --json` | No VS Code needed; CI friendly; **not affected by the switches** |
+
+- **Master switch**: `codeblocks.agent.enabled` (default `true`); **read-only mode**: `codeblocks.agent.readOnly` (default `false`).
+  Untrusted workspaces are always treated as off; both apply **immediately** (no reload).
+- Tool reference, typical workflows and troubleshooting: [Agent control (Copilot / MCP / CLI)](./agent-control.en.md).
 
 ## License
 
