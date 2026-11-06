@@ -1,0 +1,3 @@
+# GitHub Release 页面正文：无论 core.autocrlf 如何，检出 / 提交都保持 LF
+# （tests/contract/gen-release-notes.js --check 与 gh --notes-file 都按 LF 处理）
+docs/release/pages/*.md text eol=lf
