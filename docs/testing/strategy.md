@@ -172,7 +172,7 @@ node tests/run-all.js --group all --json out.json
 4. **跨工具链用例的程序路径注入**：宿主内无法交互驱动「探测编译器」QuickPick，故按产品文档化机制写 `codeblocks.compilerPrograms`
    （**按编译器 id 作用域**：`{ "<id>": { C, … } }`，D-20 后形态；用例结束恢复原值）。
 5. **宿主层改动 `src/` 后必须 `npm run bundle`**：扩展入口是 `package.json.main = ./bundle/extension.js`
-   （宿主加载的是 bundle，不是 `dist/`）——只跑 `npm run compile` 会让宿主用例跑在**旧代码**上而误判（曾导致跨工具链用例「看似产品坏了」）。
+   （宿主加载的是 bundle，不是 `dist/`）——只跑 `npm run compile` 会让宿主用例跑在**旧代码**上而误判（曾导致跨工具链用例「看似产品坏了」）。工程搜索内容模式另有 `bundle/search-worker.js`，需 `npm run bundle:search`（`npm run test:pack` 会检查产物）。
 
 ## 5.4 L1 调试 E2E（DAP 协议级，`tests/e2e/test-e2e-debug.js`）
 

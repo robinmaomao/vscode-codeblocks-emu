@@ -68,7 +68,7 @@ const mixed = parseImportPayload('{ "overrides": { "build": "ctrl+alt+b", "nope"
 check('导入：未知/非法项报告', mixed.overrides.size === 1 && mixed.unknown.length === 1 && mixed.invalid.length === 1, { ok: mixed.overrides.size, u: mixed.unknown, i: mixed.invalid.map((x) => x.id) }, { ok: 1, u: ['nope'], i: ['debug'] });
 
 // ---- 6. 行数与分组 ----
-check('行模型覆盖全部托管项（30）', rowsDefault.length === MANAGED_KEYBINDINGS.length && rowsDefault.length === 30, rowsDefault.length, 30);
+check('行模型覆盖全部托管项（31）', rowsDefault.length === MANAGED_KEYBINDINGS.length && rowsDefault.length === 31, rowsDefault.length, 31);
 check('行模型分组与托管表一致', rowsDefault.every((r) => MANAGED_KEYBINDINGS.find((m) => m.id === r.id).group === r.group), 'n/a', '一致');
 
 console.log(`快捷键面板模型回归: ${pass} pass, ${fail} fail`);

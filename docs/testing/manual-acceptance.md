@@ -1,7 +1,7 @@
 # 手工验收清单（L6 · 不可自动化项）
 
 > 本清单覆盖**自动化难以稳定判定**的交互与视觉项。执行前先完成：
-> `npm run compile && npm run bundle`，然后按「开发调试」方式启动扩展宿主（`F5`，或 `code --extensionDevelopmentPath=<仓库路径> test-project`）。
+> `npm run compile && npm run bundle && npm run bundle:search`，然后按「开发调试」方式启动扩展宿主（`F5`，或 `code --extensionDevelopmentPath=<仓库路径> test-project`）。
 > 建议用仓库内 `test-project/`（3 个 `.cbp` + 1 个 `.workspace`）与 `test-project/dep-test.workspace` 作为验收工程。
 >
 > 记录方式：逐项勾选并截图留档（原生 UI 不做像素门禁，截图仅作回归留档与问题复现证据）。
@@ -136,3 +136,20 @@
 - [ ] **调试层文案**：启动失败、GDB 异常退出、断点/寄存器禁用等提示中英两态一致（重点：错误提示仍含可定位的命令名/路径）
 - [ ] **WebView 面板正文**：工程属性 9 页、快捷键面板、编译选项面板的字段标签/按钮/校验提示随语言切换；**工程名与备注等数据不被翻译**（源级插桩的边界）
 - [ ] **菜单标签**：状态栏菜单「选择菜单」→「Build / 构建菜单」等 148 个菜单项标签随 `ui.language` 切换，且点击行为与命令映射不变
+
+## 9. 工程搜索（Project Search，0.8.144-project-search 起）
+
+- [ ] 侧边栏出现 **Project Search**（Project 之后、Symbols 之前）；200px 窄侧栏无横向溢出，历史栏文字缩为图标
+- [ ] 文件模式：输入即搜、活动工程置顶、按工程分组；空查询可浏览全部工程文件；单击打开、悬停 ⤢ 在工程树定位
+- [ ] 内容模式：输入后 `Enter` / 「搜索」执行；结果按文件分组（默认展开前两组）；单击匹配行跳转并选中匹配文本；搜索中「停止」可取消
+- [ ] 中文输入法组合输入期间不触发搜索；组合结束后再搜
+- [ ] 范围：所有工程 / 当前活动工程；从工程树右键 folder / virtualFolder / fileGroup 进入显示范围 chip，× 清除后恢复
+- [ ] `Aa` / `.*`：内容模式大小写与 `/正则/` 生效；非法正则给出可读提示；文件模式不受影响
+- [ ] 顶部历史栏：`🕘 搜索历史` 展开；**`保留历史` switch 位于搜索栏顶部**，开/关即时生效并与设置 `codeblocks.search.keepHistory` 同步
+- [ ] 点击历史条目：有有效上次结果直接跳转；失效/无结果时恢复查询/模式/范围/选项并重跑；`↻` 仅重跑
+- [ ] 清空历史需二次确认；关闭保留历史后历史面板隐藏、不再写新记录
+- [ ] 子树范围搜索不写历史；历史只在当前工作区可见（另开工作区不串）
+- [ ] 中英切换后重建搜索视图，标签/提示/相对时间语言一致；深/浅/高对比主题下颜色可读
+- [ ] 打开/关闭/切换活动工程、增删文件后，可见视图自动刷新结果；隐藏视图不产生后台搜索
+- [ ] 命令 `Code::Blocks: Project Search: Search Project Files`（`Ctrl+Alt+P`）与 `Search in Project Files` 可打开/聚焦视图；编辑器单行选区会预填内容查询
+- [ ] 运行 `Code::Blocks: Reset View Layout` 后顺序为 Project → Search → Symbols（未手动隐藏 Search 时）

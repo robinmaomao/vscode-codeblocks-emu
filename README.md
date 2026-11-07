@@ -6,7 +6,7 @@
 
 直接在 VS Code 中打开 `.cbp` / `.workspace` 工程，即可获得与 Code::Blocks 对齐的构建、调试与工程浏览体验。
 
-> **作者**：Robinmaomao ｜ **版本**：0.8.142
+> **作者**：Robinmaomao ｜ **版本**：0.8.144
 
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](./LICENSE.md)
 
@@ -51,6 +51,7 @@
 - ⚙️ **编译器管理**：完整解析 `options_<id>.xml`（含 `extends` 继承、`<if platform>` 平台分支、`<Common>` 引用）；自动探测 GCC / MinGW / Clang / MSVC / RISC-V，以及 AVR / MSP430 / SDCC 工具链；支持从 Code::Blocks 的 `default.conf` 读取**用户自定义交叉编译器**。
 - 🗂️ **多项目管理**：同时打开多个 `.cbp`，工程树支持拖拽排序（即编译顺序）、上移/下移、移除项目、活动项目高亮；打开工作区自动检测 `.cbp`，多选弹窗（目录名/文件名、默认全选）或状态栏入口随时重新打开。
 - 📂 **工程树浏览**：按公共顶层目录（`relativeToCommonTopLevelPath`）展开的多层嵌套目录树、文件类型图标、缺失文件标记、目录优先排序（对齐 VS Code Explorer）。
+- 🔎 **工程搜索（Project Search）**：侧边栏专用视图，**只搜索已打开 `.cbp` 工程**（文件/内容双模式、活动工程优先、点击跳转、可停止）；顶部搜索历史 + `保留历史` 可视化开关，`Ctrl+Alt+P` 直达文件模式；不替换内置搜索、不扫描工作区外文件。
 - 🧩 **右键菜单**：项目节点支持增量编译/全量编译/添加文件；文件节点支持从项目移除、打开所在目录、切换编译/链接开关（写回 `.cbp`）。
 - 📄 **单文件编译 / 单文件 Clean**：工程树右键文件 → `Build File`（对齐 Code::Blocks `CompileFile`：DepsSearchStart + IsObjectOutdated 增量判断，命令与整目标构建字节级一致）/ `Clean File`（删对象与 `.depend` 依赖文件）。
 - 🔔 **外部修改检测**：已打开的 `.cbp` 被其它程序（编辑器 / 版本控制 / Code::Blocks 本体）修改时按设置
@@ -120,10 +121,10 @@ code --install-extension robinmaomao.codeblocks-vscode
 
 ### 方式二：从 GitHub Releases 安装
 
-从 [Releases](https://github.com/robinmaomao/vscode-codeblocks-emu/releases) 下载最新 `codeblocks-vscode-0.8.142.vsix`：
+从 [Releases](https://github.com/robinmaomao/vscode-codeblocks-emu/releases) 下载最新 `codeblocks-vscode-0.8.144.vsix`：
 
 ```powershell
-code --install-extension codeblocks-vscode-0.8.142.vsix --force
+code --install-extension codeblocks-vscode-0.8.144.vsix --force
 ```
 
 ### 方式三：从源码构建
@@ -131,7 +132,7 @@ code --install-extension codeblocks-vscode-0.8.142.vsix --force
 ```powershell
 npm install
 npm run package
-code --install-extension codeblocks-vscode-0.8.142.vsix --force
+code --install-extension codeblocks-vscode-0.8.144.vsix --force
 ```
 
 > `npm run package` = `vsce package`（打包前会自动执行 `vscode:prepublish` 钩子 = `tsc` 编译（`dist/`，本地测试用）+ esbuild 单文件打包（`bundle/extension.js`，发布入口））；直接运行 `npx vsce package` / `npx vsce publish` 同样会自动构建，不会打进过期或缺失的 `bundle/`；Windows 下建议使用 `npm.cmd` / `npx.cmd`（PSReadLine 执行策略）。
@@ -149,6 +150,7 @@ code --extensionDevelopmentPath="." --disable-extensions --new-window
 1. 打开包含 `.cbp` / `.workspace` 的文件夹（自动检测并提示选择要打开的工程），或执行命令面板的 **`Code::Blocks: Open Project (.cbp)`**。
 2. 左侧活动栏点击 **Code::Blocks** 图标，展开面板：
    - **Project**：工程树（多项目 + 嵌套目录 + 文件浏览；项目行悬停有 Build / Rebuild / Clean / Properties 快捷按钮）
+   - **Project Search**：工程内搜索（只搜已打开 `.cbp`；文件/内容双模式、活动工程优先、点击跳转、顶部搜索历史与 `保留历史` 开关；`Ctrl+Alt+P`）
    - **Analysis**：工程分析（按工程展示 `.cbp` 重要属性；悬停显示对应配置片段，点击在 `.cbp` 中定位，右键可复制；顶部为「最近构建」入口）
    - **Symbols**：符号浏览器（默认隐藏，可从 ⋯ → Views 调出或设置 `codeblocks.ui.symbolsView` 控制）
    - **Build Log**：结构化构建摘要，位于**底部 Panel 的「Build Log」标签页**（`Ctrl+J` 打开）

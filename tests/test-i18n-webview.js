@@ -37,6 +37,7 @@ async function main() {
   const { ProjectPropertiesPanel } = require('../dist/ui/projectPropertiesPanel.js');
   const { KeybindingPanel } = require('../dist/ui/keybindingPanel.js');
   const { CompilerOptionsPanel } = require('../dist/ui/compilerOptionsPanel.js');
+  const { buildProjectSearchViewHtml } = require('../dist/ui/projectSearchViewHtml.js');
 
   const project = new ProjectParser().parse(FIXTURE);
   const uri = mock.vscode.Uri.file(ROOT);
@@ -76,6 +77,7 @@ async function main() {
     out.keybindings = mock.webviews[mock.webviews.length - 1].webview.html;
     new CompilerOptionsPanel(compiler, project, project.buildTargets[0], uri);
     out.compilerOptions = mock.webviews[mock.webviews.length - 1].webview.html;
+    out.search = buildProjectSearchViewHtml();
     return out;
   }
 
@@ -94,6 +96,7 @@ async function main() {
   check('A3 快捷键面板：中文标签在位',
     zh.keybindings.includes('快捷键') && zh.keybindings.includes('全部重置') && zh.keybindings.includes('检查冲突'));
   check('A4 编译选项面板：中文标签在位', zh.compilerOptions.includes('应用') && zh.compilerOptions.includes('重置'));
+  check('A5 工程搜索视图：中文标签在位', zh.search.includes('搜索历史') && zh.search.includes('保留历史') && zh.search.includes('所有工程'));
 
   // ---- B. 英文态 ----
   check('B1 工程属性面板：英文态 lang=en', en.props.includes('lang="en"'), en.props.match(/lang="[^"]*"/)?.[0]);
@@ -102,6 +105,7 @@ async function main() {
   check('B3 快捷键面板：英文标签在位',
     en.keybindings.includes('Reset all') && en.keybindings.includes('Check conflicts') && en.keybindings.includes('Current keybinding'));
   check('B4 编译选项面板：英文标签在位', en.compilerOptions.includes('>Apply<') && en.compilerOptions.includes('>Reset<'));
+  check('B5 工程搜索视图：英文标签在位', en.search.includes('Search History') && en.search.includes('Keep history') && en.search.includes('All projects'));
 
   const leftovers = {};
   for (const [id, html] of Object.entries(en)) leftovers[id] = [...new Set(cjkRuns(html))];
@@ -110,18 +114,18 @@ async function main() {
     const bad = runs.filter((r) => !isData(r));
     if (bad.length) unexpected[id] = bad;
   }
-  check('B5 英文态渲染仅剩「工程数据」中文（备注等），无 UI 文案残留',
+  check('B6 英文态渲染仅剩「工程数据」中文（备注等），无 UI 文案残留',
     Object.keys(unexpected).length === 0, unexpected);
 
   // ---- C. 结构一致性（防止插桩破坏标记） ----
   const tags = (s) => (s.match(/<[a-zA-Z][^>]*>/g) || []).length;
   check('C1 中英两态标签数量一致（无标记损失）',
     tags(zh.props) === tags(en.props) && tags(zh.keybindings) === tags(en.keybindings)
-    && tags(zh.compilerOptions) === tags(en.compilerOptions),
-    { zhProps: tags(zh.props), enProps: tags(en.props), zhKb: tags(zh.keybindings), enKb: tags(en.keybindings) });
+    && tags(zh.compilerOptions) === tags(en.compilerOptions) && tags(zh.search) === tags(en.search),
+    { zhProps: tags(zh.props), enProps: tags(en.props), zhKb: tags(zh.keybindings), enKb: tags(en.keybindings), zhSearch: tags(zh.search), enSearch: tags(en.search) });
   check('C2 输出无插桩泄漏（不含 i18n.tr( 源码片段）',
     ![...Object.values(zh), ...Object.values(en)].some((h) => h.includes('i18n.tr(')));
-  check('C3 英文态无未替换的 ${} 模板残留', !en.props.includes('${') && !en.keybindings.includes('${'));
+  check('C3 英文态无未替换的 ${} 模板残留', !en.props.includes('${') && !en.keybindings.includes('${') && !en.search.includes('${'));
 
   // ---- C4. 渲染后的内联脚本必须能编译（英文译文含撇号/引号会截断 '...' 字符串，导致整个面板脚本不执行） ----
   {
@@ -141,7 +145,7 @@ async function main() {
   const dictPath = path.join(ROOT, 'src', 'i18n', 'strings.zh-cn.webview.json');
   const dict = JSON.parse(fs.readFileSync(dictPath, 'utf-8'));
   const ts = require('typescript');
-  const PANEL_FILES = ['src/ui/projectPropertiesPanel.ts', 'src/ui/keybindingPanel.ts', 'src/ui/compilerOptionsPanel.ts'];
+  const PANEL_FILES = ['src/ui/projectPropertiesPanel.ts', 'src/ui/keybindingPanel.ts', 'src/ui/compilerOptionsPanel.ts', 'src/ui/projectSearchViewHtml.ts'];
   const units = new Set();
   const nonLiteral = [];
   for (const rel of PANEL_FILES) {

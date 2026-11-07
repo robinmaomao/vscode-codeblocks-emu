@@ -114,6 +114,7 @@ import {
   diffManaged, parseImportPayload, parseOverrides, readManagedEntries, updateKeybindingsText, validateChord,
 } from './tools/keybindingConfig';
 import { KeybindingPanel, KeybindingPanelState } from './ui/keybindingPanel';
+import { registerProjectSearch, ProjectSearchRegistration } from './ui/projectSearchView';
 
 /** 已打开的项目列表（顺序即编译顺序） */
 let openProjects: Project[] = [];
@@ -130,6 +131,8 @@ let compilerResourcesDir = '';
 let codeBlocksConfig: CodeBlocksConfig | undefined;
 let projectTreeProvider: ProjectTreeProvider | undefined;
 let projectTreeView: vscode.TreeView<any> | undefined;
+/** 工程搜索视图（上下文变化时通知；deactivate 时释放 worker/定时器） */
+let projectSearch: ProjectSearchRegistration | undefined;
 let buildLogTreeProvider: BuildLogTreeProvider | undefined;
 let symbolTreeProvider: SymbolTreeProvider | undefined;
 let analysisTreeProvider: AnalysisTreeProvider | undefined;
@@ -710,6 +713,43 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     }
   });
 
+  // 注册工程搜索视图（Sidebar WebviewView）：只搜索已打开 .cbp 工程，不触发 workspace.findFiles/watcher
+  projectSearch = registerProjectSearch(context, {
+    getProjects: () => openProjects,
+    getActiveProject: () => activeProject,
+    filesUnder: (node: any) => (projectTreeProvider ? projectTreeProvider.filesUnder(node) : []),
+    revealFile: async (project, file) => {
+      if (!projectTreeProvider || !projectTreeView) return;
+      const node = projectTreeProvider.findFileNode(project, file);
+      try {
+        await projectTreeView.reveal(node as any, { select: true, focus: true, expand: true });
+      } catch {
+        /* 视图被隐藏/树不可用：忽略定位 */
+      }
+    },
+    openLocation: async (file, line, column, length) => {
+      try {
+        const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(file));
+        const lastLine = Math.max(0, (doc.lineCount || 1) - 1);
+        const lineIdx = Math.max(0, Math.min(Math.floor(Number(line)) || 0, lastLine));
+        const lineText = doc.lineAt(lineIdx);
+        const lineEnd = Math.max(0, lineText.range.end.character);
+        const startCol = Math.max(0, Math.min(Math.floor(Number(column)) || 0, lineEnd));
+        const endCol = Math.max(startCol, Math.min(startCol + Math.max(0, Math.floor(Number(length)) || 0), lineEnd));
+        const range = new vscode.Range(
+          new vscode.Position(lineIdx, startCol),
+          new vscode.Position(lineIdx, endCol),
+        );
+        const editor = await vscode.window.showTextDocument(doc, { preview: false, selection: range });
+        editor.revealRange(range, vscode.TextEditorRevealType.InCenter);
+        return true;
+      } catch {
+        return false;
+      }
+    },
+    output: outputChannel,
+  });
+
   // 注册构建日志树视图（结构化构建摘要）
   buildLogTreeProvider = new BuildLogTreeProvider();
   buildLogTreeProvider.setResourcesDir(path.join(context.extensionPath, 'resources'));
@@ -789,6 +829,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       // 顺序即最终排列：每次 move 追加到目标容器末尾
       await vscode.commands.executeCommand('vscode.moveViews', { viewIds: ['codeblocks.buildLog'], destinationId: panelId });
       await vscode.commands.executeCommand('vscode.moveViews', { viewIds: ['codeblocks.projectTree'], destinationId: sidebarId });
+      try {
+        // 搜索视图可能被用户隐藏：失败不得让既有布局重置整体失败
+        await vscode.commands.executeCommand('vscode.moveViews', { viewIds: ['codeblocks.search'], destinationId: sidebarId });
+      } catch {
+        /* 忽略 */
+      }
       await vscode.commands.executeCommand('vscode.moveViews', { viewIds: ['codeblocks.symbols'], destinationId: sidebarId });
       if (restoreEditorFocus) {
         // 激活路径：把键盘焦点还给编辑器，避免开机弹出侧栏
@@ -796,7 +842,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
           void vscode.commands.executeCommand('workbench.action.focusActiveEditorGroup');
         }, 300);
       }
-      outputChannel.appendLine(logT('[View layout] Default layout applied (Build Log → bottom panel; sidebar Project→Symbols)'));
+      outputChannel.appendLine(logT('[View layout] Default layout applied (Build Log → bottom panel; sidebar Project→Search→Symbols)'));
       return true;
     } catch (e) {
       outputChannel.appendLine(logT('[View layout] Failed to apply (will retry this session): {0}', e instanceof Error ? e.message : String(e)));
@@ -828,7 +874,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       await context.globalState.update(UI_LAYOUT_VERSION_KEY, UI_LAYOUT_VERSION);
       vscode.window.showInformationMessage(
         ok
-          ? i18n.t('View layout reset: Build Log is in the bottom panel and the sidebar order is Menu → Project → Symbols')
+          ? i18n.t('View layout reset: Build Log is in the bottom panel and the sidebar order is Menu → Project → Search → Symbols')
           : i18n.t('Failed to reset the view layout — see the Code::Blocks output channel'),
       );
     }),
@@ -3317,6 +3363,7 @@ async function openProject(filename: string): Promise<void> {
       // 打开动作用户期望"立刻能分析"：数据库/配置有变化时必须重启 clangd（不受 restartOnActiveProjectSwitch 限制）
       restartClangdReason = 'open';
       void generateClangdForWorkspace();
+      projectSearch?.provider.notifyContextChanged();
       return;
     }
 
@@ -3368,6 +3415,7 @@ async function openProject(filename: string): Promise<void> {
     // 打开工程后 clangd 必须按新数据库重新分析（首开工程时旧 clangd 进程可能还按"无数据库"的状态在跑）
     restartClangdReason = 'open';
     void generateClangdForWorkspace();
+    projectSearch?.provider.notifyContextChanged();
   } catch (err) {
     vscode.window.showErrorMessage(i18n.t('Failed to open the project: {0}', (err as Error).message));
   }
@@ -3444,6 +3492,7 @@ function setActiveProject(project: Project | undefined, opts: { persist?: boolea
   activeProject = project;
   projectTreeProvider?.setActiveProject(project);
   refreshStatusBars();
+  projectSearch?.provider.notifyContextChanged();
   if (opts.persist && project) {
     void extContext?.workspaceState.update('codeblocks.activeProject', project.filename);
   }
@@ -4756,6 +4805,7 @@ function reorderProjects(srcFilename: string, targetFilename: string | undefined
   }
   projectTreeProvider?.setProjects(openProjects);
   persistProjectOrder();
+  projectSearch?.provider.notifyContextChanged();
 }
 
 /** 按持久化顺序重排已打开的项目（恢复上次会话的编译顺序） */
@@ -5058,6 +5108,7 @@ function moveProject(filename: string, delta: number): void {
   openProjects.splice(targetIdx, 0, moved);
   projectTreeProvider?.setProjects(openProjects);
   persistProjectOrder();
+  projectSearch?.provider.notifyContextChanged();
 }
 
 /** 移除项目（仅从侧边栏移除，不删除磁盘文件） */
@@ -5075,6 +5126,7 @@ function removeProject(filename: string): void {
   persistProjectOrder();
   markFallbackIndexDirty(); // P2：懒构建
   analysisTreeProvider?.refresh();
+  projectSearch?.provider.notifyContextChanged();
   outputChannel.info(logT('[Code::Blocks] Project removed: {0}', removed.title));
 }
 
@@ -8594,6 +8646,8 @@ export function deactivate(): void {
   // （cancel 置位 + taskkill /T /F 杀 cmd.exe→gcc→cc1/as/ld 整棵进程树），
   // 避免扩展宿主退出后遗留孤儿编译进程/未受控的半成品产物。无构建时为空操作。
   currentBuildCancel?.cancel();
+  projectSearch?.dispose();
+  projectSearch = undefined;
   // 外部修改检测的去抖计时器不属于 context.subscriptions，需要显式清掉：
   // 扩展被禁用但宿主未退出时，残留计时器会回调已失效的 vscode API。
   for (const timer of externalChangeTimers.values()) clearTimeout(timer);

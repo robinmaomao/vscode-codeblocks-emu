@@ -154,6 +154,8 @@
 | `codeblocks.ui.symbolsView` | boolean | `true` |  | 显示侧边栏 Symbols 视图。 |
 | `codeblocks.ui.recentProjectsLimit` | number | `8` |  | 最近工程列表上限（0–50；0 = 不记录）。 |
 | `codeblocks.ui.findFileOpen` | boolean | `false` |  | 「查找文件」命中后直接打开文件；默认只在工程树中定位。 |
+| `codeblocks.search.scope` | string | `openProjects` |  | 工程搜索默认范围：`openProjects`（所有已打开工程）/ `activeProject`（仅当前活动工程）。视图内选择按工作区覆盖。 |
+| `codeblocks.search.keepHistory` | boolean | `true` |  | 按工作区保留最近搜索历史（文件/内容各 20 条）；关闭后停止记录，已有历史可在视图顶部清空。 |
 
 ---
 
