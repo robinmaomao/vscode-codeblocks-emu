@@ -10,7 +10,7 @@
 | 层 | 命令 | 本轮结果 | 说明 |
 |----|------|----------|------|
 | L-1 契约 | `npm run test:contract` | **3/3** | 契约 44 项 + 文档一致性 6 项 + 设置契约 **685** 断言（覆盖矩阵/性能基准/命令与链接/版本标记） |
-| 无头层（unit） | `npm test` | **TOTAL=187 FAIL=0 SKIP=1** | SKIP=`tests/test-writer.js`（需 `<cbp>` 参数的手工工具）；新增 `test-agent-policy.js`（34 断言），另有 `test-api-tool-guards` / `test-api-build-service` / `test-mcp-server` 门控用例 |
+| 无头层（unit） | `npm test` | **TOTAL=189 FAIL=0 SKIP=1** | SKIP=`tests/test-writer.js`（需 `<cbp>` 参数的手工工具）；新增 `test-agent-policy.js`（34 断言）、`test-clangd-restart-decision.js`（19 断言）、`test-clangd-startup-restore.js`（9 断言），另有 `test-api-tool-guards` / `test-api-build-service` / `test-mcp-server` 门控用例 |
 | L3 视觉 | `npm run test:visual` | **24/24** | 本版无 UI 布局改动；指纹匹配，严格判定，基线未刷新 |
 | L1 端到端 | `npm run test:e2e` | **7/7** | 真实工具链（本机 GCC 8.1 / MinGW）：构建 48、调试 143、边界 38、工具链 38、ccache 21、链接期诊断 7、CLI 7 |
 | L4 性能 | `npm run test:perf` | **13 项：9 pass / 1 warn / 3 fail（环境性）** | 裸 `gcc -c main.c` 实测 1.43–1.73 s/文件（基线约 0.14 s），B8/B10/B11 超预算；同期纯 CPU 项 +36%～94% 趋势告警 ⇒ 机器整体变慢 |
@@ -26,6 +26,7 @@
 | 构建引擎接线 | `tests/e2e/test-e2e-linker-diagnostic.js` **7 断言**：真实 gcc 链接失败 → `onStructuredDiagnostic` 的 file = 真实源文件、line = 调用行（第 6 行）、`onDiagnostic` 的 URI 一致、伪路径 `:(.text` 消失 | 真机 MinGW GCC 8.1：`obj\Debug\...\link_err.o:link_err.c:(.text+0x9): undefined reference to ...` |
 | 回归安全 | `test-e2e-build.js` 构建矩阵 48 断言保持全绿（构建命令 / 增量语义 / 产物零变化）；`unit 179 FAIL=0` | — |
 | Agent 开关（`agentPolicy` + `invokeTool`） | `tests/test-agent-policy.js` **34 断言**：设置声明/默认值/双语 nls/文档覆盖、`isAgentEnabled`/`isAgentReadOnly` 真值表、只读白名单逐工具逐动作（8 放行 / 13 拒绝）、`invokeTool` 只读拦截（含工程字节不变）、MCP 暴露计划；`test-mcp-server` M7–M10（关闭 → 空列表 + `disabled`；只读 → `read-only`）；`test-cli` C16（CLI 不受开关影响） | 宿主实测：关闭 `agent.enabled` → `invokeTool` 报未知工具、重开恢复；`agent.readOnly` → `build` 返回 `read-only`；`lm.tools` 快照可能滞后到重载 |
+| clangd 重载后噪音与弹窗 | `tests/test-clangd-startup-restore.js` **9 断言**（两阶段独立进程：首次会话打开两个同名 `app.cbp` → 预置 `projectOrder` 重新激活模拟 reload：恢复两工程、`Project file:` ×2、clangd 配置/数据库只处理一次、**不执行 `clangd.restart`** 且留说明日志）、`tests/test-clangd-restart-decision.js` **19 断言**（`decideClangdRestart` 真值表 + 批量/恢复期接线）、`tests/test-clangd-settings-sync.js` 36 断言（打开工程 → 数据库/配置变化仍重启 + 输出通道留痕原因）、`tests/test-clangd-config.js` 118 断言、`tests/test-build-cpu-guards.js` 10 断言 | 现场日志（reload → 两个同名 `app.cbp`）：两组 `Project opened` 为两个不同工程，clangd 生成/配置写入重复两遍；修复后批量合并为一次、跳过重启时输出一行说明。反向验证：临时禁用 `skip-config-only` 判定 → `test-clangd-startup-restore` 转红（`clangd.restart` 被执行且无跳过日志）；批量合并由接线断言 + 端到端「配置只写一次」共同守护 |
 | 文档与版本标记 | `test-contract.js` G1/G2/G3（CHANGELOG / README / 根目录 VSIX 版本）、`test-doc-consistency.js` D1/D1b/D3/D4/D5；`gen-release-notes.js --check`（13 条发布页） | `npm run coverage:matrix` 重新生成（命令 111 / 设置 85） |
 
 ## 2. 覆盖台账（自动生成）

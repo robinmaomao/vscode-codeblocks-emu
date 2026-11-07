@@ -88,6 +88,10 @@ async function activate(opts = {}) {
     findFilesResult: opts.findFilesResult,
   });
   const vscode = mock.vscode;
+  // 预置「已安装/已启用扩展」（例如 clangd 扩展已激活 ⇒ clangdExtensionActive() 为真）
+  for (const installed of opts.installedExtensions || []) {
+    if (installed && installed.id) mock.setInstalledExtension(installed.id, installed);
+  }
   const records = {
     executeCommand: [], saveAll: 0, clipboard: [], tasks: [], setContext: [], openExternal: [], appliedEdits: [], decorations: [], shownDocuments: [],
     quickPickPrompts: [], inputBoxPrompts: [], warningButtons: [], openDialogs: [], saveDialogs: [], statusBarMessages: [], treeProviders: [],
@@ -228,7 +232,7 @@ async function activate(opts = {}) {
       setKeysForSync: () => {},
     },
     workspaceState: {
-      _m: new Map(),
+      _m: new Map(Object.entries(opts.workspaceState || {})),
       get(k, d) { return this._m.has(k) ? this._m.get(k) : d; },
       update(k, v) { this._m.set(k, v); return Promise.resolve(); },
       keys: () => [...ctx.workspaceState._m.keys()],

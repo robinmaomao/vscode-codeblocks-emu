@@ -120,7 +120,7 @@ npm.cmd test
 
 > 当前版本 **0.8.143-agent-control**（`feat/agent-control` 分支预发布版，**不合并 main**；发布说明见
 > [release/0.8.143-agent-control.md](../release/0.8.143-agent-control.md)，上游正式版见 [release/0.8.142.md](../release/0.8.142.md)）；
-> 无头回归见 `npm test`（`TOTAL=187 FAIL=0 SKIP=1`），另有契约 / E2E / 视觉 / 性能 / 打包 / 宿主分层，见 [测试方案](../testing/strategy.md)。
+> 无头回归见 `npm test`（`TOTAL=189 FAIL=0 SKIP=1`），另有契约 / E2E / 视觉 / 性能 / 打包 / 宿主分层，见 [测试方案](../testing/strategy.md)。
 
 ## 文档：GitHub Release 页面格式统一
 
@@ -150,6 +150,10 @@ npm.cmd test
 - **测试**：`test-api-project-edit`（含 query / preserve）/ `test-api-settings-reader` / `test-api-tool-guards` /
   `test-api-build-service` / `test-agent-policy`（开关与只读白名单）/ `test-ai-tools-contract` / `test-cli` /
   `test-mcp-server`（含关闭与只读门控）/ `test-e2e-cli-build`（E2E）/ `host/suite/agent.tests.js`（宿主，含开关切换）；
-  无头 `TOTAL=187`、宿主 `32/32`。
+  无头 `TOTAL=189`、宿主 `32/32`。
+- **clangd 重载修复**：`withClangdBatch` 合并启动恢复/多选打开的 clangd 生成（不再按工程数重复）；
+  `Project opened` 日志补 `Project file:` 便于区分同名工程；`src/tools/clangdRestart.ts`（`decideClangdRestart`）
+  在**启动恢复期间仅配置变化**时跳过 `clangd.restart`（避免与 clangd 客户端初始化竞态导致的
+  `applyFix already exists` / 连接失败弹窗），回归见 `test-clangd-restart-decision`（16 断言）。
 - **文档**：`docs/guide/agent-control.md` / `.en.md`、`settings.md` / `.en.md`（第 10 分区 Agent）、
   README / usage / strategy / decisions / 发布说明同步。
