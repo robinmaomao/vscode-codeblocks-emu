@@ -22,7 +22,14 @@
   （并发外部修改 → `external-modified`，`force: true` 覆盖）；每次工具调用写一行审计日志。
 - **测试**：无头新增 `test-agent-policy`（开关/只读白名单 34 断言）、`test-api-build-service`（超时取消）、
   `test-api-tool-guards`（写盘守卫）；`test-mcp-server` 增加关闭/只读门控；宿主新增开关切换与只读用例。
-  规模：`unit TOTAL=187 FAIL=0 SKIP=1`、`contract 3/3`、`e2e 7/7`、`visual 24/24`、`pack 15/15`、`host 32/32`。
+  规模：`unit TOTAL=189 FAIL=0 SKIP=1`、`contract 3/3`、`e2e 7/7`、`visual 24/24`、`pack 15/15`、`host 32/32`。
+- **修复（reload 后 clangd 相关噪音）**：
+  - 窗口重载恢复多个工程时，clangd 生成/配置写入/重启被合并为一次（`withClangdBatch`），不再按工程数重复；
+    `Project opened` 日志追加 `Project file: <路径>`，同名工程（如两个 `app.cbp`）可直接区分。
+  - 启动恢复期间**仅 clangd 配置变化**（编译数据库未变）时跳过 `clangd.restart`：此刻 clangd 客户端刚随窗口启动、
+    仍在 `initialize`，重启会与其自身初始化竞态（`command 'clangd.applyFix' already exists` →
+    “couldn't create connection to server” 弹窗）；配置改动由 clangd 即时生效，跳过时输出一行说明日志。
+    判定抽为纯函数 `src/tools/clangdRestart.ts`（真值表见 `tests/test-clangd-restart-decision.js`）。
 - **文档**：新增 [Agent 控制](./docs/guide/agent-control.md) / [English](./docs/guide/agent-control.en.md)；
   `settings.md(.en)` 第 10 分区；发布说明见 [release/0.8.143-agent-control.md](./docs/release/0.8.143-agent-control.md)。
 

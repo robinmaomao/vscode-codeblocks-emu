@@ -76,6 +76,7 @@ import { isCompilerUsable, renderInvalidCompilerMessage, renderTriedCompilerPath
 import { collectClangdEntries, writeClangdDatabase, CompileCommandEntry } from './build/compileCommands';
 import { DiagnosticPublisher } from './build/diagnosticPublisher';
 import { collectOutputDirs, excludeGlobsFor, mergeExcludePatterns } from './build/watcherExclude';
+import { decideClangdRestart } from './tools/clangdRestart';
 import { detectClangd, queryCompilerSystemIncludes, queryCompilerTarget, resolveCompilerProgram, updateClangdUserConfig, clangdUserConfigPath, clearClangdDetectionCache, extraConfigWarnings, findStaleClangdFragments, listManagedFragments, cleanStaleClangdFragments, readClangdUserConfigText, preferClangdSource } from './tools/clangd';
 import { SymbolIndex, registerFallbackIntelliSense } from './tools/codeCompletion';
 import { GdbDebugAdapter } from './debug/gdbDebugAdapter';
@@ -3647,6 +3648,11 @@ async function saveProjectAsTemplate(): Promise<void> {
 let clangdBatchDepth = 0;
 let clangdBatchDeferred = false;
 
+/** 启动恢复（窗口重载后恢复上次会话工程）进行中：此刻 clangd 客户端刚随窗口启动、仍在 initialize */
+let sessionRestoreInProgress = false;
+/** 当前排队/进行中的 clangd 生成是否由启动恢复触发（决定「仅配置变化」时是否跳过重启） */
+let clangdGenerationFromRestore = false;
+
 /** 打开工程后的 clangd 生成请求（批量打开时延后到批量结束） */
 function requestClangdGenerationAfterOpen(): void {
   if (clangdBatchDepth > 0) {
@@ -4619,6 +4625,7 @@ function extractMultilibFlags(project: Project, target?: BuildTarget): string[] 
  * 带去抖 + 单飞：打开多个项目会连续触发，合并为一次，避免并发写同一文件。
  */
 async function generateClangdForWorkspace(interactive = false): Promise<void> {
+  if (sessionRestoreInProgress) clangdGenerationFromRestore = true;
   if (clangdGenTimer) clearTimeout(clangdGenTimer);
   clangdGenTimer = setTimeout(() => {
     clangdGenTimer = undefined;
@@ -4836,6 +4843,8 @@ async function generateClangdForWorkspaceInternal(interactive: boolean): Promise
   // 捕获本次是否由「活动工程切换 / 编译器设置变化」触发（用于 DB 变化后决定是否重启 clangd）
   const restartReason = restartClangdReason;
   restartClangdReason = undefined;
+  const fromSessionRestore = clangdGenerationFromRestore;
+  clangdGenerationFromRestore = false;
   try {
     if (!extContext) return;
     const cfg = vscode.workspace.getConfiguration('codeblocks');
@@ -4916,7 +4925,7 @@ async function generateClangdForWorkspaceInternal(interactive: boolean): Promise
       ? logT('compile_commands.json is unchanged, skipping the write')
       : logT('Regenerated compile_commands.json ({0} compile command(s)) → {1}', count, outPath)}`);
 
-    // 是否写入了新的 clangd 配置片段（配置变了同样需要重启，见下方 restart 判定）
+    // 是否实际写入了新的 clangd 配置片段（仅配置变化时是否需要重启见下方判定）
     let configWritten = false;
 
     if (clangd) {
@@ -4988,7 +4997,9 @@ async function generateClangdForWorkspaceInternal(interactive: boolean): Promise
         outputChannel.warn(logT('[Code::Blocks] codeblocks.clangd.builtinHeaders is queryDriver, but VS Code\'s clangd.arguments does not contain --query-driver yet;')
           + logT('Run the command "Code::Blocks: Configure clangd --query-driver" to write it in one click (suggested value --query-driver={0}/*)', path.dirname(firstCompilerPath).replace(/\\/g, '/')));
       }
-      outputChannel.info(logT('[Code::Blocks] clangd user config updated → {0}', clangdUserConfigPath()));
+      outputChannel.info(written
+        ? logT('[Code::Blocks] clangd user config updated → {0}', clangdUserConfigPath())
+        : logT('[Code::Blocks] clangd user config unchanged, skipping the write'));
       configWritten = written;
       outputChannel.info(logT('[Code::Blocks] clangd detected: {0}', clangd));
       if (interactive) {
@@ -5010,22 +5021,36 @@ async function generateClangdForWorkspaceInternal(interactive: boolean): Promise
       }
     }
 
-    // 编译数据库/配置实际变化 → 重启 clangd，让已打开文件按新编译命令与配置重新分析：
+    // 编译数据库实际变化 → 重启 clangd，让已打开文件按新编译命令重新分析：
     //  - 'open'（打开工程）：必须重启（不受开关限制）——打开动作本身就是"让它开始按本工程分析"；
     //    否则上次会话遗留的 clangd 进程仍按旧配置（或"没有编译数据库"）继续工作，看起来就是"没触发分析"
     //  - 'compiler'（编译器设置变化）：必须重启（不重启等于设置没生效）
     //  - 'project'（切换活动工程）：尊重 clangd.restartOnActiveProjectSwitch（重启会触发重新索引，允许关闭）
     // 门槛：clangd 扩展已激活（服务器在跑，重启才有意义）或存在已打开 C/C++ 文件（重启只为刷新它们）
-    const restartAllowed = restartReason === 'compiler'
-      || restartReason === 'open'
-      || cfg.get<boolean>('clangd.restartOnActiveProjectSwitch', true);
-    if (restartReason && (!skipped || configWritten) && restartAllowed && (clangdExtensionActive() || hasOpenSourceFile())) {
+    //
+    // 启动恢复期间「仅配置变化」跳过重启：此刻 clangd 进程刚随窗口重载启动（正在 initialize），
+    // 调用 clangd.restart 会与其自身初始化竞态（command 'clangd.applyFix' already exists →
+    // “couldn't create connection to server”弹窗）；而配置变化 clangd 会即时生效。
+    // 判定真值表见 tools/clangdRestart.ts（decideClangdRestart，有单测覆盖）。
+    const restartAction = decideClangdRestart({
+      reason: restartReason,
+      databaseUnchanged: skipped,
+      configWritten,
+      fromSessionRestore,
+      restartAllowed: restartReason === 'compiler'
+        || restartReason === 'open'
+        || cfg.get<boolean>('clangd.restartOnActiveProjectSwitch', true),
+      hasConsumer: clangdExtensionActive() || hasOpenSourceFile(),
+    });
+    if (restartAction === 'restart') {
       outputChannel.info(restartReason === 'compiler'
         ? logT('[Code::Blocks] Compiler settings changed; restarting clangd to refresh the open files')
         : restartReason === 'open'
           ? logT('[Code::Blocks] Project opened; restarting clangd to apply the new compile database / config')
           : logT('[Code::Blocks] Active project switched; restarting clangd to refresh the open files'));
       scheduleClangdRestart();
+    } else if (restartAction === 'skip-config-only') {
+      outputChannel.info(logT('[Code::Blocks] clangd is still starting after the window reload; only the config changed, so the restart is skipped (changes take effect immediately)'));
     }
   } catch (err) {
     vscode.window.showErrorMessage(i18n.t('Failed to generate compile_commands.json: {0}', (err as Error).message));
@@ -5104,30 +5129,35 @@ function restoreProjectOrder(): string[] {
 /** 恢复上次会话打开的项目：优先 .workspace（重新打开全部项目+依赖），否则按持久化顺序恢复各项目 */
 async function restorePersistedProjects(): Promise<void> {
   if (openProjects.length > 0) return;
-  await withClangdBatch(async () => {
-    const wsPath = extContext?.workspaceState.get<string>('codeblocks.openedWorkspace', '');
-    if (wsPath && fs.existsSync(wsPath)) {
-      await openProject(wsPath);
-      return;
-    }
-    const order = restoreProjectOrder();
-    const fallback = extContext?.workspaceState.get<string>('codeblocks.activeProject', '') ?? '';
-    const list = order.length ? order : [fallback].filter(Boolean);
-    // 恢复上限：上次会话打开了 N 个工程时不再全部恢复（父目录多工程工作区下会成倍放大 clangd/索引开销）
-    const limit = detectAutoOpenThreshold();
-    const use = list.length > limit ? list.slice(0, limit) : list;
-    if (list.length > limit) {
-      outputChannel?.info(
-        logT('[Code::Blocks] The last session had {0} projects open; restoring only the first {1}', list.length, limit) +
-          logT(' (threshold: codeblocks.detect.autoOpenThreshold; open the rest from the status bar or the project management menu)'),
-      );
-    }
-    for (const fn of use) {
-      if (fn && fs.existsSync(fn) && !openProjects.some((p) => p.filename === fn)) {
-        await openProject(fn);
+  sessionRestoreInProgress = true;
+  try {
+    await withClangdBatch(async () => {
+      const wsPath = extContext?.workspaceState.get<string>('codeblocks.openedWorkspace', '');
+      if (wsPath && fs.existsSync(wsPath)) {
+        await openProject(wsPath);
+        return;
       }
-    }
-  });
+      const order = restoreProjectOrder();
+      const fallback = extContext?.workspaceState.get<string>('codeblocks.activeProject', '') ?? '';
+      const list = order.length ? order : [fallback].filter(Boolean);
+      // 恢复上限：上次会话打开了 N 个工程时不再全部恢复（父目录多工程工作区下会成倍放大 clangd/索引开销）
+      const limit = detectAutoOpenThreshold();
+      const use = list.length > limit ? list.slice(0, limit) : list;
+      if (list.length > limit) {
+        outputChannel?.info(
+          logT('[Code::Blocks] The last session had {0} projects open; restoring only the first {1}', list.length, limit) +
+            logT(' (threshold: codeblocks.detect.autoOpenThreshold; open the rest from the status bar or the project management menu)'),
+        );
+      }
+      for (const fn of use) {
+        if (fn && fs.existsSync(fn) && !openProjects.some((p) => p.filename === fn)) {
+          await openProject(fn);
+        }
+      }
+    });
+  } finally {
+    sessionRestoreInProgress = false;
+  }
 }
 
 /** 拖拽重排：把 src 移到 target 之前（target 为空则移到最后） */
