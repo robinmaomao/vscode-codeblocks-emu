@@ -20,15 +20,22 @@ const bundleScript = pkg.scripts?.bundle || '';
 check('A2 bundle 脚本：esbuild + --bundle + --external:vscode + 输出 bundle/extension.js',
   bundleScript.includes('esbuild') && bundleScript.includes('--bundle') && bundleScript.includes('--external:vscode') && bundleScript.includes('--outfile=bundle/extension.js'),
   bundleScript, 'esbuild … --bundle … --external:vscode … --outfile=bundle/extension.js');
+const searchBundleScript = pkg.scripts?.['bundle:search'] || '';
+check('A2b bundle:search 单独打包 worker（platform=node、不加 --external:vscode）',
+  searchBundleScript.includes('esbuild') && searchBundleScript.includes('--bundle') && searchBundleScript.includes('--platform=node')
+  && searchBundleScript.includes('--outfile=bundle/search-worker.js') && !searchBundleScript.includes('--external:vscode'),
+  searchBundleScript, 'esbuild … --bundle --platform=node … --outfile=bundle/search-worker.js');
 check('A3 package 脚本直接调用 vsce package（构建交由 vscode:prepublish 钩子）',
   /(^|\s)vsce package\s*$/.test((pkg.scripts?.package || '').trim()),
   pkg.scripts?.package, 'vsce package');
-check('A3b vscode:prepublish 钩子按序 compile → bundle（vsce package/publish 前自动构建入口）',
+check('A3b vscode:prepublish 钩子按序 compile → bundle → bundle:search（vsce package/publish 前自动构建入口）',
   (() => {
     const s = pkg.scripts?.['vscode:prepublish'] || '';
-    return s.includes('npm run compile') && s.includes('npm run bundle') && s.indexOf('npm run compile') < s.indexOf('npm run bundle');
+    return s.includes('npm run compile') && s.includes('npm run bundle') && s.includes('npm run bundle:search')
+      && s.indexOf('npm run compile') < s.indexOf('npm run bundle')
+      && s.indexOf('npm run bundle') < s.indexOf('npm run bundle:search');
   })(),
-  pkg.scripts?.['vscode:prepublish'], 'npm run compile && npm run bundle');
+  pkg.scripts?.['vscode:prepublish'], 'npm run compile && npm run bundle && npm run bundle:search');
 check('A4 esbuild 为 devDependency，运行时无 dependencies（fast-xml-parser 已内联）',
   !!pkg.devDependencies?.esbuild && !pkg.dependencies, { esbuild: pkg.devDependencies?.esbuild, dependencies: pkg.dependencies }, { esbuild: '…', dependencies: undefined });
 
@@ -50,6 +57,12 @@ if (!fs.existsSync(bundlePath)) {
   check('B2 fast-xml-parser 已内联（XMLParser 标记）', text.includes('XMLParser'), undefined, 'XMLParser');
   check('B3 无相对 require 残留（模块已全部内联）', !/require\("\.[^"]*"\)/.test(text), undefined, '无');
   check('B4 CJS 导出块含 activate/deactivate', /module\.exports = __toCommonJS\(extension_exports\)/.test(text) && /activate: \(\) => activate/.test(text) && /deactivate: \(\) => deactivate/.test(text), undefined, 'toCommonJS + activate/deactivate');
+  const workerPath = path.join(root, 'bundle', 'search-worker.js');
+  if (fs.existsSync(workerPath)) {
+    const workerText = fs.readFileSync(workerPath, 'utf8');
+    check('B4b worker 产物不含 require("vscode")', !/require\("vscode"\)/.test(workerText), undefined, '无 vscode 依赖');
+    check('B4b worker 产物可编译', (() => { try { new Function(workerText); return true; } catch (e) { console.log(e.message); return false; } })());
+  }
 
   // B5 加载冒烟：mock vscode（含类桩/命名空间兜底）后 require bundle，确认导出的 activate/deactivate 为函数
   const Module = require('module');

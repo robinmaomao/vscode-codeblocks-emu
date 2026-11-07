@@ -3,6 +3,21 @@
 本文件记录**正式版**里程碑；近期 dev 迭代的逐轮发布说明见 [`docs/release/`](./docs/release/)（`0.8.xx-dev.md`），
 `0.8.76`–`0.8.128` 的 dev 说明已合并归档到 [`docs/release/archive/`](./docs/release/archive/)；版本号与维护约定见 [`docs/release/00-index.md`](./docs/release/00-index.md)。
 
+## 0.8.144 — 2026-11-07
+
+**工程内搜索（Project Search）**
+
+- **新视图**：侧边栏 **Project Search**（`codeblocks.search`），只搜索已打开 `.cbp` 工程中列出的文件；不调用 `workspace.findFiles`、不创建 watcher/ripgrep，内置搜索与 `search.exclude` 保持原样。
+- **文件模式**：内存排序（活动工程优先、跨工程去重、空查询浏览全部，Top 500）；输入即搜，单击打开、悬停 ⤢ 在工程树定位。
+- **内容模式**：worker_threads 隔离扫描（单飞、可取消、20s 总超时 + 5s 无进度终止、失败回退宿主内字面量扫描）；UTF-8/GBK/UTF-16 BOM、二进制/4MB 跳过、32MB 字节预算 LRU、脏编辑器文本优先；结果按文件分组，点击精确跳转并选中匹配文本。
+- **搜索历史**：搜索栏顶部 `🕘 搜索历史` + `保留历史` 可视化 switch + 清空（二次确认）；历史按工作区隔离，文件/内容各 20 条，点击条目优先跳转上次结果、失效则重跑；`↻` 仅重跑；子树范围搜索不写历史。
+- **入口**：命令 `codeblocks.searchProjectFiles`（`Ctrl+Alt+P`）/ `codeblocks.searchInProjectFiles`（预填单行选区）、C::B Search 菜单、工程树 project/folder/virtualFolder/fileGroup 右键。
+- **设置**：新增 `codeblocks.search.scope`（`openProjects` / `activeProject`）与 `codeblocks.search.keepHistory`（默认 `true`）；视图内范围选择按工作区保存。
+- **布局**：Reset View Layout 顺序更新为 Project → Search → Symbols；不提升布局版本，不覆盖用户已有排布。
+- 新增回归：`test-project-search.js`、`test-search-history.js`、`test-project-search-tasks.js`、`test-search-worker.js`、`test-project-search-view-html.js`、`test-project-search-view-provider.js`、`test-project-search-commands.js`；覆盖矩阵重新生成（命令 **113**、设置 **85**、视图 **6**、快捷键 **34**）。
+- 发布说明见 [`docs/release/0.8.144.md`](./docs/release/0.8.144.md)；测试结果见
+  [`docs/testing/test-report-0.8.144.md`](./docs/testing/test-report-0.8.144.md)。
+
 ## 0.8.142 — 2026-11-06
 
 **链接期错误（undefined reference）定位与跳转修复**

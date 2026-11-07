@@ -37,10 +37,11 @@ check('非门控键位不含 cbStyle 选项串', ungated.every((b) => !(b.when ?
 const expectedDefaults = [
   'ctrl+f9', 'f9', 'ctrl+f10', 'ctrl+f11', 'ctrl+shift+f9', 'f8', 'f4', 'shift+f4', 'alt+f5', 'alt+f6',
   'alt+f1', 'alt+f2', 'alt+g', 'shift+f2', 'ctrl+shift+r', 'ctrl+shift+up', 'ctrl+shift+down', 'ctrl+e',
+  'ctrl+alt+p',
 ];
 const actualKeys = bindings.map((b) => normalizeKey(b.key));
 const missing = expectedDefaults.filter((k) => !actualKeys.includes(k));
-check('默认键位清单齐全（18 项）', missing.length === 0, missing, '无缺失');
+check('默认键位清单齐全（19 项）', missing.length === 0, missing, '无缺失');
 
 // ---- 4. 命令有效性 ----
 const builtinAllow = new Set([

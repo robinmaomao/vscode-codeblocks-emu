@@ -4,16 +4,16 @@
 > 判定口径：契约项 ID（命令/视图/设置键/键位/语言/语法/DAP 能力标记）在对应测试层源码中出现即计为命中；
 > 视觉层/性能层不引用命令 ID 字面量，按 `EXPLICIT_HITS`（面/引擎级覆盖）人工补充，明细见脚本内注释。
 > 列 `src` 表示实现存在（不算测试覆盖）；`契约/无头/E2E/视觉/性能/宿主` 为六个自动化测试层。
-> 数据来源：package.json v0.8.142 + tests/** + src/**
+> 数据来源：package.json v0.8.144 + tests/** + src/**
 
 ## 汇总
 
 | 契约项 | 总数 | 契约层 | 无头层 | E2E 层 | 视觉层 | 性能层 | 宿主层 | 未覆盖 | 覆盖率 |
 |--------|------|--------|--------|--------|--------|--------|--------|--------|--------|
-| 命令 | 111 | 3 | 96 | 4 | 12 | 5 | 37 | 2 | 98% |
-| 视图 | 5 | 2 | 5 | 1 | 1 | 0 | 5 | 0 | 100% |
-| 设置 | 83 | 83 | 77 | 15 | 0 | 1 | 6 | 0 | 100% |
-| 快捷键 | 33 | 3 | 31 | 2 | 4 | 2 | 12 | 0 | 100% |
+| 命令 | 113 | 3 | 98 | 4 | 12 | 5 | 37 | 2 | 98% |
+| 视图 | 6 | 2 | 6 | 1 | 1 | 0 | 5 | 0 | 100% |
+| 设置 | 85 | 85 | 78 | 15 | 0 | 1 | 6 | 0 | 100% |
+| 快捷键 | 34 | 3 | 32 | 2 | 4 | 2 | 12 | 0 | 100% |
 | 语言/语法 | 6 | 0 | 6 | 3 | 2 | 1 | 3 | 0 | 100% |
 | DAP 能力 | 30 | 0 | 1 | 30 | 0 | 0 | 5 | 0 | 100% |
 
@@ -90,48 +90,50 @@
 | 67 | `codeblocks.addFile` | 添加文件... | · | ✔ | · | · | · | · | ✅ |
 | 68 | `codeblocks.addFilesRecursively` | 递归添加文件... | · | ✔ | · | · | · | · | ✅ |
 | 69 | `codeblocks.findFile` | 查找文件... | · | ✔ | · | · | · | · | ✅ |
-| 70 | `codeblocks.fileProperties` | 属性... | · | ✔ | · | · | · | ✔ | ✅ |
-| 71 | `codeblocks.renameFile` | 重命名文件... | · | ✔ | · | · | · | · | ✅ |
-| 72 | `codeblocks.newVirtualFolder` | 新建虚拟文件夹... | · | ✔ | · | · | · | · | ✅ |
-| 73 | `codeblocks.renameVirtualFolder` | 重命名虚拟文件夹... | · | ✔ | · | · | · | · | ✅ |
-| 74 | `codeblocks.deleteVirtualFolder` | 删除虚拟文件夹 | · | ✔ | · | · | · | · | ✅ |
-| 75 | `codeblocks.removeFile` | 从工程移除文件 | · | ✔ | · | · | · | · | ✅ |
-| 76 | `codeblocks.openContainingFolder` | 打开所在文件夹 | · | ✔ | · | · | · | · | ✅ |
-| 77 | `codeblocks.toggleCompile` | 编译文件 | · | ✔ | · | · | · | · | ✅ |
-| 78 | `codeblocks.toggleLink` | 链接文件 | · | ✔ | · | · | · | · | ✅ |
-| 79 | `codeblocks.compileFile` | 构建文件 | · | ✔ | · | · | ✔ | · | ✅ |
-| 80 | `codeblocks.cleanFile` | 清理文件 | · | ✔ | · | · | · | · | ✅ |
-| 81 | `codeblocks.editFileBuildCommand` | 编辑自定义构建命令... | · | ✔ | · | · | · | · | ✅ |
-| 82 | `codeblocks.nextError` | Code::Blocks: 下一个错误 | · | ✔ | · | · | · | ✔ | ✅ |
-| 83 | `codeblocks.prevError` | Code::Blocks: 上一个错误 | · | · | · | · | · | ✔ | ✅ |
-| 84 | `codeblocks.compileCurrentFile` | Code::Blocks: 编译当前文件 | · | ✔ | · | · | · | ✔ | ✅ |
-| 85 | `codeblocks.clearErrors` | Code::Blocks: 清除全部错误 | · | ✔ | · | · | · | ✔ | ✅ |
-| 86 | `codeblocks.activatePriorProject` | Code::Blocks: 激活上一个工程 | · | ✔ | · | · | · | · | ✅ |
-| 87 | `codeblocks.activateNextProject` | Code::Blocks: 激活下一个工程 | · | ✔ | · | · | · | · | ✅ |
-| 88 | `codeblocks.toggleCategorize` | Code::Blocks: 按文件类型分组显示工程树 | · | ✔ | · | · | · | ✔ | ✅ |
-| 89 | `codeblocks.clearRecentProjects` | Code::Blocks: 清除最近工程 | · | ✔ | · | · | · | · | ✅ |
-| 90 | `codeblocks.projectNotes` | Code::Blocks: 工程备注 | · | ✔ | · | · | · | · | ✅ |
-| 91 | `codeblocks.setProgramArguments` | Code::Blocks: 设置程序参数 | · | ✔ | · | · | · | · | ✅ |
-| 92 | `codeblocks.showGlobalVariables` | Code::Blocks: 显示全局变量 | · | ✔ | · | · | · | ✔ | ✅ |
-| 93 | `codeblocks.clearBacktickCache` | Code::Blocks: 清除反引号缓存 | · | ✔ | · | · | · | · | ✅ |
-| 94 | `codeblocks.keybindings.check` | Code::Blocks: 检查快捷键冲突 | · | · | · | · | · | ✔ | ✅ |
-| 95 | `codeblocks.keybindings.apply` | Code::Blocks: 应用快捷键 | · | · | · | · | · | ✔ | ✅ |
-| 96 | `codeblocks.keybindings.configure` | Code::Blocks: 配置快捷键... | · | ✔ | · | · | · | · | ✅ |
-| 97 | `codeblocks.keybindings.reset` | Code::Blocks: 重置快捷键 | · | · | · | · | · | ✔ | ✅ |
-| 98 | `codeblocks.keybindings.panel` | Code::Blocks: 快捷键设置 | · | ✔ | · | ✔ | · | ✔ | ✅ |
-| 99 | `codeblocks.keybindings.export` | Code::Blocks: 导出快捷键方案 | · | ✔ | · | · | · | · | ✅ |
-| 100 | `codeblocks.keybindings.import` | Code::Blocks: 导入快捷键方案 | · | ✔ | · | · | · | · | ✅ |
-| 101 | `codeblocks.debug.refreshRegisters` | Code::Blocks: 刷新寄存器 | · | · | · | · | · | ✔ | ✅ |
-| 102 | `codeblocks.debug.sendGdbCommand` | Code::Blocks: 发送 GDB 命令... | · | ✔ | · | · | · | · | ✅ |
-| 103 | `codeblocks.debug.setNextStatement` | Code::Blocks: 设置下一条语句 | · | ✔ | · | · | · | ✔ | ✅ |
-| 104 | `codeblocks.debug.attachToProcess` | Code::Blocks: 附加到进程... | · | ✔ | · | · | · | · | ✅ |
-| 105 | `codeblocks.debug.detach` | Code::Blocks: 分离调试 | · | ✔ | · | · | · | · | ✅ |
-| 106 | `codeblocks.debug.addSymbolFile` | Code::Blocks: 添加符号文件... | · | ✔ | · | · | · | · | ✅ |
-| 107 | `codeblocks.debug.infoFrame` | Code::Blocks: 调试信息 · 当前栈帧 | · | ✔ | · | · | · | ✔ | ✅ |
-| 108 | `codeblocks.debug.infoSharedLibrary` | Code::Blocks: 调试信息 · 已加载库 | · | ✔ | · | · | · | · | ✅ |
-| 109 | `codeblocks.debug.infoFiles` | Code::Blocks: 调试信息 · 目标与文件 | · | ✔ | · | · | · | ✔ | ✅ |
-| 110 | `codeblocks.debug.infoFloat` | Code::Blocks: 调试信息 · FPU 状态 | · | ✔ | · | · | · | · | ✅ |
-| 111 | `codeblocks.debug.infoSignals` | Code::Blocks: 调试信息 · 信号处理 | · | ✔ | · | · | · | · | ✅ |
+| 70 | `codeblocks.searchProjectFiles` | 工程搜索：查找工程文件 | · | ✔ | · | · | · | · | ✅ |
+| 71 | `codeblocks.searchInProjectFiles` | 工程搜索：在工程文件中搜索 | · | ✔ | · | · | · | · | ✅ |
+| 72 | `codeblocks.fileProperties` | 属性... | · | ✔ | · | · | · | ✔ | ✅ |
+| 73 | `codeblocks.renameFile` | 重命名文件... | · | ✔ | · | · | · | · | ✅ |
+| 74 | `codeblocks.newVirtualFolder` | 新建虚拟文件夹... | · | ✔ | · | · | · | · | ✅ |
+| 75 | `codeblocks.renameVirtualFolder` | 重命名虚拟文件夹... | · | ✔ | · | · | · | · | ✅ |
+| 76 | `codeblocks.deleteVirtualFolder` | 删除虚拟文件夹 | · | ✔ | · | · | · | · | ✅ |
+| 77 | `codeblocks.removeFile` | 从工程移除文件 | · | ✔ | · | · | · | · | ✅ |
+| 78 | `codeblocks.openContainingFolder` | 打开所在文件夹 | · | ✔ | · | · | · | · | ✅ |
+| 79 | `codeblocks.toggleCompile` | 编译文件 | · | ✔ | · | · | · | · | ✅ |
+| 80 | `codeblocks.toggleLink` | 链接文件 | · | ✔ | · | · | · | · | ✅ |
+| 81 | `codeblocks.compileFile` | 构建文件 | · | ✔ | · | · | ✔ | · | ✅ |
+| 82 | `codeblocks.cleanFile` | 清理文件 | · | ✔ | · | · | · | · | ✅ |
+| 83 | `codeblocks.editFileBuildCommand` | 编辑自定义构建命令... | · | ✔ | · | · | · | · | ✅ |
+| 84 | `codeblocks.nextError` | Code::Blocks: 下一个错误 | · | ✔ | · | · | · | ✔ | ✅ |
+| 85 | `codeblocks.prevError` | Code::Blocks: 上一个错误 | · | · | · | · | · | ✔ | ✅ |
+| 86 | `codeblocks.compileCurrentFile` | Code::Blocks: 编译当前文件 | · | ✔ | · | · | · | ✔ | ✅ |
+| 87 | `codeblocks.clearErrors` | Code::Blocks: 清除全部错误 | · | ✔ | · | · | · | ✔ | ✅ |
+| 88 | `codeblocks.activatePriorProject` | Code::Blocks: 激活上一个工程 | · | ✔ | · | · | · | · | ✅ |
+| 89 | `codeblocks.activateNextProject` | Code::Blocks: 激活下一个工程 | · | ✔ | · | · | · | · | ✅ |
+| 90 | `codeblocks.toggleCategorize` | Code::Blocks: 按文件类型分组显示工程树 | · | ✔ | · | · | · | ✔ | ✅ |
+| 91 | `codeblocks.clearRecentProjects` | Code::Blocks: 清除最近工程 | · | ✔ | · | · | · | · | ✅ |
+| 92 | `codeblocks.projectNotes` | Code::Blocks: 工程备注 | · | ✔ | · | · | · | · | ✅ |
+| 93 | `codeblocks.setProgramArguments` | Code::Blocks: 设置程序参数 | · | ✔ | · | · | · | · | ✅ |
+| 94 | `codeblocks.showGlobalVariables` | Code::Blocks: 显示全局变量 | · | ✔ | · | · | · | ✔ | ✅ |
+| 95 | `codeblocks.clearBacktickCache` | Code::Blocks: 清除反引号缓存 | · | ✔ | · | · | · | · | ✅ |
+| 96 | `codeblocks.keybindings.check` | Code::Blocks: 检查快捷键冲突 | · | · | · | · | · | ✔ | ✅ |
+| 97 | `codeblocks.keybindings.apply` | Code::Blocks: 应用快捷键 | · | · | · | · | · | ✔ | ✅ |
+| 98 | `codeblocks.keybindings.configure` | Code::Blocks: 配置快捷键... | · | ✔ | · | · | · | · | ✅ |
+| 99 | `codeblocks.keybindings.reset` | Code::Blocks: 重置快捷键 | · | · | · | · | · | ✔ | ✅ |
+| 100 | `codeblocks.keybindings.panel` | Code::Blocks: 快捷键设置 | · | ✔ | · | ✔ | · | ✔ | ✅ |
+| 101 | `codeblocks.keybindings.export` | Code::Blocks: 导出快捷键方案 | · | ✔ | · | · | · | · | ✅ |
+| 102 | `codeblocks.keybindings.import` | Code::Blocks: 导入快捷键方案 | · | ✔ | · | · | · | · | ✅ |
+| 103 | `codeblocks.debug.refreshRegisters` | Code::Blocks: 刷新寄存器 | · | · | · | · | · | ✔ | ✅ |
+| 104 | `codeblocks.debug.sendGdbCommand` | Code::Blocks: 发送 GDB 命令... | · | ✔ | · | · | · | · | ✅ |
+| 105 | `codeblocks.debug.setNextStatement` | Code::Blocks: 设置下一条语句 | · | ✔ | · | · | · | ✔ | ✅ |
+| 106 | `codeblocks.debug.attachToProcess` | Code::Blocks: 附加到进程... | · | ✔ | · | · | · | · | ✅ |
+| 107 | `codeblocks.debug.detach` | Code::Blocks: 分离调试 | · | ✔ | · | · | · | · | ✅ |
+| 108 | `codeblocks.debug.addSymbolFile` | Code::Blocks: 添加符号文件... | · | ✔ | · | · | · | · | ✅ |
+| 109 | `codeblocks.debug.infoFrame` | Code::Blocks: 调试信息 · 当前栈帧 | · | ✔ | · | · | · | ✔ | ✅ |
+| 110 | `codeblocks.debug.infoSharedLibrary` | Code::Blocks: 调试信息 · 已加载库 | · | ✔ | · | · | · | · | ✅ |
+| 111 | `codeblocks.debug.infoFiles` | Code::Blocks: 调试信息 · 目标与文件 | · | ✔ | · | · | · | ✔ | ✅ |
+| 112 | `codeblocks.debug.infoFloat` | Code::Blocks: 调试信息 · FPU 状态 | · | ✔ | · | · | · | · | ✅ |
+| 113 | `codeblocks.debug.infoSignals` | Code::Blocks: 调试信息 · 信号处理 | · | ✔ | · | · | · | · | ✅ |
 
 未覆盖 2 项：`codeblocks.detectCompilers`、`codeblocks.restartClangd`
 
@@ -140,10 +142,11 @@
 | # | 标识 | 标题 | 契约 | 无头 | E2E | 视觉 | 性能 | 宿主 | 状态 |
 |---|------|------|------|------|------|------|------|------|------|
 | 1 | `codeblocks.projectTree` | 工程 | ✔ | ✔ | · | ✔ | · | ✔ | ✅ |
-| 2 | `codeblocks.symbols` | 符号 | · | ✔ | · | · | · | ✔ | ✅ |
-| 3 | `codeblocks.analysis` | 分析 | · | ✔ | · | · | · | ✔ | ✅ |
-| 4 | `codeblocks.buildLog` | 构建日志 | ✔ | ✔ | · | · | · | ✔ | ✅ |
-| 5 | `codeblocks.debug.registers` | 寄存器 | · | ✔ | ✔ | · | · | ✔ | ✅ |
+| 2 | `codeblocks.search` | 工程搜索 | · | ✔ | · | · | · | · | ✅ |
+| 3 | `codeblocks.symbols` | 符号 | · | ✔ | · | · | · | ✔ | ✅ |
+| 4 | `codeblocks.analysis` | 分析 | · | ✔ | · | · | · | ✔ | ✅ |
+| 5 | `codeblocks.buildLog` | 构建日志 | ✔ | ✔ | · | · | · | ✔ | ✅ |
+| 6 | `codeblocks.debug.registers` | 寄存器 | · | ✔ | ✔ | · | · | ✔ | ✅ |
 
 未覆盖 0 项
 
@@ -225,15 +228,17 @@
 | 72 | `codeblocks.ui.symbolsView` |  | ✔ | ✔ | · | · | · | · | ✅ |
 | 73 | `codeblocks.ui.recentProjectsLimit` |  | ✔ | ✔ | · | · | · | · | ✅ |
 | 74 | `codeblocks.ui.findFileOpen` |  | ✔ | ✔ | · | · | · | · | ✅ |
-| 75 | `codeblocks.editor.autoHeaderGuard` |  | ✔ | ✔ | · | · | · | · | ✅ |
-| 76 | `codeblocks.editor.headerGuardStyle` |  | ✔ | ✔ | · | · | · | · | ✅ |
-| 77 | `codeblocks.editor.tidyCommentWidth` |  | ✔ | ✔ | · | · | · | · | ✅ |
-| 78 | `codeblocks.editor.asmHashComment` |  | ✔ | ✔ | · | · | · | · | ✅ |
-| 79 | `codeblocks.astyleOptions` |  | ✔ | ✔ | · | · | · | · | ✅ |
-| 80 | `codeblocks.todo.keywords` |  | ✔ | ✔ | · | · | · | · | ✅ |
-| 81 | `codeblocks.tools` |  | ✔ | ✔ | · | · | · | · | ✅ |
-| 82 | `codeblocks.keybindings.cbStyle` |  | ✔ | ✔ | · | · | · | · | ✅ |
-| 83 | `codeblocks.keybindings.overrides` |  | ✔ | ✔ | · | · | · | · | ✅ |
+| 75 | `codeblocks.search.scope` |  | ✔ | · | · | · | · | · | ✅ |
+| 76 | `codeblocks.search.keepHistory` |  | ✔ | ✔ | · | · | · | · | ✅ |
+| 77 | `codeblocks.editor.autoHeaderGuard` |  | ✔ | ✔ | · | · | · | · | ✅ |
+| 78 | `codeblocks.editor.headerGuardStyle` |  | ✔ | ✔ | · | · | · | · | ✅ |
+| 79 | `codeblocks.editor.tidyCommentWidth` |  | ✔ | ✔ | · | · | · | · | ✅ |
+| 80 | `codeblocks.editor.asmHashComment` |  | ✔ | ✔ | · | · | · | · | ✅ |
+| 81 | `codeblocks.astyleOptions` |  | ✔ | ✔ | · | · | · | · | ✅ |
+| 82 | `codeblocks.todo.keywords` |  | ✔ | ✔ | · | · | · | · | ✅ |
+| 83 | `codeblocks.tools` |  | ✔ | ✔ | · | · | · | · | ✅ |
+| 84 | `codeblocks.keybindings.cbStyle` |  | ✔ | ✔ | · | · | · | · | ✅ |
+| 85 | `codeblocks.keybindings.overrides` |  | ✔ | ✔ | · | · | · | · | ✅ |
 
 未覆盖 0 项
 
@@ -241,39 +246,40 @@
 
 | # | 标识 | 标题 | 契约 | 无头 | E2E | 视觉 | 性能 | 宿主 | 状态 |
 |---|------|------|------|------|------|------|------|------|------|
-| 1 | `codeblocks.build` | ctrl+f9 | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✅ |
-| 2 | `codeblocks.buildAndRun` | f9 | · | ✔ | · | ✔ | · | · | ✅ |
-| 3 | `codeblocks.run` | ctrl+f10 | · | ✔ | · | ✔ | · | ✔ | ✅ |
-| 4 | `codeblocks.rebuild` | ctrl+f11 | · | ✔ | · | ✔ | ✔ | ✔ | ✅ |
-| 5 | `codeblocks.compileCurrentFile` | ctrl+shift+f9 | · | ✔ | · | · | · | ✔ | ✅ |
-| 6 | `codeblocks.debug` | f8 | · | ✔ | ✔ | · | · | ✔ | ✅ |
-| 7 | `codeblocks.nextError` | f4 | · | ✔ | · | · | · | ✔ | ✅ |
-| 8 | `codeblocks.prevError` | shift+f4 | · | · | · | · | · | ✔ | ✅ |
-| 9 | `codeblocks.activatePriorProject` | alt+f5 | · | ✔ | · | · | · | · | ✅ |
-| 10 | `codeblocks.activateNextProject` | alt+f6 | · | ✔ | · | · | · | · | ✅ |
-| 11 | `codeblocks.prevError` | alt+f1 | · | · | · | · | · | ✔ | ✅ |
-| 12 | `codeblocks.nextError` | alt+f2 | · | ✔ | · | · | · | ✔ | ✅ |
-| 13 | `workbench.action.quickOpen` | alt+g | · | ✔ | · | · | · | · | ✅ |
-| 14 | `codeblocks.bookmarks.toggle` | alt+k | · | ✔ | · | · | · | · | ✅ |
-| 15 | `codeblocks.bookmarks.prev` | alt+h | · | ✔ | · | · | · | · | ✅ |
-| 16 | `codeblocks.bookmarks.next` | alt+l | · | ✔ | · | · | · | · | ✅ |
-| 17 | `codeblocks.projectTree.focus` | shift+f2 | ✔ | ✔ | · | · | · | ✔ | ✅ |
-| 18 | `workbench.action.replaceInFiles` | ctrl+shift+r | · | ✔ | · | · | · | · | ✅ |
-| 19 | `codeblocks.moveProjectUp` | ctrl+shift+up | · | ✔ | · | · | · | · | ✅ |
-| 20 | `codeblocks.moveProjectDown` | ctrl+shift+down | · | ✔ | · | · | · | · | ✅ |
-| 21 | `editor.action.addSelectionToNextFindMatch` | ctrl+e | · | ✔ | · | · | · | · | ✅ |
-| 22 | `editor.debug.action.toggleBreakpoint` | f5 | · | ✔ | · | · | · | ✔ | ✅ |
-| 23 | `workbench.action.debug.stop` | shift+f8 | · | ✔ | · | · | · | · | ✅ |
-| 24 | `codeblocks.buildLog.focus` | f2 | ✔ | ✔ | · | · | · | ✔ | ✅ |
-| 25 | `editor.action.startFindReplaceAction` | ctrl+r | · | ✔ | · | · | · | · | ✅ |
-| 26 | `editor.action.jumpToBracket` | ctrl+shift+b | · | ✔ | · | · | · | · | ✅ |
-| 27 | `editor.action.commentLine` | ctrl+shift+c | · | ✔ | · | · | · | · | ✅ |
-| 28 | `workbench.action.files.saveAll` | ctrl+shift+s | · | ✔ | · | · | · | · | ✅ |
-| 29 | `workbench.action.quit` | ctrl+q | · | ✔ | · | · | · | · | ✅ |
-| 30 | `editor.toggleFold` | f12 | · | ✔ | · | · | · | · | ✅ |
-| 31 | `workbench.action.debug.stepOver` | f7 | · | ✔ | · | · | · | · | ✅ |
-| 32 | `workbench.action.debug.stepInto` | shift+f7 | · | ✔ | · | · | · | · | ✅ |
-| 33 | `workbench.action.debug.stepOut` | ctrl+f7 | · | ✔ | · | · | · | · | ✅ |
+| 1 | `codeblocks.searchProjectFiles` | ctrl+alt+p | · | ✔ | · | · | · | · | ✅ |
+| 2 | `codeblocks.build` | ctrl+f9 | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✅ |
+| 3 | `codeblocks.buildAndRun` | f9 | · | ✔ | · | ✔ | · | · | ✅ |
+| 4 | `codeblocks.run` | ctrl+f10 | · | ✔ | · | ✔ | · | ✔ | ✅ |
+| 5 | `codeblocks.rebuild` | ctrl+f11 | · | ✔ | · | ✔ | ✔ | ✔ | ✅ |
+| 6 | `codeblocks.compileCurrentFile` | ctrl+shift+f9 | · | ✔ | · | · | · | ✔ | ✅ |
+| 7 | `codeblocks.debug` | f8 | · | ✔ | ✔ | · | · | ✔ | ✅ |
+| 8 | `codeblocks.nextError` | f4 | · | ✔ | · | · | · | ✔ | ✅ |
+| 9 | `codeblocks.prevError` | shift+f4 | · | · | · | · | · | ✔ | ✅ |
+| 10 | `codeblocks.activatePriorProject` | alt+f5 | · | ✔ | · | · | · | · | ✅ |
+| 11 | `codeblocks.activateNextProject` | alt+f6 | · | ✔ | · | · | · | · | ✅ |
+| 12 | `codeblocks.prevError` | alt+f1 | · | · | · | · | · | ✔ | ✅ |
+| 13 | `codeblocks.nextError` | alt+f2 | · | ✔ | · | · | · | ✔ | ✅ |
+| 14 | `workbench.action.quickOpen` | alt+g | · | ✔ | · | · | · | · | ✅ |
+| 15 | `codeblocks.bookmarks.toggle` | alt+k | · | ✔ | · | · | · | · | ✅ |
+| 16 | `codeblocks.bookmarks.prev` | alt+h | · | ✔ | · | · | · | · | ✅ |
+| 17 | `codeblocks.bookmarks.next` | alt+l | · | ✔ | · | · | · | · | ✅ |
+| 18 | `codeblocks.projectTree.focus` | shift+f2 | ✔ | ✔ | · | · | · | ✔ | ✅ |
+| 19 | `workbench.action.replaceInFiles` | ctrl+shift+r | · | ✔ | · | · | · | · | ✅ |
+| 20 | `codeblocks.moveProjectUp` | ctrl+shift+up | · | ✔ | · | · | · | · | ✅ |
+| 21 | `codeblocks.moveProjectDown` | ctrl+shift+down | · | ✔ | · | · | · | · | ✅ |
+| 22 | `editor.action.addSelectionToNextFindMatch` | ctrl+e | · | ✔ | · | · | · | · | ✅ |
+| 23 | `editor.debug.action.toggleBreakpoint` | f5 | · | ✔ | · | · | · | ✔ | ✅ |
+| 24 | `workbench.action.debug.stop` | shift+f8 | · | ✔ | · | · | · | · | ✅ |
+| 25 | `codeblocks.buildLog.focus` | f2 | ✔ | ✔ | · | · | · | ✔ | ✅ |
+| 26 | `editor.action.startFindReplaceAction` | ctrl+r | · | ✔ | · | · | · | · | ✅ |
+| 27 | `editor.action.jumpToBracket` | ctrl+shift+b | · | ✔ | · | · | · | · | ✅ |
+| 28 | `editor.action.commentLine` | ctrl+shift+c | · | ✔ | · | · | · | · | ✅ |
+| 29 | `workbench.action.files.saveAll` | ctrl+shift+s | · | ✔ | · | · | · | · | ✅ |
+| 30 | `workbench.action.quit` | ctrl+q | · | ✔ | · | · | · | · | ✅ |
+| 31 | `editor.toggleFold` | f12 | · | ✔ | · | · | · | · | ✅ |
+| 32 | `workbench.action.debug.stepOver` | f7 | · | ✔ | · | · | · | · | ✅ |
+| 33 | `workbench.action.debug.stepInto` | shift+f7 | · | ✔ | · | · | · | · | ✅ |
+| 34 | `workbench.action.debug.stepOut` | ctrl+f7 | · | ✔ | · | · | · | · | ✅ |
 
 未覆盖 0 项
 

@@ -125,12 +125,12 @@ const d2 = diffManaged([{ key: 'f8', command: 'codeblocks.debug', when: 'editorT
 check('diffManaged：缺失检测', d2.missing.length === 1 && d2.extra.length === 0, d2, 'missing=1');
 
 // ---- 9. 托管表规模抽查 ----
-check('托管表规模（30 项：15 builtin + 3 alias + 12 cbStyle）',
-  MANAGED_KEYBINDINGS.length === 30
+check('托管表规模（31 项：16 builtin + 3 alias + 12 cbStyle）',
+  MANAGED_KEYBINDINGS.length === 31
   && MANAGED_KEYBINDINGS.filter((m) => m.group === 'cbStyle').length === 12
   && MANAGED_KEYBINDINGS.filter((m) => m.group === 'alias').length === 3,
   { total: MANAGED_KEYBINDINGS.length, cb: MANAGED_KEYBINDINGS.filter((m) => m.group === 'cbStyle').length, alias: MANAGED_KEYBINDINGS.filter((m) => m.group === 'alias').length },
-  { total: 30, cb: 12, alias: 3 });
+  { total: 31, cb: 12, alias: 3 });
 
 console.log(`快捷键托管配置回归: ${pass} pass, ${fail} fail`);
 process.exit(fail ? 1 : 0);

@@ -2,7 +2,7 @@
 
 > 语言：**中文** ｜ [English](./usage.en.md)
 >
-> 版本：0.8.142 ｜ 本扩展为 Code::Blocks 核心功能的原生移植，直接驱动 GCC / GDB，**不依赖** `tasks.json` / `launch.json`。
+> 版本：0.8.144 ｜ 本扩展为 Code::Blocks 核心功能的原生移植，直接驱动 GCC / GDB，**不依赖** `tasks.json` / `launch.json`。
 
 ---
 
@@ -51,7 +51,7 @@ Code::Blocks for VS Code 是一个「迷你 IDE 内核」：直接解析 `.cbp` 
 ### 2.1 从 VSIX 安装
 
 ```powershell
-code --install-extension codeblocks-vscode-0.8.142.vsix --force
+code --install-extension codeblocks-vscode-0.8.144.vsix --force
 ```
 
 ### 2.2 从源码构建
@@ -59,12 +59,12 @@ code --install-extension codeblocks-vscode-0.8.142.vsix --force
 ```powershell
 npm install
 npm run package
-code --install-extension codeblocks-vscode-0.8.142.vsix --force
+code --install-extension codeblocks-vscode-0.8.144.vsix --force
 ```
 
 > `npm run package` = `vsce package`（打包前自动执行 `vscode:prepublish` 钩子 = `tsc` 编译（`dist/`，本地测试用）+ **esbuild 单文件打包**（`bundle/extension.js`，发布入口））；
 > 直接运行 `npx vsce package` / `npx vsce publish` 也会自动构建，不会打进过期或缺失的 `bundle/`；
-> 仅需编译时用 `npm run compile`，单独重打 bundle 用 `npm run bundle`（`.vscode` 任务 `build-extension` 已含两者）。
+> 仅需编译时用 `npm run compile`，单独重打 bundle 用 `npm run bundle`（`.vscode` 任务 `build-extension` 已含两者）；工程搜索的 worker 需额外执行 `npm run bundle:search`（`vscode:prepublish` 已包含）。
 > Windows 下建议使用 `npm.cmd` / `npx.cmd`（PSReadLine 执行策略）。
 
 ### 2.3 开发调试
@@ -83,16 +83,28 @@ code --extensionDevelopmentPath="." --disable-extensions --new-window
 |------|------|------|
 | **Menu** | 状态栏最左（`⊞ Menu`） | Code::Blocks 菜单栏（File / Edit / View / Search / Project / Build / Debug / Tools / Settings）：点击弹出两级菜单（Project tree / Folding / Case / Line / Errors 等为**子菜单**，可继续下钻）；列表显示**快捷键**与分隔线，未打开工程时相关项标注**（无工程）**；**悬停就地展开**常用命令链接 |
 | **Project** | 侧边栏（主体） | 工程树：多项目 + 嵌套目录 + 文件浏览（可拖拽排序、右键操作）；项目行悬停显示 **Build / Rebuild / Clean / Properties** 快捷按钮 |
+| **Project Search** | 侧边栏 | 工程内搜索：只搜索已打开 `.cbp` 工程中的文件/内容；文件/内容两种模式、活动工程优先、可折叠分组、点击跳转、搜索历史（顶部可视化开关）；`Ctrl+Alt+P` 聚焦文件模式 |
 | **Analysis** | 侧边栏 | 工程分析：按工程展示 `.cbp` 重要属性（概要 / 构建目标 / 构建命令 / 搜索目录 / 文件 / 虚拟目标 / 变量 / 备注）；**悬停显示对应的 .cbp 配置片段**，**点击属性在 .cbp 中定位**，右键可复制片段；顶部为「最近构建」快捷入口（点击打开 Build Log） |
 | **Symbols** | 侧边栏（默认隐藏） | 符号浏览器：按 函数 / 宏 / 类型 / 变量 分组展示项目符号，点击跳转定义；可从视图容器的 **⋯ → Views** 菜单调出，或用设置 `codeblocks.ui.symbolsView` 控制 |
 | **Build Log** | 底部 Panel（标签页） | 结构化构建摘要树（编译器 / 编译统计 / 链接结果 / 错误警告分组） |
 
 - 视图的**位置、并排/上下排布、大小**均可自由拖动调整，由 VS Code 自动保存并在下次打开时恢复。
 - **Menu 动态区**：**Workspace** 按依赖拓扑列出构建顺序（点击设为活动工程）；**Recent Projects** 列出最近工程（末尾 **Clear Recent Projects** 可清空历史）。
-- 执行 **`Code::Blocks: Reset View Layout`** 可一键恢复默认排布（Build Log 回到底部 Panel，侧栏顺序 Project → Symbols → Analysis，其中 Symbols 默认隐藏）。
+- 执行 **`Code::Blocks: Reset View Layout`** 可一键恢复默认排布（Build Log 回到底部 Panel，侧栏顺序 Project → Search → Symbols → Analysis，其中 Symbols 默认隐藏）。
 - 未打开工程时，**Project** 视图显示空态引导（打开工程 / 新建工程 / 单文件编译 / 检测编译器）。
 - **Analysis 视图**默认全部折叠（仅第一个工程的「概要」展开）；标题栏 **⟳** 可手动刷新，打开/移除工程与构建完成时自动刷新。
 - **Project 视图标题栏**：常驻按钮由设置 `codeblocks.ui.projectToolbar` 决定（默认 Build Workspace / Rebuild Workspace / Clean Workspace）；未选中的按钮自动进入 **⋯** 溢出菜单（新建/打开工程、Build / Rebuild / Clean、Run / Debug、编译器选项 / 工程属性、代码统计）。
+
+### 3.1 工程搜索（Project Search）
+
+- **只搜索已打开的 `.cbp` 工程**：不会扫描工作区中未打开的文件，也不调用 `workspace.findFiles`/ripgrep，不影响内置搜索与 `search.exclude`。
+- **入口**：侧边栏 **Project Search** 视图；命令面板 **`Code::Blocks: Project Search: Search Project Files`**（`Ctrl+Alt+P`）/ **`... Search in Project Files`**；C::B **Search** 菜单；工程/文件夹/虚拟文件夹/文件分组右键菜单（只搜该子树，且不写入历史）。
+- **文件模式**：输入即搜（防抖），空查询浏览作用域内全部工程文件（最多 500）；按工程分组，活动工程置顶；单击直接打开文件，行尾 **⤢** 在工程树中定位；输入框两侧 `Aa` / `.*` 对文件模式不生效。
+- **内容模式**：输入后按 `Enter` 或点击「搜索」；支持字面量与 `/正则/`（`Aa` 控制大小写、`.*` 启用正则）；按文件分组、默认展开前两组；单击匹配行跳转到对应行列并选中匹配文本；搜索中可点「停止」。
+- **范围**：下拉「所有工程 / 当前活动工程」；从工程树右键进入时显示范围 chip（`×` 清除）。视图内选择按工作区保存，设置 `codeblocks.search.scope` 只提供默认值。
+- **搜索历史**：顶部 **🕘 搜索历史** 展开最近搜索；**`保留历史` switch** 控制是否记录（对应设置 `codeblocks.search.keepHistory`）；点击历史条目恢复查询/模式/范围/选项——有上次结果时直接跳转，失效或没有结果时重新搜索；`↻` 仅重跑；「清空」需二次确认；历史按工作区隔离（文件/内容各 20 条），不保存文件内容。
+- **限制**：内容搜索在 worker 中执行，单文件 >4MB / 二进制跳过，正则单行 >4000 字符跳过，单文件 50 条 / 全局 500 条匹配，20s 总超时（5s 无进度即终止）；超大工程建议配合更精确的查询或使用内置搜索。
+- **重置布局**：`Code::Blocks: Reset View Layout` 会把 Search 放在 Project 之后、Symbols 之前。
 
 状态栏其余项：**构建目标（Target）**、**构建菜单（Build）**、**编译器（Compiler）**。
 
@@ -502,6 +514,7 @@ Build Log 视图位于**底部 Panel**（打开方式：`Ctrl+J` 后选择「Bui
 | 上移 / 下移工程（CB Project tree） | `Ctrl+Shift+Up` / `Ctrl+Shift+Down` | Project 树聚焦时 |
 | 选择下一个匹配（CB Ctrl-E ≈ 原生 Ctrl+D） | `Ctrl+E` | 编辑器聚焦 |
 | 切换书签 / 上一个 / 下一个（CB Bookmarks） | `Alt+K` / `Alt+H` / `Alt+L` | 编辑器聚焦 |
+| 查找工程文件（Project Search） | `Ctrl+Alt+P` | 全局（聚焦 Project Search 的文件模式） |
 
 ### 12.3 与 VS Code 冲突的键位：CB 保真模式
 
@@ -682,6 +695,8 @@ Build Log 视图位于**底部 Panel**（打开方式：`Ctrl+J` 后选择「Bui
 | `codeblocks.ui.symbolsView` | `true` | 显示 Symbols 视图（初始默认隐藏，可从视图容器的 ⋯ → Views 菜单调出；关闭此设置后强制隐藏） |
 | `codeblocks.ui.recentProjectsLimit` | `8` | 「最近工程」列表上限（状态栏菜单 Recent Projects；范围 0–50，0 = 不记录） |
 | `codeblocks.ui.findFileOpen` | `false` | 查找文件（Find File…）时同时打开选中的文件；默认仅在本工程树中定位（对齐 Code::Blocks 的 Find file → `Open file` 复选框，其配置项 `/project_manager/find_file_open` 默认同样为 false） |
+| `codeblocks.search.scope` | `openProjects` | 工程搜索默认范围：`openProjects`（所有已打开工程）/ `activeProject`（仅当前活动工程）；视图内选择按工作区覆盖 |
+| `codeblocks.search.keepHistory` | `true` | 按工作区保留最近搜索历史（文件/内容各 20 条）；关闭后停止记录 |
 | `codeblocks.detect.autoOpen` | `all` | 工作区工程自动检测行为：`all`（多选，受阈值保护）/ `single`（仅检测到单个工程时自动打开）/ `off`（不自动检测，仍可用状态栏入口）；父目录多工程工作区建议 `single` 或 `off` |
 | `codeblocks.detect.autoOpenThreshold` | `20` | 自动检测阈值（1–1000）：未打开工程数超过该值时不自动弹多选（仅状态栏入口 + 输出通道提示），并限制会话恢复的工程数 |
 | `codeblocks.detect.checkExternalChanges` | `prompt` | 已打开的 `.cbp` 被其它程序修改后的处理：`prompt`（弹窗询问是否重新加载，对齐 Code::Blocks `environment/check_modified_files`）/ `auto`（直接重载 + 状态栏提示）/ `off`（不检查，手动命令 `Code::Blocks: 从磁盘重新加载工程` 仍可用） |

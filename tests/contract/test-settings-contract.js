@@ -40,7 +40,7 @@ for (const s of sections) {
     byKey[k] = v;
   }
 }
-check('设置项总数 = 83', keys.length === 83, keys.length);
+check('设置项总数 = 85', keys.length === 85, keys.length);
 check('设置键唯一', new Set(keys).size === keys.length, keys.length - new Set(keys).size);
 check('已移除 clangd.queryDriver', !Object.prototype.hasOwnProperty.call(byKey, 'codeblocks.clangd.queryDriver'), keys.filter((k) => /queryDriver$/.test(k)));
 

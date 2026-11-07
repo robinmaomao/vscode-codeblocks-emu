@@ -1,4 +1,4 @@
-# 测试执行报告（0.8.142 · 滚动更新）
+﻿# 测试执行报告（0.8.142 · 滚动更新）
 
 > 生成时间：2026-11-06 ｜ 执行环境：Windows 10 x64 ｜ Node v24.19.0 ｜ CPU i3-10105 ×8 ｜ 15.8GB ｜ ccache 4.14.1
 > 方案见 [测试方案](./strategy.md)；覆盖台账见 [测试覆盖矩阵](./coverage-matrix.md)；性能数据见 [性能基准](./performance-baseline.md)。
@@ -48,7 +48,7 @@
 | 新增命令 | **无**（命令总数保持 111） |
 | 行为变更 | 链接期诊断（`undefined reference`：`obj:src:(section)` / `src:(section)` / `file:line`）在解析位置打不开时，按工程文件表落回真实源码并从段名或未定义符号补出行号；已正确（绝对路径 + 行号）的诊断原样透传 |
 | 新增测试 | `tests/test-diagnostic-path.js`（18 断言）、`tests/e2e/test-e2e-linker-diagnostic.js`（7 断言，真实 gcc） |
-| 文档 | 新增 [release/0.8.142.md](../release/0.8.142.md) 与 [release/pages/0.8.142.md](../release/pages/0.8.142.md)；滚动报告重命名为 `test-report-0.8.142.md`；覆盖矩阵重新生成 |
+| 文档 | 新增 [release/0.8.142.md](../release/0.8.142.md) 与 [release/pages/0.8.142.md](../release/pages/0.8.142.md)；滚动报告重命名为 `test-report-0.8.142-archive.md`；覆盖矩阵重新生成 |
 | 行为边界 | 工程外文件（系统头 / 第三方库）不猜测；`.o/.obj` 仅在工程文件表内回退；构建命令与产物零变化 |
 
 ## 4. 缺陷与处置（本轮发现并修复）

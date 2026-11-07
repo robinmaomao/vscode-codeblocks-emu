@@ -1,7 +1,7 @@
 # Code::Blocks for VS Code — Usage Guide
 
 > Language: **English** ｜ [中文](./usage.md)
-> Version: 0.8.142 ｜ Native port of Code::Blocks core features to VS Code, driving GCC / GDB directly, **without** `tasks.json` / `launch.json`.
+> Version: 0.8.144 ｜ Native port of Code::Blocks core features to VS Code, driving GCC / GDB directly, **without** `tasks.json` / `launch.json`.
 
 ---
 
@@ -50,7 +50,7 @@ Code::Blocks for VS Code is a "mini IDE kernel": it parses `.cbp` / `.workspace`
 ### 2.1 Install from VSIX
 
 ```powershell
-code --install-extension codeblocks-vscode-0.8.142.vsix --force
+code --install-extension codeblocks-vscode-0.8.144.vsix --force
 ```
 
 ### 2.2 Build from source
@@ -58,12 +58,12 @@ code --install-extension codeblocks-vscode-0.8.142.vsix --force
 ```powershell
 npm install
 npm run package
-code --install-extension codeblocks-vscode-0.8.142.vsix --force
+code --install-extension codeblocks-vscode-0.8.144.vsix --force
 ```
 
 > `npm run package` = `vsce package` (before packaging, the `vscode:prepublish` hook runs `tsc` compilation (`dist/`, for local testing) + the **esbuild single-file bundle** (`bundle/extension.js`, the release entry));
 > Running `npx vsce package` / `npx vsce publish` directly also builds automatically, so a stale or missing `bundle/` is never shipped;
-> Use `npm run compile` when you only need the compile step, and `npm run bundle` to rebuild the bundle alone (the `.vscode` task `build-extension` covers both).
+> Use `npm run compile` when you only need the compile step, and `npm run bundle` to rebuild the bundle alone (the `.vscode` task `build-extension` covers both); the Project Search worker additionally needs `npm run bundle:search` (already included in `vscode:prepublish`).
 > On Windows, prefer `npm.cmd` / `npx.cmd` (PSReadLine execution policy).
 
 ### 2.3 Development debugging
@@ -82,16 +82,28 @@ After installation, the **Code::Blocks** icon appears in the Activity Bar on the
 |------|------|------|
 | **Menu** | Far left of the status bar (`⊞ Menu`) | The Code::Blocks menu bar (File / Edit / View / Search / Project / Build / Debug / Tools / Settings): click to open a two-level menu (Project tree / Folding / Case / Line / Errors etc. are **submenus** you can drill into); the list shows **keybindings** and separators, and when no project is open the related items are marked **(no project)**; **hover to expand** common command links in place |
 | **Project** | Sidebar (main body) | Project tree: multiple projects + nested folders + file browsing (drag to reorder, right-click actions); hovering a project row shows quick **Build / Rebuild / Clean / Properties** buttons |
+| **Project Search** | Sidebar | Search inside open `.cbp` projects only: Files/Text modes, active project first, collapsible groups, click to jump, search history with a visual toggle at the top; `Ctrl+Alt+P` focuses Files mode |
 | **Analysis** | Sidebar | Project analysis: shows key `.cbp` properties per project (Summary / Build targets / Build commands / Search directories / Files / Virtual targets / Variables / Notes); **hover to show the matching .cbp snippet**, **click a property to locate it in the .cbp**, right-click to copy the snippet; the top holds a "recent build" shortcut (click to open Build Log) |
 | **Symbols** | Sidebar (hidden by default) | Symbol browser: lists project symbols grouped by Function / Macro / Type / Variable; click to jump to the definition; reachable from the view container's **⋯ → Views** menu, or controlled by the `codeblocks.ui.symbolsView` setting |
 | **Build Log** | Bottom Panel (tab) | Structured build summary tree (compiler / compile statistics / link result / error and warning groups) |
 
 - The **position, side-by-side/stacked arrangement and size** of views can all be dragged and adjusted freely; VS Code saves them automatically and restores them the next time you open the window.
 - **Menu dynamic area**: **Workspace** lists the build order by dependency topology (click to set the active project); **Recent Projects** lists recent projects (the **Clear Recent Projects** item at the end clears the history).
-- Run **`Code::Blocks: Reset View Layout`** to restore the default layout in one click (Build Log back to the bottom Panel, sidebar order Project → Symbols → Analysis, with Symbols hidden by default).
+- Run **`Code::Blocks: Reset View Layout`** to restore the default layout in one click (Build Log back to the bottom Panel, sidebar order Project → Search → Symbols → Analysis, with Symbols hidden by default).
 - When no project is open, the **Project** view shows an empty-state guide (open project / new project / compile single file / detect compilers).
 - The **Analysis view** is fully collapsed by default (only the first project's "Summary" is expanded); the **⟳** button in the title bar refreshes manually, and it also refreshes automatically when a project is opened/removed and when a build finishes.
 - **Project view title bar**: the persistent buttons are determined by the `codeblocks.ui.projectToolbar` setting (default Build Workspace / Rebuild Workspace / Clean Workspace); buttons that are not pinned move into the **⋯** overflow menu automatically (new/open project, Build / Rebuild / Clean, Run / Debug, Compiler options / Project properties, code statistics).
+
+### 3.1 Project Search
+
+- **Searches only opened `.cbp` projects**: it never scans files outside the project model, never calls `workspace.findFiles`/ripgrep, and leaves the built-in search and `search.exclude` untouched.
+- **Entry points**: the **Project Search** sidebar view; the command palette **`Code::Blocks: Project Search: Search Project Files`** (`Ctrl+Alt+P`) / **`... Search in Project Files`**; the C::B **Search** menu; the project / folder / virtual folder / file group context menu (searches that subtree only and is not written to history).
+- **Files mode**: search-as-you-type (debounced); an empty query browses every project file in scope (up to 500). Results are grouped by project with the active project first; click to open, **⤢** reveals the file in the project tree. `Aa` / `.*` do not affect Files mode.
+- **Text mode**: press `Enter` or click **Search**; supports literals and `/regex/` (`Aa` controls case, `.*` enables regex). Results are grouped by file (first two groups expanded); click a match to jump to its line/column and select the matched text; **Stop** cancels a running search.
+- **Scope**: the selector offers All projects / Active project; entering from the project tree shows a scope chip (clear it with `×`). The view's scope is saved per workspace; `codeblocks.search.scope` only supplies the default.
+- **History**: **🕘 Search History** at the top lists recent searches; the **Keep history** switch controls recording (setting `codeblocks.search.keepHistory`). Clicking an entry restores query/mode/scope/options and jumps to its last result when still valid, otherwise re-runs the search; `↻` only re-runs; **Clear** asks for confirmation. History is per workspace (20 entries each for files/text) and never stores file contents.
+- **Limits**: text search runs in a worker; files over 4 MB and binary files are skipped, regex lines over 4000 characters are skipped, at most 50 matches per file / 500 overall, with a 20 s total timeout (aborted after 5 s without progress). For very large projects, use a narrower query or the built-in search.
+- **Reset layout**: `Code::Blocks: Reset View Layout` places Search after Project and before Symbols.
 
 Other status bar items: **build target (Target)**, **build menu (Build)**, **compiler (Compiler)**.
 
@@ -499,6 +511,7 @@ Build succeeded / failed (root, showing elapsed time · N errors · N warnings)
 | Move project up / down (CB Project tree) | `Ctrl+Shift+Up` / `Ctrl+Shift+Down` | Project tree focused |
 | Select next match (CB Ctrl-E ≈ native Ctrl+D) | `Ctrl+E` | Editor focused |
 | Toggle bookmark / previous / next (CB Bookmarks) | `Alt+K` / `Alt+H` / `Alt+L` | Editor focused |
+| Search project files (Project Search) | `Ctrl+Alt+P` | Global (focuses Files mode in Project Search) |
 
 ### 12.3 Keys that conflict with VS Code: CB fidelity mode
 
@@ -679,6 +692,8 @@ Note: keybindings are **user-level** (shared across windows); combinations taken
 | `codeblocks.ui.symbolsView` | `true` | Show the Symbols view (initially hidden by default; reachable from the view container's ⋯ → Views menu; disabling this setting forces it hidden) |
 | `codeblocks.ui.recentProjectsLimit` | `8` | Upper limit of the "recent projects" list (status bar menu Recent Projects; range 0–50, 0 = do not record) |
 | `codeblocks.ui.findFileOpen` | `false` | Also open the selected file when using Find File (Find File…); by default it only locates within the project tree (aligned with the Code::Blocks Find file → `Open file` checkbox, whose configuration key `/project_manager/find_file_open` is likewise false by default) |
+| `codeblocks.search.scope` | `openProjects` | Default Project Search scope: `openProjects` (all open projects) / `activeProject` (active project only); the view's selector overrides it per workspace |
+| `codeblocks.search.keepHistory` | `true` | Keep recent search history per workspace (20 entries each for files/text); turn off to stop recording |
 | `codeblocks.detect.autoOpen` | `all` | Workspace project auto-detection behavior: `all` (multi-select, guarded by the threshold) / `single` (open automatically only when a single project is detected) / `off` (no auto-detection; the status bar entry still works); `single` or `off` is recommended for workspaces with many projects under one parent directory |
 | `codeblocks.detect.autoOpenThreshold` | `20` | Auto-detection threshold (1–1000): when the number of unopened projects exceeds this value the multi-select list is not shown (status bar entry + Output channel hint only), and it also limits how many projects are restored for the session |
 | `codeblocks.detect.checkExternalChanges` | `prompt` | What to do when an opened `.cbp` is modified by another program: `prompt` (ask whether to reload, aligned with Code::Blocks `environment/check_modified_files`) / `auto` (reload immediately + status bar message) / `off` (never check; the manual `Code::Blocks: Reload Project from Disk` command still works) |
