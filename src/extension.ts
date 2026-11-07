@@ -2536,9 +2536,11 @@ async function pickAndOpenCbp(files: string[]): Promise<void> {
     },
   );
   if (picked && picked.length) {
-    for (const p of picked) {
-      await openProject(p.description!);
-    }
+    await withClangdBatch(async () => {
+      for (const p of picked) {
+        await openProject(p.description!);
+      }
+    });
   }
   // 重新计算待打开列表（未选中的仍保留在状态栏入口）
   const stillOpen = new Set(openProjects.map((p) => p.filename));
@@ -3638,6 +3640,38 @@ async function saveProjectAsTemplate(): Promise<void> {
   }
 }
 
+/**
+ * 批量打开工程（启动恢复 / 多选打开）期间抑制「每打开一个工程就全量生成一次 clangd 配置」，
+ * 批量结束后统一生成一次：避免 N 个工程触发 N 次数据库扫描 / config 写入 / clangd 重启。
+ */
+let clangdBatchDepth = 0;
+let clangdBatchDeferred = false;
+
+/** 打开工程后的 clangd 生成请求（批量打开时延后到批量结束） */
+function requestClangdGenerationAfterOpen(): void {
+  if (clangdBatchDepth > 0) {
+    clangdBatchDeferred = true;
+    return;
+  }
+  restartClangdReason = 'open';
+  void generateClangdForWorkspace();
+}
+
+/** 在批量打开语义下执行 fn（结束时若有延后的生成请求则统一跑一次） */
+async function withClangdBatch<T>(fn: () => Promise<T>): Promise<T> {
+  clangdBatchDepth++;
+  try {
+    return await fn();
+  } finally {
+    clangdBatchDepth--;
+    if (clangdBatchDepth === 0 && clangdBatchDeferred) {
+      clangdBatchDeferred = false;
+      restartClangdReason = 'open';
+      void generateClangdForWorkspace();
+    }
+  }
+}
+
 async function openProject(filename: string): Promise<void> {
   try {
     // P3：工程集合/文件列表即将变化 → 失效属主索引（所有重解析路径均经由此处）
@@ -3693,6 +3727,8 @@ async function openProject(filename: string): Promise<void> {
     void autoExcludeBuildOutputs({ notify: false });
     outputChannel.info(logT('[Code::Blocks] Project opened: {0}', project.title));
     outputChannel.info(logT('  Targets: {0}', project.buildTargets.map((t) => t.title).join(', ')));
+    // 同名工程（不同目录）靠标题无法区分，补一行路径便于排障
+    outputChannel.info(logT('  Project file: {0}', project.filename));
 
     // 刷新项目树（活动项目高亮随 activeProject 同步）
     projectTreeProvider?.setProjects(openProjects);
@@ -3719,9 +3755,9 @@ async function openProject(filename: string): Promise<void> {
     vscode.window.showInformationMessage(i18n.t('Code::Blocks project opened: {0}', project.title));
 
     // 生成 compile_commands.json（clangd 补全，写到工作区外缓存），失败不阻塞。
-    // 打开工程后 clangd 必须按新数据库重新分析（首开工程时旧 clangd 进程可能还按"无数据库"的状态在跑）
-    restartClangdReason = 'open';
-    void generateClangdForWorkspace();
+    // 打开工程后 clangd 必须按新数据库重新分析（首开工程时旧 clangd 进程可能还按"无数据库"的状态在跑）；
+    // 批量打开（启动恢复 / 多选）时由 withClangdBatch 合并成一次。
+    requestClangdGenerationAfterOpen();
   } catch (err) {
     vscode.window.showErrorMessage(i18n.t('Failed to open the project: {0}', (err as Error).message));
   }
@@ -5068,28 +5104,30 @@ function restoreProjectOrder(): string[] {
 /** 恢复上次会话打开的项目：优先 .workspace（重新打开全部项目+依赖），否则按持久化顺序恢复各项目 */
 async function restorePersistedProjects(): Promise<void> {
   if (openProjects.length > 0) return;
-  const wsPath = extContext?.workspaceState.get<string>('codeblocks.openedWorkspace', '');
-  if (wsPath && fs.existsSync(wsPath)) {
-    await openProject(wsPath);
-    return;
-  }
-  const order = restoreProjectOrder();
-  const fallback = extContext?.workspaceState.get<string>('codeblocks.activeProject', '') ?? '';
-  const list = order.length ? order : [fallback].filter(Boolean);
-  // 恢复上限：上次会话打开了 N 个工程时不再全部恢复（父目录多工程工作区下会成倍放大 clangd/索引开销）
-  const limit = detectAutoOpenThreshold();
-  const use = list.length > limit ? list.slice(0, limit) : list;
-  if (list.length > limit) {
-    outputChannel?.info(
-      logT('[Code::Blocks] The last session had {0} projects open; restoring only the first {1}', list.length, limit) +
-        logT(' (threshold: codeblocks.detect.autoOpenThreshold; open the rest from the status bar or the project management menu)'),
-    );
-  }
-  for (const fn of use) {
-    if (fn && fs.existsSync(fn) && !openProjects.some((p) => p.filename === fn)) {
-      await openProject(fn);
+  await withClangdBatch(async () => {
+    const wsPath = extContext?.workspaceState.get<string>('codeblocks.openedWorkspace', '');
+    if (wsPath && fs.existsSync(wsPath)) {
+      await openProject(wsPath);
+      return;
     }
-  }
+    const order = restoreProjectOrder();
+    const fallback = extContext?.workspaceState.get<string>('codeblocks.activeProject', '') ?? '';
+    const list = order.length ? order : [fallback].filter(Boolean);
+    // 恢复上限：上次会话打开了 N 个工程时不再全部恢复（父目录多工程工作区下会成倍放大 clangd/索引开销）
+    const limit = detectAutoOpenThreshold();
+    const use = list.length > limit ? list.slice(0, limit) : list;
+    if (list.length > limit) {
+      outputChannel?.info(
+        logT('[Code::Blocks] The last session had {0} projects open; restoring only the first {1}', list.length, limit) +
+          logT(' (threshold: codeblocks.detect.autoOpenThreshold; open the rest from the status bar or the project management menu)'),
+      );
+    }
+    for (const fn of use) {
+      if (fn && fs.existsSync(fn) && !openProjects.some((p) => p.filename === fn)) {
+        await openProject(fn);
+      }
+    }
+  });
 }
 
 /** 拖拽重排：把 src 移到 target 之前（target 为空则移到最后） */
