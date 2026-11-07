@@ -959,6 +959,7 @@
   "[Code::Blocks] Project created: {0} ({1})": "[Code::Blocks] 已创建工程: {0}（{1}）",
   "[Code::Blocks] Project file deleted: {0} (it stays in the opened list and can be removed manually)": "[Code::Blocks] 工程文件已被删除：{0}（仍保留在已打开列表中，可手动移除）",
   "[Code::Blocks] Project opened: {0}": "[Code::Blocks] 已打开项目: {0}",
+  "  Project file: {0}": "  工程文件: {0}",
   "[Code::Blocks] Project opened; restarting clangd to apply the new compile database / config": "[Code::Blocks] 已打开工程，重启 clangd 以套用新的编译数据库 / 配置",
   "[Code::Blocks] Project post-build script failed": "[Code::Blocks] 项目 post-build 脚本失败",
   "[Code::Blocks] Project pre-build script failed": "[Code::Blocks] 项目 pre-build 脚本失败",
