@@ -18,6 +18,7 @@ import {
   FILE_MAX_QUERY_LENGTH,
   FILE_SEARCH_LIMIT,
   FileSearchHit,
+  projectDisplayTitle,
   ProjectSearchMode,
   ProjectSearchScope,
   rankSearchEntries,
@@ -72,6 +73,7 @@ interface PersistedViewState {
   scope: ProjectSearchScope;
   caseSensitive: boolean;
   regex: boolean;
+  wholeWord: boolean;
 }
 
 interface SubtreeState {
@@ -107,6 +109,7 @@ interface TextFileDto {
   projectFilename: string;
   relativePath: string;
   absolutePath: string;
+  isActive: boolean;
   matches: TextMatchDto[];
 }
 
@@ -145,7 +148,7 @@ function asScope(value: unknown): ProjectSearchScope | undefined {
 }
 
 function defaultViewState(): PersistedViewState {
-  return { mode: 'files', queries: { files: '', text: '' }, scope: 'openProjects', caseSensitive: false, regex: false };
+  return { mode: 'files', queries: { files: '', text: '' }, scope: 'openProjects', caseSensitive: false, regex: false, wholeWord: false };
 }
 
 function sanitizeViewState(value: unknown): PersistedViewState {
@@ -158,6 +161,7 @@ function sanitizeViewState(value: unknown): PersistedViewState {
   if (scope) base.scope = scope;
   base.caseSensitive = raw.caseSensitive === true;
   base.regex = raw.regex === true;
+  base.wholeWord = raw.wholeWord === true;
   if (raw.queries && typeof raw.queries === 'object') {
     const q = raw.queries as Record<string, unknown>;
     if (typeof q.files === 'string') base.queries.files = q.files.slice(0, FILE_MAX_QUERY_LENGTH + 1);
@@ -279,6 +283,7 @@ class TextSearchWorkerClient {
       query: string;
       caseSensitive: boolean;
       regex: boolean;
+      wholeWord?: boolean;
       maxFileBytes?: number;
       maxFileMatches?: number;
       maxTotalMatches?: number;
@@ -313,6 +318,7 @@ class TextSearchWorkerClient {
           query: options.query,
           caseSensitive: options.caseSensitive,
           regex: options.regex,
+          wholeWord: options.wholeWord === true,
           limits: {
             maxFileBytes: options.maxFileBytes,
             maxFileMatches: options.maxFileMatches,
@@ -440,17 +446,12 @@ export class ProjectSearchViewProvider implements vscode.WebviewViewProvider {
       webviewView.onDidChangeVisibility(() => {
         if (!webviewView.visible) {
           this.cancelSearch();
-          this.webviewReady = false;
           return;
         }
+        this.dirtyWhenHidden = false;
         this.reloadHistory();
         this.postState();
-        if (this.dirtyWhenHidden) {
-          this.dirtyWhenHidden = false;
-          this.scheduleResearch();
-        } else if (this.view?.visible) {
-          this.scheduleResearch();
-        }
+        this.postHistory(this.historyFilterMode());
       }),
       webviewView.onDidDispose(() => {
         this.cancelSearch();
@@ -458,7 +459,17 @@ export class ProjectSearchViewProvider implements vscode.WebviewViewProvider {
         this.webviewReady = false;
       }),
     );
-    webviewView.webview.html = buildProjectSearchViewHtml();
+    webviewView.webview.html = this.buildViewHtml();
+  }
+
+  /** Seti 字体（VS Code Explorer 同款）经 webview URI 加载；不可用时回退字母图标 */
+  private buildViewHtml(): string {
+    const webview = this.view?.webview;
+    if (!webview) return buildProjectSearchViewHtml();
+    const fontUri = webview
+      .asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'resources', 'icons', 'seti.woff'))
+      .toString();
+    return buildProjectSearchViewHtml({ fontUri, cspSource: webview.cspSource });
   }
 
   /** 打开/聚焦搜索视图，并切到指定模式 */
@@ -539,11 +550,12 @@ export class ProjectSearchViewProvider implements vscode.WebviewViewProvider {
       this.dirtyWhenHidden = true;
       return;
     }
+    // 只刷新状态，不自动重搜：搜索结果的排序（active project first）必须在一次搜索后固定，
+    // 不能在切换活动工程时被重新排序；需要刷新结果时由用户点“刷新”或重新搜索。
     if (this.contextTimer) clearTimeout(this.contextTimer);
     this.contextTimer = setTimeout(() => {
       this.contextTimer = undefined;
       this.postState();
-      this.scheduleResearch();
     }, 400);
   }
 
@@ -594,6 +606,12 @@ export class ProjectSearchViewProvider implements vscode.WebviewViewProvider {
       case 'searchText':
         await this.runTextSearch(String(msg.query ?? ''));
         break;
+      case 'commitHistory': {
+        const mode = asMode(msg.mode) ?? this.viewState.mode;
+        const query = typeof msg.query === 'string' ? msg.query : this.viewState.queries[mode];
+        this.recordHistory(mode, query);
+        break;
+      }
       case 'cancel':
         this.cancelSearch();
         break;
@@ -637,6 +655,9 @@ export class ProjectSearchViewProvider implements vscode.WebviewViewProvider {
         await this.persistHistory();
         this.postHistory(this.historyFilterMode());
         break;
+      case 'requestClearHistory':
+        await this.requestClearHistory();
+        break;
       case 'setKeepHistory':
         await this.setKeepHistory(msg.value === true);
         break;
@@ -658,13 +679,14 @@ export class ProjectSearchViewProvider implements vscode.WebviewViewProvider {
     }
     this.viewState.caseSensitive = msg.caseSensitive === true;
     this.viewState.regex = msg.regex === true;
+    this.viewState.wholeWord = msg.wholeWord === true;
     this.persistViewState();
   }
 
   private onConfigurationChanged(e: vscode.ConfigurationChangeEvent): void {
     if (e.affectsConfiguration('codeblocks.ui.language') && this.view) {
       const state = this.viewState;
-      this.view.webview.html = buildProjectSearchViewHtml();
+      this.view.webview.html = this.buildViewHtml();
       this.webviewReady = false;
       this.postState();
       this.post({ type: 'activated', mode: state.mode, query: state.queries[state.mode] });
@@ -687,11 +709,16 @@ export class ProjectSearchViewProvider implements vscode.WebviewViewProvider {
 
   private entries(): SearchEntry[] {
     if (this.subtree) {
-      const project = this.host.getProjects().find((p) => samePath(p.filename, this.subtree!.projectFilename));
+      const projects = this.host.getProjects();
+      const project = projects.find((p) => samePath(p.filename, this.subtree!.projectFilename));
       if (!project) return [];
       const wanted = new Set(this.subtree.relativePaths.map((p) => p.replace(/\\/g, '/').toLowerCase()));
       const files = project.files.filter((f) => wanted.has(String(f.relativeFilename).replace(/\\/g, '/').toLowerCase()));
-      return buildSubtreeEntries(project, files, samePath(project.filename, this.activeFilename() ?? ''));
+      return buildSubtreeEntries(
+        project, files,
+        samePath(project.filename, this.activeFilename() ?? ''),
+        projectDisplayTitle(projects, project),
+      );
     }
     const projects = this.host.getProjects();
     const active = this.activeFilename();
@@ -791,6 +818,7 @@ export class ProjectSearchViewProvider implements vscode.WebviewViewProvider {
     this.viewState.mode = 'text';
     this.viewState.queries.text = query;
     this.persistViewState();
+    this.recordHistory('text', query);
     const seq = ++this.textSeq;
     const started = Date.now();
     const files = this.textFiles();
@@ -813,6 +841,7 @@ export class ProjectSearchViewProvider implements vscode.WebviewViewProvider {
             query,
             caseSensitive: this.viewState.caseSensitive,
             regex: this.viewState.regex,
+            wholeWord: this.viewState.wholeWord,
             maxFileBytes: TEXT_MAX_FILE_BYTES,
             maxFileMatches: TEXT_FILE_MATCH_LIMIT,
             maxTotalMatches: TEXT_TOTAL_MATCH_LIMIT,
@@ -897,6 +926,7 @@ export class ProjectSearchViewProvider implements vscode.WebviewViewProvider {
         projectFilename: item.file.projectFilename,
         relativePath: item.file.relativeFilename,
         absolutePath: item.file.absolutePath,
+        isActive: samePath(item.file.projectFilename, this.activeFilename() ?? ''),
         matches,
       });
     }
@@ -923,7 +953,6 @@ export class ProjectSearchViewProvider implements vscode.WebviewViewProvider {
       cancelled: aborted,
       timedOut,
     });
-    if (!aborted && !timedOut && matchCount > 0) this.recordHistory('text', query);
   }
 
   private async fallbackTextSearch(files: TextSearchFile[], query: string, seq: number): Promise<any> {
@@ -934,6 +963,7 @@ export class ProjectSearchViewProvider implements vscode.WebviewViewProvider {
         query,
         caseSensitive: this.viewState.caseSensitive,
         regex: this.viewState.regex,
+        wholeWord: this.viewState.wholeWord,
         maxFileBytes: TEXT_MAX_FILE_BYTES,
         maxFileMatches: TEXT_FILE_MATCH_LIMIT,
         maxTotalMatches: TEXT_TOTAL_MATCH_LIMIT,
@@ -1038,13 +1068,16 @@ export class ProjectSearchViewProvider implements vscode.WebviewViewProvider {
     match: TextMatchDto | undefined,
   ): void {
     if (!this.keepHistory() || this.subtree || !query.trim()) return;
-    this.history = addHistoryEntry(this.history, {
-      mode,
-      query,
-      scope: this.viewState.scope,
-      caseSensitive: this.viewState.caseSensitive,
-      regex: this.viewState.regex,
-    });
+    if (!this.history.entries.some((e) => e.mode === mode && e.query === query.trim())) {
+      this.history = addHistoryEntry(this.history, {
+        mode,
+        query,
+        scope: this.viewState.scope,
+        caseSensitive: this.viewState.caseSensitive,
+        regex: this.viewState.regex,
+        wholeWord: this.viewState.wholeWord,
+      });
+    }
     const last: SearchHistoryLastResult = {
       projectFilename: entry.projectFilename,
       relativeFilename: entry.relativePath,
@@ -1077,9 +1110,25 @@ export class ProjectSearchViewProvider implements vscode.WebviewViewProvider {
       scope: this.viewState.scope,
       caseSensitive: this.viewState.caseSensitive,
       regex: this.viewState.regex,
+      wholeWord: this.viewState.wholeWord,
     });
     void this.persistHistory();
     this.postHistory(this.historyFilterMode());
+  }
+
+  /** 清空确认走 VS Code 原生模态框，避免 Webview 内确认条被滚动区遮挡 */
+  private async requestClearHistory(): Promise<void> {
+    const clearLabel = i18n.t('Clear');
+    const answer = await vscode.window.showWarningMessage(
+      i18n.t('Clear search history?'),
+      { modal: true },
+      clearLabel,
+    );
+    if (answer !== clearLabel) return;
+    this.history = clearHistory();
+    await this.persistHistory();
+    this.postHistory(this.historyFilterMode());
+    this.postState();
   }
 
   private reloadHistory(): void {
@@ -1125,6 +1174,7 @@ export class ProjectSearchViewProvider implements vscode.WebviewViewProvider {
     this.viewState.scope = entry.scope;
     this.viewState.caseSensitive = entry.caseSensitive;
     this.viewState.regex = entry.regex;
+    this.viewState.wholeWord = entry.wholeWord === true;
     this.viewState.queries[entry.mode] = entry.query;
     this.persistViewState();
     this.subtree = undefined;
@@ -1195,6 +1245,7 @@ export class ProjectSearchViewProvider implements vscode.WebviewViewProvider {
       scope: this.viewState.scope,
       caseSensitive: this.viewState.caseSensitive,
       regex: this.viewState.regex,
+      wholeWord: this.viewState.wholeWord,
       keepHistory: this.keepHistory(),
       hasProjects: projects.length > 0,
       projectCount: projects.length,

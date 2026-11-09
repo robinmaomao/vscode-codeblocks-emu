@@ -26,6 +26,21 @@
 | [0.8.142.md](./0.8.142.md) | 链接期错误（undefined reference）定位与跳转修复 |
 | [0.8.144.md](./0.8.144.md) | 工程内搜索（Project Search）：只搜索已打开 .cbp 工程，文件/内容双模式 + 历史 |
 
+## 分支预发布版本（branch prerelease）
+
+分支开发默认使用「目标正式版 + 分支名」的 SemVer 预发布版本，便于区分本地/分支构建与正式版：
+
+- 格式：`<目标正式版>-<分支 slug>`；分支名中的 `/` 记为 `.`，其余字符仅保留 `[0-9A-Za-z.-]`。
+  例：分支 `feat/project-search` → `0.8.144-feat.project-search`（目标正式版 `0.8.144`）。
+- 同步位置：`package.json` / `package-lock.json`、`README*.md` 版本标记、`docs/guide/usage*.md` 版本与 VSIX 文件名、
+  `CHANGELOG.md` 顶部标题、`docs/dev/progress.md` 当前版本、`docs/testing/test-report-<版本>.md` 文件名与标题、
+  `docs/testing/coverage-matrix.md` 数据来源（由 `npm run coverage:matrix` 生成）。
+- 分支预发布只提交到功能分支：**不合并 `main`、不创建 PR、不创建 GitHub Release**；VSIX 由本地
+  `npm run package` 生成，文件名随版本号带分支后缀。
+- 正式版发布时版本号回到纯 `x.y.z`，再按本文件前述流程生成 `pages/<tag>.md` 与 GitHub Release。
+
+> 当前分支：`feat/project-search` 对应 `0.8.144-feat.project-search`（0.8.144 正式版底稿见 [0.8.144.md](./0.8.144.md)）。
+
 ## 最近 dev 说明（保留）
 
 - [0.8.129-dev.md](./0.8.129-dev.md)：测试分层体系落地（七层 + CI）+ 测试阶段缺陷修复 + 工具链/CI 加固。

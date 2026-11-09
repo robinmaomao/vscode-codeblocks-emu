@@ -27,6 +27,7 @@ export interface SearchHistoryEntry {
   scope: ProjectSearchScope;
   caseSensitive: boolean;
   regex: boolean;
+  wholeWord: boolean;
   updatedAt: number;
   lastResult?: SearchHistoryLastResult;
 }
@@ -93,6 +94,7 @@ function sanitizeEntry(value: unknown): SearchHistoryEntry | undefined {
     scope: raw.scope,
     caseSensitive: raw.caseSensitive === true,
     regex: raw.regex === true,
+    wholeWord: raw.wholeWord === true,
     updatedAt: finiteNumber(raw.updatedAt) ?? 0,
   };
   const lastResult = sanitizeLastResult(raw.lastResult);
@@ -142,6 +144,7 @@ export function addHistoryEntry(
     scope: ProjectSearchScope;
     caseSensitive: boolean;
     regex: boolean;
+    wholeWord?: boolean;
     now?: number;
   },
 ): SearchHistoryState {
@@ -154,6 +157,7 @@ export function addHistoryEntry(
     scope: input.scope,
     caseSensitive: input.caseSensitive === true,
     regex: input.regex === true,
+    wholeWord: input.wholeWord === true,
     updatedAt: input.now ?? Date.now(),
   };
   const rest = state.entries.filter((e) => !(e.mode === input.mode && e.query === query));

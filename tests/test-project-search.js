@@ -29,6 +29,22 @@ check('条目：活动工程优先且跨工程去重', entries[0].projectTitle =
 check('条目：activeProject 范围只含活动工程', buildSearchEntries([p1, p2], p2.filename, 'activeProject').every((e) => e.projectTitle === 'beta'),
   buildSearchEntries([p1, p2], p2.filename, 'activeProject').map((e) => e.projectTitle));
 
+const dupA = {
+  title: 'app', filename: 'C:/ws/earphone/app.cbp', basePath: 'C:/ws/earphone',
+  files: [file('src/a.c', 'C:/ws/earphone/src/a.c')],
+};
+const dupB = {
+  title: 'app', filename: 'C:/ws/esop8/app.cbp', basePath: 'C:/ws/esop8',
+  files: [file('src/b.c', 'C:/ws/esop8/src/b.c')],
+};
+const dupTitles = buildSearchEntries([dupA, dupB], dupA.filename, 'openProjects').map((e) => e.projectTitle);
+check('条目：同名工程用父目录名区分（earphone / esop8）', dupTitles.includes('earphone') && dupTitles.includes('esop8'),
+  dupTitles);
+check('条目：activeProject 范围仍用目录名（Text 模式同名工程）',
+  buildSearchEntries([dupA, dupB], dupA.filename, 'activeProject').every((e) => e.projectTitle === 'earphone'),
+  buildSearchEntries([dupA, dupB], dupA.filename, 'activeProject').map((e) => e.projectTitle));
+check('条目：无重名时保持 .cbp title', buildSearchEntries([p1], undefined, 'openProjects').every((e) => e.projectTitle === 'alpha'));
+
 const allHits = rankSearchEntries(entries, '', 100);
 check('空查询返回全部（活动工程在前）', allHits.length === 5 && allHits[0].entry.isActive, allHits.map((h) => h.entry.relativePath));
 const utilHits = rankSearchEntries(entries, 'util');
@@ -56,6 +72,14 @@ check('查询：/regex/ + 大小写敏感', regex.kind === 'regex' && regex.rege
 const bad = parseTextQuery('/[/', false);
 check('查询：非法正则返回 error', !!bad.error, bad);
 check('查询：空查询 error', !!parseTextQuery('   ').error);
+
+const wholeWord = parseTextQuery('if', false, true);
+const wholeWordMatches = findTextMatches('if (cond) { diff = ifdef; }', wholeWord).matches;
+check('查询：全字匹配只命中独立单词', wholeWordMatches.length === 1 && wholeWordMatches[0].column === 0,
+  wholeWordMatches.map((m) => m.column));
+const wholeWordPunct = parseTextQuery('foo(', false, true);
+check('查询：全字匹配兼容非单词结尾', findTextMatches('foo(1) barfoo(', wholeWordPunct).matches.length === 1,
+  findTextMatches('foo(1) barfoo(', wholeWordPunct).matches.map((m) => m.column));
 
 const text = 'int main() {\n  printf("hello"); // hello\n  HELLO();\n}\n';
 const found = findTextMatches(text, parseTextQuery('hello', false));

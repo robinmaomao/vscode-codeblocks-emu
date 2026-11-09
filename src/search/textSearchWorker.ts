@@ -2,7 +2,7 @@
  * 内容搜索 worker 入口（由 esbuild 单独打包为 bundle/search-worker.js）。
  *
  * 协议：
- *   宿主 → worker: { type:'search', id, files, query, caseSensitive, regex, limits? }
+ *   宿主 → worker: { type:'search', id, files, query, caseSensitive, regex, wholeWord, limits? }
  *                  { type:'cancel', id }
  *   worker → 宿主: { type:'progress', id, scanned, total, matches }
  *                  { type:'result', id, result }
@@ -18,6 +18,7 @@ export interface WorkerSearchMessage {
   query: string;
   caseSensitive?: boolean;
   regex?: boolean;
+  wholeWord?: boolean;
   limits?: {
     maxFileBytes?: number;
     maxFileMatches?: number;
@@ -69,6 +70,7 @@ port.on('message', (message: Incoming) => {
     query: String(message.query ?? ''),
     caseSensitive: message.caseSensitive === true,
     regex: message.regex === true,
+    wholeWord: message.wholeWord === true,
     maxFileBytes: message.limits?.maxFileBytes,
     maxFileMatches: message.limits?.maxFileMatches,
     maxTotalMatches: message.limits?.maxTotalMatches,
