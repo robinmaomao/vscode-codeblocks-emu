@@ -6,7 +6,7 @@
 
 直接在 VS Code 中打开 `.cbp` / `.workspace` 工程，即可获得与 Code::Blocks 对齐的构建、调试与工程浏览体验。
 
-> **作者**：Robinmaomao ｜ **版本**：0.8.144-feat.project-search（分支预发布）
+> **作者**：Robinmaomao ｜ **版本**：0.8.144-feat.project-search.1（分支预发布）
 
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](./LICENSE.md)
 
@@ -121,10 +121,10 @@ code --install-extension robinmaomao.codeblocks-vscode
 
 ### 方式二：从 GitHub Releases 安装
 
-正式版从 [Releases](https://github.com/robinmaomao/vscode-codeblocks-emu/releases) 下载；当前分支预发布包 `codeblocks-vscode-0.8.144-feat.project-search.vsix` 仅由本地 `npm run package` 生成（不创建 Release）：
+正式版从 [Releases](https://github.com/robinmaomao/vscode-codeblocks-emu/releases) 下载；当前分支预发布包 `codeblocks-vscode-0.8.144-feat.project-search.1.vsix` 仅由本地 `npm run package` 生成（不创建 Release）：
 
 ```powershell
-code --install-extension codeblocks-vscode-0.8.144-feat.project-search.vsix --force
+code --install-extension codeblocks-vscode-0.8.144-feat.project-search.1.vsix --force
 ```
 
 ### 方式三：从源码构建
@@ -132,7 +132,7 @@ code --install-extension codeblocks-vscode-0.8.144-feat.project-search.vsix --fo
 ```powershell
 npm install
 npm run package
-code --install-extension codeblocks-vscode-0.8.144-feat.project-search.vsix --force
+code --install-extension codeblocks-vscode-0.8.144-feat.project-search.1.vsix --force
 ```
 
 > `npm run package` = `vsce package`（打包前会自动执行 `vscode:prepublish` 钩子 = `tsc` 编译（`dist/`，本地测试用）+ esbuild 单文件打包（`bundle/extension.js`，发布入口））；直接运行 `npx vsce package` / `npx vsce publish` 同样会自动构建，不会打进过期或缺失的 `bundle/`；Windows 下建议使用 `npm.cmd` / `npx.cmd`（PSReadLine 执行策略）。

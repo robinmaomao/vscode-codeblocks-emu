@@ -30,8 +30,9 @@
 
 分支开发默认使用「目标正式版 + 分支名」的 SemVer 预发布版本，便于区分本地/分支构建与正式版：
 
-- 格式：`<目标正式版>-<分支 slug>`；分支名中的 `/` 记为 `.`，其余字符仅保留 `[0-9A-Za-z.-]`。
-  例：分支 `feat/project-search` → `0.8.144-feat.project-search`（目标正式版 `0.8.144`）。
+- 格式：`<目标正式版>-<分支 slug>[.<递增序号>]`；分支名中的 `/` 记为 `.`，其余字符仅保留 `[0-9A-Za-z.-]`。
+  例：分支 `feat/project-search` → `0.8.144-feat.project-search`（目标正式版 `0.8.144`）；
+  同一分支重复构建时递增末尾序号：`0.8.144-feat.project-search.1`、`.2` …（首个构建可省略 `.0`）。
 - 同步位置：`package.json` / `package-lock.json`、`README*.md` 版本标记、`docs/guide/usage*.md` 版本与 VSIX 文件名、
   `CHANGELOG.md` 顶部标题、`docs/dev/progress.md` 当前版本、`docs/testing/test-report-<版本>.md` 文件名与标题、
   `docs/testing/coverage-matrix.md` 数据来源（由 `npm run coverage:matrix` 生成）。
@@ -39,7 +40,7 @@
   `npm run package` 生成，文件名随版本号带分支后缀。
 - 正式版发布时版本号回到纯 `x.y.z`，再按本文件前述流程生成 `pages/<tag>.md` 与 GitHub Release。
 
-> 当前分支：`feat/project-search` 对应 `0.8.144-feat.project-search`（0.8.144 正式版底稿见 [0.8.144.md](./0.8.144.md)）。
+> 当前分支：`feat/project-search` 对应 `0.8.144-feat.project-search.1`（0.8.144 正式版底稿见 [0.8.144.md](./0.8.144.md)）。
 
 ## 最近 dev 说明（保留）
 
