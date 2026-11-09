@@ -327,6 +327,43 @@ async function migrateSettingsOnce(context: vscode.ExtensionContext): Promise<vo
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
   extContext = context;
+  // 搜索视图尽早注册：package.json 已声明 type:"webview"，但侧边栏布局恢复可能早于 activate 完成；
+  // provider 越早就绪，视图越早进入正常解析，避免长时间停留在空视图/加载态。
+  projectSearch = registerProjectSearch(context, {
+    getProjects: () => openProjects,
+    getActiveProject: () => activeProject,
+    filesUnder: (node: any) => (projectTreeProvider ? projectTreeProvider.filesUnder(node) : []),
+    revealFile: async (project, file) => {
+      if (!projectTreeProvider || !projectTreeView) return;
+      const node = projectTreeProvider.findFileNode(project, file);
+      try {
+        await projectTreeView.reveal(node as any, { select: true, focus: true, expand: true });
+      } catch {
+        /* 视图被隐藏/树不可用：忽略定位 */
+      }
+    },
+    openLocation: async (file, line, column, length) => {
+      try {
+        const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(file));
+        const lastLine = Math.max(0, (doc.lineCount || 1) - 1);
+        const lineIdx = Math.max(0, Math.min(Math.floor(Number(line)) || 0, lastLine));
+        const lineText = doc.lineAt(lineIdx);
+        const lineEnd = Math.max(0, lineText.range.end.character);
+        const startCol = Math.max(0, Math.min(Math.floor(Number(column)) || 0, lineEnd));
+        const endCol = Math.max(startCol, Math.min(startCol + Math.max(0, Math.floor(Number(length)) || 0), lineEnd));
+        const range = new vscode.Range(
+          new vscode.Position(lineIdx, startCol),
+          new vscode.Position(lineIdx, endCol),
+        );
+        const editor = await vscode.window.showTextDocument(doc, { preview: false, selection: range });
+        editor.revealRange(range, vscode.TextEditorRevealType.InCenter);
+        return true;
+      } catch {
+        return false;
+      }
+    },
+    output: { appendLine: (line) => (outputChannel as CbOutput | undefined)?.appendLine(line) },
+  });
   // Run 终端方案 B1：workspaceState 持久化「本扩展用过的终端名」注册表（WeakSet 重载即失效，注册表保证跨重载单一标签）
   setRunTerminalRegistry(createWorkspaceRunTerminalRegistry(context.workspaceState));
   loadSelectedTargets();
@@ -711,43 +748,6 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     if (node?.project) {
       setActiveProject(node.project, { persist: true });
     }
-  });
-
-  // 注册工程搜索视图（Sidebar WebviewView）：只搜索已打开 .cbp 工程，不触发 workspace.findFiles/watcher
-  projectSearch = registerProjectSearch(context, {
-    getProjects: () => openProjects,
-    getActiveProject: () => activeProject,
-    filesUnder: (node: any) => (projectTreeProvider ? projectTreeProvider.filesUnder(node) : []),
-    revealFile: async (project, file) => {
-      if (!projectTreeProvider || !projectTreeView) return;
-      const node = projectTreeProvider.findFileNode(project, file);
-      try {
-        await projectTreeView.reveal(node as any, { select: true, focus: true, expand: true });
-      } catch {
-        /* 视图被隐藏/树不可用：忽略定位 */
-      }
-    },
-    openLocation: async (file, line, column, length) => {
-      try {
-        const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(file));
-        const lastLine = Math.max(0, (doc.lineCount || 1) - 1);
-        const lineIdx = Math.max(0, Math.min(Math.floor(Number(line)) || 0, lastLine));
-        const lineText = doc.lineAt(lineIdx);
-        const lineEnd = Math.max(0, lineText.range.end.character);
-        const startCol = Math.max(0, Math.min(Math.floor(Number(column)) || 0, lineEnd));
-        const endCol = Math.max(startCol, Math.min(startCol + Math.max(0, Math.floor(Number(length)) || 0), lineEnd));
-        const range = new vscode.Range(
-          new vscode.Position(lineIdx, startCol),
-          new vscode.Position(lineIdx, endCol),
-        );
-        const editor = await vscode.window.showTextDocument(doc, { preview: false, selection: range });
-        editor.revealRange(range, vscode.TextEditorRevealType.InCenter);
-        return true;
-      } catch {
-        return false;
-      }
-    },
-    output: outputChannel,
   });
 
   // 注册构建日志树视图（结构化构建摘要）
