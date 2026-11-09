@@ -97,8 +97,25 @@ function activeProjectFilename(projects: Project[], activeFilename: string | und
   return '';
 }
 
-function projectEntries(project: Project, isActive: boolean): SearchEntry[] {
-  const projectTitle = project.title || path.basename(project.filename || '') || project.filename;
+function rawProjectTitle(project: Project): string {
+  return String(project.title ?? '').trim() || path.basename(project.filename || '') || project.filename;
+}
+
+/**
+ * 工程显示名：
+ *  - 默认用 .cbp 的 title；
+ *  - 多个工程 title 相同（如 earphone/app.cbp 与 esop8/app.cbp 的 title 都是 app）时，
+ *    改用 .cbp 所在目录名区分，否则搜索结果会合并出两个都叫 app 的分组。
+ */
+export function projectDisplayTitle(projects: Project[], project: Project): string {
+  const title = rawProjectTitle(project);
+  const duplicates = projects.filter((p) => rawProjectTitle(p).toLowerCase() === title.toLowerCase());
+  if (duplicates.length <= 1) return title;
+  const folder = path.basename(path.dirname(project.filename || ''));
+  return folder && folder.toLowerCase() !== title.toLowerCase() ? folder : title;
+}
+
+function projectEntries(project: Project, isActive: boolean, projectTitle: string): SearchEntry[] {
   const out: SearchEntry[] = [];
   for (const file of project.files ?? []) {
     const relativePath = displaySearchPath(file.relativeFilename || path.basename(file.absolutePath));
@@ -143,7 +160,7 @@ export function buildSearchEntries(
   const out: SearchEntry[] = [];
   for (const project of ordered) {
     const isActive = normalizeSearchPath(project.filename) === active;
-    for (const entry of projectEntries(project, isActive)) {
+    for (const entry of projectEntries(project, isActive, projectDisplayTitle(projects, project))) {
       if (!entry.absolutePath) continue;
       const key = normalizeSearchPath(entry.absolutePath);
       if (seen.has(key)) continue;
@@ -155,8 +172,12 @@ export function buildSearchEntries(
 }
 
 /** 从工程树子树构建条目（project 已由调用方确定；files 为该子树下的文件） */
-export function buildSubtreeEntries(project: Project, files: ProjectFile[], isActive: boolean): SearchEntry[] {
-  const projectTitle = project.title || path.basename(project.filename || '') || project.filename;
+export function buildSubtreeEntries(
+  project: Project,
+  files: ProjectFile[],
+  isActive: boolean,
+  projectTitle = rawProjectTitle(project),
+): SearchEntry[] {
   const seen = new Set<string>();
   const out: SearchEntry[] = [];
   for (const file of files) {
@@ -315,7 +336,7 @@ export function rankSearchEntries(
 }
 
 /** 解析内容查询：字面量或 /regex/；非法正则返回 error（regex 仍为安全占位） */
-export function parseTextQuery(raw: string, caseSensitive = false): TextQuery {
+export function parseTextQuery(raw: string, caseSensitive = false, wholeWord = false): TextQuery {
   const sourceText = String(raw ?? '').trim();
   if (!sourceText) {
     return { kind: 'literal', source: '', regex: new RegExp('$^'), error: 'empty-query' };
@@ -333,10 +354,17 @@ export function parseTextQuery(raw: string, caseSensitive = false): TextQuery {
       };
     }
   }
+  let pattern = escapeRegExp(sourceText);
+  if (wholeWord) {
+    // 全字匹配只作用于字面量；按首尾是否为单词字符补 \b，避免 "foo(" 这类查询失效
+    const isWordChar = (ch: string) => /[A-Za-z0-9_]/.test(ch);
+    if (isWordChar(sourceText[0])) pattern = `\\b${pattern}`;
+    if (isWordChar(sourceText[sourceText.length - 1])) pattern = `${pattern}\\b`;
+  }
   return {
     kind: 'literal',
     source: sourceText,
-    regex: new RegExp(escapeRegExp(sourceText), caseSensitive ? 'g' : 'gi'),
+    regex: new RegExp(pattern, caseSensitive ? 'g' : 'gi'),
   };
 }
 

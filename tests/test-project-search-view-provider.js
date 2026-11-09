@@ -48,6 +48,8 @@ function makeView() {
     webview: {
       options: undefined,
       html: '',
+      cspSource: 'vscode-webview://test',
+      asWebviewUri: (uri) => uri,
       posted: [],
       onDidReceiveMessage: (fn) => { listeners.message = fn; return new Disposable(); },
       postMessage: (m) => { view.webview.posted.push(m); return Promise.resolve(true); },
@@ -118,12 +120,19 @@ function fakeWorkerFactory(resultFor) {
   const state = view.webview.posted.find((m) => m.type === 'state');
   check('Provider：ready 后下发状态', !!state && state.hasProjects === true && state.fileCount === 4, state);
   check('Provider：HTML 已设置且带 CSP', view.webview.html.includes('Content-Security-Policy') && view.webview.options.enableScripts === true);
+  check('Provider：Seti 字体 URI + font-src CSP', view.webview.html.includes('seti.woff') && view.webview.html.includes('font-src vscode-webview://test'), view.webview.html.slice(0, 200));
 
   view.__emit({ type: 'searchFiles', query: 'util', requestId: 7 });
   await tick();
   const fileResults = view.webview.posted.filter((m) => m.type === 'fileResults' && m.query === 'util').pop();
   check('文件模式：只返回工程内文件', !!fileResults && fileResults.results.length === 2 && fileResults.results.every((r) => r.relativePath.includes('util')), fileResults && fileResults.results.map((r) => r.relativePath));
   check('文件模式：活动工程优先标记', fileResults.results[0].isActive === true, fileResults.results.map((r) => [r.projectTitle, r.isActive]));
+
+  const resultsBeforeContext = view.webview.posted.filter((m) => m.type === 'fileResults').length;
+  provider.notifyContextChanged();
+  await tick(500);
+  check('工程/活动工程变化不自动重排结果', view.webview.posted.filter((m) => m.type === 'fileResults').length === resultsBeforeContext,
+    view.webview.posted.filter((m) => m.type === 'fileResults').length);
 
   const firstId = fileResults.results[0].id;
   view.__emit({ type: 'openFile', id: firstId });
@@ -138,13 +147,14 @@ function fakeWorkerFactory(resultFor) {
   const textResults = view.webview.posted.find((m) => m.type === 'textResults');
   check('内容模式：结果 DTO + 匹配 id', !!textResults && textResults.files.length === 1 && textResults.files[0].matches.length === 1
     && textResults.files[0].matches[0].id, textResults);
+  check('内容模式：活动工程标记（用于工程分组高亮）', textResults.files[0].isActive === true, textResults.files.map((f) => [f.projectTitle, f.isActive]));
   const matchId = textResults.files[0].matches[0].id;
   view.__emit({ type: 'openMatch', id: matchId });
   await tick();
   check('打开匹配：0-based 行列 + 长度', opened.length === 2 && opened[1].line === 4 && opened[1].column === 2 && opened[1].length === 5, opened);
   const historyAfterMatch = context.workspaceState.get(SEARCH_HISTORY_KEY);
   const textEntry = historyAfterMatch.entries.find((e) => e.mode === 'text');
-  check('内容历史：完成且有匹配才记录 + 上次位置', !!textEntry && textEntry.lastResult.line === 4 && textEntry.lastResult.column === 2, textEntry);
+  check('内容历史：搜索即记录 + 上次位置', !!textEntry && textEntry.lastResult.line === 4 && textEntry.lastResult.column === 2, textEntry);
 
   view.__emit({ type: 'getHistory', mode: 'all' });
   await tick();
@@ -162,14 +172,31 @@ function fakeWorkerFactory(resultFor) {
   check('保留历史关闭：不再写历史', before === 2, before);
   mock.configStore['codeblocks.search.keepHistory'] = true;
 
+  view.__emit({ type: 'requestClearHistory' });
+  await tick();
+  check('清空历史：模态取消时保留', context.workspaceState.get(SEARCH_HISTORY_KEY).entries.length === 2,
+    context.workspaceState.get(SEARCH_HISTORY_KEY).entries.length);
+
+  const originalWarning = mock.vscode.window.showWarningMessage;
+  mock.vscode.window.showWarningMessage = (_message, _options, ...items) => Promise.resolve(items[0]);
+  view.__emit({ type: 'requestClearHistory' });
+  await tick();
+  check('清空历史：模态确认后清空', context.workspaceState.get(SEARCH_HISTORY_KEY).entries.length === 0);
+  mock.vscode.window.showWarningMessage = originalWarning;
+
   view.__emit({ type: 'clearHistory' });
   await tick();
-  check('清空历史：持久化为空', context.workspaceState.get(SEARCH_HISTORY_KEY).entries.length === 0);
+  check('清空历史：程序化清空仍可用', context.workspaceState.get(SEARCH_HISTORY_KEY).entries.length === 0);
 
-  view.__emit({ type: 'stateChanged', mode: 'text', queries: { files: 'main', text: 'util' }, caseSensitive: true, regex: true });
+  view.__emit({ type: 'stateChanged', mode: 'text', queries: { files: 'main', text: 'util' }, caseSensitive: true, wholeWord: true, regex: true });
   await tick();
   const persistedView = context.workspaceState.get('codeblocks.search.viewState');
-  check('状态持久化：每模式查询/选项', persistedView && persistedView.mode === 'text' && persistedView.queries.files === 'main' && persistedView.caseSensitive === true && persistedView.regex === true, persistedView);
+  check('状态持久化：每模式查询/选项', persistedView && persistedView.mode === 'text' && persistedView.queries.files === 'main' && persistedView.caseSensitive === true && persistedView.wholeWord === true && persistedView.regex === true, persistedView);
+
+  view.__emit({ type: 'commitHistory', mode: 'files', query: 'main' });
+  await tick();
+  const committed = context.workspaceState.get(SEARCH_HISTORY_KEY).entries;
+  check('文件模式 Enter 提交搜索历史', committed.length === 1 && committed[0].mode === 'files' && committed[0].query === 'main', committed);
 
   provider.setSubtreeScope(project, { kind: 'folder', dirKey: 'src', project, files: [project.files[0]] });
   await tick();

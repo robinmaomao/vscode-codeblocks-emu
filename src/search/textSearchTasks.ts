@@ -51,6 +51,8 @@ export interface TextSearchOptions {
   query: string;
   caseSensitive?: boolean;
   regex?: boolean;
+  /** 全字匹配（仅字面量查询） */
+  wholeWord?: boolean;
   maxFileBytes?: number;
   maxFileMatches?: number;
   maxTotalMatches?: number;
@@ -153,7 +155,7 @@ export async function searchFileSet(
   options: TextSearchOptions,
 ): Promise<TextSearchTaskResult> {
   const started = Date.now();
-  const parsed = parseTextQuery(options.query, options.caseSensitive === true);
+  const parsed = parseTextQuery(options.query, options.caseSensitive === true, options.wholeWord === true);
   const skipped = emptySkips();
   const empty: TextSearchTaskResult = {
     files: [],

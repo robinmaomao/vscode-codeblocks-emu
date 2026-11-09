@@ -55,7 +55,7 @@ const UNCOVERED = '未覆盖';
 /** 解析 docs/testing/coverage-matrix.md：版本行 / 汇总行 / 各节明细（ID 序列 + 层命中单元格 + 状态） */
 function parseMatrixDoc(text) {
   const out = { version: null, summary: [], sections: [] };
-  const vm = text.match(/数据来源：package\.json v([\d.]+)/);
+  const vm = text.match(/数据来源：package\.json v(\S+)/);
   out.version = vm ? vm[1] : null;
   let cur = null;
   for (const line of text.split(/\r?\n/)) {
@@ -306,36 +306,38 @@ function checkDocLinks(docs /* [{rel, text}] */, exists) {
 
 function checkVersionMarkers(pkgVersion, docsByRel) {
   const v = [];
-  const reports = fs.readdirSync(path.join(ROOT, 'docs', 'testing'))
-    .filter((f) => /^test-report-\d+\.\d+\.\d+\.md$/.test(f));
+  // 版本可带分支预发布后缀（如 0.8.144-feat.project-search）；排除历史归档 *-full.md / *-archive.md。
+  const isVersionedReport = (f) => /^test-report-\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?\.md$/.test(f)
+    && !/-(?:full|archive)\.md$/.test(f);
+  const reports = fs.readdirSync(path.join(ROOT, 'docs', 'testing')).filter(isVersionedReport);
   if (!reports.length) v.push('docs/testing/ 缺少「test-report-<版本>.md」');
   for (const f of reports) {
-    const ver = f.match(/^test-report-([\d.]+)\.md$/)[1];
+    const ver = f.match(/^test-report-(.+)\.md$/)[1];
     if (ver !== pkgVersion) v.push(`docs/testing/${f} 文件名版本 got=${ver} want=${pkgVersion}`);
   }
   const report = docsByRel[`docs/testing/test-report-${pkgVersion}.md`];
   if (report) {
-    const h1 = report.match(/^#\s+测试执行报告（([\d.]+)/m);
+    const h1 = report.match(/^#\s+测试执行报告（(\S+)/m);
     if (!h1 || h1[1] !== pkgVersion) v.push(`docs/testing/test-report-${pkgVersion}.md:1 标题版本 got=${h1 ? h1[1] : '(未匹配)'} want=${pkgVersion}`);
   }
   const matrix = docsByRel['docs/testing/coverage-matrix.md'];
   if (matrix) {
-    const ver = (matrix.match(/数据来源：package\.json v([\d.]+)/) || [])[1];
+    const ver = (matrix.match(/数据来源：package\.json v(\S+)/) || [])[1];
     if (ver !== pkgVersion) v.push(`docs/testing/coverage-matrix.md:7 数据来源版本 got=${ver} want=${pkgVersion}`);
   }
   const usage = docsByRel['docs/guide/usage.md'];
   if (usage) {
-    const ver = (usage.match(/^>\s*版本：([\d.]+)/m) || [])[1];
+    const ver = (usage.match(/^>\s*版本：([0-9][0-9A-Za-z.+-]*)/m) || [])[1];
     if (ver !== pkgVersion) v.push(`docs/guide/usage.md:3 「版本：」 got=${ver} want=${pkgVersion}`);
-    for (const m of usage.matchAll(/codeblocks-vscode-([\d.]+)\.vsix/g)) {
+    for (const m of usage.matchAll(/codeblocks-vscode-([0-9A-Za-z.+-]+)\.vsix/g)) {
       if (m[1] !== pkgVersion) v.push(`docs/guide/usage.md VSIX 文件名版本 got=${m[1]} want=${pkgVersion}`);
     }
   }
   const progress = docsByRel['docs/dev/progress.md'];
   if (progress) {
-    const ver = (progress.match(/当前版本\s*\*\*([\d.]+)\*\*/) || [])[1];
+    const ver = (progress.match(/当前版本\s*\*\*([^*]+)\*\*/) || [])[1];
     if (ver !== pkgVersion) v.push(`docs/dev/progress.md 「当前版本」 got=${ver} want=${pkgVersion}`);
-    for (const m of progress.matchAll(/codeblocks-vscode-([\d.]+)\.vsix/g)) {
+    for (const m of progress.matchAll(/codeblocks-vscode-([0-9A-Za-z.+-]+)\.vsix/g)) {
       if (m[1] !== pkgVersion) v.push(`docs/dev/progress.md VSIX 文件名版本 got=${m[1]} want=${pkgVersion}`);
     }
   }
@@ -355,7 +357,9 @@ function runAll() {
   for (const rel of allDocRels()) docsByRel[rel] = readDoc(rel);
   const mainDocs = mainDocRels().map((rel) => ({ rel, text: docsByRel[rel] !== undefined ? docsByRel[rel] : readDoc(rel) }));
   const linkDocs = allDocRels().map((rel) => ({ rel, text: docsByRel[rel] }));
-  const reportRel = fs.readdirSync(path.join(ROOT, 'docs', 'testing')).find((f) => /^test-report-\d+\.\d+\.\d+\.md$/.test(f));
+  const reportRel = fs.readdirSync(path.join(ROOT, 'docs', 'testing'))
+    .find((f) => /^test-report-\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?\.md$/.test(f)
+      && !/-(?:full|archive)\.md$/.test(f));
   const matrixText = readDoc('docs/testing/coverage-matrix.md');
 
   return [
@@ -431,9 +435,9 @@ if (process.argv.includes('--self-test')) {
 
   expectClean('D5 基线', checkVersionMarkers(pkg.version, { 'docs/guide/usage.md': usage, 'docs/dev/progress.md': progress }));
   expectViolation('D5 篡改「版本：」标记',
-    () => checkVersionMarkers(pkg.version, { 'docs/guide/usage.md': usage.replace(/^>\s*版本：[\d.]+/m, '> 版本：0.0.1'), 'docs/dev/progress.md': progress }), '版本');
+    () => checkVersionMarkers(pkg.version, { 'docs/guide/usage.md': usage.replace(/^>\s*版本：[0-9][0-9A-Za-z.+-]*/m, '> 版本：0.0.1'), 'docs/dev/progress.md': progress }), '版本');
   expectViolation('D5 篡改「当前版本」标记',
-    () => checkVersionMarkers(pkg.version, { 'docs/guide/usage.md': usage, 'docs/dev/progress.md': progress.replace(/当前版本\s\*\*[\d.]+\*\*/, '当前版本 **0.0.1**') }), '当前版本');
+    () => checkVersionMarkers(pkg.version, { 'docs/guide/usage.md': usage, 'docs/dev/progress.md': progress.replace(/当前版本\s\*\*[^*]+\*\*/, '当前版本 **0.0.1**') }), '当前版本');
 
   console.log(`\ndoc-consistency 自证: ${stPass} pass, ${stFail} fail`);
   process.exit(stFail ? 1 : 0);

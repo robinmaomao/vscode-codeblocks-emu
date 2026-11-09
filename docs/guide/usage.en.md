@@ -1,7 +1,7 @@
-# Code::Blocks for VS Code — Usage Guide
+﻿# Code::Blocks for VS Code — Usage Guide
 
 > Language: **English** ｜ [中文](./usage.md)
-> Version: 0.8.144 ｜ Native port of Code::Blocks core features to VS Code, driving GCC / GDB directly, **without** `tasks.json` / `launch.json`.
+> Version: 0.8.144-feat.project-search (branch prerelease for `feat/project-search`; stable version is `0.8.144`) ｜ Native port of Code::Blocks core features to VS Code, driving GCC / GDB directly, **without** `tasks.json` / `launch.json`.
 
 ---
 
@@ -50,7 +50,7 @@ Code::Blocks for VS Code is a "mini IDE kernel": it parses `.cbp` / `.workspace`
 ### 2.1 Install from VSIX
 
 ```powershell
-code --install-extension codeblocks-vscode-0.8.144.vsix --force
+code --install-extension codeblocks-vscode-0.8.144-feat.project-search.vsix --force
 ```
 
 ### 2.2 Build from source
@@ -58,7 +58,7 @@ code --install-extension codeblocks-vscode-0.8.144.vsix --force
 ```powershell
 npm install
 npm run package
-code --install-extension codeblocks-vscode-0.8.144.vsix --force
+code --install-extension codeblocks-vscode-0.8.144-feat.project-search.vsix --force
 ```
 
 > `npm run package` = `vsce package` (before packaging, the `vscode:prepublish` hook runs `tsc` compilation (`dist/`, for local testing) + the **esbuild single-file bundle** (`bundle/extension.js`, the release entry));
@@ -98,10 +98,12 @@ After installation, the **Code::Blocks** icon appears in the Activity Bar on the
 
 - **Searches only opened `.cbp` projects**: it never scans files outside the project model, never calls `workspace.findFiles`/ripgrep, and leaves the built-in search and `search.exclude` untouched.
 - **Entry points**: the **Project Search** sidebar view; the command palette **`Code::Blocks: Project Search: Search Project Files`** (`Ctrl+Alt+P`) / **`... Search in Project Files`**; the C::B **Search** menu; the project / folder / virtual folder / file group context menu (searches that subtree only and is not written to history).
-- **Files mode**: search-as-you-type (debounced); an empty query browses every project file in scope (up to 500). Results are grouped by project with the active project first; click to open, **⤢** reveals the file in the project tree. `Aa` / `.*` do not affect Files mode.
-- **Text mode**: press `Enter` or click **Search**; supports literals and `/regex/` (`Aa` controls case, `.*` enables regex). Results are grouped by file (first two groups expanded); click a match to jump to its line/column and select the matched text; **Stop** cancels a running search.
+- **UI**: aligned with the VS Code sidebar — typography from `--vscode-font-size` with 22 px rows and inline codicon SVG icons; `Aa` (case) / `Ab` (whole word) / `.*` (regex) / clear sit inside the search box, and the status row ends with a Refresh / Expand All / Collapse All toolbar.
+- **Files mode**: search-as-you-type (debounced); an empty query browses every project file in scope (up to 500). Results are grouped by project with collapsible, sticky project headers and the active project first; each file row shows a language icon (blue `C` for `.c` and purple `C` for `.h`, using VS Code Explorer's Seti icon font), file name and directory; click to open, and the reveal button jumps to the file in the project tree. `Aa` / `.*` do not affect Files mode. When several projects share the same `.cbp` `title` (for example `earphone/app.cbp` and `esop8/app.cbp` are both `app`), the group name falls back to the `.cbp` folder name (`earphone` / `esop8`) so the two groups stay distinguishable.
+- **Text mode**: press `Enter` or click **Search**; supports literals and `/regex/` (`Aa` controls case, `Ab` matches whole words, `.*` enables regex; `Ab` applies to literal queries only). Results are grouped as project → file → match and start fully expanded on every search; both project headers and file rows collapse and show match-count badges; click a match to jump to its line/column and select the matched text; **Stop** cancels a running search.
+- **Frozen results**: after a search completes, result order and the **active project first** marker stay fixed. Switching the active project only refreshes state/scope information; it does not reorder or re-run the search. Use **Refresh** or search again when you want updated results.
 - **Scope**: the selector offers All projects / Active project; entering from the project tree shows a scope chip (clear it with `×`). The view's scope is saved per workspace; `codeblocks.search.scope` only supplies the default.
-- **History**: **🕘 Search History** at the top lists recent searches; the **Keep history** switch controls recording (setting `codeblocks.search.keepHistory`). Clicking an entry restores query/mode/scope/options and jumps to its last result when still valid, otherwise re-runs the search; `↻` only re-runs; **Clear** asks for confirmation. History is per workspace (20 entries each for files/text) and never stores file contents.
+- **History**: entries are recorded as soon as you click **Search** or press `Enter` (Files mode commits on `Enter` too), even for zero-result searches. The history area lives at the **bottom of the view**, collapsed by default and remembering its state per workspace; its header shows the current-mode entry count plus the **Keep history** switch (setting `codeblocks.search.keepHistory`) and **Clear**. Only entries for the current mode are listed. Clicking an entry restores query/mode/scope/options and jumps to its last result when still valid, otherwise re-runs the search; the re-run icon only re-runs; **Clear** uses a native VS Code modal confirmation. History is per workspace (20 entries each for files/text) and never stores file contents.
 - **Limits**: text search runs in a worker; files over 4 MB and binary files are skipped, regex lines over 4000 characters are skipped, at most 50 matches per file / 500 overall, with a 20 s total timeout (aborted after 5 s without progress). For very large projects, use a narrower query or the built-in search.
 - **Reset layout**: `Code::Blocks: Reset View Layout` places Search after Project and before Symbols.
 
