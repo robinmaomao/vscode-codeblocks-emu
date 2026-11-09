@@ -15,6 +15,7 @@
 - **设置**：新增 `codeblocks.search.scope`（`openProjects` / `activeProject`）与 `codeblocks.search.keepHistory`（默认 `true`）；视图内范围选择按工作区保存。
 - **布局**：Reset View Layout 顺序更新为 Project → Search → Symbols；不提升布局版本，不覆盖用户已有排布。
 - **修复**：`codeblocks.search` 补 `"type": "webview"`，并提前注册 provider；新版 VS Code 默认按 TreeView 解析，缺省会显示“no data provider registered”而没有搜索栏。
+- **修复（clangd）**：打开工程/切换工程/改编译器时同一秒内多次请求重启 clangd，会让 clangd 扩展在旧客户端命令注销前重新注册 `clangd.applyFix`，抛 `command 'clangd.applyFix' already exists` 并导致语言服务器启动失败。现改为：合并重启请求（1.5s 窗口 + 5s 最小间隔）、等客户端 `Running` 后再留 2s 稳定期、优先调用 `LanguageClient.restart()`（内部串行 stop→start）、失败时回退命令重启并重试一次；clangd 扩展未激活时跳过（打开源文件会自然加载新配置）。
 - 新增回归：`test-project-search.js`、`test-search-history.js`、`test-project-search-tasks.js`、`test-search-worker.js`、`test-project-search-view-html.js`、`test-project-search-view-provider.js`、`test-project-search-commands.js`；覆盖矩阵重新生成（命令 **113**、设置 **85**、视图 **6**、快捷键 **34**）。
 - 发布说明见 [`docs/release/0.8.144.md`](./docs/release/0.8.144.md)；测试结果见
   [`docs/testing/test-report-0.8.144.md`](./docs/testing/test-report-0.8.144.md)。

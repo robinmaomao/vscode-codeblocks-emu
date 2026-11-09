@@ -68,6 +68,11 @@ import { collectClangdEntries, writeClangdDatabase, CompileCommandEntry } from '
 import { DiagnosticPublisher } from './build/diagnosticPublisher';
 import { collectOutputDirs, excludeGlobsFor, mergeExcludePatterns } from './build/watcherExclude';
 import { detectClangd, queryCompilerSystemIncludes, queryCompilerTarget, resolveCompilerProgram, updateClangdUserConfig, clangdUserConfigPath, clearClangdDetectionCache, extraConfigWarnings, findStaleClangdFragments, listManagedFragments, cleanStaleClangdFragments, readClangdUserConfigText, preferClangdSource } from './tools/clangd';
+import {
+  CLANGD_RESTART_MIN_INTERVAL_MS,
+  createClangdRestartCoalescer,
+  waitForClangdRestartable,
+} from './tools/clangdRestart';
 import { SymbolIndex, registerFallbackIntelliSense } from './tools/codeCompletion';
 import { GdbDebugAdapter } from './debug/gdbDebugAdapter';
 import { debugStateChanged, getActiveAdapter, setDebugTraceEnabled, setDebugTraceSink } from './debug/debugRegistry';
@@ -909,6 +914,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   // 手动重启 clangd（排查"改了配置/换了工程但 clangd 没重新分析"）
   context.subscriptions.push(
     vscode.commands.registerCommand('codeblocks.restartClangd', async () => {
+      // 手动重启优先：取消排队中的自动重启，避免同一个用户动作触发两次 clangd.restart
+      clangdRestart.cancel();
+      if (!(await waitForClangdClientReady(getClangdLanguageClient(), true))) {
+        vscode.window.showWarningMessage(i18n.t('clangd is still starting. Try again in a moment.'));
+        return;
+      }
       const restarted = await restartClangd();
       if (!restarted) {
         vscode.window.showWarningMessage(i18n.t('The clangd extension is not installed or its restart command is unavailable'));
@@ -4003,16 +4014,102 @@ function clangdExtensionActive(): boolean {
   }
 }
 
-/** 重启 clangd（最佳努力；clangd 扩展未安装时静默忽略）；返回是否已成功发出重启命令 */
+/**
+ * 重启 clangd（最佳努力；clangd 扩展未安装时静默忽略）；返回是否已成功发出重启命令。
+ *
+ * 注意不要直接调用：自动触发请走 scheduleClangdRestart()（合并窗口 + 最小间隔），
+ * 否则连续两次 `clangd.restart` 会让 clangd 扩展在旧客户端命令注销前重新注册
+ * `clangd.applyFix`，抛 "command 'clangd.applyFix' already exists" 并导致客户端启动失败。
+ */
 async function restartClangd(): Promise<boolean> {
+  // 首选 LanguageClient.restart()：内部 await stop() 后才 start()，命令注销与注册严格串行，
+  // 不会出现 clangd 扩展 restart 命令「dispose 旧客户端后立刻 create 新客户端」的重复注册竞态。
+  const client = getClangdLanguageClient();
+  if (client && typeof client.restart === 'function') {
+    try {
+      await client.restart();
+      return true;
+    } catch (err) {
+      outputChannel?.warn(logT('[Code::Blocks] Restarting clangd through its language client failed; falling back to the clangd.restart command ({0})', (err as Error)?.message ?? String(err)));
+    }
+  }
   try {
     await vscode.commands.executeCommand('clangd.restart');
     return true;
-  } catch {
+  } catch (err) {
+    const message = (err as Error)?.message ?? String(err);
+    if (/already exists/i.test(message)) {
+      // 与上一次重启撞车：等旧客户端完全释放后再试一次
+      outputChannel?.warn(logT('[Code::Blocks] clangd restart raced with the previous client; retrying once ({0})', message));
+      await new Promise((resolve) => setTimeout(resolve, CLANGD_RESTART_MIN_INTERVAL_MS));
+      try {
+        await vscode.commands.executeCommand('clangd.restart');
+        return true;
+      } catch {
+        return false;
+      }
+    }
     // 忽略：clangd 扩展不存在或命令不可用
     return false;
   }
 }
+
+/** clangd 扩展 v1 API 暴露的 LanguageClient（只读探测状态；restart 由本扩展在我方控制下调用） */
+interface ClangdLanguageClientLike {
+  /** vscode-languageclient State：1 = Stopped / 2 = Running / 3 = Starting */
+  state?: number;
+  /** 串行 stop() → start()；比 clangd 扩展的 restart 命令安全（后者 dispose 后立即 create） */
+  restart?: () => Promise<void>;
+}
+
+/** 读取 clangd 扩展导出的 LanguageClient（旧版本无 getApi 时返回 undefined） */
+function getClangdLanguageClient(): ClangdLanguageClientLike | undefined {
+  try {
+    const ext = vscode.extensions.getExtension(CLANGD_EXTENSION_ID);
+    if (!ext?.isActive) return undefined;
+    const api = (ext.exports as { getApi?: (version: number) => unknown } | undefined)?.getApi?.(1) as
+      | { languageClient?: ClangdLanguageClientLike }
+      | undefined;
+    return api?.languageClient;
+  } catch {
+    return undefined;
+  }
+}
+
+function clangdClientStateOf(client: ClangdLanguageClientLike | undefined): number | undefined {
+  return client && typeof client.state === 'number' ? client.state : undefined;
+}
+
+/**
+ * 等 clangd 客户端稳定再重启（详细语义见 tools/clangdRestart.ts）。
+ *
+ * clangd 扩展的 `clangd.restart` 只判断「是否正在启动」，随后 `dispose()` 旧客户端并立即 `create()` 新客户端。
+ * 若旧客户端刚结束启动、命令注册尚未完成就 dispose，新客户端会在旧命令仍在册时重新注册
+ * `clangd.applyFix`，抛 "command 'clangd.applyFix' already exists" → 客户端启动失败（语言服务器退出）。
+ */
+function waitForClangdClientReady(
+  client: ClangdLanguageClientLike | undefined,
+  allowStartWhenStopped = false,
+): Promise<boolean> {
+  return waitForClangdRestartable(() => clangdClientStateOf(client), {
+    allowStartWhenStopped,
+    onStartTimeout: () => outputChannel?.warn(logT('[Code::Blocks] clangd is still starting; skipping this restart to avoid a language-client race')),
+  });
+}
+
+/**
+ * 自动重启合并器：打开工程 / 切换活动工程 / 重新生成数据库常在同一秒内连续请求重启，
+ * 合并为一次并保证最小间隔；执行前再等 clangd 客户端稳定，避免命令重复注册竞态。
+ */
+const clangdRestart = createClangdRestartCoalescer(async () => {
+  // 已安装但未激活 = 服务器没在跑：此时执行 clangd.restart 会让 clangd 扩展在 activate 期间
+  // 与命令调用各自创建一个客户端（→ applyFix 重复注册）。打开源文件会按新数据库/配置自然启动，故跳过。
+  const clangdExt = vscode.extensions.getExtension(CLANGD_EXTENSION_ID);
+  if (clangdExt && !clangdExt.isActive) return;
+  const client = getClangdLanguageClient();
+  if (!(await waitForClangdClientReady(client))) return;
+  await restartClangd();
+});
 
 /**
  * 请求重启 clangd：构建进行中只登记，构建结束（flushPendingClangdRestart）再执行。
@@ -4024,7 +4121,7 @@ function scheduleClangdRestart(): void {
     outputChannel.info(logT('[Code::Blocks] Build in progress; deferring the clangd restart until it finishes (avoids index/compile CPU contention)'));
     return;
   }
-  void restartClangd();
+  clangdRestart.request();
 }
 
 /** 构建结束：补执行构建期间被推迟的 clangd 重启（无待处理项时零操作） */
@@ -4044,7 +4141,7 @@ function flushPendingClangdRestart(): void {
   }
   if (!restart) return;
   outputChannel.info(logT('[Code::Blocks] Build finished; restarting clangd to apply the new compile database'));
-  void restartClangd();
+  clangdRestart.request();
 }
 
 /**
@@ -8646,6 +8743,7 @@ export function deactivate(): void {
   // （cancel 置位 + taskkill /T /F 杀 cmd.exe→gcc→cc1/as/ld 整棵进程树），
   // 避免扩展宿主退出后遗留孤儿编译进程/未受控的半成品产物。无构建时为空操作。
   currentBuildCancel?.cancel();
+  clangdRestart.cancel();
   projectSearch?.dispose();
   projectSearch = undefined;
   // 外部修改检测的去抖计时器不属于 context.subscriptions，需要显式清掉：
