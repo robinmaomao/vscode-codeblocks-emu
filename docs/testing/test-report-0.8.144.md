@@ -9,7 +9,7 @@
 | 层 | 命令 | 本轮结果 | 说明 |
 |----|------|----------|------|
 | L-1 契约 | `npm run test:contract` | **3/3** | 契约 44 项 + 文档一致性 6 项 + 设置契约 686 断言（覆盖矩阵/性能基准/命令与链接/版本标记） |
-| 无头层（unit） | `npm test` | **TOTAL=186 FAIL=0 SKIP=1** | SKIP=`tests/test-writer.js`（需 `<cbp>` 参数的手工工具）；新增 7 个工程搜索测试脚本 |
+| 无头层（unit） | `npm test` | **TOTAL=187 FAIL=0 SKIP=1** | SKIP=`tests/test-writer.js`（需 `<cbp>` 参数的手工工具）；新增 7 个工程搜索测试脚本 + `test-clangd-restart.js`（clangd 重启合并） |
 | L3 视觉 | `npm run test:visual` | **24/24** | 现有面板布局未改动；搜索视图为 WebviewView，HTML 结构/i18n 由单元层覆盖 |
 | L1 端到端 | `npm run test:e2e` | **6/6** | 构建/调试链未改动；沿用 0.8.142 真实工具链结论 |
 | L4 性能 | `npm run test:perf` | **13 项** | 搜索为按需触发，不引入常驻扫描；沿用既有基线 |
@@ -26,7 +26,8 @@
 | 历史（`searchHistory.ts`） | `tests/test-search-history.js` **17 断言**：去重置顶、每模式 20 条、上次结果、重复搜索保留上次结果、精确匹配、损坏/版本回退、负坐标清理 | 视图内开关/点击/清空手工验收 |
 | HTML / i18n | `tests/test-project-search-view-html.js` **13 断言**：CSP、历史栏顺序、switch、主题变量、无 `innerHTML`、无 `${}`、脚本可编译、消息协议、窄栏；`test-i18n-webview.js` 新增中英渲染与 55 个反查词条（21 断言全绿） | 深/浅主题、200px 窄侧栏 |
 | Provider 协议 | `tests/test-project-search-view-provider.js` **18 断言**：ready/state、文件结果、活动工程、打开文件/匹配（0-based）、历史写入/上次结果、历史跳转、关闭保留历史、清空、状态持久化、子树范围、工程树定位 | 命令面板 / C::B Search 菜单 / 工程树右键 |
-| 命令注册 | `tests/test-project-search-commands.js` **6 断言**：两个命令 ID 注册、进入 subscriptions、视图未解析时不抛错、工程树子树入口、dispose 幂等 | 命令面板实际调用 |
+| 命令注册 | `tests/test-project-search-commands.js` **8 断言**：两个命令 ID 注册、`onView` 激活事件、视图声明 `type:"webview"`、进入 subscriptions、视图未解析时不抛错、工程树子树入口、dispose 幂等 | 命令面板实际调用；侧边栏实际渲染 |
+| clangd 重启竞态 | `tests/test-clangd-restart.js` **22 断言**：合并窗口、最小间隔、取消、同步/异步异常安全、自定义参数；客户端状态门（无状态/Stopped/Starting→Running/超时/稳定期内停止）；`test-build-cpu-guards` 12 断言（含「自动重启仅两个请求入口 + 优先 `LanguageClient.restart()`」） | 修复 `command 'clangd.applyFix' already exists` → 打开工程不再中断语言服务器 |
 | 回归安全 | `test-keybindings`（19 默认键）、`test-keybinding-config`（31 托管项）、`test-settings-structure`（85 设置）、`test-settings-coverage`（无死配置）、`test-menu-structure`、`test-bundle-packaging`（worker 产物/预发布顺序）全绿 | — |
 | 文档与版本标记 | `test-contract.js` G1/G2/G3、`test-doc-consistency.js` D1/D1b/D3/D4/D5；`gen-release-notes.js --check` | `npm run coverage:matrix` 重新生成（命令 113 / 视图 6 / 设置 85 / 快捷键 34） |
 
