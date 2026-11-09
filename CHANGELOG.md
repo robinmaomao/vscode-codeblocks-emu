@@ -3,6 +3,15 @@
 本文件记录**正式版**里程碑；近期 dev 迭代的逐轮发布说明见 [`docs/release/`](./docs/release/)（`0.8.xx-dev.md`），
 `0.8.76`–`0.8.128` 的 dev 说明已合并归档到 [`docs/release/archive/`](./docs/release/archive/)；版本号与维护约定见 [`docs/release/00-index.md`](./docs/release/00-index.md)。
 
+## 0.8.144-feat.project-search.1 — 2026-11-09
+
+**分支预发布增量（feat/project-search）**
+
+> 同一分支重复构建时递增末尾序号：`0.8.144-feat.project-search.N`。本版仍仅提交到分支验证，不合并 `main`、不创建 PR / GitHub Release。
+
+- **修复（pre/post-build）**：Windows 宿主若设置 `NoDefaultCurrentDirectoryInExePath`，cmd 不再搜索当前目录，批处理内的 `call libs_copy.bat`（同目录脚本）会报“不是内部或外部命令”。现在执行 `.bat` / `.cmd` 时把脚本目录加入子进程 `PATH`，恢复“脚本同目录优先”的查找语义，同时不关闭该安全设置；工程脚本无需修改。
+- 验证：`test-script-runner-exit.js` **62 pass / 0 fail**（新增 4 断言）；`npm test` **TOTAL=187 FAIL=0 SKIP=1**。
+
 ## 0.8.144-feat.project-search — 2026-11-09
 
 **分支预发布（feat/project-search）**
@@ -25,7 +34,7 @@
 - **修复（clangd）**：打开工程/切换工程/改编译器时同一秒内多次请求重启 clangd，会让 clangd 扩展在旧客户端命令注销前重新注册 `clangd.applyFix`，抛 `command 'clangd.applyFix' already exists` 并导致语言服务器启动失败。现改为：合并重启请求（1.5s 窗口 + 5s 最小间隔）、等客户端 `Running` 后再留 2s 稳定期、优先调用 `LanguageClient.restart()`（内部串行 stop→start）、失败时回退命令重启并重试一次；clangd 扩展未激活时跳过（打开源文件会自然加载新配置）。
 - 新增回归：`test-project-search.js`、`test-search-history.js`、`test-project-search-tasks.js`、`test-search-worker.js`、`test-project-search-view-html.js`、`test-project-search-view-provider.js`、`test-project-search-commands.js`；覆盖矩阵重新生成（命令 **113**、设置 **85**、视图 **6**、快捷键 **34**）。
 - 发布说明见 [`docs/release/0.8.144.md`](./docs/release/0.8.144.md)（0.8.144 正式版底稿）；分支测试结果见
-  [`docs/testing/test-report-0.8.144-feat.project-search.md`](./docs/testing/test-report-0.8.144-feat.project-search.md)。
+  [`docs/testing/test-report-0.8.144-feat.project-search.1.md`](./docs/testing/test-report-0.8.144-feat.project-search.1.md)。
 
 ## 0.8.142 — 2026-11-06
 

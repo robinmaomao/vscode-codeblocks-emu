@@ -1,7 +1,7 @@
-﻿# Code::Blocks for VS Code — Usage Guide
+﻿﻿# Code::Blocks for VS Code — Usage Guide
 
 > Language: **English** ｜ [中文](./usage.md)
-> Version: 0.8.144-feat.project-search (branch prerelease for `feat/project-search`; stable version is `0.8.144`) ｜ Native port of Code::Blocks core features to VS Code, driving GCC / GDB directly, **without** `tasks.json` / `launch.json`.
+> Version: 0.8.144-feat.project-search.1 (branch prerelease for `feat/project-search`; stable version is `0.8.144`) ｜ Native port of Code::Blocks core features to VS Code, driving GCC / GDB directly, **without** `tasks.json` / `launch.json`.
 
 ---
 
@@ -50,7 +50,7 @@ Code::Blocks for VS Code is a "mini IDE kernel": it parses `.cbp` / `.workspace`
 ### 2.1 Install from VSIX
 
 ```powershell
-code --install-extension codeblocks-vscode-0.8.144-feat.project-search.vsix --force
+code --install-extension codeblocks-vscode-0.8.144-feat.project-search.1.vsix --force
 ```
 
 ### 2.2 Build from source
@@ -58,7 +58,7 @@ code --install-extension codeblocks-vscode-0.8.144-feat.project-search.vsix --fo
 ```powershell
 npm install
 npm run package
-code --install-extension codeblocks-vscode-0.8.144-feat.project-search.vsix --force
+code --install-extension codeblocks-vscode-0.8.144-feat.project-search.1.vsix --force
 ```
 
 > `npm run package` = `vsce package` (before packaging, the `vscode:prepublish` hook runs `tsc` compilation (`dist/`, for local testing) + the **esbuild single-file bundle** (`bundle/extension.js`, the release entry));
