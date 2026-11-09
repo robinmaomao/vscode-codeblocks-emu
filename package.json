@@ -40,6 +40,7 @@
     "onLanguage:cpp",
     "workspaceContains:**/*.cbp",
     "workspaceContains:**/*.workspace",
+    "onView:codeblocks.search",
     "onDebug",
     "onDebugResolve:codeblocks",
     "onDebugInitialConfigurations",
@@ -1402,6 +1403,7 @@
         },
         {
           "id": "codeblocks.search",
+          "type": "webview",
           "name": "%view.codeblocks.search.name%",
           "icon": "resources/search.svg",
           "initialSize": 14

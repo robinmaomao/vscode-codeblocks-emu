@@ -8,6 +8,7 @@ function check(name, cond, got, want) {
   else { fail++; console.log('FAIL ' + name + '  got=' + JSON.stringify(got) + (want !== undefined ? ' want=' + JSON.stringify(want) : '')); }
 }
 const ROOT = path.resolve(__dirname, '..');
+const pkg = require('../package.json');
 const mock = installVscodeMock({ config: { 'codeblocks.ui.language': 'zh-cn' } });
 const { registerProjectSearch } = require('../dist/ui/projectSearchView.js');
 
@@ -35,6 +36,9 @@ const host = {
 
 (async () => {
   const registration = registerProjectSearch(context, host);
+  check('onView activation registered', (pkg.activationEvents || []).includes('onView:codeblocks.search'), pkg.activationEvents);
+  const searchView = pkg.contributes.views.codeblocks.find((v) => v.id === 'codeblocks.search');
+  check('search view declared as webview', searchView && searchView.type === 'webview', searchView);
   check('命令已注册：codeblocks.searchProjectFiles', mock.commandHandlers.has('codeblocks.searchProjectFiles'), [...mock.commandHandlers.keys()].filter((k) => k.includes('search')));
   check('命令已注册：codeblocks.searchInProjectFiles', mock.commandHandlers.has('codeblocks.searchInProjectFiles'), [...mock.commandHandlers.keys()].filter((k) => k.includes('search')));
   check('命令进入 context.subscriptions', context.subscriptions.length >= 3, context.subscriptions.length);
