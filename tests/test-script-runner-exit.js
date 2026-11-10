@@ -23,7 +23,7 @@ Module._load = function (request, parent, isMain) {
   return origLoad(request, parent, isMain);
 };
 
-const { runScriptCommand, runScriptCommands, scriptExitGraceMs, scriptCommandTimeoutMs, SCRIPT_EXIT_GRACE_DEFAULT_MS, SCRIPT_EXIT_GRACE_MAX_MS, SCRIPT_TIMEOUT_MAX_MS, SCRIPT_HEARTBEAT_MS, SCRIPT_EXIT_QUIET_MS } = require('../dist/build/scriptRunner.js');
+const { runScriptCommand, runScriptCommands, resolveScriptCommandDir, scriptExitGraceMs, scriptCommandTimeoutMs, SCRIPT_EXIT_GRACE_DEFAULT_MS, SCRIPT_EXIT_GRACE_MAX_MS, SCRIPT_TIMEOUT_MAX_MS, SCRIPT_HEARTBEAT_MS, SCRIPT_EXIT_QUIET_MS } = require('../dist/build/scriptRunner.js');
 const { resetBuildLogPrefsCache } = require('../dist/build/logLang.js');
 
 let pass = 0, fail = 0;
@@ -271,6 +271,37 @@ const BG_CMD = 'start "" /b ping -n 6 127.0.0.1 >nul';
     check('收割：空集合调用安全（no-op）', (() => { try { reapOrphans([]); return true; } catch { return false; } })(), 'n/a', true);
     check('收割：自身 PID 不会被纳入（防 PID 复用误杀）', (() => { try { reapOrphans([process.pid]); return true; } catch { return false; } })(), 'n/a', true);
     try { fs.rmSync(sleeper, { force: true }); } catch { /* ignore */ }
+  }
+
+  // 13. 脚本同目录 call 兼容（仅 Windows）：
+  //     宿主若设置 NoDefaultCurrentDirectoryInExePath，cmd 不会搜索当前目录，
+  //     批处理里的 `call libs_copy.bat` 会报“不是内部或外部命令”。
+  //     修复：把 .bat/.cmd 脚本目录加入子进程 PATH，恢复“脚本同目录优先”的查找语义。
+  if (process.platform !== 'win32') {
+    console.log('SKIP 脚本同目录 call 兼容（仅 Windows）');
+  } else {
+    const tmp = fs.mkdtempSync(nodePath.join(os.tmpdir(), 'cb-scriptdir-'));
+    const bin = nodePath.join(tmp, 'Output', 'bin');
+    fs.mkdirSync(bin, { recursive: true });
+    fs.writeFileSync(nodePath.join(bin, 'postbuild.bat'), '@echo off\r\ncd /d %~dp0\r\ncall libs_copy.bat\r\n');
+    fs.writeFileSync(nodePath.join(bin, 'libs_copy.bat'), '@echo off\r\necho LIBS_OK\r\n');
+    const prevEnv = process.env.NoDefaultCurrentDirectoryInExePath;
+    process.env.NoDefaultCurrentDirectoryInExePath = '1';
+    try {
+      check('脚本目录解析：相对 .bat 路径', resolveScriptCommandDir('Output\\bin\\postbuild.bat test', tmp) === bin,
+        resolveScriptCommandDir('Output\\bin\\postbuild.bat test', tmp), bin);
+      check('脚本目录解析：带引号 .bat 路径', resolveScriptCommandDir('"Output\\bin\\postbuild.bat" test', tmp) === bin,
+        resolveScriptCommandDir('"Output\\bin\\postbuild.bat" test', tmp), bin);
+      check('脚本目录解析：非批处理命令返回 undefined', resolveScriptCommandDir('echo hi', tmp) === undefined,
+        resolveScriptCommandDir('echo hi', tmp), undefined);
+      const r = await runScriptCommand('Output\\bin\\postbuild.bat test', tmp, {});
+      check('NoDefaultCurrentDirectoryInExePath 下同目录 call 可解析（LIBS_OK）',
+        r.success && /LIBS_OK/.test(r.output), { success: r.success, output: r.output.trim() }, 'success + LIBS_OK');
+    } finally {
+      if (prevEnv === undefined) delete process.env.NoDefaultCurrentDirectoryInExePath;
+      else process.env.NoDefaultCurrentDirectoryInExePath = prevEnv;
+      try { fs.rmSync(tmp, { recursive: true, force: true }); } catch { /* ignore */ }
+    }
   }
 
   await Promise.resolve();

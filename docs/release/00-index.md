@@ -24,6 +24,22 @@
 | [0.8.140.md](./0.8.140.md) | 构建性能归因告警改为可选（`build.performanceAdvisor`，默认关闭） |
 | [0.8.141.md](./0.8.141.md) | 打开工程后 clangd 不重启（不分析）修复 + 编译错误自动跳转修复 |
 | [0.8.142.md](./0.8.142.md) | 链接期错误（undefined reference）定位与跳转修复 |
+| [0.8.145.md](./0.8.145.md) | 工程内搜索（Project Search）：只搜索已打开 .cbp 工程，文件/内容双模式 + 历史；由 `feat/project-search` 通过 PR 合并 |
+
+## 分支预发布版本（branch prerelease）
+
+分支开发默认使用「目标正式版 + 分支名」的 SemVer 预发布版本，便于区分本地/分支构建与正式版：
+
+- 格式：`<目标正式版>-<分支 slug>[.<递增序号>]`；分支名中的 `/` 记为 `.`，其余字符仅保留 `[0-9A-Za-z.-]`。
+  例：分支 `feat/project-search` → `0.8.144-feat.project-search`（目标正式版 `0.8.144`）；
+  同一分支重复构建时递增末尾序号：`0.8.144-feat.project-search.1`、`.2` …（首个构建可省略 `.0`）。
+- 同步位置：`package.json` / `package-lock.json`、`README*.md` 版本标记、`docs/guide/usage*.md` 版本与 VSIX 文件名、
+  `CHANGELOG.md` 顶部标题、`docs/dev/progress.md` 当前版本、`docs/testing/test-report-<版本>.md` 文件名与标题、
+  `docs/testing/coverage-matrix.md` 数据来源（由 `npm run coverage:matrix` 生成）。
+- 分支预发布阶段只提交到功能分支，不创建 GitHub Release；VSIX 由本地 `npm run package` 生成，文件名随版本号带分支后缀。
+- 转正式版时版本号回到纯 `x.y.z`，通过 PR 合并到 `main`，再按本文件前述流程生成 `pages/<tag>.md` 与 GitHub Release。
+
+> `0.8.145` 已由 `feat/project-search` 通过 PR 合并到 `main`（正式版说明见 [0.8.145.md](./0.8.145.md)）。
 
 ## 最近 dev 说明（保留）
 

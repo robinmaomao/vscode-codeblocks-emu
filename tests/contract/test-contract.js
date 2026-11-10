@@ -201,9 +201,9 @@ check('F5 bundle/extension.js 存在（宿主与 VSIX 均依赖）', fs.existsSy
 
 // ---------- G. 版本与文档一致性 ----------
 const changelog = fs.readFileSync(path.join(root, 'CHANGELOG.md'), 'utf-8');
-const changelogTop = (changelog.match(/^##\s+(\d+\.\d+\.\d+)/m) || [])[1];
+const changelogTop = (changelog.match(/^##\s+(\S+)/m) || [])[1];
 const readme = fs.readFileSync(path.join(root, 'README.md'), 'utf-8');
-const readmeVer = (readme.match(/版本\*\*[：:]\s*([0-9.]+)/) || readme.match(/\*\*版本\*\*[^\d]*([0-9.]+)/) || [])[1];
+const readmeVer = (readme.match(/版本\*\*[：:]\s*([0-9][0-9A-Za-z.+-]*)/) || readme.match(/\*\*版本\*\*[^\d]*([0-9][0-9A-Za-z.+-]*)/) || [])[1];
 check('G1 CHANGELOG 顶部版本 == package.json version', changelogTop === pkg.version, changelogTop, pkg.version);
 check('G2 README 标注版本 == package.json version', readmeVer === pkg.version, readmeVer, pkg.version);
 

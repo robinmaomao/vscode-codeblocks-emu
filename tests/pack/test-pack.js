@@ -69,6 +69,7 @@ async function main() {
     const files = (ls.stdout || '').split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
     const has = (re) => files.some((f) => re.test(f));
     check('P1 清单包含入口 bundle/extension.js', has(/^bundle[\\/]extension\.js$/), files.filter((f) => f.startsWith('bundle')).slice(0, 3), 'bundle/extension.js');
+    check('P1 清单包含内容搜索 worker bundle/search-worker.js', has(/^bundle[\\/]search-worker\.js$/), files.filter((f) => f.startsWith('bundle')).slice(0, 3), 'bundle/search-worker.js');
     check('P1 清单包含语法与语言配置', has(/^syntaxes[\\/].+\.json$/) && has(/^language-configurations[\\/].+\.json$/), null, '两个目录');
     check('P1 清单包含编译器资源 XML', has(/^resources[\\/]compilers[\\/]options_gcc\.xml$/), null, 'options_gcc.xml');
     check('P1 清单包含 NLS 文件', has(/^package\.nls\.json$/) && has(/^package\.nls\.zh-cn\.json$/), null, '两个 NLS');

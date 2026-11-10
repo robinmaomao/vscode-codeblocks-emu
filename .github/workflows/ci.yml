@@ -43,6 +43,9 @@ jobs:
       - name: 打包（esbuild bundle）
         run: npm run bundle
 
+      - name: 打包搜索 worker（esbuild bundle:search）
+        run: npm run bundle:search
+
       - name: 工具链自检（信息性）
         shell: pwsh
         continue-on-error: true

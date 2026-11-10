@@ -51,6 +51,7 @@ export const MANAGED_KEYBINDINGS: ManagedKeybinding[] = [
   { id: 'moveProjectDown', label: i18n.t('Move Project Down'), command: 'codeblocks.moveProjectDown', when: 'focusedView == codeblocks.projectTree', defaults: ['ctrl+shift+down'], group: 'builtin' },
   { id: 'projectTreeFocus', label: i18n.t('Project view focus (Manager)'), command: 'codeblocks.projectTree.focus', defaults: ['shift+f2'], group: 'builtin' },
   { id: 'buildLogFocus', label: i18n.t('Build Log focus'), command: 'codeblocks.buildLog.focus', defaults: [], group: 'builtin' },
+  { id: 'searchProjectFiles', label: i18n.t('Project search (files)'), command: 'codeblocks.searchProjectFiles', defaults: ['ctrl+alt+p'], group: 'builtin' },
   // ---- alias：外部命令别名 ----
   { id: 'aliasGotoFile', label: i18n.t('Goto File (Alt+G → Quick Open)'), command: 'workbench.action.quickOpen', defaults: ['alt+g'], group: 'alias' },
   { id: 'aliasReplaceInFiles', label: 'Replace in Files', command: 'workbench.action.replaceInFiles', when: '!inSearchEditor', defaults: ['ctrl+shift+r'], group: 'alias' },
