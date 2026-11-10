@@ -60,6 +60,8 @@ export const CHILD_ICONS: Record<string, string> = {
   'Reset View Layout': 'refresh',
   'Find…': 'search',
   'Find in Files…': 'search',
+  'Search Project Files…': 'search',
+  'Search in Project Files…': 'search',
   'Replace…': 'replace',
   'Replace in Files…': 'replace',
   'TODO List': 'checklist',
@@ -236,6 +238,8 @@ export const MENU_STRUCTURE: MenuDef[] = [
     children: [
       { label: 'Find…', command: 'actions.find' },
       { label: 'Find in Files…', command: 'workbench.action.findInFiles' },
+      { label: 'Search Project Files…', command: 'codeblocks.searchProjectFiles', shortcut: 'Ctrl+Alt+P' },
+      { label: 'Search in Project Files…', command: 'codeblocks.searchInProjectFiles' },
       { label: 'Find Next', command: 'editor.action.nextMatchFindAction' },
       { label: 'Find Previous', command: 'editor.action.previousMatchFindAction' },
       SEP,

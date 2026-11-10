@@ -154,6 +154,8 @@ Example:
 | `codeblocks.ui.symbolsView` | boolean | `true` |  | Show the Symbols view in the sidebar. |
 | `codeblocks.ui.recentProjectsLimit` | number | `8` |  | Maximum recent projects (0–50; 0 = do not record). |
 | `codeblocks.ui.findFileOpen` | boolean | `false` |  | Open files directly from "Find File"; default locates the file in the project tree only. |
+| `codeblocks.search.scope` | string | `openProjects` |  | Default Project Search scope: `openProjects` (all open projects) / `activeProject` (active project only). The view's selector overrides it per workspace. |
+| `codeblocks.search.keepHistory` | boolean | `true` |  | Keep recent search history per workspace (20 entries each for files/text). Turn it off to stop recording; existing history can be cleared at the top of the view. |
 
 ---
 

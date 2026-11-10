@@ -6,7 +6,7 @@ An extension that natively ports the Code::Blocks core features to VS Code — a
 
 Open a `.cbp` / `.workspace` project directly in VS Code and get a build, debug, and project browsing experience aligned with Code::Blocks.
 
-> **Author**: Robinmaomao ｜ **Version**: 0.8.142
+> **Author**: Robinmaomao ｜ **Version**: 0.8.145
 
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](./LICENSE.md)
 
@@ -51,6 +51,7 @@ Open a `.cbp` / `.workspace` project directly in VS Code and get a build, debug,
 - ⚙️ **Compiler management**: full parsing of `options_<id>.xml` (including `extends` inheritance, `<if platform>` platform branches, and `<Common>` references); auto-detects GCC / MinGW / Clang / MSVC / RISC-V as well as AVR / MSP430 / SDCC toolchains; reads **user-defined cross compilers** from the Code::Blocks `default.conf`.
 - 🗂️ **Multi-project management**: open several `.cbp` files at once; the project tree supports drag-and-drop ordering (which sets the build order), move up/down, remove project, and active-project highlighting; opening a workspace auto-detects `.cbp` files, and a multi-select dialog (directory/file names, all selected by default) or the status bar entry reopens them at any time.
 - 📂 **Project tree browsing**: multi-level nested directory tree rooted at the common top-level path (`relativeToCommonTopLevelPath`), file-type icons, missing-file markers, and directories sorted first (aligned with the VS Code Explorer).
+- 🔎 **Project Search**: a dedicated sidebar view that searches **only opened `.cbp` projects** (Files/Text modes, active project first, click to jump, cancellable); search history with a visual **Keep history** toggle at the top, and `Ctrl+Alt+P` focuses Files mode. It does not replace the built-in search or scan files outside the projects.
 - 🧩 **Context menu**: project nodes support incremental build / full rebuild / add files; file nodes support remove from project, open containing directory, and toggle compile/link (written back to `.cbp`).
 - 📄 **Single-file build / single-file Clean**: right-click a file in the project tree → `Build File` (aligned with Code::Blocks `CompileFile`: DepsSearchStart + IsObjectOutdated incremental check, with a command byte-identical to the whole-target build) / `Clean File` (deletes the object and the `.depend` dependency files).
 - ⏹️ **Stop a build at any time**: the ❌ button on the build notification or the `Code::Blocks: Stop Build` command; on Windows, `taskkill /T /F` kills the entire process tree (cmd → gcc → cc1/as/ld, no leftovers), and a cancellation is not counted as a failure.
@@ -117,10 +118,10 @@ code --install-extension robinmaomao.codeblocks-vscode
 
 ### Option 2: install from GitHub Releases
 
-Download the latest `codeblocks-vscode-0.8.142.vsix` from [Releases](https://github.com/robinmaomao/vscode-codeblocks-emu/releases):
+Download `codeblocks-vscode-0.8.145.vsix` from [Releases](https://github.com/robinmaomao/vscode-codeblocks-emu/releases):
 
 ```powershell
-code --install-extension codeblocks-vscode-0.8.142.vsix --force
+code --install-extension codeblocks-vscode-0.8.145.vsix --force
 ```
 
 ### Option 3: build from source
@@ -128,7 +129,7 @@ code --install-extension codeblocks-vscode-0.8.142.vsix --force
 ```powershell
 npm install
 npm run package
-code --install-extension codeblocks-vscode-0.8.142.vsix --force
+code --install-extension codeblocks-vscode-0.8.145.vsix --force
 ```
 
 > `npm run package` = `vsce package` (packaging runs the `vscode:prepublish` hook automatically = `tsc` compile (`dist/`, for local tests) + esbuild single-file bundle (`bundle/extension.js`, the release entry)); running `npx vsce package` / `npx vsce publish` directly also builds automatically and never packs a stale or missing `bundle/`; on Windows, prefer `npm.cmd` / `npx.cmd` (PSReadLine execution policy).
@@ -146,6 +147,7 @@ code --extensionDevelopmentPath="." --disable-extensions --new-window
 1. Open a folder containing `.cbp` / `.workspace` (projects are detected automatically and you are prompted to choose which to open), or run **`Code::Blocks: Open Project (.cbp)`** from the Command Palette.
 2. Click the **Code::Blocks** icon in the activity bar on the left to expand the panels:
    - **Project**: project tree (multiple projects + nested directories + file browsing; hovering a project row shows Build / Rebuild / Clean / Properties shortcut buttons)
+   - **Project Search**: search inside opened `.cbp` projects only (Files/Text modes, active project first, click to jump, search history with a **Keep history** toggle at the top; `Ctrl+Alt+P`)
    - **Analysis**: project analysis (shows the important `.cbp` properties per project; hover to see the corresponding configuration fragment, click to locate it in the `.cbp`, right-click to copy; the top is the "recent builds" entry)
    - **Symbols**: symbol browser (hidden by default; bring it up from ⋯ → Views or control it with the `codeblocks.ui.symbolsView` setting)
    - **Build Log**: structured build summary, in the **"Build Log" tab of the bottom panel** (`Ctrl+J` to open)

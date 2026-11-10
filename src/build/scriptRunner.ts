@@ -10,6 +10,8 @@
  * 此处实现宏展开后交由 shell 执行。
  */
 import * as vscode from 'vscode';
+import * as fs from 'fs';
+import * as path from 'path';
 import { spawn } from 'child_process';
 import { OutputLineDecoder } from '../tools/encoding';
 import { getWindowsSystemPath } from '../tools/windowsPath';
@@ -133,6 +135,39 @@ function mergePath(...parts: string[]): string {
 }
 
 /**
+ * 取脚本命令开头的 `.bat` / `.cmd` 绝对目录。
+ *
+ * Windows 宿主若设置了 `NoDefaultCurrentDirectoryInExePath`，cmd 不再搜索当前目录，
+ * 批处理里的 `call sibling.bat`（同目录）会报“不是内部或外部命令”。脚本通常已经
+ * `cd /d %~dp0`，把脚本目录加入子进程 PATH 可恢复“脚本同目录优先”的查找语义，
+ * 同时不关闭该安全设置。
+ */
+export function resolveScriptCommandDir(command: string, cwd: string): string | undefined {
+  if (process.platform !== 'win32') return undefined;
+  const text = command.trim();
+  if (!text) return undefined;
+  let token: string;
+  if (text.startsWith('"')) {
+    const end = text.indexOf('"', 1);
+    if (end < 0) return undefined;
+    token = text.slice(1, end);
+  } else {
+    const m = text.match(/^[^\s]+/);
+    if (!m) return undefined;
+    token = m[0];
+  }
+  if (!/\.(?:bat|cmd)$/i.test(token)) return undefined;
+  // 未展开的 cmd 变量（%VAR%）无法在宿主侧可靠解析，保持原行为。
+  if (/[%!]/.test(token)) return undefined;
+  const abs = path.isAbsolute(token) ? token : path.resolve(cwd, token);
+  try {
+    return fs.statSync(abs).isFile() ? path.dirname(abs) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
  * 执行单条脚本命令（可附加环境变量，如编译器 bin 目录加入 PATH；cancel 提供时注册子进程并支持强杀）。
  *
  * @param onOutputLine 实时输出回调（逐行、已解码、行尾 \r 已去除；命令收尾时 flush 无换行的尾行）
@@ -154,8 +189,13 @@ export function runScriptCommand(
     const expanded = replaceCbMacros(command, { vars, basePath: cwd });
     const env: Record<string, string> = { ...(process.env as Record<string, string>) };
     if (process.platform === 'win32') {
-      // Windows：实时读取系统 PATH（注册表 Machine+User），宿主进程 PATH 快照可能过期
-      env.PATH = mergePath(getWindowsSystemPath(), env.PATH ?? '');
+      // Windows：实时读取系统 PATH（注册表 Machine+User），宿主进程 PATH 快照可能过期。
+      // 仅当宿主设置 NoDefaultCurrentDirectoryInExePath（cmd 不搜索当前目录）时，
+      // 才把批处理脚本目录加入 PATH：兼容脚本内 `call 同目录.bat` 找不到的问题；
+      // 未设置时保持原有 PATH 语义，避免改变工程目录内同名工具的解析顺序。
+      const noDefaultCwd = Object.keys(env).some((key) => key.toLowerCase() === 'nodefaultcurrentdirectoryinexepath');
+      const scriptDir = noDefaultCwd ? resolveScriptCommandDir(expanded, cwd) : undefined;
+      env.PATH = mergePath(scriptDir ?? '', getWindowsSystemPath(), env.PATH ?? '');
     }
     if (extraPath) {
       const sep = process.platform === 'win32' ? ';' : ':';

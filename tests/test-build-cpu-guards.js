@@ -22,9 +22,18 @@ check('A2 构建包装 finally 均补执行 flush（≥5 处：工作区/单项�
   (ext.match(/flushPendingClangdRestart\(\)/g) || []).length);
 check('A3 schedule 在构建中只登记：检查 buildInProgress',
   /function scheduleClangdRestart\(\)\s*\{\s*if \(buildInProgress\)/.test(ext), null);
-check('A4 直接重启仅剩两个入口（schedule 立即路径 + flush）',
-  (ext.match(/void restartClangd\(\)/g) || []).length === 2,
-  (ext.match(/void restartClangd\(\)/g) || []).length);
+// 0.8.145 起自动重启统一走 clangdRestart 合并器（合并窗口 + 最小间隔 + 等客户端稳定），
+// 不允许再出现 `void restartClangd()` 直连；schedule 立即路径与 flush 各请求一次。
+check('A4 自动重启仅两个请求入口（schedule 立即路径 + flush），无直连重启',
+  (ext.match(/clangdRestart\.request\(\)/g) || []).length === 2
+  && (ext.match(/void restartClangd\(\)/g) || []).length === 0,
+  { request: (ext.match(/clangdRestart\.request\(\)/g) || []).length, direct: (ext.match(/void restartClangd\(\)/g) || []).length });
+check('A5 自动重启前等 clangd 客户端稳定（避免 applyFix 重复注册）',
+  ext.includes('waitForClangdClientReady') && ext.includes('waitForClangdRestartable')
+  && ext.includes('clangdClientStateOf'), null);
+check('A6 优先 LanguageClient.restart()（stop/start 串行），命令重启仅作回退',
+  ext.includes('client.restart()') && ext.indexOf('client.restart()') < ext.indexOf("executeCommand('clangd.restart')"),
+  { hasClientRestart: ext.includes('client.restart()') });
 
 // ---- B. clangd 探测同步子进程超时（tools/clangd） ----
 const clangdTool = read('dist/tools/clangd.js');

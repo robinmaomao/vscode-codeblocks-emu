@@ -1,7 +1,32 @@
-# 更新日志（Changelog）
+﻿# 更新日志（Changelog）
 
 本文件记录**正式版**里程碑；近期 dev 迭代的逐轮发布说明见 [`docs/release/`](./docs/release/)（`0.8.xx-dev.md`），
 `0.8.76`–`0.8.128` 的 dev 说明已合并归档到 [`docs/release/archive/`](./docs/release/archive/)；版本号与维护约定见 [`docs/release/00-index.md`](./docs/release/00-index.md)。
+
+## 0.8.145 — 2026-11-09
+
+> 由 `feat/project-search` 通过 PR 合并的正式版。
+
+**工程内搜索（Project Search）**
+
+- **修复（pre/post-build）**：Windows 宿主若设置 `NoDefaultCurrentDirectoryInExePath`，cmd 不再搜索当前目录，批处理内的 `call libs_copy.bat`（同目录脚本）会报“不是内部或外部命令”。现在执行 `.bat` / `.cmd` 时把脚本目录加入子进程 `PATH`，恢复“脚本同目录优先”的查找语义，同时不关闭该安全设置；工程脚本无需修改。
+- 验证：`test-script-runner-exit.js` **62 pass / 0 fail**（新增 4 断言）；`npm test` **TOTAL=187 FAIL=0 SKIP=1**。
+
+- **新视图**：侧边栏 **Project Search**（`codeblocks.search`），只搜索已打开 `.cbp` 工程中列出的文件；不调用 `workspace.findFiles`、不创建 watcher/ripgrep，内置搜索与 `search.exclude` 保持原样。
+- **界面**：对齐 VS Code 内置搜索——`--vscode-font-size` + 22px 行高、内联 codicon SVG 图标、`Aa` / `.*` / 清除按钮内嵌搜索框，状态行右侧为刷新 / 全部展开 / 全部折叠工具条；结果按「工程 → 文件 → 匹配」分组，工程头吸顶且显示计数与活动工程标记；匹配文本使用高对比橙色背景（不依赖主题的 `editor.findMatchHighlightBackground`，避免暗色主题下几乎看不见）；多个工程的 `.cbp` `title` 相同（如 `earphone/app.cbp` 与 `esop8/app.cbp` 都叫 `app`）时，分组名改用父目录名区分。
+- **文件模式**：内存排序（活动工程优先、跨工程去重、空查询浏览全部，Top 500）；输入即搜，单击打开、行尾定位按钮在工程树定位；文件行显示语言图标（`.c` 蓝色 C、`.h` 紫色 C（VS Code Explorer 的 Seti 图标字体））+ 文件名 + 目录。
+- **内容模式**：worker_threads 隔离扫描（单飞、可取消、20s 总超时 + 5s 无进度终止、失败回退宿主内字面量扫描）；UTF-8/GBK/UTF-16 BOM、二进制/4MB 跳过、32MB 字节预算 LRU、脏编辑器文本优先；工程头与文件行均可折叠并显示匹配数徽标，点击精确跳转并选中匹配文本。
+- **全字匹配**：搜索框新增 `Ab`（Match whole word）按钮，内容搜索只命中完整单词（仅作用于字面量）；`Ab` 状态随视图持久化，也写入搜索历史并在恢复历史时一并还原。
+- **结果展开/固定**：每次新搜索默认展开全部工程与文件；搜索完成后结果的排序与「active project first」标记固定，切换活动工程不再自动重排/重搜（需要更新时点「刷新」或重新搜索）。
+- **搜索历史**：点击「搜索」或按 `Enter`（文件模式同样提交）后立即记录，0 结果也保留；历史区移到**视图最底部**并默认折叠（按工作区记忆展开状态），头部显示当前模式条数 + `保留历史` switch + 清空（VS Code 模态确认），只列出当前模式历史；历史按工作区隔离，文件/内容各 20 条，点击条目优先跳转上次结果、失效则重跑；重跑图标仅重跑；子树范围搜索不写历史。
+- **入口**：命令 `codeblocks.searchProjectFiles`（`Ctrl+Alt+P`）/ `codeblocks.searchInProjectFiles`（预填单行选区）、C::B Search 菜单、工程树 project/folder/virtualFolder/fileGroup 右键。
+- **设置**：新增 `codeblocks.search.scope`（`openProjects` / `activeProject`）与 `codeblocks.search.keepHistory`（默认 `true`）；视图内范围选择按工作区保存。
+- **布局**：Reset View Layout 顺序更新为 Project → Search → Symbols；不提升布局版本，不覆盖用户已有排布。
+- **修复**：`codeblocks.search` 补 `"type": "webview"`，并提前注册 provider；新版 VS Code 默认按 TreeView 解析，缺省会显示“no data provider registered”而没有搜索栏。
+- **修复（clangd）**：打开工程/切换工程/改编译器时同一秒内多次请求重启 clangd，会让 clangd 扩展在旧客户端命令注销前重新注册 `clangd.applyFix`，抛 `command 'clangd.applyFix' already exists` 并导致语言服务器启动失败。现改为：合并重启请求（1.5s 窗口 + 5s 最小间隔）、等客户端 `Running` 后再留 2s 稳定期、优先调用 `LanguageClient.restart()`（内部串行 stop→start）、失败时回退命令重启并重试一次；clangd 扩展未激活时跳过（打开源文件会自然加载新配置）。
+- 新增回归：`test-project-search.js`、`test-search-history.js`、`test-project-search-tasks.js`、`test-search-worker.js`、`test-project-search-view-html.js`、`test-project-search-view-provider.js`、`test-project-search-commands.js`；覆盖矩阵重新生成（命令 **113**、设置 **85**、视图 **6**、快捷键 **34**）。
+- 发布说明见 [`docs/release/0.8.145.md`](./docs/release/0.8.145.md)；测试结果见
+  [`docs/testing/test-report-0.8.145.md`](./docs/testing/test-report-0.8.145.md)。
 
 ## 0.8.142 — 2026-11-06
 
