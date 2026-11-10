@@ -1,8 +1,8 @@
-﻿# 测试执行报告（0.8.144-feat.project-search.1 · 滚动更新）
+﻿# 测试执行报告（0.8.145 · 滚动更新）
 
-> 生成时间：2026-11-07 ｜ 执行环境：Windows 10 x64 ｜ Node v24.19.0 ｜ CPU i3-10105 ×8 ｜ 15.8GB
+> 生成时间：2026-11-09 ｜ 执行环境：Windows 10 x64 ｜ Node v24.19.0 ｜ CPU i3-10105 ×8 ｜ 15.8GB
 > 方案见 [测试方案](./strategy.md)；覆盖台账见 [测试覆盖矩阵](./coverage-matrix.md)；性能数据见 [性能基准](./performance-baseline.md)。
-> 上一版权威复核见 [0.8.139 完整报告](./test-report-0.8.139-full.md)；本分支预发布版本的正式版底稿见 [release/0.8.144.md](../release/0.8.144.md)；上一版发布说明见 [release/0.8.142.md](../release/0.8.142.md)。
+> 上一版权威复核见 [0.8.139 完整报告](./test-report-0.8.139-full.md)；本版发布说明见 [release/0.8.145.md](../release/0.8.145.md)；上一版发布说明见 [release/0.8.142.md](../release/0.8.142.md)。
 
 ## 1. 分层结果
 
@@ -13,7 +13,7 @@
 | L3 视觉 | `npm run test:visual` | **24/24** | 现有面板布局未改动；搜索视图为 WebviewView，HTML 结构/i18n 由单元层覆盖 |
 | L1 端到端 | `npm run test:e2e` | **6/6** | 构建/调试链未改动；沿用 0.8.142 真实工具链结论 |
 | L4 性能 | `npm run test:perf` | **13 项** | 搜索为按需触发，不引入常驻扫描；沿用既有基线 |
-| L5 打包 | `npm run test:pack` | **1/1（15 断言）** | VSIX 0.8.144-feat.project-search.1 打包 / 安装冒烟通过，含 `bundle/search-worker.js` 检查 |
+| L5 打包 | `npm run test:pack` | **1/1（15 断言）** | VSIX 0.8.145 打包 / 安装冒烟通过，含 `bundle/search-worker.js` 检查 |
 | 产物 | `npm run bundle` + `npm run bundle:search` | 通过 | esbuild 无告警；worker 单独产物已生成 |
 | L2 宿主 | `npm run test:host` | **24/24（0 fail / 0 skip）** | 沿用 0.8.140 复核；本版为新增视图/命令，未改动构建/调试适配层 |
 
@@ -58,7 +58,7 @@
 | 行为变更 | 新增工程内搜索，不替换内置搜索；`Reset View Layout` 侧栏顺序加入 Search；不提升 `UI_LAYOUT_VERSION` |
 | 构建脚本兼容 | Windows `NoDefaultCurrentDirectoryInExePath` 下 pre/post-build 批处理 `call` 同目录 `.bat`（如 `libs_copy.bat`）不再报“不是内部或外部命令”；脚本目录加入子进程 `PATH`（`test-script-runner-exit.js` 新增 4 断言，62 pass） |
 | 新增测试 | `test-project-search.js`、`test-search-history.js`、`test-project-search-tasks.js`、`test-search-worker.js`、`test-project-search-view-html.js`、`test-project-search-view-provider.js`、`test-project-search-commands.js` |
-| 文档 | 新增 [release/0.8.144.md](../release/0.8.144.md) 与 [release/pages/0.8.144.md](../release/pages/0.8.144.md)；分支预发布版本规范见 [release/00-index.md](../release/00-index.md#分支预发布版本branch-prerelease)；usage/settings/alignment/progress/manual-acceptance 同步；覆盖矩阵重新生成 |
+| 文档 | 新增 [release/0.8.145.md](../release/0.8.145.md) 与 [release/pages/0.8.145.md](../release/pages/0.8.145.md)；分支预发布版本规范见 [release/00-index.md](../release/00-index.md#分支预发布版本branch-prerelease)；usage/settings/alignment/progress/manual-acceptance 同步；覆盖矩阵重新生成 |
 | 行为边界 | 只搜索 `.cbp` 列出的文件；不写 `search.exclude`、不建 watcher、不调用 `workspace.findFiles` |
 
 ## 4. 缺陷与处置（本轮发现并修复）
