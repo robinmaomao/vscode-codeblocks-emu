@@ -67,7 +67,7 @@ npm.cmd run compile
 npm.cmd run package
 
 # 安装（版本号以 package.json 为准）
-code --install-extension "codeblocks-vscode-0.8.144-feat.project-search.1.vsix" --force
+code --install-extension "codeblocks-vscode-0.8.145.vsix" --force
 
 # 全量回归测试
 npm.cmd test
@@ -116,9 +116,9 @@ npm.cmd test
 | [0.8.140](../release/0.8.140.md) | 构建性能归因告警改为可选（`build.performanceAdvisor`，默认关闭） |
 | [0.8.141](../release/0.8.141.md) | 打开工程后 clangd 不重启（不分析）修复 + 编译错误自动跳转修复 |
 | [0.8.142](../release/0.8.142.md) | 链接期错误（undefined reference）定位与跳转修复 |
-| [0.8.144-feat.project-search.1](../release/0.8.144.md) | 分支预发布：工程内搜索（Project Search）：只搜索已打开 .cbp 工程，文件/内容双模式；UI 对齐 VS Code 内置搜索（字体/行高/codicon/Seti 文件图标、Aa/Ab/.* 输入框内选项），结果按工程分组并默认全展开，搜索后结果固定；搜索/Enter 即写历史且历史面板位于搜索框下方；清空历史走 VS Code 原生模态确认；修复视图 webview 类型与 clangd 重启竞态（applyFix 重复注册） |
+| [0.8.145](../release/0.8.145.md) | 工程内搜索（Project Search）：只搜索已打开 .cbp 工程，文件/内容双模式；UI 对齐 VS Code 内置搜索（字体/行高/codicon/Seti 文件图标、Aa/Ab/.* 输入框内选项），结果按工程分组并默认全展开，搜索后结果固定；搜索/Enter 即写历史且历史面板位于搜索框下方；清空历史走 VS Code 原生模态确认；修复视图 webview 类型、clangd 重启竞态（applyFix 重复注册）与 pre/post-build 同目录批处理解析 |
 
-> 当前版本 **0.8.144-feat.project-search.1**（`feat/project-search` 分支预发布；不合并 `main`、不创建 PR / Release。正式版里程碑底稿见 [release/0.8.144.md](../release/0.8.144.md)，上一版见 [release/0.8.142.md](../release/0.8.142.md)）；分支测试报告见 [test-report-0.8.144-feat.project-search.1.md](../testing/test-report-0.8.144-feat.project-search.1.md)；无头回归见 `npm test`（`TOTAL=187 FAIL=0 SKIP=1`，另有契约 / E2E / 视觉 / 性能 / 打包 / 宿主分层，见 [测试方案](../testing/strategy.md)）。
+> 当前版本 **0.8.145**（正式版；由 `feat/project-search` 通过 PR 合并。发布说明见 [release/0.8.145.md](../release/0.8.145.md)，上一版见 [release/0.8.142.md](../release/0.8.142.md)）；测试报告见 [test-report-0.8.145.md](../testing/test-report-0.8.145.md)；无头回归见 `npm test`（`TOTAL=187 FAIL=0 SKIP=1`，另有契约 / E2E / 视觉 / 性能 / 打包 / 宿主分层，见 [测试方案](../testing/strategy.md)）。
 
 ## 文档：GitHub Release 页面格式统一
 
