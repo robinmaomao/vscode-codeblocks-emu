@@ -3,6 +3,18 @@
 本文件记录**正式版**里程碑；近期 dev 迭代的逐轮发布说明见 [`docs/release/`](./docs/release/)（`0.8.xx-dev.md`），
 `0.8.76`–`0.8.128` 的 dev 说明已合并归档到 [`docs/release/archive/`](./docs/release/archive/)；版本号与维护约定见 [`docs/release/00-index.md`](./docs/release/00-index.md)。
 
+## 0.8.146 — 2026-11-10
+
+> 修复版：clangd `#ifdef` 关闭区域（inactive regions）不再变暗。
+
+**修复（clangd inactive regions）**
+
+- **现象**：`config.h` 里 `#define FUNC_BTHID_EN 0` 等宏关闭的代码（`config.c` 中的 `#if FUNC_BTHID_EN` 块）**不变暗**；保存头文件也不刷新，关闭/重开文件或重载窗口才恢复。
+- **根因**：clangd 服务端一直在发送 `textDocument/inactiveRegions`（clangd 22.1.6 日志可见），问题在 vscode-clangd 的装饰生命周期——`LanguageClient.restart()` 复用同一客户端与 Feature，停止阶段 `clear()` 只 `dispose()` 装饰类型却**不清空字段**，重启后重建条件 `if (!this.decorationType)` 永远为假 ⇒ 装饰永不重建，`applyHighlights` 用已释放的类型 `setDecorations` ⇒ 不变暗。
+- **为何 0.8.144 才出现**：0.8.144 为修复 `command 'clangd.applyFix' already exists`，把自动重启从「`clangd.restart` 命令（销毁旧客户端、创建全新客户端/Feature）」改为「`LanguageClient.restart()`（复用同一客户端/Feature）」，第一次踩中该缺陷；0.8.143 及更早版本（含 0.8.141/0.8.142）不复制 Feature，因此从未出现。
+- **修复**：新增 `src/tools/clangdInactiveRegions.ts`，监听 clangd 客户端状态——`Stopped`/`Starting` 时释放并清空装饰类型与区域缓存，`Running` 时装饰类型缺失则重建并重新应用已收到的区域；本扩展每次重启 clangd 后立即触发一次。不改 clangd 扩展本体、不改用户设置、不改诊断/补全/编译数据库。
+- 验证：新增 `tests/test-clangd-inactive-regions.js` **22 断言**；`npm test` **TOTAL=188 FAIL=0 SKIP=1**；`npm run test:contract` 3/3 通过（设置项仍为 85）。
+
 ## 0.8.145 — 2026-11-09
 
 > 由 `feat/project-search` 通过 PR 合并的正式版。

@@ -999,6 +999,8 @@
   "[Code::Blocks] clangd extension installed/enabled; re-detecting and regenerating the compile database": "[Code::Blocks] clangd 扩展已安装/已启用，重新探测并重建编译数据库",
   "[Code::Blocks] clangd extension uninstalled/disabled; re-detecting and regenerating the compile database": "[Code::Blocks] clangd 扩展已卸载/已禁用，重新探测并重建编译数据库",
   "[Code::Blocks] clangd integration is disabled (codeblocks.clangd.enabled = false)": "[Code::Blocks] clangd 集成已禁用（codeblocks.clangd.enabled = false）",
+  "[Code::Blocks] clangd inactive regions decorations initialized": "[Code::Blocks] 已初始化 clangd 非活动区域装饰",
+  "[Code::Blocks] clangd inactive region support was not found; the installed clangd extension may be incompatible": "[Code::Blocks] 未找到 clangd 非活动区域支持，已安装的 clangd 扩展可能不兼容",
   "[Code::Blocks] clangd restart requested manually": "[Code::Blocks] 已手动请求重启 clangd",
   "[Code::Blocks] clangd restart raced with the previous client; retrying once ({0})": "[Code::Blocks] clangd 重启与上一个客户端撞车，稍后重试一次（{0}）",
   "[Code::Blocks] Restarting clangd through its language client failed; falling back to the clangd.restart command ({0})": "[Code::Blocks] 通过语言客户端重启 clangd 失败，回退到 clangd.restart 命令（{0}）",

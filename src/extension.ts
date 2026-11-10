@@ -68,6 +68,7 @@ import { collectClangdEntries, writeClangdDatabase, CompileCommandEntry } from '
 import { DiagnosticPublisher } from './build/diagnosticPublisher';
 import { collectOutputDirs, excludeGlobsFor, mergeExcludePatterns } from './build/watcherExclude';
 import { detectClangd, queryCompilerSystemIncludes, queryCompilerTarget, resolveCompilerProgram, updateClangdUserConfig, clangdUserConfigPath, clearClangdDetectionCache, extraConfigWarnings, findStaleClangdFragments, listManagedFragments, cleanStaleClangdFragments, readClangdUserConfigText, preferClangdSource } from './tools/clangd';
+import { ClangdInactiveRegionsWatcher } from './tools/clangdInactiveRegions';
 import {
   CLANGD_RESTART_MIN_INTERVAL_MS,
   createClangdRestartCoalescer,
@@ -226,6 +227,8 @@ let clangdGenPendingInteractive = false;
 let restartClangdReason: 'project' | 'compiler' | 'open' | undefined;
 /** clangd.enabled 的上次取值（只在「开 → 关」时提醒既有片段仍在生效，避免其它设置变更重复弹窗） */
 let clangdEnabledLast = true;
+/** 修复 clangd 扩展 inactiveRegions 装饰在客户端重启后不再显示的问题 */
+let inactiveRegionsWatcher: ClangdInactiveRegionsWatcher | undefined;
 
 /** clangd 扩展 ID（检测“是否接管 Problems 诊断”与扩展安装状态变化） */
 const CLANGD_EXTENSION_ID = 'llvm-vs-code-extensions.vscode-clangd';
@@ -385,6 +388,19 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       timestamp: () => buildOutputTimestamp,
     },
   );
+  // clangd 扩展 0.6.0 的 inactiveRegions 装饰在客户端重启后不会自动重建：
+  // 本扩展在 clangd 客户端 Running/重启过渡时修复其 Feature 状态，保证宏关闭区域持续变暗。
+  inactiveRegionsWatcher = new ClangdInactiveRegionsWatcher({
+    getClient: () => getClangdLanguageClient(),
+    log: (event) => {
+      if (event === 'missing') {
+        outputChannel.warn(logT('[Code::Blocks] clangd inactive region support was not found; the installed clangd extension may be incompatible'));
+      } else {
+        outputChannel.info(logT('[Code::Blocks] clangd inactive regions decorations initialized'));
+      }
+    },
+  });
+  context.subscriptions.push(inactiveRegionsWatcher);
   // 升级后一次性迁移设置（parallelJobs 显式 0 → 8；清理已移除的 clangd.queryDriver）
   await migrateSettingsOnce(context);
   // DAP 跟踪（codeblocks.debug.trace）：写入本输出通道
@@ -4028,6 +4044,7 @@ async function restartClangd(): Promise<boolean> {
   if (client && typeof client.restart === 'function') {
     try {
       await client.restart();
+      refreshInactiveRegions();
       return true;
     } catch (err) {
       outputChannel?.warn(logT('[Code::Blocks] Restarting clangd through its language client failed; falling back to the clangd.restart command ({0})', (err as Error)?.message ?? String(err)));
@@ -4035,6 +4052,7 @@ async function restartClangd(): Promise<boolean> {
   }
   try {
     await vscode.commands.executeCommand('clangd.restart');
+    refreshInactiveRegions();
     return true;
   } catch (err) {
     const message = (err as Error)?.message ?? String(err);
@@ -4044,6 +4062,7 @@ async function restartClangd(): Promise<boolean> {
       await new Promise((resolve) => setTimeout(resolve, CLANGD_RESTART_MIN_INTERVAL_MS));
       try {
         await vscode.commands.executeCommand('clangd.restart');
+        refreshInactiveRegions();
         return true;
       } catch {
         return false;
@@ -4052,6 +4071,11 @@ async function restartClangd(): Promise<boolean> {
     // 忽略：clangd 扩展不存在或命令不可用
     return false;
   }
+}
+
+/** 重启完成后立即修复 inactiveRegions 装饰（轮询兜底见 ClangdInactiveRegionsWatcher） */
+function refreshInactiveRegions(): void {
+  inactiveRegionsWatcher?.refresh();
 }
 
 /** clangd 扩展 v1 API 暴露的 LanguageClient（只读探测状态；restart 由本扩展在我方控制下调用） */
@@ -8744,6 +8768,8 @@ export function deactivate(): void {
   // 避免扩展宿主退出后遗留孤儿编译进程/未受控的半成品产物。无构建时为空操作。
   currentBuildCancel?.cancel();
   clangdRestart.cancel();
+  inactiveRegionsWatcher?.dispose();
+  inactiveRegionsWatcher = undefined;
   projectSearch?.dispose();
   projectSearch = undefined;
   // 外部修改检测的去抖计时器不属于 context.subscriptions，需要显式清掉：

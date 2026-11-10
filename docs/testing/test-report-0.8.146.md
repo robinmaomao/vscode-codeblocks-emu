@@ -1,19 +1,19 @@
-﻿# 测试执行报告（0.8.145 · 滚动更新）
+# 测试执行报告（0.8.146 · 滚动更新）
 
-> 生成时间：2026-11-09 ｜ 执行环境：Windows 10 x64 ｜ Node v24.19.0 ｜ CPU i3-10105 ×8 ｜ 15.8GB
+> 生成时间：2026-11-10 ｜ 执行环境：Windows 10 x64 ｜ Node v24.19.0 ｜ CPU i3-10105 ×8 ｜ 15.8GB
 > 方案见 [测试方案](./strategy.md)；覆盖台账见 [测试覆盖矩阵](./coverage-matrix.md)；性能数据见 [性能基准](./performance-baseline.md)。
-> 上一版权威复核见 [0.8.139 完整报告](./test-report-0.8.139-full.md)；本版发布说明见 [release/0.8.145.md](../release/0.8.145.md)；上一版发布说明见 [release/0.8.142.md](../release/0.8.142.md)。
+> 上一版权威复核见 [0.8.139 完整报告](./test-report-0.8.139-full.md)；本版发布说明见 [release/0.8.146.md](../release/0.8.146.md)；上一版发布说明见 [release/0.8.145.md](../release/0.8.145.md)。
 
 ## 1. 分层结果
 
 | 层 | 命令 | 本轮结果 | 说明 |
 |----|------|----------|------|
 | L-1 契约 | `npm run test:contract` | **3/3** | 契约 44 项 + 文档一致性 6 项 + 设置契约 686 断言（覆盖矩阵/性能基准/命令与链接/版本标记） |
-| 无头层（unit） | `npm test` | **TOTAL=187 FAIL=0 SKIP=1** | SKIP=`tests/test-writer.js`（需 `<cbp>` 参数的手工工具）；新增 7 个工程搜索测试脚本 + `test-clangd-restart.js`（clangd 重启合并） |
+| 无头层（unit） | `npm test` | **TOTAL=188 FAIL=0 SKIP=1** | SKIP=`tests/test-writer.js`（需 `<cbp>` 参数的手工工具）；含 7 个工程搜索测试脚本 + `test-clangd-restart.js`（clangd 重启合并）+ `test-clangd-inactive-regions.js`（inactive regions 装饰生命周期修复，22 断言） |
 | L3 视觉 | `npm run test:visual` | **24/24** | 现有面板布局未改动；搜索视图为 WebviewView，HTML 结构/i18n 由单元层覆盖 |
 | L1 端到端 | `npm run test:e2e` | **6/6** | 构建/调试链未改动；沿用 0.8.142 真实工具链结论 |
 | L4 性能 | `npm run test:perf` | **13 项** | 搜索为按需触发，不引入常驻扫描；沿用既有基线 |
-| L5 打包 | `npm run test:pack` | **1/1（15 断言）** | VSIX 0.8.145 打包 / 安装冒烟通过，含 `bundle/search-worker.js` 检查 |
+| L5 打包 | `npm run test:pack` | **1/1（15 断言）** | VSIX 0.8.146 打包 / 安装冒烟通过，含 `bundle/search-worker.js` 检查 |
 | 产物 | `npm run bundle` + `npm run bundle:search` | 通过 | esbuild 无告警；worker 单独产物已生成 |
 | L2 宿主 | `npm run test:host` | **24/24（0 fail / 0 skip）** | 沿用 0.8.140 复核；本版为新增视图/命令，未改动构建/调试适配层 |
 
@@ -28,6 +28,7 @@
 | Provider 协议 | `tests/test-project-search-view-provider.js` **24 断言**：ready/state、Seti 字体 URI + CSP、文件结果、活动工程（文件 + 内容模式）、打开文件/匹配（0-based）、历史写入/上次结果、历史跳转、关闭保留历史、清空、状态持久化（含全字匹配）、工程变化不重排、文件模式 Enter 提交历史、清空历史模态取消/确认、子树范围、工程树定位 | 命令面板 / C::B Search 菜单 / 工程树右键 |
 | 命令注册 | `tests/test-project-search-commands.js` **8 断言**：两个命令 ID 注册、`onView` 激活事件、视图声明 `type:"webview"`、进入 subscriptions、视图未解析时不抛错、工程树子树入口、dispose 幂等 | 命令面板实际调用；侧边栏实际渲染 |
 | clangd 重启竞态 | `tests/test-clangd-restart.js` **22 断言**：合并窗口、最小间隔、取消、同步/异步异常安全、自定义参数；客户端状态门（无状态/Stopped/Starting→Running/超时/稳定期内停止）；`test-build-cpu-guards` 12 断言（含「自动重启仅两个请求入口 + 优先 `LanguageClient.restart()`」） | 修复 `command 'clangd.applyFix' already exists` → 打开工程不再中断语言服务器 |
+| clangd inactive regions 装饰（0.8.146） | `tests/test-clangd-inactive-regions.js` **22 断言**：Feature 鸭子类型定位、`reset`（dispose + 置空 + 清空区域）、`ensure`（缺失时重建 + 重放）、已存在时不重复重建、单编辑器异常隔离、watcher 状态过渡（Stopped/Starting/Running）、客户端替换后重新 attach、dispose 后不再处理 | `Code::Blocks` 输出通道出现 `已初始化 clangd 非活动区域装饰`；`config.c` 中 `#if FUNC_*_EN` 为 `0` 的区域变暗 |
 | 回归安全 | `test-keybindings`（19 默认键）、`test-keybinding-config`（31 托管项）、`test-settings-structure`（85 设置）、`test-settings-coverage`（无死配置）、`test-menu-structure`、`test-bundle-packaging`（worker 产物/预发布顺序）全绿 | — |
 | 文档与版本标记 | `test-contract.js` G1/G2/G3、`test-doc-consistency.js` D1/D1b/D3/D4/D5；`gen-release-notes.js --check` | `npm run coverage:matrix` 重新生成（命令 113 / 视图 6 / 设置 85 / 快捷键 34） |
 
@@ -51,14 +52,15 @@
 
 | 项 | 说明 |
 |---|---|
-| 新增设置 | `codeblocks.search.scope`、`codeblocks.search.keepHistory`（设置项总数 83 → **85**） |
+| 新增设置 | `codeblocks.search.scope`、`codeblocks.search.keepHistory`（设置项总数 83 → **85**，0.8.146 未变更） |
 | 新增命令 | `codeblocks.searchProjectFiles`、`codeblocks.searchInProjectFiles`（命令总数 111 → **113**） |
 | 新增视图 | `codeblocks.search`（视图总数 5 → **6**） |
 | 新增快捷键 | `codeblocks.searchProjectFiles` → `Ctrl+Alt+P`（快捷键总数 33 → **34**） |
 | 行为变更 | 新增工程内搜索，不替换内置搜索；`Reset View Layout` 侧栏顺序加入 Search；不提升 `UI_LAYOUT_VERSION` |
 | 构建脚本兼容 | Windows `NoDefaultCurrentDirectoryInExePath` 下 pre/post-build 批处理 `call` 同目录 `.bat`（如 `libs_copy.bat`）不再报“不是内部或外部命令”；脚本目录加入子进程 `PATH`（`test-script-runner-exit.js` 新增 4 断言，62 pass） |
 | 新增测试 | `test-project-search.js`、`test-search-history.js`、`test-project-search-tasks.js`、`test-search-worker.js`、`test-project-search-view-html.js`、`test-project-search-view-provider.js`、`test-project-search-commands.js` |
-| 文档 | 新增 [release/0.8.145.md](../release/0.8.145.md) 与 [release/pages/0.8.145.md](../release/pages/0.8.145.md)；分支预发布版本规范见 [release/00-index.md](../release/00-index.md#分支预发布版本branch-prerelease)；usage/settings/alignment/progress/manual-acceptance 同步；覆盖矩阵重新生成 |
+| 0.8.146 修复 | clangd inactive regions 装饰在 `LanguageClient.restart()` 后无法重建（`clear()` 只 dispose 不置空）；新增 `src/tools/clangdInactiveRegions.ts` 与 `tests/test-clangd-inactive-regions.js`（22 断言），不改设置、不改 clangd 扩展本体 |
+| 文档 | 新增 [release/0.8.146.md](../release/0.8.146.md) 与 [release/pages/0.8.146.md](../release/pages/0.8.146.md)；分支预发布版本规范见 [release/00-index.md](../release/00-index.md#分支预发布版本branch-prerelease)；usage/settings/alignment/progress/manual-acceptance 同步；覆盖矩阵重新生成 |
 | 行为边界 | 只搜索 `.cbp` 列出的文件；不写 `search.exclude`、不建 watcher、不调用 `workspace.findFiles` |
 
 ## 4. 缺陷与处置（本轮发现并修复）

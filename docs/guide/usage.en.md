@@ -1,7 +1,7 @@
 ﻿﻿﻿# Code::Blocks for VS Code — Usage Guide
 
 > Language: **English** ｜ [中文](./usage.md)
-> Version: 0.8.145 ｜ Native port of Code::Blocks core features to VS Code, driving GCC / GDB directly, **without** `tasks.json` / `launch.json`.
+> Version: 0.8.146 ｜ Native port of Code::Blocks core features to VS Code, driving GCC / GDB directly, **without** `tasks.json` / `launch.json`.
 
 ---
 
@@ -50,7 +50,7 @@ Code::Blocks for VS Code is a "mini IDE kernel": it parses `.cbp` / `.workspace`
 ### 2.1 Install from VSIX
 
 ```powershell
-code --install-extension codeblocks-vscode-0.8.145.vsix --force
+code --install-extension codeblocks-vscode-0.8.146.vsix --force
 ```
 
 ### 2.2 Build from source
@@ -58,7 +58,7 @@ code --install-extension codeblocks-vscode-0.8.145.vsix --force
 ```powershell
 npm install
 npm run package
-code --install-extension codeblocks-vscode-0.8.145.vsix --force
+code --install-extension codeblocks-vscode-0.8.146.vsix --force
 ```
 
 > `npm run package` = `vsce package` (before packaging, the `vscode:prepublish` hook runs `tsc` compilation (`dist/`, for local testing) + the **esbuild single-file bundle** (`bundle/extension.js`, the release entry));
@@ -364,6 +364,7 @@ When a project is opened, the extension generates the clangd assets **outside th
 - Command: `Code::Blocks: Generate compile_commands.json (IntelliSense)` (regenerate manually and detect clangd)
 - Regenerated automatically when a project is opened and when the active project switches; **changing a `codeblocks.clangd.*` setting that affects the generated artifacts also triggers one regeneration** (~150ms debounce with coalescing; clangd reloads `config.yaml` itself, so no restart or window reload is needed), and both generation and skips are recorded in the Output channel. Settings that only affect display/hints (`buildLogDiagnostics`, `restartOnActiveProjectSwitch`) do not change the artifacts and therefore **do not** trigger a rebuild (avoiding a full command collection on every settings edit for large projects); the `Generate compile_commands.json` command and manual re-detection also clear the clangd detection cache, so a freshly installed/downloaded clangd is picked up immediately. Nothing is generated when no project is open (the scope is unknown); the next project open generates with the new settings.
 - **Compiler changes take effect immediately as well**: the compile commands in the compilation database, `--target` and system-header `-isystem` are all derived from the current compiler, so changing `codeblocks.compilerId` / `codeblocks.masterPath` / `codeblocks.compilerPrograms` **regenerates with the new compiler** and, once the compilation database actually changes, **restarts clangd** (otherwise open files keep reporting errors/completing against the old compile commands), and the bottom status bar `Compiler:` refreshes accordingly. No opt-out is offered for compiler changes (not restarting means the setting did not take effect); the restart on active project switch can be disabled with `codeblocks.clangd.restartOnActiveProjectSwitch`.
+- **inactive-region decorations recover automatically**: after an in-place language-client restart (`LanguageClient.restart()`, which this extension has used since 0.8.144 to avoid duplicate `clangd.applyFix` registration), the clangd extension disposes its old decoration type without clearing the field, so it is never rebuilt — macro-disabled (`#ifdef`) code stops dimming until you close/reopen the file or reload the window. This extension watches the clangd client state: it drops the stale decorations on the stop/start transition and, once Running, rebuilds the decoration type and reapplies the regions it already received, so no manual reopen is needed.
 - **Tolerant setting values**: `suppressedWarnings` / `forcedIncludes` / `excludeDirs` are all string arrays. If you edit `settings.json` by hand and accidentally write a string (e.g. `"codeblocks.clangd.suppressedWarnings": "-Wunused-function, -Wempty-body"`), the extension **splits it by comma/semicolon/whitespace** before use; any other type **falls back to the setting default** and prints an `invalid value type` hint in the Output channel (otherwise "configured in settings but not written to `config.yaml`" is hard to diagnose). Array values are also trimmed, cleared of empty entries and de-duplicated.
 - **Automatic cleanup of stale leftovers**: the extension only rewrites fragments for "the scope opened this time", so after a project is deleted/moved the old fragments remain forever (and clangd parses them every time). Each configuration generation therefore **also cleans up dead fragments** (those whose scope directory or compilation database directory no longer exists) and prints the count to the Output channel; you can also use the `Code::Blocks: Clean Stale clangd Config Fragments` command to preview + clean manually (it also cleans orphan `compile_commands.json` directories in the extension cache directory that no longer have a matching fragment, which can be rebuilt). **Safety boundary**: only fragments marked by the extension itself (`# >>> codeblocks-vscode <hash> begin`…`end`) are touched and user-owned content is never modified; network drives / unmounted drive letters (such as an unmapped `Z:` or a USB stick) and `\\server\share` paths are always skipped, so nothing is deleted by mistake.
 

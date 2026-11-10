@@ -2,7 +2,7 @@
 
 > 语言：**中文** ｜ [English](./usage.en.md)
 >
-> 版本：0.8.145 ｜ 本扩展为 Code::Blocks 核心功能的原生移植，直接驱动 GCC / GDB，**不依赖** `tasks.json` / `launch.json`。
+> 版本：0.8.146 ｜ 本扩展为 Code::Blocks 核心功能的原生移植，直接驱动 GCC / GDB，**不依赖** `tasks.json` / `launch.json`。
 
 ---
 
@@ -51,7 +51,7 @@ Code::Blocks for VS Code 是一个「迷你 IDE 内核」：直接解析 `.cbp` 
 ### 2.1 从 VSIX 安装
 
 ```powershell
-code --install-extension codeblocks-vscode-0.8.145.vsix --force
+code --install-extension codeblocks-vscode-0.8.146.vsix --force
 ```
 
 ### 2.2 从源码构建
@@ -59,7 +59,7 @@ code --install-extension codeblocks-vscode-0.8.145.vsix --force
 ```powershell
 npm install
 npm run package
-code --install-extension codeblocks-vscode-0.8.145.vsix --force
+code --install-extension codeblocks-vscode-0.8.146.vsix --force
 ```
 
 > `npm run package` = `vsce package`（打包前自动执行 `vscode:prepublish` 钩子 = `tsc` 编译（`dist/`，本地测试用）+ **esbuild 单文件打包**（`bundle/extension.js`，发布入口））；
@@ -366,6 +366,7 @@ code --extensionDevelopmentPath="." --disable-extensions --new-window
 - 命令：`Code::Blocks: Generate compile_commands.json (IntelliSense)`（手动重新生成，并检测 clangd）
 - 打开工程、切换活动项目时自动重新生成；**修改影响产物的 `codeblocks.clangd.*` 设置后也会自动重新生成一次**（约 150ms 去抖合并；clangd 自己会重载 `config.yaml`，无需重启或重载窗口），生成/跳过都会在输出通道留痕。只影响展示/提示的 `buildLogDiagnostics`、`restartOnActiveProjectSwitch` 不改变产物，**不会**触发重建（避免大工程每次改设置都全量收集编译命令）；「生成 compile_commands.json」命令与手动重检会顺带清除 clangd 探测缓存，刚安装/下载完也能立即生效。未打开工程时不做生成（作用域未知），下次打开工程按新设置生成。
 - **改编译器后同样立即生效**：编译数据库里的编译命令、`--target`、系统头 `-isystem` 全部按当前编译器推导，因此修改 `codeblocks.compilerId` / `codeblocks.masterPath` / `codeblocks.compilerPrograms` 时会**按新编译器重新生成**并在编译数据库真正变化后**重启 clangd**（否则已打开文件仍按旧编译命令报错/补全），底部状态栏 `Compiler:` 同步刷新。编译器变化不提供关闭项（不重启等于设置没生效）；切换活动工程的重启可用 `codeblocks.clangd.restartOnActiveProjectSwitch` 关闭。
+- **inactive 区域装饰自动恢复**：clangd 扩展在语言客户端「原地重启」（`LanguageClient.restart()`，0.8.144 起本扩展改用该方式以避免 `clangd.applyFix` 重复注册）后，旧装饰类型被 `dispose` 但没有清空，此后不会再重建，表现为 `#ifdef` 关闭的代码**不变暗**（关闭/重开文件或重载窗口才恢复）。本扩展监听 clangd 客户端状态：停止/启动过渡时清掉旧装饰，进入 Running 后立即重建装饰类型并重新应用已收到的区域，无需手动重开文件。
 - **设置取值容错**：`suppressedWarnings` / `forcedIncludes` / `excludeDirs` 都是字符串数组。若手改 `settings.json` 时误写成字符串（如 `"codeblocks.clangd.suppressedWarnings": "-Wunused-function, -Wempty-body"`），扩展会**按逗号/分号/空白拆分**后使用；写成其它类型则**回退设置默认值**，并在输出通道给出 `取值类型不正确` 提示（否则「设置里配了却没写进 `config.yaml`」难以排查）。数组值会顺带 trim、去空、去重。
 - **历史残留自动清理**：扩展只会重写「本次打开作用域」的片段，项目被删除/移动后旧片段会永久残留（clangd 每次都要解析它们）。因此每次生成配置时会**顺带清理失效片段**（作用域目录或编译数据库目录已不存在者），并把清理数量打印到输出通道；也可用命令 `Code::Blocks: Clean Stale clangd Config Fragments` 手动预览 + 清理（同时清理扩展缓存目录里已无对应片段的孤儿 `compile_commands.json` 目录，可重建）。**安全边界**：只动扩展自己标记的片段（`# >>> codeblocks-vscode <hash> begin`…`end`），用户自有内容一律不碰；网络盘/未挂载盘符（如未映射的 `Z:`、U 盘）与 `\\server\share` 路径一律跳过，不会误删。
 
