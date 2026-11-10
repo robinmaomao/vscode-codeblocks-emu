@@ -25,6 +25,7 @@
 | [0.8.141.md](./0.8.141.md) | 打开工程后 clangd 不重启（不分析）修复 + 编译错误自动跳转修复 |
 | [0.8.142.md](./0.8.142.md) | 链接期错误（undefined reference）定位与跳转修复 |
 | [0.8.145.md](./0.8.145.md) | 工程内搜索（Project Search）：只搜索已打开 .cbp 工程，文件/内容双模式 + 历史；由 `feat/project-search` 通过 PR 合并 |
+| [0.8.146.md](./0.8.146.md) | clangd `#ifdef` 关闭区域（inactive regions）不再变暗修复：语言客户端原地重启后装饰无法重建 |
 
 ## 分支预发布版本（branch prerelease）
 
@@ -39,7 +40,7 @@
 - 分支预发布阶段只提交到功能分支，不创建 GitHub Release；VSIX 由本地 `npm run package` 生成，文件名随版本号带分支后缀。
 - 转正式版时版本号回到纯 `x.y.z`，通过 PR 合并到 `main`，再按本文件前述流程生成 `pages/<tag>.md` 与 GitHub Release。
 
-> `0.8.145` 已由 `feat/project-search` 通过 PR 合并到 `main`（正式版说明见 [0.8.145.md](./0.8.145.md)）。
+> `0.8.145` 已由 `feat/project-search` 通过 PR 合并到 `main`（正式版说明见 [0.8.145.md](./0.8.145.md)）；`0.8.146` 为其后的修复版（见 [0.8.146.md](./0.8.146.md)）。
 
 ## 最近 dev 说明（保留）
 
