@@ -1,8 +1,8 @@
-﻿﻿﻿# Code::Blocks for VS Code 使用说明
+﻿﻿﻿﻿# Code::Blocks for VS Code 使用说明
 
 > 语言：**中文** ｜ [English](./usage.en.md)
 >
-> 版本：0.8.146 ｜ 本扩展为 Code::Blocks 核心功能的原生移植，直接驱动 GCC / GDB，**不依赖** `tasks.json` / `launch.json`。
+> 版本：0.8.147 ｜ 本扩展为 Code::Blocks 核心功能的原生移植，直接驱动 GCC / GDB，**不依赖** `tasks.json` / `launch.json`。
 
 ---
 
@@ -51,7 +51,7 @@ Code::Blocks for VS Code 是一个「迷你 IDE 内核」：直接解析 `.cbp` 
 ### 2.1 从 VSIX 安装
 
 ```powershell
-code --install-extension codeblocks-vscode-0.8.146.vsix --force
+code --install-extension codeblocks-vscode-0.8.147.vsix --force
 ```
 
 ### 2.2 从源码构建
@@ -59,7 +59,7 @@ code --install-extension codeblocks-vscode-0.8.146.vsix --force
 ```powershell
 npm install
 npm run package
-code --install-extension codeblocks-vscode-0.8.146.vsix --force
+code --install-extension codeblocks-vscode-0.8.147.vsix --force
 ```
 
 > `npm run package` = `vsce package`（打包前自动执行 `vscode:prepublish` 钩子 = `tsc` 编译（`dist/`，本地测试用）+ **esbuild 单文件打包**（`bundle/extension.js`，发布入口））；
@@ -99,7 +99,11 @@ code --extensionDevelopmentPath="." --disable-extensions --new-window
 
 - **只搜索已打开的 `.cbp` 工程**：不会扫描工作区中未打开的文件，也不调用 `workspace.findFiles`/ripgrep，不影响内置搜索与 `search.exclude`。
 - **入口**：侧边栏 **Project Search** 视图；命令面板 **`Code::Blocks: Project Search: Search Project Files`**（`Ctrl+Alt+P`）/ **`... Search in Project Files`**；C::B **Search** 菜单；工程/文件夹/虚拟文件夹/文件分组右键菜单（只搜该子树，且不写入历史）。
-- **界面**：对齐 VS Code 侧边栏观感——字体/行高取 `--vscode-font-size` 与 22px 行高，图标为内联 codicon SVG；`Aa`（大小写）/ `Ab`（全字匹配）/ `.*`（正则）/ 清除按钮内嵌在搜索框右侧，状态行右侧是「刷新 / 全部展开 / 全部折叠」工具条。
+- **界面**：对齐 VS Code 侧边栏观感——字体/行高取 `--vscode-font-size` 与 22px 行高，图标为内联 codicon SVG；`Aa`（大小写）/ `Ab`（全字匹配）/ `.*`（正则）/ 清除按钮内嵌在搜索框右侧，状态行右侧是「刷新 / 全部展开 / 全部折叠」工具条。**Text 模式结果更紧凑**：与内置 Search 同款界面字体与字号（`--vscode-font-family` / `--vscode-font-size`），工程 / 文件 / 匹配行行高统一为 22px；行号不占固定列，按本批最大行号位数右对齐（等宽数字），匹配行几乎不缩进；预览按 120 字符截取（File 模式仍为 13px / 22px 行高）。
+
+- **Files / Text 共用布局**：`Files / Text / Search / All projects` 保持同一行（空间不足先压缩范围下拉框）；Files 模式同样有「搜索」按钮，搜索进行中显示「停止」。
+- **搜索记录保持**：视图被隐藏（如切到 Explorer）后返回，两种模式最近一次的搜索结果都会恢复，不会因为切换模式而丢失。
+- **模式专属选项**：`Aa`（大小写）/ `Ab`（全字匹配）/ `.*`（正则）仅对内容模式有效，Files 模式下置灰并提示「仅内容模式有效」。
 - **文件模式**：输入即搜（防抖），空查询浏览作用域内全部工程文件（最多 500）；结果按工程分组、工程头可折叠、活动工程置顶；文件行显示语言图标（`.c` 蓝色 C、`.h` 紫色 C（VS Code Explorer 的 Seti 图标字体））+ 文件名 + 目录；单击直接打开文件，行尾定位按钮在工程树中定位；`Aa` / `.*` 对文件模式不生效。多个工程的 `.cbp` `title` 相同（例如 `earphone/app.cbp` 与 `esop8/app.cbp` 的 title 都是 `app`）时，工程分组名自动改用 `.cbp` 所在目录名（`earphone` / `esop8`），避免出现两个同名 `app` 分组。
 - **内容模式**：输入后按 `Enter` 或点击「搜索」；支持字面量与 `/正则/`（`Aa` 控制大小写、`Ab` 全字匹配、`.*` 启用正则；`Ab` 只作用于字面量）；结果按「工程 → 文件 → 匹配」三级分组，每次搜索默认全部展开，工程头与文件行均可折叠并显示匹配数徽标；单击匹配行跳转到对应行列并选中匹配文本；搜索中可点「停止」。
 - **结果固定**：一次搜索完成后，结果的排序与「active project first」标记保持不变；切换活动工程只更新状态栏/范围信息，不会自动重排或重搜，需要刷新时点状态行「刷新」或重新搜索。

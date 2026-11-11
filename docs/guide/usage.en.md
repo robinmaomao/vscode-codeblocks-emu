@@ -1,7 +1,7 @@
-﻿﻿﻿# Code::Blocks for VS Code — Usage Guide
+﻿﻿﻿﻿# Code::Blocks for VS Code — Usage Guide
 
 > Language: **English** ｜ [中文](./usage.md)
-> Version: 0.8.146 ｜ Native port of Code::Blocks core features to VS Code, driving GCC / GDB directly, **without** `tasks.json` / `launch.json`.
+> Version: 0.8.147 ｜ Native port of Code::Blocks core features to VS Code, driving GCC / GDB directly, **without** `tasks.json` / `launch.json`.
 
 ---
 
@@ -50,7 +50,7 @@ Code::Blocks for VS Code is a "mini IDE kernel": it parses `.cbp` / `.workspace`
 ### 2.1 Install from VSIX
 
 ```powershell
-code --install-extension codeblocks-vscode-0.8.146.vsix --force
+code --install-extension codeblocks-vscode-0.8.147.vsix --force
 ```
 
 ### 2.2 Build from source
@@ -58,7 +58,7 @@ code --install-extension codeblocks-vscode-0.8.146.vsix --force
 ```powershell
 npm install
 npm run package
-code --install-extension codeblocks-vscode-0.8.146.vsix --force
+code --install-extension codeblocks-vscode-0.8.147.vsix --force
 ```
 
 > `npm run package` = `vsce package` (before packaging, the `vscode:prepublish` hook runs `tsc` compilation (`dist/`, for local testing) + the **esbuild single-file bundle** (`bundle/extension.js`, the release entry));
@@ -98,7 +98,11 @@ After installation, the **Code::Blocks** icon appears in the Activity Bar on the
 
 - **Searches only opened `.cbp` projects**: it never scans files outside the project model, never calls `workspace.findFiles`/ripgrep, and leaves the built-in search and `search.exclude` untouched.
 - **Entry points**: the **Project Search** sidebar view; the command palette **`Code::Blocks: Project Search: Search Project Files`** (`Ctrl+Alt+P`) / **`... Search in Project Files`**; the C::B **Search** menu; the project / folder / virtual folder / file group context menu (searches that subtree only and is not written to history).
-- **UI**: aligned with the VS Code sidebar — typography from `--vscode-font-size` with 22 px rows and inline codicon SVG icons; `Aa` (case) / `Ab` (whole word) / `.*` (regex) / clear sit inside the search box, and the status row ends with a Refresh / Expand All / Collapse All toolbar.
+- **UI**: aligned with the VS Code sidebar — typography from `--vscode-font-size` with 22 px rows and inline codicon SVG icons; `Aa` (case) / `Ab` (whole word) / `.*` (regex) / clear sit inside the search box, and the status row ends with a Refresh / Expand All / Collapse All toolbar. **Text results are denser**: the same UI font and size as the built-in VS Code Search (`--vscode-font-family` / `--vscode-font-size`), with project / file / match rows all using the built-in 22 px row height; line numbers take no fixed column — they are right-aligned in a column sized to the widest line number of the batch (tabular digits) and match rows are barely indented; the preview is truncated at 120 characters (File mode keeps 13 px / 22 px rows).
+
+- **Shared layout**: `Files / Text / Search / All projects` stay on one row (the scope dropdown shrinks first); Files mode also has a Search button, which becomes Stop while a text search runs.
+- **Results are kept**: hiding the view (e.g. switching to Explorer) and coming back restores the last results of *both* modes instead of dropping the one you switched away from.
+- **Mode-specific options**: `Aa` (case) / `Ab` (whole word) / `.*` (regex) only apply to text search; in Files mode they are disabled with a “text mode only” tooltip.
 - **Files mode**: search-as-you-type (debounced); an empty query browses every project file in scope (up to 500). Results are grouped by project with collapsible, sticky project headers and the active project first; each file row shows a language icon (blue `C` for `.c` and purple `C` for `.h`, using VS Code Explorer's Seti icon font), file name and directory; click to open, and the reveal button jumps to the file in the project tree. `Aa` / `.*` do not affect Files mode. When several projects share the same `.cbp` `title` (for example `earphone/app.cbp` and `esop8/app.cbp` are both `app`), the group name falls back to the `.cbp` folder name (`earphone` / `esop8`) so the two groups stay distinguishable.
 - **Text mode**: press `Enter` or click **Search**; supports literals and `/regex/` (`Aa` controls case, `Ab` matches whole words, `.*` enables regex; `Ab` applies to literal queries only). Results are grouped as project → file → match and start fully expanded on every search; both project headers and file rows collapse and show match-count badges; click a match to jump to its line/column and select the matched text; **Stop** cancels a running search.
 - **Frozen results**: after a search completes, result order and the **active project first** marker stay fixed. Switching the active project only refreshes state/scope information; it does not reorder or re-run the search. Use **Refresh** or search again when you want updated results.

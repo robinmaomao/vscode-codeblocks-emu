@@ -211,6 +211,7 @@
   "区分大小写": "Match case",
   "全字匹配": "Match whole word",
   "使用正则表达式": "Use regular expression",
+  "仅内容模式有效": "Text mode only",
   "刷新": "Refresh",
   "全部展开": "Expand all",
   "全部折叠": "Collapse all",

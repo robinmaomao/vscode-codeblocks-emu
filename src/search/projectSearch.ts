@@ -76,6 +76,8 @@ export const TEXT_CACHE_BUDGET_BYTES = 32 * 1024 * 1024;
 export const TEXT_MAX_QUERY_LENGTH = 300;
 export const FILE_MAX_QUERY_LENGTH = 200;
 export const TEXT_MAX_REGEX_LINE_LENGTH = 4000;
+/** 匹配预览截取长度（含命中的上下文；侧边栏宽度有限，120 字符足够辨识） */
+export const TEXT_PREVIEW_LENGTH = 120;
 
 /** 归一化路径：正斜杠、小写（Windows 大小写不敏感；用于比较/排序/去重） */
 export function normalizeSearchPath(value: string): string {
@@ -419,7 +421,7 @@ export function findTextMatches(text: string, query: TextQuery, opts: FindTextOp
 
   const maxFileMatches = Math.max(1, opts.maxFileMatches ?? TEXT_FILE_MATCH_LIMIT);
   const maxTotalMatches = Math.max(1, opts.maxTotalMatches ?? TEXT_TOTAL_MATCH_LIMIT);
-  const maxPreview = Math.max(40, opts.maxPreviewLength ?? 200);
+  const maxPreview = Math.max(40, opts.maxPreviewLength ?? TEXT_PREVIEW_LENGTH);
   const maxRegexLine = Math.max(80, opts.maxRegexLineLength ?? TEXT_MAX_REGEX_LINE_LENGTH);
   const flags = query.regex.flags.includes('g') ? query.regex.flags : query.regex.flags + 'g';
   const flagsWithoutSticky = flags.replace(/y/g, '');
