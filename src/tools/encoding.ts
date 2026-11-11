@@ -10,6 +10,7 @@
  *  1. `decodeText`             —— 整段解码（UTF-8 严格优先 → GBK 回退），保持既有语义；
  *  2. `decodeOutputLines` /
  *     `OutputLineDecoder`      —— **按完整行**逐行判定编码（流式安全），供构建/脚本/工具输出使用；
+ *     行级输出统一经 `stripAnsi` 清理颜色转义（`-fdiagnostics-color=always` 不再破坏诊断正则）；
  *  3. `decodeTextWithEncoding` /
  *     `encodeText`             —— 读写 `.cbp` 等文本文件时保留原编码（旧 ANSI 工程不被静默转码）。
  */
@@ -32,6 +33,24 @@ export function decodeText(buf: Buffer | string): string {
   }
 }
 
+/**
+ * 清理 ANSI 转义序列（CSI 颜色/光标、OSC 标题/超链接、单字符 ESC）。
+ *
+ * 编译器加了 `-fdiagnostics-color=always`（或在 Makefile/CMake 里导出 `GCC_COLORS`）时，
+ * 输出行形如 `\x1b[01m\x1b[Ksrc/main.c:10:5:\x1b[m\x1b[K ...`：
+ *  - 输出通道直接显示会把 ESC 序列当噪声；
+ *  - 诊断正则要求 `file:line:col:` 连续匹配，颜色码插入后整行解析失败（Build Log/Problems 空）。
+ * 因此所有**行级**子进程输出（构建 / 脚本 / GDB）统一清理。
+ */
+export function stripAnsi(text: string): string {
+  // 绝大多数输出没有颜色：includes 快路径避免逐行跑正则
+  if (!text || !text.includes('\u001b')) return text;
+  return text.replace(
+    /\u001b(?:\[[0-?]*[ -/]*[@-~]|\][^\u0007]*(?:\u0007|\u001b\\)|[@-Z\\-_])/g,
+    '',
+  );
+}
+
 /** 解码单个非 ASCII 行：UTF-8 严格优先，失败回退 GBK（ASCII 行由调用方直通） */
 function decodeLineBytes(line: Buffer): string {
   if (!line.length) return '';
@@ -44,7 +63,7 @@ function decodeLineBytes(line: Buffer): string {
     }
   }
   const text = ascii ? line.toString('latin1') : decodeText(line);
-  return text.endsWith('\r') ? text.slice(0, -1) : text;
+  return stripAnsi(text.endsWith('\r') ? text.slice(0, -1) : text);
 }
 
 /**
@@ -58,7 +77,7 @@ export function decodeOutputLines(buf: Buffer): string[] {
     const text = utf8Fatal.decode(buf);
     const lines = text.split('\n');
     if (lines.length && lines[lines.length - 1] === '') lines.pop();
-    return lines.map((l) => (l.endsWith('\r') ? l.slice(0, -1) : l));
+    return lines.map((l) => stripAnsi(l.endsWith('\r') ? l.slice(0, -1) : l));
   } catch {
     /* 含非 UTF-8 字节：逐行判定 */
   }

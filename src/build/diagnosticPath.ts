@@ -46,6 +46,49 @@ export function normPathKey(p: string): string {
   return p.replace(/\\/g, '/').toLowerCase();
 }
 
+/** 源码扩展：对象文件按同名源码回退时使用（小写比较） */
+const SOURCE_EXTENSIONS = ['.c', '.cpp', '.cc', '.cxx'];
+
+/** 链接器/工具常见「伪文件名」——磁盘上不存在，也不能作为诊断跳转目标 */
+const PSEUDO_TOOL_NAMES = new Set([
+  'ld', 'ld64', 'lld', 'ld.lld', 'ld.gold', 'ld.bfd', 'collect2',
+  'link', 'cl', 'cc1', 'cc1plus', 'gcc', 'g++', 'cc', 'c++',
+  'windres', 'ar', 'ranlib', 'nasm', 'yasm',
+  'make', 'mingw32-make', 'cmake', 'ninja',
+]);
+
+/** 二进制 / 构建产物扩展：不能作为诊断跳转目标（`.d` 虽是文本，也不是源码位置） */
+const NON_SOURCE_EXTENSIONS = new Set([
+  '.o', '.obj', '.a', '.lib', '.so', '.dylib', '.dll', '.exe',
+  '.gch', '.pch', '.d', '.elf', '.axf', '.bin', '.hex', '.s19',
+]);
+
+/**
+ * 是否为「可跳转的诊断位置」（纯名称/扩展判断，不访问磁盘；存在性由调用方检查）。
+ *
+ * 链接器/工具输出的「文件」经常是伪文件名或构建产物：
+ *  - `ld.exe: cannot find -lfoo`（工具名）
+ *  - `obj/main.o:(.text+0x9)`（残留段名的伪路径，Windows 上 `:(` 不可能出现在真实文件名里）
+ *  - `<command-line>` / `<stdin>`
+ * 这些打开必然失败，不应挂跳转命令。
+ */
+export function isNavigableDiagnosticFile(file: string | undefined): boolean {
+  const f = String(file ?? '').trim();
+  if (!f) return false;
+  if (f.includes(':(')) return false;
+  const base = path.basename(f).toLowerCase();
+  if (!base) return false;
+  // 编译器虚拟文件（`<command-line>` / `<stdin>` / `<built-in>` 等）
+  if (/^<.*>$/.test(base)) return false;
+  if (PSEUDO_TOOL_NAMES.has(base) || PSEUDO_TOOL_NAMES.has(base.replace(/\.exe$/, ''))) return false;
+  return !NON_SOURCE_EXTENSIONS.has(path.extname(base));
+}
+
+/** 对象文件（`.o` / `.obj`）：只能作为「找同名源码」的线索，不能作为最终跳转目标 */
+function isObjectFileToken(file: string): boolean {
+  return /\.(?:o|obj)$/i.test(file);
+}
+
 /** 构造工程文件索引 */
 export function buildDiagnosticPathIndex(files: string[], basePath: string): DiagnosticPathIndex {
   const byAbs = new Map<string, string>();
@@ -147,24 +190,37 @@ function resolveExistingFile(
 ): string | undefined {
   const file = rawFile.trim();
   if (!file) return undefined;
+  const objectToken = isObjectFileToken(file);
 
-  if (path.isAbsolute(file)) {
-    if (io.exists(file)) return file;
-  } else {
-    for (const candidate of [path.join(cwd, file), path.join(index.basePath, file)]) {
-      if (io.exists(candidate)) return candidate;
+  // 对象文件是构建产物（链接阶段必然存在），不能当成跳转目标：只走下面的源码匹配
+  if (!objectToken) {
+    if (path.isAbsolute(file)) {
+      if (io.exists(file)) return file;
+    } else {
+      for (const candidate of [path.join(cwd, file), path.join(index.basePath, file)]) {
+        if (io.exists(candidate)) return candidate;
+      }
     }
   }
 
   // 工程文件表按 basename 匹配（链接期常见：只看得到 `func_bt.c` / `func_bt.o`）
   const base = path.basename(file).toLowerCase();
   let matches = index.byBase.get(base) ?? [];
-  if (!matches.length) {
-    const ext = path.extname(base);
-    if (ext === '.o' || ext === '.obj') {
-      const stem = base.slice(0, -ext.length);
-      const sources = ['.c', '.cpp', '.cc', '.cxx'].flatMap((e) => index.byBase.get(stem + e) ?? []);
-      matches = sources;
+  if (!matches.length && objectToken) {
+    const stem = base.slice(0, -path.extname(base).length);
+    matches = SOURCE_EXTENSIONS.flatMap((e) => index.byBase.get(stem + e) ?? []);
+  }
+  if (!matches.length && objectToken) {
+    // 工程文件表里没有（生成文件 / 外部对象）：试对象同目录的同名源码
+    const objectAbs = path.isAbsolute(file)
+      ? file
+      : [path.join(cwd, file), path.join(index.basePath, file)].find((p) => io.exists(p));
+    if (objectAbs) {
+      const stem = objectAbs.slice(0, -path.extname(objectAbs).length);
+      for (const ext of SOURCE_EXTENSIONS) {
+        const candidate = stem + ext;
+        if (io.exists(candidate)) return candidate;
+      }
     }
   }
   if (!matches.length) return undefined;
@@ -214,8 +270,11 @@ export function resolveDiagnosticLocation(
     }
   }
 
-  // 没有任何改善（文件与「直接 join」的结果相同、行号也没补）→ 交给调用方按原逻辑处理
-  const naiveFile = path.isAbsolute(token.file) ? token.file : path.join(cwd, token.file);
+  // 与**原始 token**（含 `:(section)` / `:line`）比较：剥掉段名/行号后落到真实文件本身就是改善。
+  // 用剥离后的 token 比较会把 `src/main.c:(.text+0x9)` 误判为「无改善」，调用方随后回退到
+  // 带段名的原始路径（永不存在）⇒ 点击不跳转（0.8.142 遗留）。
+  const rawFile = String(input.file).trim().replace(/^"+|"+$/g, '');
+  const naiveFile = path.isAbsolute(rawFile) ? rawFile : path.join(cwd, rawFile);
   const unchanged = normPathKey(file) === normPathKey(naiveFile) && (line ?? 0) === (input.line ?? 0);
   if (unchanged) return undefined;
   return { file, line, column: input.column };

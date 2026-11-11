@@ -111,6 +111,34 @@ async function scenarioLinkerDiagnostic() {
 
   const normalized = String(undef.file || '').replace(/\\/g, '/');
   check('S7 伪路径形态已消失（不含 `:(.text`）', !/:\(\.text/.test(normalized), normalized);
+
+  // S8/S9：GNU ld 另一种常见形态 `<obj>:(.text+0x9)`（无调试信息时只给对象文件）。
+  // 链接阶段 .o 必然存在，不能把它当成诊断文件（打开二进制 = 用户眼中的「点击不跳转」）。
+  const findByName = (root, name) => {
+    if (!fs.existsSync(root)) return undefined;
+    for (const e of fs.readdirSync(root, { withFileTypes: true })) {
+      const p = path.join(root, e.name);
+      if (e.isDirectory()) {
+        const hit = findByName(p, name);
+        if (hit) return hit;
+      } else if (e.name.toLowerCase() === name) {
+        return p;
+      }
+    }
+    return undefined;
+  };
+  const objFile = findByName(path.join(dir, 'obj'), 'link_err.o');
+  if (objFile) {
+    const objRel = path.relative(ctx.project.basePath, objFile).replace(/\\/g, '/');
+    const objResolved = resolver({ file: `${objRel}:(.text+0x9)` }, ctx.project.basePath);
+    check('S8 对象文件形态：不把 .o 当诊断文件，落回真实源码',
+      !!objResolved && samePath(objResolved.file, src) && !/\.(o|obj)$/i.test(String(objResolved.file)), { objRel, resolved: objResolved });
+    check('S9 对象文件形态：不残留 `:(.text` 伪路径',
+      !!objResolved && !/:\(\.text/.test(String(objResolved.file).replace(/\\/g, '/')), objResolved);
+  } else {
+    skip++;
+    console.log('SKIP 对象文件未生成（无法验证 .o 形态）');
+  }
 }
 
 (async () => {

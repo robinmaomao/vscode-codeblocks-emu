@@ -1,7 +1,7 @@
 ﻿﻿﻿﻿# Code::Blocks for VS Code — Usage Guide
 
 > Language: **English** ｜ [中文](./usage.md)
-> Version: 0.8.147 ｜ Native port of Code::Blocks core features to VS Code, driving GCC / GDB directly, **without** `tasks.json` / `launch.json`.
+> Version: 0.8.148 ｜ Native port of Code::Blocks core features to VS Code, driving GCC / GDB directly, **without** `tasks.json` / `launch.json`.
 
 ---
 
@@ -50,7 +50,7 @@ Code::Blocks for VS Code is a "mini IDE kernel": it parses `.cbp` / `.workspace`
 ### 2.1 Install from VSIX
 
 ```powershell
-code --install-extension codeblocks-vscode-0.8.147.vsix --force
+code --install-extension codeblocks-vscode-0.8.148.vsix --force
 ```
 
 ### 2.2 Build from source
@@ -58,7 +58,7 @@ code --install-extension codeblocks-vscode-0.8.147.vsix --force
 ```powershell
 npm install
 npm run package
-code --install-extension codeblocks-vscode-0.8.147.vsix --force
+code --install-extension codeblocks-vscode-0.8.148.vsix --force
 ```
 
 > `npm run package` = `vsce package` (before packaging, the `vscode:prepublish` hook runs `tsc` compilation (`dist/`, for local testing) + the **esbuild single-file bundle** (`bundle/extension.js`, the release entry));
@@ -460,6 +460,8 @@ Build succeeded / failed (root, showing elapsed time · N errors · N warnings)
 
 - **Error / warning groups**: the group node label shows the count directly (e.g. `errors (3)`), with the actual diagnostics hanging one level below it.
 - Clicking a diagnostic node jumps precisely to `file:line:column`.
+- **Diagnostics without a source location** (linker/tool output, e.g. `ld.exe: cannot find -lfoo`, `collect2.exe: error: ld returned 1 exit status`): only the message is shown, marked "No source location (linker/tool output)", with no jump command — so clicking never silently does nothing. Linker `undefined reference` diagnostics try to map `<obj>:(.text+0xN)` / `<src>:(.text+0xN)` back to the real source and call line (object files `.o/.obj` are never used as jump targets).
+- **ANSI color output** (e.g. `-fdiagnostics-color=always` or an exported `GCC_COLORS`): color escapes are stripped before parsing, so the Build Log / Problems still list errors (and the output panel no longer shows `[01m`-style noise).
 - `F4` jumps to the next error, `Shift+F4` to the previous one (cyclically).
 - When the number of errors exceeds the limit (50 by default, adjustable with the `codeblocks.maxReportedErrors` setting) the list is truncated automatically.
 - The raw compiler output is still kept in the **"Code::Blocks" output panel** for troubleshooting.

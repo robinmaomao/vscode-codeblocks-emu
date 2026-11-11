@@ -9,6 +9,7 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import * as i18n from '../i18n';
 import { openFileAtLocation } from './openLocation';
+import { isNavigableDiagnosticFile } from '../build/diagnosticPath';
 
 /** 诊断严重程度（仅收集 error/warning，info 噪音大不展示） */
 export type BuildLogSeverity = 'error' | 'warning';
@@ -64,14 +65,6 @@ export interface BuildLogSummary {
 }
 
 type BuildLogKind = 'root' | 'project' | 'info' | 'group' | 'diagnostic';
-
-/**
- * 是否为「链接期伪文件」——`ld.exe: cannot find -lfoo` / `collect2.exe: error: ld returned 1`
- * 之类被正则当文件名捕获的工具名，磁盘上不存在、也没有源码位置 ⇒ 不能作为跳转目标。
- */
-function isPseudoDiagnosticFile(file: string): boolean {
-  return /^(ld|ld64|lld|collect2|link|cl)(\.exe)?$/i.test(path.basename(file));
-}
 
 class BuildLogNode extends vscode.TreeItem {
   /** 子节点（覆盖默认，允许后续赋值） */
@@ -140,8 +133,8 @@ export class BuildLogTreeProvider implements vscode.TreeDataProvider<BuildLogNod
     if (summary) {
       for (const p of summary.projects) {
         for (const d of p.diagnostics) {
-          // 链接期伪文件（ld.exe / collect2.exe / link.exe）没有源码位置，跳过去必然失败 ⇒ 不进导航列表
-          if (d.severity === 'error' && d.file && !isPseudoDiagnosticFile(d.file)) {
+          // 链接期伪文件（ld.exe / collect2.exe）与构建产物（.o）没有可用源码位置 ⇒ 不进导航列表
+          if (d.severity === 'error' && d.file && isNavigableDiagnosticFile(d.file)) {
             this.errorList.push(d);
           }
         }
@@ -309,9 +302,12 @@ export class BuildLogTreeProvider implements vscode.TreeDataProvider<BuildLogNod
 
   private buildDiagnosticNode(d: BuildLogDiagnostic): BuildLogNode {
     const isError = d.severity === 'error';
+    // 不可导航（无文件 / 链接器工具名 / 二进制产物 / 残留段名伪路径）：只展示消息，不挂跳转命令，
+    // 否则点击后 openTextDocument 必然失败，用户看到的就是「点了没反应」。
+    const navigable = !!d.file && isNavigableDiagnosticFile(d.file);
     // label 显示「文件名:行:列」，description 显示完整错误信息（Code::Blocks 习惯，易扫读）
     let label: string;
-    if (d.file) {
+    if (navigable && d.file) {
       const parts = [path.basename(d.file)];
       if (d.line) parts.push(String(d.line));
       if (d.column) parts.push(String(d.column));
@@ -326,21 +322,22 @@ export class BuildLogTreeProvider implements vscode.TreeDataProvider<BuildLogNod
       vscode.TreeItemCollapsibleState.None,
       isError ? this.icon('log-error.svg', 'error') : this.icon('log-warning.svg', 'warning'),
     );
-    node.description = d.file ? d.message : undefined;
-    node.contextValue = isError ? 'diagnostic' : 'diagnostic-warning';
-    node.diag = d;
+    node.description = navigable ? d.message : i18n.t('No source location (linker/tool output)');
     node.contextValue = isError ? 'diagnostic' : 'diagnostic-warning';
     node.diag = d;
 
     const md = new vscode.MarkdownString();
     md.appendMarkdown(`**${d.message}**`);
-    if (d.file) {
+    if (navigable && d.file) {
       md.appendMarkdown('\n\n');
       md.appendCodeblock(`${d.file}${d.line ? `:${d.line}` : ''}${d.column ? `:${d.column}` : ''}`, 'text');
+    } else {
+      md.appendMarkdown('\n\n');
+      md.appendMarkdown(i18n.t('No source location (linker/tool output)'));
     }
     node.tooltip = md;
 
-    if (d.file) {
+    if (navigable && d.file) {
       // 经命令跳转：参数必须是纯标量（`vscode.open` 的 `{ selection: Range }` 序列化后不再是 IRange ⇒ 不定位）
       node.command = {
         command: 'codeblocks.openLocation',

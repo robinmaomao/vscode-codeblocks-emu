@@ -37,6 +37,10 @@
 - [ ] 增量构建：第二次构建提示 up-to-date（无编译命令输出）
 - [ ] 触碰头文件后构建触发重编译；触碰 `external_deps` 触发重链
 - [ ] 构建失败 → Problems 面板错误可点击跳转；状态栏与通知文案一致
+- [ ] **链接期诊断定位**：Build Log 的 Errors 条目（`<obj>:(.text+0xN)` / `<src>:(.text+0xN)` 形式的 `undefined reference`）点击能落到真实源码/调用行；`.o` 对象文件不会作为跳转目标
+- [ ] **无源码位置诊断**：`ld.exe: cannot find -lfoo`、`collect2.exe: error: ld returned 1 exit status` 等条目显示「无源码位置（链接器/工具输出）」且不提供跳转（点击无反应属预期）
+- [ ] **ANSI 颜色输出**：工程给编译器加 `-fdiagnostics-color=always` 后，Build Log 仍列出错误且可跳转，输出面板无 `[01m` 噪声
+- [ ] **失效路径反馈**：点击一个构建后被删除的诊断文件路径会弹出可见警告，而不是点击无反应
 - [ ] 构建日志面板：错误过滤开关、清除输出、复制消息、诊断复制均可用
 - [ ] 构建日志中文件名/命令行含空格时不截断
 - [ ] **CB 产物体积行**：任一可执行目标链接成功后，输出通道出现 `Output file is bin\Debug\xxx.exe with size N.NN KB`（体积与磁盘上文件一致，两位小数、`bytes`/`KB`/`MB` 三档）；勾选 `codeblocks.build.plainCbLog` 后**仍然出现**该行（此时无 `✔️ [Linked]` 摘要行）；静态库目标打包后同样出现（`.a`）；产物被删/链接跳过的场景不出现
