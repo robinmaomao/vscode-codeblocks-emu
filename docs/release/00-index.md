@@ -26,6 +26,7 @@
 | [0.8.142.md](./0.8.142.md) | 链接期错误（undefined reference）定位与跳转修复 |
 | [0.8.145.md](./0.8.145.md) | 工程内搜索（Project Search）：只搜索已打开 .cbp 工程，文件/内容双模式 + 历史；由 `feat/project-search` 通过 PR 合并 |
 | [0.8.146.md](./0.8.146.md) | clangd `#ifdef` 关闭区域（inactive regions）不再变暗修复：语言客户端原地重启后装饰无法重建 |
+| [0.8.147.md](./0.8.147.md) | 工程搜索体验：Text 结果排版对齐内置 Search + Files 模式 Search 按钮/同一行布局 + 切视图后两模式搜索记录保持 + 开关与选项置灰 |
 
 ## 分支预发布版本（branch prerelease）
 
@@ -40,7 +41,7 @@
 - 分支预发布阶段只提交到功能分支，不创建 GitHub Release；VSIX 由本地 `npm run package` 生成，文件名随版本号带分支后缀。
 - 转正式版时版本号回到纯 `x.y.z`，通过 PR 合并到 `main`，再按本文件前述流程生成 `pages/<tag>.md` 与 GitHub Release。
 
-> `0.8.145` 已由 `feat/project-search` 通过 PR 合并到 `main`（正式版说明见 [0.8.145.md](./0.8.145.md)）；`0.8.146` 为其后的修复版（见 [0.8.146.md](./0.8.146.md)）。
+> `0.8.145` 已由 `feat/project-search` 通过 PR 合并到 `main`（正式版说明见 [0.8.145.md](./0.8.145.md)）；`0.8.146` / `0.8.147` 为其后的修复与体验版（见 [0.8.146.md](./0.8.146.md)、[0.8.147.md](./0.8.147.md)）。
 
 ## 最近 dev 说明（保留）
 

@@ -3,6 +3,23 @@
 本文件记录**正式版**里程碑；近期 dev 迭代的逐轮发布说明见 [`docs/release/`](./docs/release/)（`0.8.xx-dev.md`），
 `0.8.76`–`0.8.128` 的 dev 说明已合并归档到 [`docs/release/archive/`](./docs/release/archive/)；版本号与维护约定见 [`docs/release/00-index.md`](./docs/release/00-index.md)。
 
+## 0.8.147 — 2026-11-11
+
+> 体验版：Project Search 的 Text 结果排版对齐 VS Code 内置 Search，并修复切换视图后另一种模式的搜索记录丢失。
+
+**工程搜索体验（Project Search）**
+
+- **Text 结果对齐内置 Search**：匹配行改用界面字体（`--vscode-font-family`）与 `--vscode-font-size`；工程头 / 文件行 / 匹配行统一 **22px** 行高；行号右对齐、按本批最大行号位数定宽（`--cb-line-num-ch`，等宽数字），不再占用固定列，代码左边缘不随位数跳动；Text 模式不再单独覆盖工程头/文件行/徽标尺寸，与 Files 模式完全一致。
+- **预览长度**：新增 `TEXT_PREVIEW_LENGTH = 120`（原 200），窄侧栏可少滚动；`maxPreviewLength` 显式传参仍可覆盖。
+- **Files 模式补回「搜索」按钮**：仅在 Text 模式搜索进行中替换为「停止」；`.controls` 改 `flex-wrap: nowrap`，`#scope` 用 `flex: 0 1 auto` 先压缩，`Files / Text / Search / All projects` 保持同一行（≤240px 兜底才换行）。
+- **搜索记录保持**：侧边栏隐藏（切到 Explorer）会销毁 webview，新增 `postCachedResults()` 在 `ready` 时回放两种模式最近一次的 `fileResults` / `textResults`（含 `matchCount`），**不重跑扫描**；缓存 query 与当前 query 不一致时不回放，当前模式无缓存且查询非空时才回退重跑。
+- **状态行按模式记忆**：`S.summary = { files, text }`，切换模式恢复各自摘要，不再显示另一模式的统计。
+- **`Keep history` 开关修正**：`.switch` 加 `box-sizing: border-box`（外框此前被边框撑成 30×18，滑块底边多 1px、开启态右侧少走 2px），`border-radius` 9px → 8px，滑块四周留白对称。
+- **Files 模式选项置灰**：文件搜索恒不区分大小写、不支持正则/全字匹配，`Aa` / `Ab` / `.*` 在 Files 模式 `disabled` 并提示「仅内容模式有效」，Text 模式恢复原 tooltip。
+- 验证：`npm test` **TOTAL=188 FAIL=0 SKIP=1**；`npm run test:contract` 3/3；`test-project-search-view-html.js` 24/24、`test-project-search-view-provider.js` 24/24、`test-i18n-webview.js` 21/21。
+- 发布说明见 [`docs/release/0.8.147.md`](./docs/release/0.8.147.md)；测试结果见
+  [`docs/testing/test-report-0.8.147.md`](./docs/testing/test-report-0.8.147.md)。
+
 ## 0.8.146 — 2026-11-10
 
 > 修复版：clangd `#ifdef` 关闭区域（inactive regions）不再变暗。

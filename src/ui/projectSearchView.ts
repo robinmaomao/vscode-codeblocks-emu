@@ -127,6 +127,7 @@ interface TextResultState {
   byId: Map<string, { file: TextSearchFile; match?: TextMatchDto }>;
   truncated: boolean;
   elapsedMs: number;
+  matchCount: number;
 }
 
 interface ActiveWorkerSearch {
@@ -590,10 +591,12 @@ export class ProjectSearchViewProvider implements vscode.WebviewViewProvider {
           this.pendingReveal = undefined;
           this.post({ type: 'activated', mode: pending.mode, query: this.viewState.queries[pending.mode] });
         }
-        // 视图（重新）解析后恢复当前模式的结果：文件模式便宜，内容模式仅在有查询时重跑
-        if (this.viewState.mode === 'files' && this.host.getProjects().length) {
+        // 视图（重新）解析：先回放两种模式已缓存的搜索结果（视图隐藏时 webview 上下文会被销毁），
+        // 缓存缺失时才回退到重跑，避免切换 Explorer 后另一模式的记录丢失。
+        const restored = this.postCachedResults();
+        if (this.viewState.mode === 'files' && !restored.files && this.host.getProjects().length) {
           void this.runFileSearch(this.viewState.queries.files, 0);
-        } else if (this.viewState.mode === 'text' && this.viewState.queries.text.trim()) {
+        } else if (this.viewState.mode === 'text' && !restored.text && this.viewState.queries.text.trim()) {
           void this.runTextSearch(this.viewState.queries.text);
         }
         break;
@@ -823,7 +826,7 @@ export class ProjectSearchViewProvider implements vscode.WebviewViewProvider {
     const started = Date.now();
     const files = this.textFiles();
     if (!files.length) {
-      this.textResults = { query, files: [], byId: new Map(), truncated: false, elapsedMs: 0 };
+      this.textResults = { query, files: [], byId: new Map(), truncated: false, elapsedMs: 0, matchCount: 0 };
       this.post({ type: 'textResults', requestId: seq, query, files: [], matchCount: 0, fileCount: 0, truncated: false, elapsedMs: 0 });
       return;
     }
@@ -940,6 +943,7 @@ export class ProjectSearchViewProvider implements vscode.WebviewViewProvider {
       byId,
       truncated: result?.truncated === true,
       elapsedMs,
+      matchCount,
     };
     this.post({
       type: 'textResults',
@@ -1232,6 +1236,47 @@ export class ProjectSearchViewProvider implements vscode.WebviewViewProvider {
 
   private publicSubtree(): { projectFilename: string; label: string } | undefined {
     return this.subtree ? { projectFilename: this.subtree.projectFilename, label: this.subtree.label } : undefined;
+  }
+
+  /**
+   * 回放两种模式已缓存的搜索结果。
+   *
+   * 侧边栏 webview 在视图隐藏（如切到 Explorer）时会被销毁，重新显示后内存里的结果全部丢失；
+   * 这里直接把上次的 DTO 重新下发，既不重跑扫描，也能保留「非当前模式」的搜索结果。
+   */
+  private postCachedResults(): { files: boolean; text: boolean } {
+    const out = { files: false, text: false };
+    // 仅在缓存查询与当前查询一致时回放（避免恢复「已清空/已改写查询」的旧结果）
+    if (this.fileResults && this.fileResults.query === this.viewState.queries.files) {
+      const f = this.fileResults;
+      this.post({
+        type: 'fileResults',
+        requestId: this.fileSeq,
+        query: f.query,
+        results: f.results,
+        total: f.results.length,
+        truncated: f.truncated,
+        elapsedMs: f.elapsedMs,
+      });
+      out.files = true;
+    }
+    if (this.textResults && this.textResults.query === this.viewState.queries.text && this.textResults.query.trim()) {
+      const t = this.textResults;
+      this.post({
+        type: 'textResults',
+        requestId: this.textSeq,
+        query: t.query,
+        files: t.files,
+        matchCount: t.matchCount,
+        fileCount: t.files.length,
+        truncated: t.truncated,
+        elapsedMs: t.elapsedMs,
+        cancelled: false,
+        timedOut: false,
+      });
+      out.text = true;
+    }
+    return out;
   }
 
   private postState(): void {

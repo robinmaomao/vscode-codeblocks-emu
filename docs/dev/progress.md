@@ -67,7 +67,7 @@ npm.cmd run compile
 npm.cmd run package
 
 # 安装（版本号以 package.json 为准）
-code --install-extension "codeblocks-vscode-0.8.146.vsix" --force
+code --install-extension "codeblocks-vscode-0.8.147.vsix" --force
 
 # 全量回归测试
 npm.cmd test
@@ -118,8 +118,9 @@ npm.cmd test
 | [0.8.142](../release/0.8.142.md) | 链接期错误（undefined reference）定位与跳转修复 |
 | [0.8.145](../release/0.8.145.md) | 工程内搜索（Project Search）：只搜索已打开 .cbp 工程，文件/内容双模式；UI 对齐 VS Code 内置搜索（字体/行高/codicon/Seti 文件图标、Aa/Ab/.* 输入框内选项），结果按工程分组并默认全展开，搜索后结果固定；搜索/Enter 即写历史且历史面板位于搜索框下方；清空历史走 VS Code 原生模态确认；修复视图 webview 类型、clangd 重启竞态（applyFix 重复注册）与 pre/post-build 同目录批处理解析 |
 | [0.8.146](../release/0.8.146.md) | clangd `#ifdef` 关闭区域（inactive regions）不再变暗修复：`LanguageClient.restart()` 复用同客户端/Feature，`clear()` 只 dispose 装饰类型不清空字段 ⇒ 永不重建；改为在客户端停止/启动过渡时清空、Running 时重建并重放区域 |
+| [0.8.147](../release/0.8.147.md) | 工程搜索体验：Text 结果排版对齐 VS Code 内置 Search（界面字体 / 22px 行高 / 行号右对齐定宽 / 预览 120 字符）、Files 模式补回 Search 按钮且四个控件同一行、切换 Explorer 后两种模式的搜索记录保持（Provider 回放缓存）、状态行按模式记忆、`Keep history` 开关对齐、Files 模式 `Aa`/`Ab`/`.*` 置灰 |
 
-> 当前版本 **0.8.146**（修复版；发布说明见 [release/0.8.146.md](../release/0.8.146.md)，上一版见 [release/0.8.145.md](../release/0.8.145.md)）；测试报告见 [test-report-0.8.146.md](../testing/test-report-0.8.146.md)；无头回归见 `npm test`（`TOTAL=188 FAIL=0 SKIP=1`，另有契约 / E2E / 视觉 / 性能 / 打包 / 宿主分层，见 [测试方案](../testing/strategy.md)）。
+> 当前版本 **0.8.147**（体验版；发布说明见 [release/0.8.147.md](../release/0.8.147.md)，上一版见 [release/0.8.146.md](../release/0.8.146.md)）；测试报告见 [test-report-0.8.147.md](../testing/test-report-0.8.147.md)；无头回归见 `npm test`（`TOTAL=188 FAIL=0 SKIP=1`，另有契约 / E2E / 视觉 / 性能 / 打包 / 宿主分层，见 [测试方案](../testing/strategy.md)）。
 
 ## 文档：GitHub Release 页面格式统一
 

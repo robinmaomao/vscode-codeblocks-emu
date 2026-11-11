@@ -53,7 +53,9 @@ button { cursor: pointer; }
 .toolbar-btn.active { background: var(--vscode-list-activeSelectionBackground); color: var(--vscode-list-activeSelectionForeground); }
 .switch-wrap { display: inline-flex; align-items: center; gap: 5px; color: var(--vscode-descriptionForeground); white-space: nowrap; }
 .switch {
-  width: 28px; height: 16px; border-radius: 9px; position: relative; display: inline-block;
+  /* border-box：28×16 含边框，内部 26×14 ⇒ 滑块 12px 四周留 1px，左右行程 12px 才对称 */
+  box-sizing: border-box;
+  width: 28px; height: 16px; border-radius: 8px; position: relative; display: inline-block;
   background: var(--vscode-input-background); border: 1px solid var(--vscode-input-border, var(--vscode-contrastBorder, #666));
   transition: background-color .12s ease; outline: none; flex: 0 0 auto;
 }
@@ -113,6 +115,8 @@ button { cursor: pointer; }
   color: var(--vscode-input-foreground); font-size: 11px; line-height: 1; padding: 0;
 }
 .input-option:hover { background: var(--vscode-toolbar-hoverBackground); }
+.input-option:disabled { opacity: .4; cursor: default; }
+.input-option:disabled:hover { background: transparent; }
 .input-option[aria-pressed="true"] {
   background: var(--vscode-inputOption-activeBackground, var(--vscode-list-activeSelectionBackground));
   border-color: var(--vscode-inputOption-activeBorder, transparent);
@@ -123,15 +127,16 @@ button { cursor: pointer; }
 .primary { background: var(--vscode-button-background); color: var(--vscode-button-foreground); border: 1px solid transparent; border-radius: 3px; height: 24px; padding: 0 10px; }
 .primary:hover { background: var(--vscode-button-hoverBackground); }
 .danger { background: var(--vscode-inputValidation-errorBackground, #a1260d); color: #fff; border: 1px solid transparent; border-radius: 3px; height: 24px; padding: 0 10px; }
-.controls { display: flex; align-items: center; gap: 6px; padding: 6px 8px 0; flex-wrap: wrap; }
-.segmented { display: inline-flex; border-radius: 3px; overflow: hidden; border: 1px solid var(--vscode-input-border, transparent); height: 24px; }
+.controls { display: flex; align-items: center; gap: 6px; padding: 6px 8px 0; flex-wrap: nowrap; }
+.segmented { display: inline-flex; flex: 0 0 auto; border-radius: 3px; overflow: hidden; border: 1px solid var(--vscode-input-border, transparent); height: 24px; }
 .segment {
   border: none; background: var(--vscode-button-secondaryBackground); color: var(--vscode-button-secondaryForeground);
-  padding: 0 10px; line-height: 22px; font-size: 12px;
+  padding: 0 8px; line-height: 22px; font-size: 12px;
 }
 .segment.active { background: var(--vscode-list-activeSelectionBackground); color: var(--vscode-list-activeSelectionForeground); }
+#searchBtn, #stopBtn { flex: 0 0 auto; }
 #scope {
-  margin-left: auto; max-width: 52%; height: 24px; box-sizing: border-box;
+  margin-left: auto; flex: 0 1 auto; min-width: 0; max-width: 52%; height: 24px; box-sizing: border-box;
   color: var(--vscode-dropdown-foreground); background: var(--vscode-dropdown-background);
   border: 1px solid var(--vscode-dropdown-border, transparent); border-radius: 3px; padding: 0 4px;
 }
@@ -209,6 +214,16 @@ button { cursor: pointer; }
 .match-row .line { flex: 0 0 34px; text-align: right; color: var(--vscode-editorLineNumber-foreground, var(--vscode-descriptionForeground)); font-family: var(--vscode-editor-font-family); font-size: 11px; font-variant-numeric: tabular-nums; }
 .match-row.selected .line { color: inherit; opacity: .8; }
 .match-row .match-preview { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: pre; font-family: var(--vscode-editor-font-family); font-size: var(--vscode-editor-font-size, 12px); }
+/* Text 模式：工程头/文件行与 Files 模式共用基础样式，仅匹配行做紧凑排版并采用内置 Search 的界面字体 */
+.results.text-mode { font-size: var(--vscode-font-size, 13px); }
+.results.text-mode .match-row { line-height: 22px; gap: 4px; padding: 0 4px; }
+.results.text-mode .match-row .line {
+  flex: 0 0 auto; text-align: right; margin-right: 5px;
+  min-width: calc(var(--cb-line-num-ch, 2) * 1ch);
+  font-family: var(--vscode-font-family); font-size: .9em; opacity: .7;
+  font-variant-numeric: tabular-nums;
+}
+.results.text-mode .match-row .match-preview { font-family: var(--vscode-font-family); font-size: inherit; }
 .load-more { display: block; width: calc(100% - 10px); margin: 6px 5px; padding: 3px; }
 .empty { padding: 18px 14px; text-align: center; color: var(--vscode-descriptionForeground); }
 .empty .title { color: var(--vscode-foreground); font-weight: 600; margin-bottom: 5px; }
@@ -220,7 +235,7 @@ button { cursor: pointer; }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
 @media (max-width: 240px) {
   .history-label, .switch-label, .btn-label { display: none; }
-  .controls { gap: 4px; }
+  .controls { gap: 4px; flex-wrap: wrap; }
   #scope { max-width: 60%; }
   .file-row .dir { display: none; }
   .footer { display: none; }
@@ -333,6 +348,7 @@ button { cursor: pointer; }
     noProjectsHint: "${i18n.tr('打开一个 .cbp 工程后即可搜索工程内文件')}",
     textHintTitle: "${i18n.tr('输入内容后按 Enter 搜索')}",
     textHintBody: "${i18n.tr('搜索内容，只查找已打开 .cbp 工程中的文件')}",
+    toggleTextOnly: "${i18n.tr('仅内容模式有效')}",
     filesHintTitle: "${i18n.tr('文件模式：空查询可浏览全部工程文件')}",
     noResults: "${i18n.tr('没有匹配结果')}",
     adjustHint: "${i18n.tr('试试调整范围、大小写或正则选项')}",
@@ -346,6 +362,9 @@ button { cursor: pointer; }
   };
 
   function $(id) { return document.getElementById(id); }
+  var OPTION_IDS = ['caseToggle', 'wholeWordToggle', 'regexToggle'];
+  /** 三个选项按钮的原始 tooltip（切回内容模式时恢复） */
+  var OPTION_TITLES = {};
   var queryEl = $('query');
   var resultsEl = $('results');
   var statusEl = $('statusText');
@@ -357,6 +376,9 @@ button { cursor: pointer; }
   var switchEl = $('historySwitch');
   var scopeEl = $('scope');
   var chipEl = $('scopeChip');
+  for (var ot = 0; ot < OPTION_IDS.length; ot++) {
+    OPTION_TITLES[OPTION_IDS[ot]] = $(OPTION_IDS[ot]).getAttribute('title') || '';
+  }
 
   var S = {
     mode: 'files',
@@ -376,6 +398,7 @@ button { cursor: pointer; }
     history: [],
     historyCollapsed: true,
     data: { files: null, text: null },
+    summary: { files: '', text: '' },
     expanded: {},
     groups: {},
     renderLimit: 200,
@@ -457,6 +480,7 @@ button { cursor: pointer; }
   function updateChrome() {
     $('modeFiles').classList.toggle('active', S.mode === 'files');
     $('modeText').classList.toggle('active', S.mode === 'text');
+    resultsEl.classList.toggle('text-mode', S.mode === 'text');
     $('modeFiles').setAttribute('aria-selected', S.mode === 'files' ? 'true' : 'false');
     $('modeText').setAttribute('aria-selected', S.mode === 'text' ? 'true' : 'false');
     scopeEl.value = S.scope;
@@ -464,13 +488,22 @@ button { cursor: pointer; }
     var chipVisible = !!S.subtree;
     chipEl.classList.toggle('hidden', !chipVisible);
     if (chipVisible) $('scopeChipLabel').textContent = (S.subtree && S.subtree.label) || '';
+    // 文件搜索恒不区分大小写、不支持正则/全字匹配：这三项仅在内容模式可用
+    var textOnly = S.mode !== 'text';
+    for (var o = 0; o < OPTION_IDS.length; o++) {
+      var optEl = $(OPTION_IDS[o]);
+      optEl.disabled = textOnly;
+      optEl.setAttribute('aria-disabled', textOnly ? 'true' : 'false');
+      optEl.title = textOnly ? T.toggleTextOnly : (OPTION_TITLES[OPTION_IDS[o]] || '');
+    }
     $('caseToggle').setAttribute('aria-pressed', S.caseSensitive ? 'true' : 'false');
     $('wholeWordToggle').setAttribute('aria-pressed', S.wholeWord ? 'true' : 'false');
     $('regexToggle').setAttribute('aria-pressed', S.regex ? 'true' : 'false');
     switchEl.setAttribute('aria-checked', S.keepHistory ? 'true' : 'false');
     $('clearHistory').classList.remove('hidden');
-    $('searchBtn').classList.toggle('hidden', S.running || S.mode !== 'text');
-    $('stopBtn').classList.toggle('hidden', !S.running);
+    var textRunning = S.running && S.mode === 'text';
+    $('searchBtn').classList.toggle('hidden', textRunning);
+    $('stopBtn').classList.toggle('hidden', !textRunning);
     var collapsed = S.historyCollapsed !== false;
     $('historyToggle').setAttribute('aria-expanded', collapsed ? 'false' : 'true');
     historyBody.classList.toggle('hidden', collapsed);
@@ -511,7 +544,12 @@ button { cursor: pointer; }
   function clearQuery() {
     setQuery('');
     if (S.mode === 'files') runSearch();
-    else { S.data.text = null; render(); }
+    else {
+      S.data.text = null;
+      S.summary.text = '';
+      render();
+      setStatus('');
+    }
     queryEl.focus();
   }
 
@@ -526,6 +564,8 @@ button { cursor: pointer; }
     updateChrome();
     render();
     renderHistory();
+    // 状态行恢复当前模式自己的结果摘要，避免显示另一模式的统计
+    if (!S.running) setStatus(S.summary[S.mode] || '', 'ok');
     queryEl.focus();
   }
 
@@ -768,6 +808,8 @@ button { cursor: pointer; }
     var files = (msg && msg.files) || [];
     if (!files.length) return;
     var grouped = groupItems(files, projectKeyOf);
+    // 行号列宽按本批结果的最大行号位数设定（右对齐 + 等宽数字），代码左边缘不随位数跳动
+    var maxLineNo = 0;
     for (var g = 0; g < grouped.order.length; g++) {
       var key = grouped.order[g];
       var items = grouped.by[key];
@@ -790,6 +832,7 @@ button { cursor: pointer; }
         if (!fileExpanded) continue;
         for (var j = 0; j < f.matches.length && j < 50; j++) {
           var m = f.matches[j];
+          if ((m.line || 0) + 1 > maxLineNo) maxLineNo = (m.line || 0) + 1;
           var row = document.createElement('div');
           row.className = 'match-row';
           row.setAttribute('role', 'option');
@@ -808,6 +851,7 @@ button { cursor: pointer; }
         }
       }
     }
+    resultsEl.style.setProperty('--cb-line-num-ch', String(Math.max(2, String(maxLineNo).length)));
   }
 
   function renderEmpty() {
@@ -1202,7 +1246,8 @@ button { cursor: pointer; }
       persist();
       showProgress(false, 0);
       render();
-      setStatus((msg.total || 0) + ' ' + T.filesUnit + ' · ' + (msg.elapsedMs || 0) + ' ms' + (msg.truncated ? ' · ' + T.truncated : ''), 'ok');
+      S.summary.files = (msg.total || 0) + ' ' + T.filesUnit + ' · ' + (msg.elapsedMs || 0) + ' ms' + (msg.truncated ? ' · ' + T.truncated : '');
+      setStatus(S.summary.files, 'ok');
     } else if (msg.type === 'textProgress') {
       var total = Number(msg.total) || 0;
       var scanned = Number(msg.scanned) || 0;
@@ -1220,6 +1265,7 @@ button { cursor: pointer; }
       if (msg.cancelled) status += ' · ' + T.cancelled;
       if (msg.timedOut) status += ' · ' + T.timedOut;
       if (msg.truncated) status += ' · ' + T.truncated;
+      S.summary.text = status;
       setStatus(status, 'ok');
     } else if (msg.type === 'history') {
       S.history = Array.isArray(msg.entries) ? msg.entries : [];
