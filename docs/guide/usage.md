@@ -2,7 +2,7 @@
 
 > 语言：**中文** ｜ [English](./usage.en.md)
 >
-> 版本：0.8.147 ｜ 本扩展为 Code::Blocks 核心功能的原生移植，直接驱动 GCC / GDB，**不依赖** `tasks.json` / `launch.json`。
+> 版本：0.8.148 ｜ 本扩展为 Code::Blocks 核心功能的原生移植，直接驱动 GCC / GDB，**不依赖** `tasks.json` / `launch.json`。
 
 ---
 
@@ -51,7 +51,7 @@ Code::Blocks for VS Code 是一个「迷你 IDE 内核」：直接解析 `.cbp` 
 ### 2.1 从 VSIX 安装
 
 ```powershell
-code --install-extension codeblocks-vscode-0.8.147.vsix --force
+code --install-extension codeblocks-vscode-0.8.148.vsix --force
 ```
 
 ### 2.2 从源码构建
@@ -59,7 +59,7 @@ code --install-extension codeblocks-vscode-0.8.147.vsix --force
 ```powershell
 npm install
 npm run package
-code --install-extension codeblocks-vscode-0.8.147.vsix --force
+code --install-extension codeblocks-vscode-0.8.148.vsix --force
 ```
 
 > `npm run package` = `vsce package`（打包前自动执行 `vscode:prepublish` 钩子 = `tsc` 编译（`dist/`，本地测试用）+ **esbuild 单文件打包**（`bundle/extension.js`，发布入口））；
@@ -463,6 +463,8 @@ Build Log 视图位于**底部 Panel**（打开方式：`Ctrl+J` 后选择「Bui
 
 - **错误 / 警告分组**：分组节点 label 直接显示数量（如 `错误 (3)`），具体诊断挂在其下一层级。
 - 点击诊断节点精确定位到 `文件:行:列`。
+- **无源码位置的诊断**（链接器/工具输出，如 `ld.exe: cannot find -lfoo`、`collect2.exe: error: ld returned 1 exit status`）：只显示消息并标注「无源码位置（链接器/工具输出）」，不提供跳转，避免点击无反应。链接期的 `undefined reference` 会尽量把 `<obj>:(.text+0xN)` / `<src>:(.text+0xN)` 落回真实源码与调用行（对象文件 `.o/.obj` 不会作为跳转目标）。
+- **ANSI 颜色输出兼容**：工程给编译器加 `-fdiagnostics-color=always`（或导出 `GCC_COLORS`）时，颜色转义会先被清理再解析，Build Log / Problems 仍能正常列出错误（输出面板不再出现 `[01m` 之类的噪声）。
 - `F4` 跳转下一个错误，`Shift+F4` 跳转上一个错误（循环）。
 - 错误数超过上限（默认 50，设置 `codeblocks.maxReportedErrors` 调整）时自动截断。
 - 原始编译输出仍保留在 **输出面板「Code::Blocks」** 中用于排障。

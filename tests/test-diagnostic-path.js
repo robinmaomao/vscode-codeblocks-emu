@@ -107,6 +107,49 @@ async function main() {
     check('B10 `obj:src` + 未定义符号 → 落到调用行（第 6 行，不是 extern 声明）',
       !!r8 && r8.file === callSrc && r8.line === 6, r8);
 
+    // ---------- B11–B15：0.8.148 修复（段名残留 / 对象文件 / 同级源码 / 可导航判断） ----------
+    // B11：剥掉 `:(section)` 后文件本来就对、但行号推不出来 —— 之前误判「无改善」返回 undefined，
+    //      调用方回退到带 `:(.text+0x9)` 的原始路径 ⇒ 点击必然失败
+    const direct = path.join(tmp, 'direct.c');
+    fs.writeFileSync(direct, 'int main(void) { return 0; }\n', 'utf-8');
+    const r11 = resolveDiagnosticLocation({ file: 'direct.c:(.text+0x9)' }, tmp, index, io);
+    check('B11 段名残留 + 文件已正确：仍返回剥掉段名的真实文件（不能返回 undefined）',
+      !!r11 && r11.file === direct && r11.line === undefined, r11);
+
+    // B12：对象文件在链接阶段必然存在，不能把它当跳转目标（应回退同名源码）
+    const objDir = path.join(tmp, 'obj', 'Debug');
+    fs.mkdirSync(objDir, { recursive: true });
+    const objFile = path.join(objDir, 'func_bt.o');
+    fs.writeFileSync(objFile, Buffer.from([0x7f, 0x45, 0x4c, 0x46]));
+    const r12 = resolveDiagnosticLocation({ file: 'obj/Debug/func_bt.o:(.text+0x9)' }, tmp, index, io);
+    check('B12 对象文件已存在：仍回退同名源码，不返回 .o',
+      !!r12 && r12.file === src && r12.file !== objFile, r12);
+
+    // B13：工程里没有同名源码 → 不能返回对象文件
+    const r13 = resolveDiagnosticLocation({ file: 'obj/Debug/missing.o:(.text+0x9)' }, tmp, index, io);
+    check('B13 对象文件无同名源码：返回 undefined（不把 .o 当位置）', r13 === undefined, r13);
+
+    // B14：工程文件表没有（生成文件/外部对象）→ 试对象同目录的同名源码
+    const genDir = path.join(tmp, 'gen');
+    fs.mkdirSync(genDir, { recursive: true });
+    fs.writeFileSync(path.join(genDir, 'gen.o'), Buffer.from([1, 2, 3]));
+    fs.writeFileSync(path.join(genDir, 'gen.c'), 'int gen(void) { return 0; }\n', 'utf-8');
+    const r14 = resolveDiagnosticLocation({ file: 'gen/gen.o:(.text+0x9)' }, tmp, index, io);
+    check('B14 工程外对象：回退同目录同名源码',
+      !!r14 && r14.file === path.join(genDir, 'gen.c'), r14);
+
+    const { isNavigableDiagnosticFile } = require(dist('build/diagnosticPath.js'));
+    check('B15 可导航判断：源码/头文件/链接脚本可导航；伪文件/对象文件/残留段名不可导航',
+      isNavigableDiagnosticFile(direct) === true
+      && isNavigableDiagnosticFile(path.join(tmp, 'x.h')) === true
+      && isNavigableDiagnosticFile(path.join(tmp, 'link.ld')) === true
+      && isNavigableDiagnosticFile(path.join(tmp, 'ld.exe')) === false
+      && isNavigableDiagnosticFile(path.join(tmp, 'windres.exe')) === false
+      && isNavigableDiagnosticFile(objFile) === false
+      && isNavigableDiagnosticFile('main.o:(.text+0x9)') === false
+      && isNavigableDiagnosticFile('<stdin>') === false,
+      { ld: isNavigableDiagnosticFile(path.join(tmp, 'ld.exe')), obj: isNavigableDiagnosticFile(objFile) });
+
     // 缓存解析器：同一文件只读一次
     let reads = 0;
     const resolver = createDiagnosticResolver(index, {
@@ -133,6 +176,17 @@ async function main() {
     const absoluteWarn = parser.parseLine(`${src}:6:17: warning: implicit declaration of function 'x'`);
     const caw = resolver(absoluteWarn, tmp);
     check('C4 已是绝对路径 + 行号：不做改写（resolver 返回 undefined）', caw === undefined, caw);
+
+    // C5–C7：ANSI 颜色输出（-fdiagnostics-color=always）——清理后必须能正常解析
+    const enc = require(dist('tools/encoding.js'));
+    const colored = '\u001b[01m\u001b[Ksrc/main.c:10:5:\u001b[m\u001b[K \u001b[01;31m\u001b[Kerror:\u001b[m\u001b[K ' + "'x' undeclared";
+    const clean = enc.stripAnsi(colored);
+    check('C5 stripAnsi 清理 CSI 颜色码', clean === "src/main.c:10:5: error: 'x' undeclared", clean);
+    check('C6 无 ESC 的行原样返回（快路径）', enc.stripAnsi('src/main.c:10:5: error: x') === 'src/main.c:10:5: error: x', null);
+    const coloredParsed = parser.parseLine(clean);
+    check('C7 清理后的彩色错误行可被 OutputParser 解析（file/line/col）',
+      !!coloredParsed && coloredParsed.file === 'src/main.c' && coloredParsed.line === 10 && coloredParsed.column === 5,
+      coloredParsed);
   } finally {
     mock.restore();
     try { fs.rmSync(tmp, { recursive: true, force: true }); } catch { /* 忽略 */ }

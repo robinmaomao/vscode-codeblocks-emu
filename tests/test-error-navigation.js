@@ -61,7 +61,8 @@ async function main() {
     check('A6 extension 注册 codeblocks.openLocation 命令', extDist.includes("'codeblocks.openLocation'"), null);
 
     // ---------- B. 导航列表：伪文件 / 已不存在的文件跳过，落到真实源码 ----------
-    check('B1 dist 含伪文件过滤（isPseudoDiagnosticFile）', buildLogDist.includes('isPseudoDiagnosticFile'), null);
+    check('B1 dist 含可导航判断（isNavigableDiagnosticFile，排除伪文件与构建产物）',
+      buildLogDist.includes('isNavigableDiagnosticFile'), null);
 
     const { BuildLogTreeProvider } = require(dist('ui/buildLogTreeProvider.js'));
     const provider = new BuildLogTreeProvider();
@@ -87,6 +88,34 @@ async function main() {
     ]));
     const none = await provider.gotoFirstError();
     check('B2 只有链接期伪文件时判定为「无可导航错误」', none === undefined && provider.hasErrors() === false, none);
+
+    // B2e：对象文件（构建产物）同样不是源码位置 ⇒ 不进 F4 导航
+    provider.setSummary(summaryOf([
+      diag({ message: 'cannot find -lfoo', file: path.join(tmp, 'ld.exe') }),
+      diag({ message: 'undefined ref', file: path.join(tmp, 'obj', 'main.o'), line: 2 }),
+    ]));
+    check('B2e 伪文件与对象文件都不进 F4 导航', provider.hasErrors() === false, null);
+
+    // B2b–B2d：树节点本身也按可导航性挂命令（这是「点击不跳转」的直接来源）
+    provider.setSummary(summaryOf([
+      diag({ message: 'cannot find -lfoo', file: path.join(tmp, 'ld.exe') }),
+      diag({ message: 'undefined ref', file: path.join(tmp, 'obj', 'main.o'), line: 2 }),
+      diag({ message: 'expected ;', file: realSource, line: 3, column: 3 }),
+    ]));
+    const rootNode = provider.getChildren()[0];
+    const projectNode = rootNode.children[0];
+    const errorGroup = projectNode.children.find((c) => c.kind === 'group');
+    const nodes = errorGroup ? errorGroup.children : [];
+    check('B2b 伪文件/对象文件节点不挂跳转命令',
+      nodes.length === 3 && nodes[0].command === undefined && nodes[1].command === undefined,
+      nodes.map((n) => ({ label: n.label, cmd: n.command })));
+    check('B2c 真实源码节点仍挂 codeblocks.openLocation',
+      !!nodes[2] && !!nodes[2].command && nodes[2].command.command === 'codeblocks.openLocation', nodes[2] && nodes[2].command);
+    check('B2d 无源码位置节点显示提示（description）',
+      nodes.length === 3
+      && /源码位置|source location/i.test(String(nodes[0].description))
+      && /源码位置|source location/i.test(String(nodes[1].description)),
+      nodes.map((n) => n.description));
 
     provider.setSummary(summaryOf([
       diag({ message: 'cannot find -lfoo', file: path.join(tmp, 'ld.exe') }),

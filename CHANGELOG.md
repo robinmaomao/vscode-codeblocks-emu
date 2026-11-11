@@ -3,6 +3,19 @@
 本文件记录**正式版**里程碑；近期 dev 迭代的逐轮发布说明见 [`docs/release/`](./docs/release/)（`0.8.xx-dev.md`），
 `0.8.76`–`0.8.128` 的 dev 说明已合并归档到 [`docs/release/archive/`](./docs/release/archive/)；版本号与维护约定见 [`docs/release/00-index.md`](./docs/release/00-index.md)。
 
+## 0.8.148 — 2026-11-11
+
+> 修复版：Build Log（诊断来源 `build`）里编译/链接错误点击不跳转。
+
+**Build Log 诊断跳转**
+
+- **现象**：`codeblocks.clangd.buildLogDiagnostics = build` 时，部分错误条目点击无反应、构建结束也不自动跳；常见于链接期 `undefined reference`（`src/main.c:(.text+0x9)` / `obj/x.o:(.text+0x9)`）与 `ld.exe` / `collect2.exe` 等工具输出。
+- **根因**：诊断定位的「无改善」判断拿**剥掉 `:(section)` / `:line` 的 token** 做比较，文件本来就对但行号推不出来时返回 `undefined`，调用方回退到带段名的原始路径（永不存在）；对象文件 `.o/.obj` 链接阶段一定存在，被直接当成跳转目标；无源码位置的条目仍按可点击渲染，`openTextDocument` 失败后静默。
+- **修复**：`resolveDiagnosticLocation` 改用原始 token 比较；`.o/.obj` 只作为「找同名源码」的线索（工程索引 + 同目录源码回退），绝不返回对象文件；Build Log / Problems 统一过滤不可导航位置（伪工具名、构建产物、残留段名、不存在的文件），无源码位置条目显示「无源码位置（链接器/工具输出）」且不挂跳转命令；`codeblocks.openLocation` 失败弹出可见警告。
+- **ANSI**：统一清理子进程行输出中的颜色转义（CSI/OSC），`-fdiagnostics-color=always` 的工程不再因颜色码导致整行解析失败。
+- 验证：`npm test` **TOTAL=188 FAIL=0 SKIP=1**；`npm run test:contract` 3/3；`npm run test:e2e` 6/6（链接期诊断 9 断言）；`npm run test:pack` 1/1。
+- 发布说明见 [`docs/release/0.8.148.md`](./docs/release/0.8.148.md)；测试结果见 [`docs/testing/test-report-0.8.148.md`](./docs/testing/test-report-0.8.148.md)。
+
 ## 0.8.147 — 2026-11-11
 
 > 体验版：Project Search 的 Text 结果排版对齐 VS Code 内置 Search，并修复切换视图后另一种模式的搜索记录丢失。

@@ -30,7 +30,7 @@ import { registerStatusBarMenu, MenuDynamicData } from './ui/statusBarMenu';
 import { BuildLogTreeProvider, BuildLogProject, BuildLogDiagnostic } from './ui/buildLogTreeProvider';
 import { normalizeBuildLogAutoFocusMode, maybeAutoFocusBuildLog } from './ui/buildLogFocus';
 import { openFileAtLocation } from './ui/openLocation';
-import { buildDiagnosticPathIndex, createDiagnosticResolver } from './build/diagnosticPath';
+import { buildDiagnosticPathIndex, createDiagnosticResolver, isNavigableDiagnosticFile } from './build/diagnosticPath';
 import { AnalysisTreeProvider, AnalysisData, AnalysisProjectInfo, LastBuildMeta } from './ui/analysisTreeProvider';
 import { SymbolTreeProvider } from './ui/symbolTreeProvider';
 import { BuildSpinRenderState, nextBuildSpinRender } from './ui/buildStatusRender';
@@ -958,6 +958,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       const ok = await openFileAtLocation(file, line, column);
       if (!ok) {
         outputChannel.warn(logT('[Code::Blocks] Cannot open the file (missing or unreadable): {0}', file));
+        // 可见反馈：链接期伪路径 / 构建后已删除的文件，否则用户看到的就是「点了没反应」
+        vscode.window.showWarningMessage(i18n.t('Cannot open {0} — the file is missing, unreadable, or not a source file', file));
       }
       return ok;
     }),
@@ -6751,9 +6753,31 @@ function claimBuildMutex(): boolean {
  */
 let buildDiagnosticPublisher: DiagnosticPublisher<vscode.Uri, vscode.Diagnostic> | undefined;
 
+/** 诊断文件存在性缓存（每次构建清空；避免大量警告重复 stat 同一路径） */
+let diagFileExistsCache = new Map<string, boolean>();
+
+/**
+ * 诊断位置是否真的可跳转：不是工具伪文件/构建产物（`ld.exe`、`.o`、残留 `:(section)`），
+ * 且是磁盘上的普通文件。不可导航的诊断只保留消息，避免树里出现「点了没反应」的节点。
+ */
+function isNavigableDiagnosticTarget(file: string | undefined): file is string {
+  if (!file || !isNavigableDiagnosticFile(file)) return false;
+  const cached = diagFileExistsCache.get(file);
+  if (cached !== undefined) return cached;
+  let ok = false;
+  try {
+    ok = fs.statSync(file).isFile();
+  } catch {
+    ok = false;
+  }
+  diagFileExistsCache.set(file, ok);
+  return ok;
+}
+
 /** 构建开始：创建发布器（节流 200ms） */
 function beginBuildDiagnostics(): void {
   endBuildDiagnostics();
+  diagFileExistsCache = new Map();
   buildDiagnosticPublisher = new DiagnosticPublisher<vscode.Uri, vscode.Diagnostic>(
     diagnosticCollection,
     (uri) => uri.toString(),
@@ -7098,7 +7122,9 @@ async function buildSingleFileLocked(project: Project, file: ProjectFile): Promi
           onDiagnostic: (diag, fileUri) => {
             // clangd 接管诊断时，Problems 面板由 clangd 产出（对齐整目标构建）
             if (clangdDiagnosticsEnabled) return;
-            publishBuildDiagnostic(fileUri ?? vscode.Uri.file(project.basePath), diag);
+            // 不可导航的伪文件（ld.exe / 带段名路径 / 构建产物）回退到工程根，避免 Problems 指向不存在的文件
+            const target = fileUri && isNavigableDiagnosticTarget(fileUri.fsPath) ? fileUri : vscode.Uri.file(project.basePath);
+            publishBuildDiagnostic(target, diag);
           },
         });
       },
@@ -7241,9 +7267,10 @@ async function buildOneProject(project: Project, targetTitle: string, rebuild: b
     onDiagnostic: (diag, fileUri) => {
       // clangd 接管诊断时，Problems 面板由 clangd 产出，构建引擎不再写入（避免重复）
       if (clangdDiagnosticsEnabled) return;
-      // 按具体文件 URI 分组挂到 Problems 面板；无文件则回退到项目根
+      // 按具体文件 URI 分组挂到 Problems 面板；伪文件/不存在的路径回退到项目根
       // 性能：归集 + 节流发布（每文件一次 set），避免每条诊断一次跨进程提交（见 DiagnosticPublisher）
-      publishBuildDiagnostic(fileUri ?? vscode.Uri.file(project.basePath), diag);
+      const target = fileUri && isNavigableDiagnosticTarget(fileUri.fsPath) ? fileUri : vscode.Uri.file(project.basePath);
+      publishBuildDiagnostic(target, diag);
     },
     onStructuredDiagnostic: (d) => {
       // Build Log 使用 clangd 诊断时，不再收集构建引擎的结构化诊断
@@ -7257,7 +7284,11 @@ async function buildOneProject(project: Project, targetTitle: string, rebuild: b
         }
         currentBuildErrorCount++;
       }
-      diagnostics.push(d);
+      // 无源码位置（链接器/工具输出、伪文件、构建产物）：去掉 file/line/column，只保留消息，
+      // 避免 Build Log 树里出现「看起来能点、点了没反应」的节点
+      diagnostics.push(isNavigableDiagnosticTarget(d.file)
+        ? d
+        : { ...d, file: undefined, line: undefined, column: undefined });
     },
   });
 

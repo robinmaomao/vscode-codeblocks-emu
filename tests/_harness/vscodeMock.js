@@ -41,7 +41,7 @@ class TreeItem {
 
 class ThemeIcon { constructor(id) { this.id = id; } }
 class ThemeColor { constructor(id) { this.id = id; } }
-class MarkdownString { constructor(value) { this.value = value; } appendText(t) { this.value += t; return this; } appendMarkdown(t) { this.value += t; return this; } }
+class MarkdownString { constructor(value) { this.value = value; } appendText(t) { this.value += t; return this; } appendMarkdown(t) { this.value += t; return this; } appendCodeblock(t, lang) { this.value += '```' + (lang || '') + '\n' + t + '\n```'; return this; } }
 
 class Position { constructor(line, character) { this.line = line; this.character = character; } }
 class Range { constructor(a, b, c, d) { Object.assign(this, typeof a === 'number' ? { start: new Position(a, b), end: new Position(c, d) } : { start: a, end: b }); } }

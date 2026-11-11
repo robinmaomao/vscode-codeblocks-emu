@@ -42,6 +42,16 @@ const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'cb-enc-'));
   check('A5 空缓冲 = 空数组', enc.decodeOutputLines(Buffer.alloc(0)).length === 0, enc.decodeOutputLines(Buffer.alloc(0)), []);
   const noTrail = enc.decodeOutputLines(utf8('只有一行无换行'));
   check('A6 无尾换行也返回尾行', noTrail.length === 1 && noTrail[0] === '只有一行无换行', noTrail, ['只有一行无换行']);
+
+  // A7–A10：ANSI 颜色（-fdiagnostics-color=always）——颜色码不得进入诊断解析
+  const colored = '\u001b[01m\u001b[Ksrc/main.c:10:5:\u001b[m\u001b[K \u001b[01;31m\u001b[Kerror:\u001b[m\u001b[K ' + "'x' undeclared";
+  check('A7 stripAnsi 清理 CSI 颜色码', enc.stripAnsi(colored) === "src/main.c:10:5: error: 'x' undeclared", enc.stripAnsi(colored));
+  check('A8 stripAnsi 无 ESC 时原样返回（快路径）', enc.stripAnsi('plain text') === 'plain text', enc.stripAnsi('plain text'));
+  check('A9 stripAnsi 清理 OSC（超链接/标题）',
+    enc.stripAnsi('\u001b]8;;https://example.com\u0007link\u001b]8;;\u0007') === 'link',
+    enc.stripAnsi('\u001b]8;;https://example.com\u0007link\u001b]8;;\u0007'));
+  const coloredLines = enc.decodeOutputLines(utf8(colored + '\n'));
+  check('A10 decodeOutputLines 输出已清理 ANSI', coloredLines.length === 1 && coloredLines[0] === "src/main.c:10:5: error: 'x' undeclared", coloredLines);
 }
 
 // ---------- B. OutputLineDecoder（跨块） ----------
