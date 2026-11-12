@@ -1,5 +1,5 @@
 // 设置结构回归（配置整理）：
-//  - configuration 为 9 个分区块（title+order），设置项总数 85、无重复键
+//  - configuration 为 9 个分区块（title+order），设置项总数 88、无重复键
 //  - 关键默认值/枚举/scope/数值校验/DBGconfig/描述无轮次标记
 //  - 全部设置键在 dist 中被读取（无死配置；ui.symbolsView 由 when 子句使用）
 //  - 已移除的 clangd.queryDriver 不再出现
@@ -39,7 +39,7 @@ for (const b of cfg) {
     byKey[k] = v;
   }
 }
-check('设置项总数 = 85', keys.length === 85, keys.length);
+check('设置项总数 = 88', keys.length === 88, keys.length);
 check('已移除冗余设置 clangd.queryDriver', !keys.includes('codeblocks.clangd.queryDriver'), keys.filter((k) => /queryDriver$/.test(k)));
 check('无重复键', new Set(keys).size === keys.length, keys.length - new Set(keys).size);
 check('disableInit 默认 true（对齐 CB disable_init）', byKey['codeblocks.debug.disableInit']?.default === true, byKey['codeblocks.debug.disableInit']);

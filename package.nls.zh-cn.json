@@ -33,7 +33,7 @@
   "command.codeblocks.compileCurrentFile.title": "Code::Blocks: 编译当前文件",
   "command.codeblocks.compileFile.title": "构建文件",
   "command.codeblocks.compileFileWithoutProject.title": "Code::Blocks: 编译文件 (无工程)",
-  "command.codeblocks.compilerOptions.title": "Code::Blocks: 编译器选项",
+  "command.codeblocks.compilerOptions.title": "构建选项...",
   "command.codeblocks.configureTools.title": "Code::Blocks: 配置工具...",
   "command.codeblocks.debug.addSymbolFile.title": "Code::Blocks: 添加符号文件...",
   "command.codeblocks.debug.attachToProcess.title": "Code::Blocks: 附加到进程...",
@@ -81,7 +81,7 @@
   "command.codeblocks.openRecentProject.title": "Code::Blocks: 打开最近工程",
   "command.codeblocks.prevError.title": "Code::Blocks: 上一个错误",
   "command.codeblocks.projectNotes.title": "Code::Blocks: 工程备注",
-  "command.codeblocks.projectProperties.title": "Code::Blocks: 工程属性",
+  "command.codeblocks.projectProperties.title": "属性...",
   "command.codeblocks.rebuild.title": "Code::Blocks: 重新构建",
   "command.codeblocks.rebuildProject.title": "重新构建",
   "command.codeblocks.rebuildWorkspace.title": "Code::Blocks: 重新构建工作区",
@@ -235,5 +235,8 @@
   "view.codeblocks.symbols.name": "符号",
   "viewsContainer.codeblocks-buildPanel.title": "Code::Blocks 构建日志",
   "viewsContainer.codeblocks.title": "Code::Blocks",
-  "viewsWelcome.codeblocks.projectTree.contents": "尚未打开 Code::Blocks 工程。\n[打开工程 / 工作区 (.cbp / .workspace)](command:codeblocks.openProject)\n[新建工程](command:codeblocks.newProject)\n[编译当前文件（无项目）](command:codeblocks.compileFileWithoutProject)\n[检测编译器](command:codeblocks.detectCompilers)"
+  "viewsWelcome.codeblocks.projectTree.contents": "尚未打开 Code::Blocks 工程。\n[打开工程 / 工作区 (.cbp / .workspace)](command:codeblocks.openProject)\n[新建工程](command:codeblocks.newProject)\n[编译当前文件（无项目）](command:codeblocks.compileFileWithoutProject)\n[检测编译器](command:codeblocks.detectCompilers)",
+  "configuration.codeblocks.compiler.customFlags.description": "用户自定义编译器参数，追加到 Build options 的编译器参数列表中（按编译器 id 分组）。每项包含 name、option，可选 category。",
+  "configuration.codeblocks.compiler.flagOverrides.description": "内置编译器参数的覆盖与删除记录（按编译器 id 分组）。modified 以原始参数为键；removed 为被删除的原始参数。清空本项即可恢复默认参数。",
+  "configuration.codeblocks.compiler.languageFlags.description": "仅 C / 仅 C++ 编译参数（按编译器 id 分组）。设置后覆盖编译器 XML 中的 <Sort CFlags/CPPFlags>，构建时分别用于 C 与 C++ 编译过滤。"
 }

@@ -27,6 +27,9 @@
 | `codeblocks.compilerId` | string | `gcc` |  | Default compiler ID (matches `options_<id>.xml`). Used when a project has no compiler or for standalone file compilation; changing it refreshes the `Compiler:` status bar and regenerates the clangd database for the new compiler (restarting clangd when the database actually changes). |
 | `codeblocks.masterPath` | string | `""` | machine-overridable | Compiler installation root; empty = detect from `PATH`. Changes propagate to compile commands, system include paths and the clangd database. |
 | `codeblocks.compilerPrograms` | object | `{}` | machine-overridable | Per-compiler program paths overriding `C` / `CPP` / `LD` / `LIB` / `WINDRES` / `MAKE` / `DBGconfig`. Usually written by "Detect Compilers"; can be set explicitly for cross toolchains. |
+| `codeblocks.compiler.customFlags` | object | `{}` | application | Per-compiler flags added from Build options (right-click "New flag..."). Each entry has `name` / `option` and an optional `category`, and shows up in the compiler-flags checklist. |
+| `codeblocks.compiler.flagOverrides` | object | `{}` | application | Per-compiler overrides for **built-in** flags: `modified` maps an original `option` to a new name/option/category, `removed` lists original options to hide. Clear this setting to restore the XML defaults. |
+| `codeblocks.compiler.languageFlags` | object | `{}` | application | Per-compiler "C only" (`cOnly`) / "C++ only" (`cppOnly`) flags. When set they replace the compiler XML `<Sort CFlags/CPPFlags>` lists and are injected per file language at build time. |
 
 Example:
 

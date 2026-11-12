@@ -65,7 +65,6 @@ function neutralizePlaceholders(tpl) {
 const PANELS = [
   { file: 'projectPropertiesPanel.js', name: '项目属性', escapePattern: /function esc\(/ },
   { file: 'keybindingPanel.js', name: '快捷键', escapePattern: /function esc\(/ },
-  { file: 'compilerOptionsPanel.js', name: '编译选项', escapePattern: /escapeHtml\(/ },
 ];
 
 for (const p of PANELS) {
@@ -143,8 +142,8 @@ function fnBody(script, name) {
     /flex-wrap:\s*wrap/.test(ruleBody(css, '.toolbar') || ''), ruleBody(css, '.toolbar'));
   const layout = ruleBody(css, '.layout') || '';
   check('工程属性：列表列有下限、表单列可收缩（minmax）',
-    /minmax\(200px,\s*240px\)/.test(layout) && /minmax\(0,\s*1fr\)/.test(layout), layout);
-  check('工程属性：窄面板改为上下堆叠（媒体查询）', /@media\s*\(max-width:\s*720px\)/.test(css), null);
+    /minmax\(200px,\s*260px\)/.test(layout) && /minmax\(0,\s*1fr\)/.test(layout), layout);
+  check('工程属性：窄面板改为上下堆叠（媒体查询）', /@media\s*\(max-width:\s*760px\)/.test(css), null);
 
   const save = fnBody(script, 'doSave') || '';
   check('工程属性：保存前收集异常不再逃逸（try/catch）', /try\s*\{/.test(save) && /catch\s*\(/.test(save), save.slice(0, 120));
@@ -159,10 +158,14 @@ function fnBody(script, name) {
   check('工程属性：目标表单未渲染时跳过收集',
     /if \(!targets\.length \|\| !document\.getElementById\('f-title'\)\) return;/.test(tBody), tBody.slice(0, 150));
   // 目标被删除后各目标级 tab 的作用域索引可能失效：collect 必须能跳过而不是抛错（否则整次保存失败）
-  for (const name of ['collectOptionsForm', 'collectDirsForm', 'collectScriptsForm']) {
+  for (const name of ['collectOptionsForm', 'collectDirsForm']) {
     const body = fnBody(script, name) || '';
     check(`工程属性：${name} 作用域失效时跳过（if (!cur) return）`, /if \(!cur\) return;/.test(body), body.slice(0, 200));
   }
+  // 脚本 tab 不再有作用域表单（直接读写数组），因此只需保证它不依赖未渲染的 DOM 节点
+  check('工程属性：collectScriptsForm 不依赖作用域 DOM',
+    !/document\.getElementById\(/.test(fnBody(script, 'collectScriptsForm') || ''),
+    fnBody(script, 'collectScriptsForm'));
   const dbgBody = fnBody(script, 'collectDebugForm') || '';
   check('工程属性：collectDebugForm 作用域失效时跳过 remote 段（保留 search_path）',
     /dbg\.searchPaths = optionsLines\(/.test(dbgBody) && /if \(selectedDebugScope !== '' && !scopeTarget\) return;/.test(dbgBody), dbgBody.slice(0, 240));
@@ -173,16 +176,52 @@ function fnBody(script, name) {
     /dbg\.remote = dbg\.remote\.filter\(r => r\.target !== removedTitle\)/.test(script), null);
 }
 
+// 编译选项（Build options）：共享视图 = CSS + HTML 片段 + 内联脚本（0.8.150 起重写为 Code::Blocks 对齐版）
 {
-  const coDist = fs.readFileSync(path.resolve(__dirname, '../dist/ui/compilerOptionsPanel.js'), 'utf-8');
-  const tpl = extractTemplate(coDist, coDist.indexOf('return `<!DOCTYPE html>') + 'return '.length);
-  const css = (neutralizePlaceholders(tpl).match(/<style>([\s\S]*?)<\/style>/) || [, ''])[1];
-  check('编译选项：工具栏可换行（.toolbar flex-wrap）',
-    /flex-wrap:\s*wrap/.test(ruleBody(css, '.toolbar') || ''), ruleBody(css, '.toolbar'));
-  check('编译选项：按钮禁止逐字换行（button white-space: nowrap）',
-    /white-space:\s*nowrap/.test(ruleBody(css, 'button') || ''), ruleBody(css, 'button'));
-  check('编译选项：选项行可换行（.opt flex-wrap）',
-    /flex-wrap:\s*wrap/.test(ruleBody(css, '.opt') || ''), ruleBody(css, '.opt'));
+  const dist = fs.readFileSync(path.resolve(__dirname, '../dist/ui/buildOptionsView.js'), 'utf-8');
+
+  const cssIdx = dist.indexOf('function buildOptionsCss');
+  const cssTpl = cssIdx >= 0 ? extractTemplate(dist, dist.indexOf('return `', cssIdx) + 'return '.length) : null;
+  check('编译选项：CSS 模板提取成功', !!cssTpl, null);
+
+  const pageIdx = dist.indexOf('function buildOptionsPage');
+  const pageTpl = pageIdx >= 0 ? extractTemplate(dist, dist.indexOf('return `', pageIdx) + 'return '.length) : null;
+  check('编译选项：页面模板提取成功', !!pageTpl && pageTpl.includes('</html>'), pageTpl === null ? 'extract failed' : undefined);
+  if (pageTpl) {
+    check('编译选项：含 CSP meta', pageTpl.includes('http-equiv="Content-Security-Policy"'), null);
+    const html = neutralizePlaceholders(pageTpl);
+    const sm = html.match(/<script>([\s\S]*?)<\/script>/);
+    check('编译选项：提取到 <script> 块', !!sm, null);
+    if (sm) {
+      try {
+        new Function(sm[1]);
+        check('编译选项：<script> 语法合法', true, null);
+      } catch (e) {
+        check('编译选项：<script> 语法合法', false, e.message);
+      }
+    }
+  }
+
+  const scriptIdx = dist.indexOf('function buildOptionsScript');
+  const jsTpl = scriptIdx >= 0 ? extractTemplate(dist, dist.indexOf('return `', scriptIdx) + 'return '.length) : null;
+  check('编译选项：内联脚本模板提取成功', !!jsTpl, null);
+  if (jsTpl) {
+    try {
+      new Function(neutralizePlaceholders(jsTpl));
+      check('编译选项：内联脚本语法合法', true, null);
+    } catch (e) {
+      check('编译选项：内联脚本语法合法', false, e.message);
+    }
+  }
+
+  if (cssTpl) {
+    check('编译选项：按钮禁止逐字换行（white-space: nowrap）', /white-space:\s*nowrap/.test(cssTpl), null);
+    check('编译选项：操作按钮可换行（.bo-actions flex-wrap）',
+      /\.bo-actions \{[^}]*flex-wrap:\s*wrap/.test(cssTpl), null);
+    check('编译选项：外层页签可横向滚动（.bo-tabs overflow-x）',
+      /\.bo-tabs \{[^}]*overflow-x:\s*auto/.test(cssTpl), null);
+    check('编译选项：只读派生输入有独立样式（.bo-derived-input）', /\.bo-derived-input\s*\{/.test(cssTpl), null);
+  }
 }
 
 {

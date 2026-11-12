@@ -8,7 +8,7 @@ const path = require('path');
 const root = path.resolve(__dirname, '..', '..');
 const fixture = path.join(__dirname, 'fixtures', 'rich.cbp');
 
-const PROPS_TABS = ['targets', 'vtargets', 'files', 'options', 'dirs', 'scripts', 'settings', 'notes', 'debugger'];
+const PROPS_TABS = ['settings', 'targets', 'scripts', 'notes', 'parser', 'debugger'];
 
 /** 快捷键面板的宿主状态（对齐 KeybindingPanelHost.getState 的形状：rows/notices/path/cbStyle） */
 function keybindingState() {
@@ -70,7 +70,6 @@ function buildSurfaces() {
   const { CompilerOptionsLoader } = require('../../dist/compiler/optionsLoader.js');
   const { ProjectPropertiesPanel } = require('../../dist/ui/projectPropertiesPanel.js');
   const { KeybindingPanel } = require('../../dist/ui/keybindingPanel.js');
-  const { CompilerOptionsPanel } = require('../../dist/ui/compilerOptionsPanel.js');
 
   const project = new ProjectParser().parse(fixture);
   const fakeUri = mock.vscode.Uri.file(root);
@@ -116,14 +115,61 @@ function buildSurfaces() {
     actions: [{ type: 'postMessage', payload: { type: 'state', state: keybindingState() } }],
   });
 
-  // ---- 编译选项面板（真实 options_gcc.xml） ----
+  // ---- Build options 面板（真实 options_gcc.xml 目录 + rich.cbp 工程/目标） ----
   const loader = new CompilerOptionsLoader(path.join(root, 'resources', 'compilers'));
   const compiler = loader.load('gcc');
-  new CompilerOptionsPanel(compiler, project, project.buildTargets[0], fakeUri);
+  const { buildCompilerCatalog, readCompilerFlagStores, readLanguageFlags } = require('../../dist/compiler/compilerFlagSettings.js');
+  const { OptionsRelationType } = require('../../dist/model/types.js');
+  const { BuildOptionsPanel } = require('../../dist/ui/buildOptionsPanel.js');
+  const stores = readCompilerFlagStores();
+  const baseCatalog = compiler.options.map((o) => ({
+    name: o.name,
+    option: o.option,
+    additionalLibs: o.additionalLibs,
+    category: o.category,
+  }));
+  const boScope = (title, s, relations) => ({
+    title,
+    compilerId: s.compilerId,
+    compilerOptions: [...s.compilerOptions],
+    resourceCompilerOptions: [...(s.resourceCompilerOptions ?? [])],
+    linkerOptions: [...s.linkerOptions],
+    linkLibs: [...s.linkLibs],
+    linkerExecutable: s.linkerExecutable ?? 0,
+    relations,
+    includeDirs: [...s.includeDirs],
+    libDirs: [...s.libDirs],
+    resourceDirs: [...s.resourceIncludeDirs],
+    commandsBefore: [...s.commandsBeforeBuild],
+    commandsAfter: [...s.commandsAfterBuild],
+    alwaysPost: s.alwaysRunPostBuildSteps === true,
+    envVars: (s.envVars ?? []).map((v) => ({ name: v.name, value: v.value })),
+    makeCommands: { ...(s.makeCommands ?? {}) },
+  });
+  const allBoth = { compiler: 3, linker: 3, include: 3, lib: 3, res: 3 };
+  const boData = {
+    projectTitle: project.title,
+    makefileIsCustom: project.makefileIsCustom === true,
+    defineSwitch: compiler.switches.defines || '-D',
+    project: boScope(project.title, project, allBoth),
+    targets: project.buildTargets.map((t) => boScope(t.title, t, {
+      compiler: t.optionRelations[OptionsRelationType.CompilerOptions],
+      linker: t.optionRelations[OptionsRelationType.LinkerOptions],
+      include: t.optionRelations[OptionsRelationType.IncludeDirs],
+      lib: t.optionRelations[OptionsRelationType.LibDirs],
+      res: t.optionRelations[OptionsRelationType.ResDirs],
+    })),
+    compilers: [{ id: 'gcc', name: 'GNU GCC Compiler' }],
+    compilerCatalogs: { gcc: buildCompilerCatalog('gcc', baseCatalog, stores) },
+    compilerBaseCatalogs: { gcc: baseCatalog },
+    compilerFlags: { gcc: readLanguageFlags('gcc', { cOnly: compiler.cOnlyFlags ?? [], cppOnly: compiler.cppOnlyFlags ?? [] }, stores) },
+    defaultCompilerId: 'gcc',
+  };
+  BuildOptionsPanel.show(project.title, project.filename, boData, fakeUri);
   const optPanel = mock.webviews[mock.webviews.length - 1];
   const optHtml = optPanel.webview.html;
-  if (!optHtml || !optHtml.includes('</html>')) throw new Error('编译选项面板 HTML 生成失败');
-  surfaces.push({ id: 'compiler-options', html: optHtml, width: 1100, height: 900, actions: [] });
+  if (!optHtml || !optHtml.includes('</html>')) throw new Error('Build options 面板 HTML 生成失败');
+  surfaces.push({ id: 'build-options', html: optHtml, width: 1180, height: 940, actions: [] });
 
   // ---- HTML 构建日志 ----
   surfaces.push({ id: 'buildlog-html', html: buildLogHtml(), width: 1000, height: 620, actions: [] });
