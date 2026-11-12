@@ -36,12 +36,44 @@ async function main() {
   const { CompilerOptionsLoader } = require('../dist/compiler/optionsLoader.js');
   const { ProjectPropertiesPanel } = require('../dist/ui/projectPropertiesPanel.js');
   const { KeybindingPanel } = require('../dist/ui/keybindingPanel.js');
-  const { CompilerOptionsPanel } = require('../dist/ui/compilerOptionsPanel.js');
+  const { buildOptionsPage } = require('../dist/ui/buildOptionsView.js');
   const { buildProjectSearchViewHtml } = require('../dist/ui/projectSearchViewHtml.js');
 
   const project = new ProjectParser().parse(FIXTURE);
   const uri = mock.vscode.Uri.file(ROOT);
   const compiler = new CompilerOptionsLoader(path.join(ROOT, 'resources', 'compilers')).load('gcc');
+
+  /** Build options 页（共享视图）所需的完整数据 */
+  function buildOptionsHtml() {
+    const scope = (t, title, compilerId) => ({
+      title,
+      compilerId,
+      compilerOptions: [...(t.compilerOptions || [])],
+      resourceCompilerOptions: [...(t.resourceCompilerOptions || [])],
+      linkerOptions: [...(t.linkerOptions || [])],
+      linkLibs: [...(t.linkLibs || [])],
+      linkerExecutable: t.linkerExecutable ?? 0,
+      relations: { compiler: 3, linker: 3, include: 3, lib: 3, res: 3 },
+      includeDirs: [...(t.includeDirs || [])],
+      libDirs: [...(t.libDirs || [])],
+      resourceDirs: [...(t.resourceIncludeDirs || [])],
+      commandsBefore: [...(t.commandsBeforeBuild || [])],
+      commandsAfter: [...(t.commandsAfterBuild || [])],
+      alwaysPost: !!t.alwaysRunPostBuildSteps,
+      envVars: (t.envVars || []).map((v) => ({ ...v })),
+      makeCommands: { ...(t.makeCommands || {}) },
+    });
+    return buildOptionsPage({
+      projectTitle: project.title,
+      makefileIsCustom: project.makefileIsCustom === true,
+      defineSwitch: '-D',
+      project: scope(project, project.title, project.compilerId),
+      targets: project.buildTargets.map((t) => scope(t, t.title, t.compilerId)),
+      compilers: [{ id: project.compilerId, name: project.compilerId }],
+      compilerCatalogs: { [project.compilerId]: [{ name: 'Debug symbols', option: '-g', category: 'Debugging' }] },
+      defaultCompilerId: project.compilerId,
+    });
+  }
 
   const hostStub = {
     getState: () => ({
@@ -75,8 +107,7 @@ async function main() {
     out.props = mock.webviews[mock.webviews.length - 1].webview.html;
     new KeybindingPanel(uri, hostStub);
     out.keybindings = mock.webviews[mock.webviews.length - 1].webview.html;
-    new CompilerOptionsPanel(compiler, project, project.buildTargets[0], uri);
-    out.compilerOptions = mock.webviews[mock.webviews.length - 1].webview.html;
+    out.compilerOptions = buildOptionsHtml();
     out.search = buildProjectSearchViewHtml();
     return out;
   }
@@ -95,7 +126,7 @@ async function main() {
     ['构建目标', '虚拟目标', '构建选项', '搜索目录', '调试器', '保存并关闭'].every((s) => zh.props.includes(s)));
   check('A3 快捷键面板：中文标签在位',
     zh.keybindings.includes('快捷键') && zh.keybindings.includes('全部重置') && zh.keybindings.includes('检查冲突'));
-  check('A4 编译选项面板：中文标签在位', zh.compilerOptions.includes('应用') && zh.compilerOptions.includes('重置'));
+  check('A4 编译选项面板：中文标签在位', zh.compilerOptions.includes('保存') && zh.compilerOptions.includes('保存并关闭'));
   check('A5 工程搜索视图：中文标签在位', zh.search.includes('搜索历史') && zh.search.includes('保留历史') && zh.search.includes('所有工程'));
 
   // ---- B. 英文态 ----
@@ -104,7 +135,8 @@ async function main() {
     ['Build targets', 'Virtual targets', 'Build options', 'Search directories', 'Debugger', 'Save and Close'].every((s) => en.props.includes(s)));
   check('B3 快捷键面板：英文标签在位',
     en.keybindings.includes('Reset all') && en.keybindings.includes('Check conflicts') && en.keybindings.includes('Current keybinding'));
-  check('B4 编译选项面板：英文标签在位', en.compilerOptions.includes('>Apply<') && en.compilerOptions.includes('>Reset<'));
+  check('B4 编译选项面板：英文标签在位',
+    en.compilerOptions.includes('"save":"Save"') && en.compilerOptions.includes('"saveClose":"Save and Close"'));
   check('B5 工程搜索视图：英文标签在位', en.search.includes('Search History') && en.search.includes('Keep history') && en.search.includes('All projects'));
 
   const leftovers = {};

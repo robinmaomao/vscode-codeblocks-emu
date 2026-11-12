@@ -11,7 +11,7 @@ import { spawn } from 'child_process';
 import { execFile } from 'child_process';
 import { isExecutableTargetType, resolveExecutablePath, requiresExecutableExtensionForLaunch } from './build/outputPath';
 import { ProjectParser, WorkspaceParser } from './model/parser';
-import { Project, BuildTarget, ProjectFile, TargetType, CommandType, Workspace, OptionsRelation, OptionsRelationType, LinkerExecutableOption, supportsCurrentPlatform, PLATFORM_ALL } from './model/types';
+import { Project, BuildTarget, ProjectFile, TargetType, CommandType, Workspace, OptionsRelation, OptionsRelationType, LinkerExecutableOption, supportsCurrentPlatform, PLATFORM_ALL, MakeCommandsMap } from './model/types';
 import { serializeProject } from './model/projectWriter';
 import { createProjectFromTemplate, PROJECT_TEMPLATES } from './project/newProject';
 import { instantiateUserTemplate, listUserTemplates, saveAsUserTemplate } from './project/userTemplates';
@@ -21,10 +21,18 @@ import { CompilerRegistryDeps, findRegisteredCompilerId, resolveEffectiveCompile
 import { BoundedMap, buildCompilerCacheKey } from './compiler/compilerCache';
 import { resolveProgramsForCompiler, setProgramsForCompiler } from './compiler/compilerPrograms';
 import { CompilerOptionsLoader } from './compiler/optionsLoader';
+import {
+  buildCompilerCatalog,
+  languageFlagsSignature,
+  readCompilerFlagStores,
+  readLanguageFlags,
+} from './compiler/compilerFlagSettings';
 import { CodeBlocksConfig } from './compiler/codeblocksConfig';
 import { detectAllCompilersAsync, DetectedCompiler } from './compiler/detector';
-import { CompilerOptionsPanel } from './ui/compilerOptionsPanel';
-import { ProjectPropertiesPanel, TargetEditData, FileEditData, BuildOptionsEditData, SearchDirsEditData, ProjectSettingsEditData, BuildScriptsEditData, NotesEditData, VirtualTargetEditData, DebuggerSettingsEditData } from './ui/projectPropertiesPanel';
+import { BuildOptionsPanel } from './ui/buildOptionsPanel';
+import { BuildOptionsData, BuildOptionsScopeData } from './ui/buildOptionsView';
+import { ProjectPropertiesPanel, TargetEditData, FileEditData, BuildOptionsEditData, SearchDirsEditData, ProjectSettingsEditData, BuildScriptsEditData, NotesEditData, VirtualTargetEditData, DebuggerSettingsEditData, BuildOptionsRuntime } from './ui/projectPropertiesPanel';
+import { applyProjectCodeCompletionSearchPaths, parseProjectCodeCompletionSearchPaths } from './model/projectCodeCompletionExtensions';
 import { ProjectTreeProvider } from './ui/projectTreeProvider';
 import { registerStatusBarMenu, MenuDynamicData } from './ui/statusBarMenu';
 import { BuildLogTreeProvider, BuildLogProject, BuildLogDiagnostic } from './ui/buildLogTreeProvider';
@@ -1183,6 +1191,62 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     }),
   );
 
+  // 关闭工程（对齐 CB Project → Close project：从侧栏卸载，磁盘文件保留；与带确认的 Remove Project 并存）
+  context.subscriptions.push(
+    vscode.commands.registerCommand('codeblocks.closeProject', async (node?: any) => {
+      const filename = resolveProjectFilename(node) ?? activeProject?.filename;
+      if (!filename) return;
+      const project = openProjects.find((p) => normPath(p.filename) === normPath(filename));
+      if (!project) return;
+      removeProject(project.filename);
+      vscode.window.showInformationMessage(i18n.t('Project closed: {0}', path.basename(project.filename)));
+    }),
+  );
+
+  // 保存工程（对齐 CB Project → Save project：把内存模型写回 .cbp）
+  context.subscriptions.push(
+    vscode.commands.registerCommand('codeblocks.saveProject', async (node?: any) => {
+      const filename = resolveProjectFilename(node) ?? activeProject?.filename;
+      if (!filename) return;
+      await saveProjectToDisk(filename);
+    }),
+  );
+
+  // 从工程移除文件（对齐 CB Project → Remove files...，磁盘文件保留）
+  context.subscriptions.push(
+    vscode.commands.registerCommand('codeblocks.removeFiles', async (node?: any) => {
+      const filename = resolveProjectFilename(node) ?? activeProject?.filename;
+      if (!filename) return;
+      const project = openProjects.find((p) => normPath(p.filename) === normPath(filename));
+      if (!project) return;
+      await removeFilesFromProject(project);
+    }),
+  );
+
+  // 工程树全部展开 / 折叠（对齐 CB Project → Project tree 子菜单）
+  context.subscriptions.push(
+    vscode.commands.registerCommand('codeblocks.projectTree.expandAll', async () => {
+      projectTreeProvider?.setExpandAll(true);
+      if (!projectTreeProvider || !projectTreeView) return;
+      // 工程节点带稳定 id，视图会沿用其折叠状态：逐个 reveal({expand:true}) 强制展开
+      for (const project of openProjects) {
+        const node = projectTreeProvider.getProjectNode(project.filename);
+        if (!node) continue;
+        try {
+          await projectTreeView.reveal(node, { expand: true, select: false, focus: false });
+        } catch {
+          // 节点尚未渲染 / 工程已关闭：忽略
+        }
+      }
+    }),
+  );
+  context.subscriptions.push(
+    vscode.commands.registerCommand('codeblocks.projectTree.collapseAll', async () => {
+      projectTreeProvider?.setExpandAll(false);
+      await vscode.commands.executeCommand('workbench.actions.treeView.codeblocks.projectTree.collapseAll');
+    }),
+  );
+
   // 增量编译单个项目（右键）
   context.subscriptions.push(
     vscode.commands.registerCommand('codeblocks.buildProject', async (node?: any) => {
@@ -1257,8 +1321,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   // 文件属性（M3：直接打开工程属性面板的「文件」页并定位该文件）
   context.subscriptions.push(
-    vscode.commands.registerCommand('codeblocks.fileProperties', (node?: any) => {
-      const { project, file } = resolveFileNode(node);
+    vscode.commands.registerCommand('codeblocks.fileProperties', (arg?: any) => {
+      // 面板消息可传 { projectFilename, relativeFilename }；工程树节点仍传 { project, file }
+      const filename = String(arg?.projectFilename ?? arg?.project?.filename ?? '');
+      const project = arg?.project as Project | undefined
+        ?? openProjects.find((p) => normPath(p.filename) === normPath(filename));
+      const rel = String(arg?.relativeFilename ?? arg?.file?.relativeFilename ?? '');
+      const file = arg?.file as ProjectFile | undefined
+        ?? project?.files.find((f) => f.relativeFilename === rel);
       if (!project || !file) return;
       showProjectPropertiesPanel(project, context.extensionUri, 'files', file.relativeFilename);
     }),
@@ -1602,30 +1672,17 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     }),
   );
 
-  // 编译选项面板
+  // Build options 面板（工程/目标构建选项，对齐 Code::Blocks Build options...）
   context.subscriptions.push(
-    vscode.commands.registerCommand('codeblocks.compilerOptions', async () => {
-      const project = requireProject();
+    vscode.commands.registerCommand('codeblocks.compilerOptions', async (arg?: any) => {
+      const filename = resolveProjectFilename(arg)
+        ?? (typeof arg?.projectFilename === 'string' ? arg.projectFilename : undefined);
+      const project = filename
+        ? openProjects.find((p) => normPath(p.filename) === normPath(filename))
+        : requireProject();
       if (!project) return;
-      const targetTitle = await selectTarget();
-      const target = targetTitle ? project.buildTargets.find((t) => t.title === targetTitle) : undefined;
-      CompilerOptionsPanel.show(getCompiler(), project, target, context.extensionUri, async (options) => {
-        // 应用 = 立即写回 .cbp：本扩展没有 Code::Blocks 的「工程已修改」状态，仅改内存会让改动在重开工程后丢失
-        const live = openProjects.find((p) => p.filename === project.filename);
-        if (!live) throw new Error(i18n.t('Project is not open: {0}', project.title));
-        const liveTarget = target ? live.buildTargets.find((t) => t.title === target.title) : undefined;
-        // 目标在面板打开后被改名/删除：不要静默改写工程级选项（作用域会错位）
-        if (target && !liveTarget) throw new Error(i18n.t('Target not found: {0}', target.title));
-        if (liveTarget) liveTarget.compilerOptions = options;
-        else live.compilerOptions = options;
-        await persistProjectAndReload(live);
-        const fresh = openProjects.find((p) => p.filename === project.filename);
-        if (!fresh) return undefined;
-        return {
-          project: fresh,
-          target: target ? fresh.buildTargets.find((t) => t.title === target.title) : undefined,
-        };
-      });
+      const targetTitle = typeof arg?.targetTitle === 'string' ? arg.targetTitle : undefined;
+      openBuildOptionsPanel(project, targetTitle, context.extensionUri);
     }),
   );
 
@@ -1634,7 +1691,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     vscode.commands.registerCommand('codeblocks.projectProperties', async (node?: any) => {
       const filename = resolveProjectFilename(node);
       const project = filename
-        ? openProjects.find((p) => p.filename === filename)
+        ? openProjects.find((p) => normPath(p.filename) === normPath(filename))
         : requireProject();
       if (!project) return;
       showProjectPropertiesPanel(project, context.extensionUri);
@@ -2067,14 +2124,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     vscode.commands.registerCommand('codeblocks.exportMakefile', async () => {
       await exportProjectMakefile();
     }),
-    vscode.commands.registerCommand('codeblocks.workspace.editDependencies', async () => {
-      await editWorkspaceDependencies();
+    vscode.commands.registerCommand('codeblocks.workspace.editDependencies', async (projectFilenameArg?: unknown) => {
+      await editWorkspaceDependencies(projectFilenameArg);
     }),
     vscode.commands.registerCommand('codeblocks.importProject', async () => {
       await importExternalProject();
     }),
-    vscode.commands.registerCommand('codeblocks.exportTargetAsProject', async (targetTitleArg?: unknown) => {
-      await exportTargetAsProject(targetTitleArg);
+    vscode.commands.registerCommand('codeblocks.exportTargetAsProject', async (targetTitleArg?: unknown, projectFilenameArg?: unknown) => {
+      await exportTargetAsProject(targetTitleArg, projectFilenameArg);
     }),
     vscode.commands.registerCommand('codeblocks.openDefaultConfig', async () => {
       await openDefaultConf();
@@ -2988,6 +3045,8 @@ function queueExternalChange(file: string): void {
   if (detectExternalChangeMode() === 'off') return;
   const project = openProjects.find((p) => normPath(p.filename) === normPath(file));
   if (!project) return;
+  // <Option check_files="0">：工程显式关闭外部修改检测（对齐 CB cbProject::GetCheckForExternallyModifiedFiles）
+  if (project.checkForExternallyModifiedFiles === false) return;
   if (!projectChangeTracker.hasChanged(project.filename)) return;
   pendingExternalChanges.add(normPath(project.filename));
   drainExternalChanges();
@@ -2997,6 +3056,7 @@ function queueExternalChange(file: string): void {
 function checkExternallyModifiedProjects(): void {
   if (detectExternalChangeMode() === 'off') return;
   for (const p of [...openProjects]) {
+    if (p.checkForExternallyModifiedFiles === false) continue;
     if (projectChangeTracker.hasChanged(p.filename)) pendingExternalChanges.add(normPath(p.filename));
   }
   if (!pendingExternalChanges.size) return;
@@ -3014,7 +3074,8 @@ function drainExternalChanges(): void {
         const key = [...pendingExternalChanges][0];
         pendingExternalChanges.delete(key);
         const project = openProjects.find((p) => normPath(p.filename) === key);
-        if (!project || !projectChangeTracker.hasChanged(project.filename)) continue;
+        if (!project || project.checkForExternallyModifiedFiles === false
+          || !projectChangeTracker.hasChanged(project.filename)) continue;
         const mode = detectExternalChangeMode();
         if (mode === 'off') return;
         if (mode === 'auto') {
@@ -3076,6 +3137,7 @@ async function reloadProjectFromDisk(filename: string, opts: { notify?: boolean 
     openProjects[idx] = project;
 
     ProjectPropertiesPanel.closeFor(previous);
+    BuildOptionsPanel.closeFor(previous);
 
     if (wasActive || !activeProject) activeProject = project;
     // 选中目标沿用（含虚拟目标；目标已删除/改名则回退首个支持当前平台的目标）
@@ -3546,6 +3608,194 @@ function activateRelativeProject(delta: number): void {
   vscode.window.setStatusBarMessage(i18n.t('Active project: {0}', next.title), 2000);
 }
 
+/** Build options 编译器目录（当前工程/目标用到的编译器 + 可选列表） */
+function buildOptionsRuntimeFor(project: Project): BuildOptionsRuntime {
+  const compilers = listCompilers();
+  const ids = new Set<string>(compilers.map((c) => c.id));
+  ids.add(project.compilerId || 'gcc');
+  for (const t of project.buildTargets) ids.add(t.compilerId || project.compilerId || 'gcc');
+  const loadCatalog = (id: string) => {
+    try {
+      return compilerLoader ? compilerLoader.load(id) : getCompiler(id);
+    } catch {
+      return getCompiler(id);
+    }
+  };
+  const compilerCatalogs: BuildOptionsRuntime['compilerCatalogs'] = {};
+  const compilerBaseCatalogs: BuildOptionsRuntime['compilerBaseCatalogs'] = {};
+  const compilerFlags: BuildOptionsRuntime['compilerFlags'] = {};
+  const flagStores = readCompilerFlagStores();
+  for (const id of ids) {
+    // 用加载器直接取选项目录：避免 getCompiler 触发编译器版本探测（PCH 编译器会 spawn 进程）
+    const compiler = loadCatalog(id);
+    const base = compiler.options.map((o) => ({
+      name: o.name,
+      option: o.option,
+      additionalLibs: o.additionalLibs,
+      category: o.category,
+    }));
+    compilerBaseCatalogs[id] = base;
+    compilerCatalogs[id] = buildCompilerCatalog(id, base, flagStores);
+    compilerFlags[id] = readLanguageFlags(
+      id,
+      { cOnly: compiler.cOnlyFlags ?? [], cppOnly: compiler.cppOnlyFlags ?? [] },
+      flagStores,
+    );
+  }
+  const projectCompiler = loadCatalog(project.compilerId || 'gcc');
+  return {
+    compilers,
+    compilerCatalogs,
+    compilerBaseCatalogs,
+    compilerFlags,
+    defaultCompilerId: vscode.workspace.getConfiguration('codeblocks').get<string>('compilerId', 'gcc'),
+    defineSwitch: projectCompiler.switches.defines || '-D',
+  };
+}
+
+function boScopeData(
+  title: string,
+  compilerId: string,
+  options: { compilerOptions: string[]; linkerOptions: string[]; linkLibs: string[]; resourceCompilerOptions: string[] },
+  dirs: { includeDirs: string[]; libDirs: string[]; resourceDirs: string[] },
+  commands: { before: string[]; after: string[]; always: boolean },
+  envVars: Array<{ name: string; value: string }>,
+  makeCommands: MakeCommandsMap,
+  linkerExecutable: number,
+  relations: { compiler: number; linker: number; include: number; lib: number; res: number },
+): BuildOptionsScopeData {
+  return {
+    title,
+    compilerId,
+    compilerOptions: [...options.compilerOptions],
+    resourceCompilerOptions: [...(options.resourceCompilerOptions ?? [])],
+    linkerOptions: [...options.linkerOptions],
+    linkLibs: [...options.linkLibs],
+    linkerExecutable,
+    relations,
+    includeDirs: [...dirs.includeDirs],
+    libDirs: [...dirs.libDirs],
+    resourceDirs: [...dirs.resourceDirs],
+    commandsBefore: [...commands.before],
+    commandsAfter: [...commands.after],
+    alwaysPost: commands.always === true,
+    envVars: envVars.map((v) => ({ name: v.name, value: v.value })),
+    makeCommands: { ...makeCommands },
+  };
+}
+
+/** 从工程模型构造 Build options 面板数据 */
+function buildOptionsDataFor(project: Project): BuildOptionsData {
+  const projectScope = boScopeData(
+    project.title,
+    project.compilerId,
+    {
+      compilerOptions: project.compilerOptions,
+      linkerOptions: project.linkerOptions,
+      linkLibs: project.linkLibs,
+      resourceCompilerOptions: project.resourceCompilerOptions,
+    },
+    { includeDirs: project.includeDirs, libDirs: project.libDirs, resourceDirs: project.resourceIncludeDirs },
+    { before: project.commandsBeforeBuild, after: project.commandsAfterBuild, always: project.alwaysRunPostBuildSteps },
+    project.envVars,
+    project.makeCommands,
+    0,
+    { compiler: 3, linker: 3, include: 3, lib: 3, res: 3 },
+  );
+  const targets = project.buildTargets.map((t) => boScopeData(
+    t.title,
+    t.compilerId,
+    {
+      compilerOptions: t.compilerOptions,
+      linkerOptions: t.linkerOptions,
+      linkLibs: t.linkLibs,
+      resourceCompilerOptions: t.resourceCompilerOptions,
+    },
+    { includeDirs: t.includeDirs, libDirs: t.libDirs, resourceDirs: t.resourceIncludeDirs },
+    { before: t.commandsBeforeBuild, after: t.commandsAfterBuild, always: t.alwaysRunPostBuildSteps },
+    t.envVars,
+    t.makeCommands,
+    t.linkerExecutable ?? 0,
+    {
+      compiler: t.optionRelations[OptionsRelationType.CompilerOptions],
+      linker: t.optionRelations[OptionsRelationType.LinkerOptions],
+      include: t.optionRelations[OptionsRelationType.IncludeDirs],
+      lib: t.optionRelations[OptionsRelationType.LibDirs],
+      res: t.optionRelations[OptionsRelationType.ResDirs],
+    },
+  ));
+  const runtime = buildOptionsRuntimeFor(project);
+  return {
+    projectTitle: project.title,
+    makefileIsCustom: project.makefileIsCustom === true,
+    defineSwitch: runtime.defineSwitch,
+    project: projectScope,
+    targets,
+    compilers: runtime.compilers,
+    compilerCatalogs: runtime.compilerCatalogs,
+    compilerBaseCatalogs: runtime.compilerBaseCatalogs,
+    compilerFlags: runtime.compilerFlags,
+    defaultCompilerId: runtime.defaultCompilerId,
+  };
+}
+
+/** 把 Build options 面板数据应用回工程模型 */
+function applyBuildOptionsData(project: Project, data: BuildOptionsData): void {
+  // 快照里的目标按标题匹配：找不到说明目标已被改名/删除（面板数据过期），
+  // 不能按索引回退，否则会把旧目标的选项写到另一个目标上。先整体校验再落任何字段。
+  const targetPairs = data.targets.map((s) => {
+    const t = project.buildTargets.find((x) => x.title === s.title);
+    if (!t) throw new Error(i18n.t('Target not found: {0}', s.title));
+    return { s, t };
+  });
+  project.compilerId = data.project.compilerId || project.compilerId;
+  project.compilerOptions = [...data.project.compilerOptions];
+  project.resourceCompilerOptions = [...(data.project.resourceCompilerOptions ?? [])];
+  project.linkerOptions = [...data.project.linkerOptions];
+  project.linkLibs = [...data.project.linkLibs];
+  project.includeDirs = [...data.project.includeDirs];
+  project.libDirs = [...data.project.libDirs];
+  project.resourceIncludeDirs = [...data.project.resourceDirs];
+  project.commandsBeforeBuild = [...data.project.commandsBefore];
+  project.commandsAfterBuild = [...data.project.commandsAfter];
+  project.alwaysRunPostBuildSteps = data.project.alwaysPost === true;
+  project.envVars = (data.project.envVars ?? []).filter((v) => v.name).map((v) => ({ name: v.name, value: v.value }));
+  project.makeCommands = { ...(data.project.makeCommands ?? {}) };
+  for (const { s, t } of targetPairs) {
+    t.compilerId = s.compilerId || t.compilerId;
+    t.compilerOptions = [...s.compilerOptions];
+    t.resourceCompilerOptions = [...(s.resourceCompilerOptions ?? [])];
+    t.linkerOptions = [...s.linkerOptions];
+    t.linkLibs = [...s.linkLibs];
+    t.includeDirs = [...s.includeDirs];
+    t.libDirs = [...s.libDirs];
+    t.resourceIncludeDirs = [...s.resourceDirs];
+    t.commandsBeforeBuild = [...s.commandsBefore];
+    t.commandsAfterBuild = [...s.commandsAfter];
+    t.alwaysRunPostBuildSteps = s.alwaysPost === true;
+    t.envVars = (s.envVars ?? []).filter((v) => v.name).map((v) => ({ name: v.name, value: v.value }));
+    t.makeCommands = { ...(s.makeCommands ?? {}) };
+    t.linkerExecutable = Number(s.linkerExecutable ?? 0) as LinkerExecutableOption;
+    t.optionRelations[OptionsRelationType.CompilerOptions] = s.relations.compiler;
+    t.optionRelations[OptionsRelationType.LinkerOptions] = s.relations.linker;
+    t.optionRelations[OptionsRelationType.IncludeDirs] = s.relations.include;
+    t.optionRelations[OptionsRelationType.LibDirs] = s.relations.lib;
+    t.optionRelations[OptionsRelationType.ResDirs] = s.relations.res;
+  }
+}
+
+/** 打开独立 Build options 面板（targetTitle 为空 = 工程作用域） */
+function openBuildOptionsPanel(project: Project, targetTitle: string | undefined, extensionUri: vscode.Uri): void {
+  const targetIndex = targetTitle ? project.buildTargets.findIndex((t) => t.title === targetTitle) : -1;
+  const initialScope = targetIndex >= 0 ? String(targetIndex) : 'project';
+  BuildOptionsPanel.show(project.title, project.filename, buildOptionsDataFor(project), extensionUri, async (data) => {
+    const live = openProjects.find((p) => normPath(p.filename) === normPath(project.filename));
+    if (!live) throw new Error(i18n.t('Project is not open: {0}', project.title));
+    applyBuildOptionsData(live, data);
+    await persistProjectAndReload(live);
+  }, initialScope);
+}
+
 /** 打开工程属性面板（initialTab 可直达指定 tab，如 notes；focusFile 可在文件 tab 定位某文件） */
 function showProjectPropertiesPanel(
   project: Project,
@@ -3553,9 +3803,10 @@ function showProjectPropertiesPanel(
   initialTab?: string,
   focusFile?: string,
 ): void {
+  const runtime = buildOptionsRuntimeFor(project);
   ProjectPropertiesPanel.show(project, extensionUri, async (targets, files, options, searchDirs, projectSettings, buildScripts, notes, virtualTargets, debuggerSettings) => {
     await saveProjectProperties(project, targets, files, options, searchDirs, projectSettings, buildScripts, notes, virtualTargets, debuggerSettings);
-  }, initialTab, focusFile);
+  }, initialTab, focusFile, runtime);
 }
 
 /** 写回 .cbp 并立即刷新外部改动检测基准（扩展自写盘不应触发"文件已被修改"提示） */
@@ -3595,8 +3846,11 @@ async function persistProjectAndReload(project: Project): Promise<void> {
  * R9：从目标导出独立工程（对齐 CB ProjectOptions → Create project from target）：
  * 确认 → 选保存位置（默认 <工程名>_<目标名>.cbp）→ 生成单目标工程 → 写盘 → 可立即打开。
  */
-async function exportTargetAsProject(targetTitleArg?: unknown): Promise<void> {
-  const project = requireProject();
+async function exportTargetAsProject(targetTitleArg?: unknown, projectFilenameArg?: unknown): Promise<void> {
+  const requested = String(projectFilenameArg ?? '').trim();
+  const project = requested
+    ? openProjects.find((p) => normPath(p.filename) === normPath(requested))
+    : requireProject();
   if (!project) return;
   let targetTitle = String(targetTitleArg ?? '').trim();
   if (!targetTitle || !project.buildTargets.some((t) => t.title === targetTitle)) {
@@ -4233,7 +4487,7 @@ async function switchUiLanguage(): Promise<void> {
 function refreshOpenPanelsForLanguage(): void {
   ProjectPropertiesPanel.refreshTitleIfOpen();
   KeybindingPanel.refreshTitleIfOpen();
-  CompilerOptionsPanel.refreshTitleIfOpen();
+  BuildOptionsPanel.refreshTitleIfOpen();
 }
 
 async function promptReloadForPersistLog(): Promise<void> {
@@ -4706,6 +4960,19 @@ async function generateClangdForWorkspaceInternal(interactive: boolean): Promise
       const includeDirs = extractAbsoluteIncludeDirs(entries);
       const headerFlags: string[] = [];
       if (targetTriple) headerFlags.push(`--target=${targetTriple}`);
+      // 工程级 C/C++ parser 附加搜索目录（<Extensions><code_completion><search_path>）
+      const parserDirs = new Set<string>();
+      for (const p of orderedProjects) {
+        for (const d of parseProjectCodeCompletionSearchPaths(p.extensions)) {
+          const abs = path.isAbsolute(d) ? d : path.join(p.basePath, d);
+          parserDirs.add(path.normalize(abs));
+        }
+      }
+      for (const d of parserDirs) {
+        if (!includeDirs.some((x) => path.normalize(x).toLowerCase() === d.toLowerCase())) {
+          headerFlags.push('-I', d.replace(/\\/g, '/'));
+        }
+      }
       // -I 与路径拆成两个独立元素（与 -isystem 一致），避免含空格路径依赖 clangd 的拆分行为
       for (const d of includeDirs) {
         headerFlags.push('-I', d.replace(/\\/g, '/'));
@@ -5036,6 +5303,9 @@ async function saveProjectProperties(
   project.makefileIsCustom = projectSettings.makefileIsCustom === true;
   project.makefile = projectSettings.makefile.trim();
   project.executionDir = projectSettings.executionDir.trim();
+  project.checkForExternallyModifiedFiles = projectSettings.checkForExternallyModifiedFiles !== false;
+  project.makeCommands = { ...(projectSettings.makeCommands ?? {}) };
+  project.extensions = applyProjectCodeCompletionSearchPaths(project.extensions, projectSettings.codeCompletionSearchPaths ?? []);
   // 环境变量（R1：<Build><Environment>，项目级）——构建/运行宏 $(NAME) + Run/Debug 进程环境
   project.envVars = (projectSettings.envVars ?? [])
     .filter((v) => v.name)
@@ -5100,6 +5370,8 @@ async function saveProjectProperties(
     t.createStaticLib = e.createStaticLib === true;
     t.prefixAuto = e.prefixAuto !== false;
     t.extensionAuto = e.extensionAuto !== false;
+    t.linkerExecutable = Number(e.linkerExecutable ?? 0) as LinkerExecutableOption;
+    t.makeCommands = { ...(e.makeCommands ?? {}) };
     newTargets.push(t);
     newTitles.add(title);
   }
@@ -5160,10 +5432,12 @@ async function saveProjectProperties(
   project.compilerOptions = options.project.compilerOptions;
   project.linkerOptions = options.project.linkerOptions;
   project.linkLibs = options.project.linkLibs;
+  project.resourceCompilerOptions = options.project.resourceCompilerOptions;
   for (let i = 0; i < newTargets.length && i < options.targets.length; i++) {
     newTargets[i].compilerOptions = options.targets[i].compilerOptions;
     newTargets[i].linkerOptions = options.targets[i].linkerOptions;
     newTargets[i].linkLibs = options.targets[i].linkLibs;
+    newTargets[i].resourceCompilerOptions = options.targets[i].resourceCompilerOptions;
     newTargets[i].optionRelations[OptionsRelationType.CompilerOptions] = options.targets[i].relations.compiler;
     newTargets[i].optionRelations[OptionsRelationType.LinkerOptions] = options.targets[i].relations.linker;
     newTargets[i].optionRelations[OptionsRelationType.IncludeDirs] = options.targets[i].relations.include;
@@ -5251,6 +5525,63 @@ function removeProject(filename: string): void {
   analysisTreeProvider?.refresh();
   projectSearch?.provider.notifyContextChanged();
   outputChannel.info(logT('[Code::Blocks] Project removed: {0}', removed.title));
+}
+
+/**
+ * 保存工程：把内存模型写回 .cbp（对齐 CB Project → Save project）。
+ * 平时编辑即落盘，此命令是显式保存入口与兜底。
+ */
+async function saveProjectToDisk(filename: string): Promise<void> {
+  const project = openProjects.find((p) => normPath(p.filename) === normPath(filename));
+  if (!project) return;
+  try {
+    writeCbpAndRemember(project.filename, serializeProject(project));
+    projectTreeProvider?.setProjects(openProjects);
+    outputChannel.info(logT('[Code::Blocks] Project saved: {0}', project.title));
+    vscode.window.showInformationMessage(i18n.t('Project saved: {0}', path.basename(project.filename)));
+  } catch (err) {
+    vscode.window.showErrorMessage(i18n.t('Failed to save the project: {0}', (err as Error).message));
+  }
+}
+
+/** 从工程移除多个文件（对齐 CB Project → Remove files...，磁盘文件保留） */
+async function removeFilesFromProject(project: Project): Promise<void> {
+  const files = project.files ?? [];
+  if (!files.length) {
+    vscode.window.showInformationMessage(i18n.t('This project has no files to remove.'));
+    return;
+  }
+  const picks = await vscode.window.showQuickPick(
+    files.map((f) => ({ label: f.relativeFilename })),
+    {
+      canPickMany: true,
+      placeHolder: i18n.t('Select the files to remove from the project (the files on disk are kept)'),
+    },
+  );
+  if (!picks || !picks.length) return;
+  const confirm = await vscode.window.showWarningMessage(
+    i18n.t('Remove {0} file(s) from project "{1}"? (the files on disk are kept)', picks.length, project.title),
+    { modal: true },
+    'Remove',
+  );
+  if (confirm !== 'Remove') return;
+
+  const failed: string[] = [];
+  for (const pick of picks) {
+    try {
+      removeUnitFromCbp(project.filename, pick.label);
+    } catch {
+      failed.push(pick.label);
+    }
+  }
+  const removed = picks.length - failed.length;
+  if (removed > 0) {
+    outputChannel.info(logT('[Code::Blocks] {0} file(s) removed from the project: {1}', removed, project.title));
+    await reloadProjectFromDisk(project.filename);
+  }
+  if (failed.length) {
+    vscode.window.showErrorMessage(i18n.t('Failed to remove the file: {0}', failed.join(', ')));
+  }
 }
 
 /** 从项目移除文件（保留磁盘文件，写回 .cbp 删除对应 <Unit> 节点） */
@@ -5863,7 +6194,7 @@ function getCompiler(compilerId?: string): Compiler {
     cfg.get<string>('compilerId', 'gcc'),
   );
   // P6：缓存命中直接返回（不再重复读取/解析编译器 XML，含 extends 链）
-  const cacheKey = buildCompilerCacheKey(id, masterPath, programs);
+  const cacheKey = buildCompilerCacheKey(id, masterPath, programs, languageFlagsSignature(id));
   const cached = compilerResultCache.get(cacheKey);
   if (cached) return cached;
   const built = buildCompilerInstance(id, masterPath, cfg);
@@ -5896,6 +6227,10 @@ function buildCompilerInstance(
     }
     // 用户自定义错误正则按索引覆盖/追加（对齐 Compiler::LoadSettings:699-737）
     codeBlocksConfig?.applyUserRegexes(id, compiler.regexes);
+    // 仅 C / 仅 C++ 参数：用户覆盖优先，否则用 XML <Sort> 基线
+    const language = readLanguageFlags(id, { cOnly: compiler.cOnlyFlags, cppOnly: compiler.cppOnlyFlags });
+    compiler.cOnlyFlags = language.cOnly;
+    compiler.cppOnlyFlags = language.cppOnly;
     return compiler;
   };
   if (compilerLoader) {
@@ -5941,8 +6276,29 @@ function buildCompilerInstance(
   return applyGlobalDirs(createGccCompiler(process.platform, masterPath));
 }
 
-/** compilerRegistry 纯模块的宿主依赖（X1：空 ID 缺省链与注册判定） */
-function compilerRegistryDeps(): CompilerRegistryDeps {
+/** 可选编译器列表（资源 options_<id>.xml + default.conf 用户编译器 + 当前设置），供 Build options → Selected compiler */
+function listCompilers(): Array<{ id: string; name: string }> {
+  const out = new Map<string, string>();
+  const add = (id: string, name?: string): void => {
+    const key = (id || '').trim();
+    if (!key) return;
+    if (!out.has(key)) out.set(key, (name || '').trim() || codeBlocksConfig?.find(key)?.name || key);
+  };
+  if (compilerResourcesDir && fs.existsSync(compilerResourcesDir)) {
+    for (const file of fs.readdirSync(compilerResourcesDir)) {
+      const m = /^options_(.+)\.xml$/i.exec(file);
+      // options_common_*.xml 是 <Common name="..."> 引入的片段，不是可选编译器
+      if (m && !/^common(_|$)/i.test(m[1])) add(m[1]);
+    }
+  }
+  for (const cfg of codeBlocksConfig?.listUserCompilers() ?? []) add(cfg.id, cfg.name);
+  add(vscode.workspace.getConfiguration('codeblocks').get<string>('compilerId', 'gcc'));
+  return [...out.entries()]
+    .map(([id, name]) => ({ id, name }))
+    .sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id));
+}
+
+/** compilerRegistry 纯模块的宿主依赖（X1：空 ID 缺省链与注册判定） */function compilerRegistryDeps(): CompilerRegistryDeps {
   const cfg = vscode.workspace.getConfiguration('codeblocks');
   return {
     configuredId: () => cfg.get<string>('compilerId', 'gcc'),
@@ -7781,13 +8137,16 @@ async function exportProjectMakefile(): Promise<void> {
 }
 
 /** 工作区依赖编辑（C1）：勾选依赖工程（依赖先构建），写入 .workspace 的 <Depends>（含环路检测） */
-async function editWorkspaceDependencies(): Promise<void> {
+async function editWorkspaceDependencies(projectFilenameArg?: unknown): Promise<void> {
   const wsFile = openedWorkspaceFile;
   if (!wsFile || !fs.existsSync(wsFile)) {
     vscode.window.showWarningMessage(i18n.t('No .workspace is open in this session (dependency editing requires an open .workspace)'));
     return;
   }
-  const project = requireProject();
+  const requested = String(projectFilenameArg ?? '').trim();
+  const project = requested
+    ? openProjects.find((p) => normPath(p.filename) === normPath(requested))
+    : requireProject();
   if (!project) return;
   let ws: Workspace;
   try {

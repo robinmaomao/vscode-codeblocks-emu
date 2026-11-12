@@ -110,7 +110,7 @@ const COMMAND = 'codeblocks.ui.switchLanguage';
     /refreshStatusBars\(\);\s*refreshOpenPanelsForLanguage\(\);/.test(ext)
     && /ProjectPropertiesPanel\.refreshTitleIfOpen\(\)/.test(ext)
     && /KeybindingPanel\.refreshTitleIfOpen\(\)/.test(ext)
-    && /CompilerOptionsPanel\.refreshTitleIfOpen\(\)/.test(ext), null);
+    && /BuildOptionsPanel\.refreshTitleIfOpen\(\)/.test(ext), null);
   check('E3 状态栏文案不残留硬编码（面板标题走 i18n）',
     /projectPropertiesTitle\(/.test(fs.readFileSync(path.join(ROOT, 'dist', 'ui', 'projectPropertiesPanel.js'), 'utf-8')), null);
 

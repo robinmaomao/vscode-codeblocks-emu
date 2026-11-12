@@ -1,8 +1,9 @@
-// 编译选项面板「应用」回归（对应 Project properties 同类配置页面缺陷）：
-//  - 勾选后必须真正写回 .cbp（此前只改内存模型，重开工程即丢失）
-//  - options_<id>.xml 之外的「自定义选项」（如手写的 -pipe）不得被本面板静默清除
-//  - 应用失败（写盘异常）要回发 error 让面板可见，而不是静默吞掉
-//  - 应用成功后宿主返回重新解析的工程/目标，面板必须重绑（否则第二次应用基于陈旧对象）
+// Build options 面板「保存」回归（移植 Code::Blocks CompilerOptionsDlg 后的新协议）：
+//  - 面板只负责收集数据并经 `save` 报文交给宿主，宿主写回 .cbp（此前只改内存模型，重开工程即丢失）
+//  - 手写的「其他编译器选项」（如 -pipe）必须原样保留，不得被勾选项覆盖
+//  - 保存失败（写盘异常）要回发 error 让面板可见，而不是静默吞掉
+//  - 连点保存按到达顺序串行落盘，最后一次生效且不丢前面已保存的选项
+//  - 工程从磁盘重载后面板必须关闭（旧快照不得覆盖新工程）
 //
 // 说明：扩展模块级状态绑定首次 require('vscode') 的 mock，故**每个场景单起一个子进程**（--case <name>）。
 const { spawnSync } = require('child_process');
@@ -11,7 +12,6 @@ const os = require('os');
 const path = require('path');
 
 const ROOT = path.resolve(__dirname, '..');
-const FIXTURE = path.join(ROOT, 'tests', 'visual', 'fixtures', 'rich.cbp');
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 /** 最小 .cbp：项目级 <Compiler> 含自定义 -pipe，目标（默认 Debug）含 -g */
@@ -55,94 +55,127 @@ function compilerOptionsIn(xml, targetTitle) {
   return [...body[1].matchAll(/<Add option="([^"]*)" \/>/g)].map((m) => m[1]);
 }
 
-/** 场景 1：面板自身的应用逻辑（无需激活扩展） */
+/** 面板快照（BuildOptionsData）最小构造 */
+function scope(title, compilerOptions = []) {
+  return {
+    title,
+    compilerId: 'gcc',
+    compilerOptions,
+    resourceCompilerOptions: [],
+    linkerOptions: [],
+    linkLibs: [],
+    linkerExecutable: 0,
+    relations: { compiler: 0, linker: 0, include: 0, lib: 0, res: 0 },
+    includeDirs: [],
+    libDirs: [],
+    resourceDirs: [],
+    commandsBefore: [],
+    commandsAfter: [],
+    alwaysPost: false,
+    envVars: [],
+    makeCommands: {},
+  };
+}
+
+function makeData() {
+  return {
+    projectTitle: 'app',
+    makefileIsCustom: false,
+    defineSwitch: '',
+    project: scope('app', ['-pipe']),
+    targets: [scope('Debug', ['-g'])],
+    compilers: [{ id: 'gcc', name: 'GNU GCC Compiler' }],
+    compilerCatalogs: {},
+    compilerBaseCatalogs: {},
+    compilerFlags: {},
+  };
+}
+
+/** 从面板 HTML 里取回内联脚本的 BOOT.data（与真实面板保存时提交的快照一致） */
+function bootData(html) {
+  const m = html.match(/var BOOT = ([\s\S]*?);\r?\n\s*var DATA = BOOT\.data;/);
+  if (!m) throw new Error('面板 HTML 里找不到 BOOT');
+  return JSON.parse(m[1]).data;
+}
+
+/** 场景 1：面板自身的保存协议（无需激活扩展） */
 async function runPanelCase(c) {
   const { installVscodeMock } = require('./_harness/vscodeMock');
   const mock = installVscodeMock({ config: {} });
-  const { ProjectParser } = require('../dist/model/parser');
-  const { CompilerOptionsLoader } = require('../dist/compiler/optionsLoader');
-  const { CompilerOptionsPanel } = require('../dist/ui/compilerOptionsPanel');
+  const { BuildOptionsPanel } = require('../dist/ui/buildOptionsPanel');
 
-  const parse = () => new ProjectParser().parse(FIXTURE);
-  const compiler = new CompilerOptionsLoader(path.join(ROOT, 'resources', 'compilers')).load('gcc');
   const uri = mock.vscode.Uri.file(ROOT);
   const lastWebview = () => mock.webviews[mock.webviews.length - 1].webview;
 
-  // ---- A. 项目级：保留 XML 之外的自定义选项 ----
-  const project = parse();
+  // ---- 保存成功：数据原样交给宿主，回发 saved ----
+  const data = makeData();
   let received;
-  CompilerOptionsPanel.show(compiler, project, undefined, uri, async (opts) => { received = opts; return undefined; });
+  BuildOptionsPanel.show('app', path.join(ROOT, 'app.cbp'), data, uri, async (d) => { received = d; });
   let wv = lastWebview();
-  wv.__emit({ type: 'apply', options: ['-g', '-Wall'] });
+  wv.__emit({ type: 'save', data });
   await sleep(20);
-  c.check('P1 自定义选项 -pipe 保留并追加勾选项',
-    JSON.stringify(received) === JSON.stringify(['-pipe', '-g', '-Wall']), received, ['-pipe', '-g', '-Wall']);
-  c.check('P2 应用成功回发 applied', wv.posted.some((m) => m.type === 'applied'), wv.posted.map((m) => m.type), ['applied']);
+  c.check('P1 保存把快照交给宿主（-pipe 与 -g 均在）',
+    !!received
+    && JSON.stringify(received.project.compilerOptions) === JSON.stringify(['-pipe'])
+    && JSON.stringify(received.targets[0].compilerOptions) === JSON.stringify(['-g']),
+    received && { project: received.project.compilerOptions, target: received.targets[0].compilerOptions },
+    { project: ['-pipe'], target: ['-g'] });
+  c.check('P2 保存成功回发 saved', wv.posted.some((m) => m.type === 'saved'), wv.posted.map((m) => m.type), ['saved']);
 
-  // ---- B. 目标级：只写目标自己的选项 ----
-  const targetProject = parse();
-  const debug = targetProject.buildTargets[0];
-  received = undefined;
-  CompilerOptionsPanel.show(compiler, targetProject, debug, uri, async (opts) => { received = opts; return undefined; });
+  // ---- 保存失败 → 回发 error（含原因），且不误报成功 ----
+  BuildOptionsPanel.show('app', path.join(ROOT, 'app.cbp'), makeData(), uri, async () => { throw new Error('disk full'); });
   wv = lastWebview();
-  wv.__emit({ type: 'apply', options: ['-O2'] });
+  wv.__emit({ type: 'save', data: makeData() });
   await sleep(20);
-  c.check('P3 目标级应用只含勾选项（原 -g/-Wextra 被替换）',
-    JSON.stringify(received) === JSON.stringify(['-O2']), received, ['-O2']);
-  c.check('P4 目标级影响的是目标而非工程选项',
-    JSON.stringify(debug.compilerOptions) === JSON.stringify(['-O2'])
-    && !targetProject.compilerOptions.includes('-O2'),
-    { target: debug.compilerOptions, project: targetProject.compilerOptions });
-
-  // ---- C. 宿主返回新对象后重绑（连续应用不会基于陈旧工程） ----
-  const freshProject = parse();
-  freshProject.compilerOptions = ['-DFRESH'];
-  const seen = [];
-  CompilerOptionsPanel.show(compiler, parse(), undefined, uri, async (opts) => {
-    seen.push(opts);
-    return { project: freshProject };
-  });
-  wv = lastWebview();
-  wv.__emit({ type: 'apply', options: ['-Wall'] });
-  await sleep(20);
-  wv.__emit({ type: 'apply', options: ['-O2'] });
-  await sleep(20);
-  c.check('P5 首次应用基于打开面板时的工程',
-    JSON.stringify(seen[0]) === JSON.stringify(['-pipe', '-Wall']), seen[0], ['-pipe', '-Wall']);
-  c.check('P5b 应用后重绑到宿主返回的工程（第二次基于 -DFRESH）',
-    JSON.stringify(seen[1]) === JSON.stringify(['-DFRESH', '-O2']), seen[1], ['-DFRESH', '-O2']);
-
-  // ---- D. 写盘失败 → 回发 error，且不误报成功 ----
-  const failProject = parse();
-  CompilerOptionsPanel.show(compiler, failProject, undefined, uri, async () => { throw new Error('disk full'); });
-  wv = lastWebview();
-  wv.__emit({ type: 'apply', options: ['-g'] });
-  await sleep(20);
-  c.check('P6 应用失败回发 error（含原因）',
+  c.check('P3 保存失败回发 error（含原因）',
     wv.posted.some((m) => m.type === 'error' && m.message === 'disk full'),
     wv.posted, 'error: disk full');
-  c.check('P7 应用失败不回发 applied', !wv.posted.some((m) => m.type === 'applied'), wv.posted.map((m) => m.type), '无 applied');
-  c.check('P7b 应用失败不改动内存模型（避免后续序列化写入未落盘的选项）',
-    JSON.stringify(failProject.compilerOptions) === JSON.stringify(['-pipe']), failProject.compilerOptions, ['-pipe']);
+  c.check('P4 保存失败不回发 saved', !wv.posted.some((m) => m.type === 'saved'), wv.posted.map((m) => m.type), '无 saved');
 
-  // ---- E. 未提供宿主回调（只读/测试构造）时仍更新内存模型 ----
-  const soloProject = parse();
-  CompilerOptionsPanel.show(compiler, soloProject, undefined, uri);
+  // ---- 连点保存：串行、按序、不丢 ----
+  const order = [];
+  BuildOptionsPanel.show('app', path.join(ROOT, 'app.cbp'), makeData(), uri, async (d) => {
+    order.push(d.targets[0].compilerOptions.join(','));
+    await sleep(30);
+  });
   wv = lastWebview();
-  wv.__emit({ type: 'apply', options: ['-g'] });
+  const first = makeData();
+  first.targets[0].compilerOptions = ['-O1'];
+  const second = makeData();
+  second.targets[0].compilerOptions = ['-O3'];
+  wv.__emit({ type: 'save', data: first });
+  wv.__emit({ type: 'save', data: second });
+  await sleep(200);
+  c.check('P5 连点保存按到达顺序串行执行',
+    JSON.stringify(order) === JSON.stringify(['-O1', '-O3']), order, ['-O1', '-O3']);
+  c.check('P5b 两次保存都回发 saved',
+    wv.posted.filter((m) => m.type === 'saved').length === 2,
+    wv.posted.map((m) => m.type), ['saved', 'saved']);
+
+  // ---- 保存并关闭：成功后释放面板 ----
+  BuildOptionsPanel.show('app', path.join(ROOT, 'app.cbp'), makeData(), uri, async () => undefined);
+  const closing = mock.webviews[mock.webviews.length - 1];
+  closing.webview.__emit({ type: 'save', data: makeData(), close: true });
   await sleep(20);
-  c.check('P8 无宿主回调时更新内存模型且不抛错',
-    JSON.stringify(soloProject.compilerOptions) === JSON.stringify(['-pipe', '-g'])
-    && wv.posted.some((m) => m.type === 'applied'),
-    soloProject.compilerOptions, ['-pipe', '-g']);
+  c.check('P6 保存并关闭后释放面板', closing.__disposed === true
+    && closing.webview.posted.some((m) => m.type === 'saved'), closing.__disposed);
+
+  // ---- 空报文不得触发宿主回调 ----
+  let called = 0;
+  BuildOptionsPanel.show('app', path.join(ROOT, 'app.cbp'), makeData(), uri, async () => { called++; });
+  wv = lastWebview();
+  wv.__emit({ type: 'save' });
+  wv.__emit({ type: 'save', data: { project: {} } });
+  await sleep(20);
+  c.check('P7 缺少 project/targets 的保存报文被忽略', called === 0 && wv.posted.length === 0, { called, posted: wv.posted.length });
 
   mock.restore();
 }
 
-/** 场景 2：命令 → 面板 → 应用 → 真正写回 .cbp */
+/** 场景 2：命令 → 面板 → 保存 → 真正写回 .cbp */
 async function runHostCase(c) {
   const { activate } = require('./_harness/extensionActivation');
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'cb-coapply-'));
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'cb-boapply-'));
   const cbp = path.join(tmp, 'app', 'app.cbp');
   writeCbp(cbp);
 
@@ -151,41 +184,49 @@ async function runHostCase(c) {
 
   await app.invoke('codeblocks.compilerOptions');
   const panel = app.mock.webviews[app.mock.webviews.length - 1];
-  c.check('H1 编译选项面板已打开', !!panel && panel.kind === 'codeblocks.compilerOptions', panel && panel.kind);
-  const html = panel.webview.html;
-  c.check('H2 面板列出目标已有选项（-g 勾选）', /value="-g"[^>]*checked/.test(html), 'html', 'checked -g');
+  c.check('H1 Build options 面板已打开', !!panel && panel.kind === 'codeblocks.buildOptions', panel && panel.kind);
 
-  panel.webview.__emit({ type: 'apply', options: ['-Wall', '-O2'] });
-  await sleep(200);
+  const data = bootData(panel.webview.html);
+  c.check('H2 面板快照带上目标已有选项 -g', data.targets.length === 1 && data.targets[0].compilerOptions.includes('-g'),
+    data.targets.map((t) => t.compilerOptions));
+  c.check('H3 面板快照带上项目级自定义选项 -pipe', data.project.compilerOptions.includes('-pipe'), data.project.compilerOptions);
+
+  data.targets[0].compilerOptions = ['-Wall', '-O2'];
+  panel.webview.__emit({ type: 'save', data });
+  await sleep(250);
   const written = fs.readFileSync(cbp, 'utf-8');
   const targetOpts = compilerOptionsIn(written, 'Debug');
-  c.check('H3 应用后 .cbp 的目标编译选项已更新（不再只有 -g）',
+  c.check('H4 保存后 .cbp 的目标编译选项已更新（不再只有 -g）',
     targetOpts.includes('-Wall') && targetOpts.includes('-O2') && !targetOpts.includes('-g'), targetOpts, ['-Wall', '-O2']);
-  c.check('H4 项目级自定义选项 -pipe 未被清掉',
+  c.check('H5 项目级自定义选项 -pipe 未被清掉',
     compilerOptionsIn(written, undefined).includes('-pipe'), compilerOptionsIn(written, undefined), ['-pipe']);
-  c.check('H5 应用成功回发 applied 且无 error',
-    panel.webview.posted.some((m) => m.type === 'applied') && !panel.webview.posted.some((m) => m.type === 'error'),
-    panel.webview.posted.map((m) => m.type), ['applied']);
+  c.check('H6 保存成功回发 saved 且无 error',
+    panel.webview.posted.some((m) => m.type === 'saved') && !panel.webview.posted.some((m) => m.type === 'error'),
+    panel.webview.posted.map((m) => m.type), ['saved']);
 
-  // 二次应用（宿主已重载工程）不再丢失上次结果
-  panel.webview.__emit({ type: 'apply', options: ['-Wall', '-O2', '-Wextra'] });
+  // 二次保存（宿主已重载工程）不丢上次结果
+  data.targets[0].compilerOptions = ['-Wall', '-O2', '-Wextra'];
+  panel.webview.__emit({ type: 'save', data });
   await sleep(250);
-  const written2 = fs.readFileSync(cbp, 'utf-8');
-  const targetOpts2 = compilerOptionsIn(written2, 'Debug');
-  c.check('H6 连续应用不丢上次选项',
+  const targetOpts2 = compilerOptionsIn(fs.readFileSync(cbp, 'utf-8'), 'Debug');
+  c.check('H7 连续保存不丢上次选项',
     ['-Wall', '-O2', '-Wextra'].every((o) => targetOpts2.includes(o)), targetOpts2, ['-Wall', '-O2', '-Wextra']);
 
-  // 连点「应用」（不等待完成）：按到达顺序串行落盘，两次都要生效
-  const appliedBefore = panel.webview.posted.filter((m) => m.type === 'applied').length;
-  panel.webview.__emit({ type: 'apply', options: ['-O1'] });
-  panel.webview.__emit({ type: 'apply', options: ['-O3'] });
-  await sleep(400);
-  const appliedAfter = panel.webview.posted.filter((m) => m.type === 'applied').length;
+  // 连点「保存」（不等待完成）：按到达顺序串行落盘，两次都要生效
+  const savedBefore = panel.webview.posted.filter((m) => m.type === 'saved').length;
+  const jump1 = JSON.parse(JSON.stringify(data));
+  jump1.targets[0].compilerOptions = ['-O1'];
+  const jump2 = JSON.parse(JSON.stringify(data));
+  jump2.targets[0].compilerOptions = ['-O3'];
+  panel.webview.__emit({ type: 'save', data: jump1 });
+  panel.webview.__emit({ type: 'save', data: jump2 });
+  await sleep(500);
+  const savedAfter = panel.webview.posted.filter((m) => m.type === 'saved').length;
   const targetOpts3 = compilerOptionsIn(fs.readFileSync(cbp, 'utf-8'), 'Debug');
-  c.check('H6b 连点应用串行生效（两次都完成，最终为最后一次）',
-    appliedAfter - appliedBefore === 2 && targetOpts3.includes('-O3') && !targetOpts3.includes('-O1'),
-    { appliedAfter, appliedBefore, targetOpts3 }, { applied: 2, targetOpts3: ['-O3'] });
-  c.check('H7 工程未被外部改动判为脏（自写盘已刷新基准）',
+  c.check('H8 连点保存串行生效（两次都完成，最终为最后一次）',
+    savedAfter - savedBefore === 2 && targetOpts3.includes('-O3') && !targetOpts3.includes('-O1'),
+    { savedAfter, savedBefore, targetOpts3 }, { saved: 2, targetOpts3: ['-O3'] });
+  c.check('H9 自写盘不触发「已在磁盘上被修改」询问',
     !app.records.warningButtons.some((w) => /已在磁盘上被修改/.test(String(w.message))),
     app.records.warningButtons.map((w) => w.message), '无外部改动询问');
 
@@ -193,10 +234,10 @@ async function runHostCase(c) {
   fs.rmSync(tmp, { recursive: true, force: true });
 }
 
-/** 场景 3：面板打开后目标被外部改名/删除 → 应用必须报错，不得静默改写工程级选项 */
+/** 场景 3：面板打开后目标被外部改名/删除 → 重载必须关闭面板，不能让旧快照覆盖工程 */
 async function runStaleTargetCase(c) {
   const { activate } = require('./_harness/extensionActivation');
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'cb-costale-'));
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'cb-bostale-'));
   const cbp = path.join(tmp, 'app', 'app.cbp');
   writeCbp(cbp);
 
@@ -204,22 +245,27 @@ async function runStaleTargetCase(c) {
   await sleep(100);
   await app.invoke('codeblocks.compilerOptions');
   const panel = app.mock.webviews[app.mock.webviews.length - 1];
-  c.check('X0 面板按 Debug 目标打开', /value="-g"[^>]*checked/.test(panel.webview.html), null);
+  const data = bootData(panel.webview.html);
+  c.check('X0 面板按 Debug 目标打开', data.targets.length === 1 && data.targets[0].title === 'Debug', data.targets.map((t) => t.title));
 
-  // 外部改名目标 + 重载：面板持有的目标已不存在
+  // 外部改名目标 + 重载：面板持有的快照已过期
   writeCbp(cbp, 'DebugRenamed');
   await app.invoke('codeblocks.reloadProject');
-  await sleep(100);
+  await sleep(150);
   const before = fs.readFileSync(cbp, 'utf-8');
 
-  panel.webview.__emit({ type: 'apply', options: ['-O2'] });
-  await sleep(300);
+  c.check('X1 重载后关闭 Build options 面板（避免旧快照写回）', panel.__disposed === true, panel.__disposed);
+
+  data.targets[0].compilerOptions = ['-O2'];
+  panel.webview.__emit({ type: 'save', data });
+  await sleep(250);
   const after = fs.readFileSync(cbp, 'utf-8');
-  const err = panel.webview.posted.find((m) => m.type === 'error');
-  c.check('X1 目标已不存在时回发 error（含原因）',
-    !!err && /not found|不存在/.test(String(err.message)), err && err.message);
-  c.check('X2 失败时不回发 applied',
-    !panel.webview.posted.some((m) => m.type === 'applied'), panel.webview.posted.map((m) => m.type));
+  // mock 的 onDidReceiveMessage 不随 Disposable 解绑，故旧快照仍会被投递一次：
+  // 此处顺带验证宿主的严格目标校验——过期目标必须被拒绝，绝不能按索引写歪。
+  c.check('X2 旧快照保存被拒绝（error 含 not found，不回发 saved）',
+    panel.webview.posted.some((m) => m.type === 'error' && /not found|不存在/i.test(String(m.message)))
+    && !panel.webview.posted.some((m) => m.type === 'saved'),
+    panel.webview.posted, 'error: Target not found');
   c.check('X3 未把目标选项误写进工程级（无 -O2）',
     !compilerOptionsIn(after, undefined).includes('-O2'), compilerOptionsIn(after, undefined), ['-pipe']);
   c.check('X4 .cbp 保持外部版本不被改写', after === before, after === before ? 'equal' : 'changed');

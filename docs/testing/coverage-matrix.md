@@ -4,15 +4,15 @@
 > 判定口径：契约项 ID（命令/视图/设置键/键位/语言/语法/DAP 能力标记）在对应测试层源码中出现即计为命中；
 > 视觉层/性能层不引用命令 ID 字面量，按 `EXPLICIT_HITS`（面/引擎级覆盖）人工补充，明细见脚本内注释。
 > 列 `src` 表示实现存在（不算测试覆盖）；`契约/无头/E2E/视觉/性能/宿主` 为六个自动化测试层。
-> 数据来源：package.json v0.8.148 + tests/** + src/**
+> 数据来源：package.json v0.8.151 + tests/** + src/**
 
 ## 汇总
 
 | 契约项 | 总数 | 契约层 | 无头层 | E2E 层 | 视觉层 | 性能层 | 宿主层 | 未覆盖 | 覆盖率 |
 |--------|------|--------|--------|--------|--------|--------|--------|--------|--------|
-| 命令 | 113 | 3 | 98 | 4 | 12 | 5 | 37 | 2 | 98% |
+| 命令 | 118 | 3 | 103 | 4 | 12 | 5 | 37 | 2 | 98% |
 | 视图 | 6 | 2 | 6 | 1 | 1 | 0 | 5 | 0 | 100% |
-| 设置 | 85 | 85 | 78 | 15 | 0 | 1 | 6 | 0 | 100% |
+| 设置 | 88 | 88 | 78 | 15 | 0 | 1 | 6 | 0 | 100% |
 | 快捷键 | 34 | 3 | 32 | 2 | 4 | 2 | 12 | 0 | 100% |
 | 语言/语法 | 6 | 0 | 6 | 3 | 2 | 1 | 3 | 0 | 100% |
 | DAP 能力 | 30 | 0 | 1 | 30 | 0 | 0 | 5 | 0 | 100% |
@@ -52,8 +52,8 @@
 | 29 | `codeblocks.workspaceScanReport` | Code::Blocks: 工作区扫描报告 | · | ✔ | · | · | · | · | ✅ |
 | 30 | `codeblocks.checkWorkspacePath` | Code::Blocks: 检查工作区路径 | · | ✔ | · | · | · | · | ✅ |
 | 31 | `codeblocks.excludeBuildOutputs` | Code::Blocks: 从文件监听/搜索中排除构建产物 | · | ✔ | · | · | · | · | ✅ |
-| 32 | `codeblocks.compilerOptions` | Code::Blocks: 编译器选项 | · | ✔ | · | ✔ | · | ✔ | ✅ |
-| 33 | `codeblocks.projectProperties` | Code::Blocks: 工程属性 | · | ✔ | · | ✔ | · | ✔ | ✅ |
+| 32 | `codeblocks.compilerOptions` | 构建选项... | · | ✔ | · | ✔ | · | ✔ | ✅ |
+| 33 | `codeblocks.projectProperties` | 属性... | · | ✔ | · | ✔ | · | ✔ | ✅ |
 | 34 | `codeblocks.generateCompileCommands` | Code::Blocks: 生成 compile_commands.json (IntelliSense) | · | ✔ | · | · | ✔ | ✔ | ✅ |
 | 35 | `codeblocks.cleanClangdConfig` | Code::Blocks: 清理失效的 clangd 配置片段 | · | ✔ | · | · | · | · | ✅ |
 | 36 | `codeblocks.restartClangd` | Code::Blocks: 重启 clangd 语言服务器 | · | · | · | · | · | · | ⚠ 未覆盖 |
@@ -83,57 +83,62 @@
 | 60 | `codeblocks.moveProjectUp` | 上移 | · | ✔ | · | · | · | · | ✅ |
 | 61 | `codeblocks.moveProjectDown` | 下移 | · | ✔ | · | · | · | · | ✅ |
 | 62 | `codeblocks.removeProject` | 移除工程 | · | ✔ | · | · | · | · | ✅ |
-| 63 | `codeblocks.reloadProject` | Code::Blocks: 从磁盘重新加载工程 | · | ✔ | · | · | · | · | ✅ |
-| 64 | `codeblocks.buildProject` | 构建 | · | ✔ | · | · | · | · | ✅ |
-| 65 | `codeblocks.rebuildProject` | 重新构建 | · | ✔ | · | · | · | · | ✅ |
-| 66 | `codeblocks.cleanProject` | 清理 | · | ✔ | · | · | · | · | ✅ |
-| 67 | `codeblocks.addFile` | 添加文件... | · | ✔ | · | · | · | · | ✅ |
-| 68 | `codeblocks.addFilesRecursively` | 递归添加文件... | · | ✔ | · | · | · | · | ✅ |
-| 69 | `codeblocks.findFile` | 查找文件... | · | ✔ | · | · | · | · | ✅ |
-| 70 | `codeblocks.searchProjectFiles` | 工程搜索：查找工程文件 | · | ✔ | · | · | · | · | ✅ |
-| 71 | `codeblocks.searchInProjectFiles` | 工程搜索：在工程文件中搜索 | · | ✔ | · | · | · | · | ✅ |
-| 72 | `codeblocks.fileProperties` | 属性... | · | ✔ | · | · | · | ✔ | ✅ |
-| 73 | `codeblocks.renameFile` | 重命名文件... | · | ✔ | · | · | · | · | ✅ |
-| 74 | `codeblocks.newVirtualFolder` | 新建虚拟文件夹... | · | ✔ | · | · | · | · | ✅ |
-| 75 | `codeblocks.renameVirtualFolder` | 重命名虚拟文件夹... | · | ✔ | · | · | · | · | ✅ |
-| 76 | `codeblocks.deleteVirtualFolder` | 删除虚拟文件夹 | · | ✔ | · | · | · | · | ✅ |
-| 77 | `codeblocks.removeFile` | 从工程移除文件 | · | ✔ | · | · | · | · | ✅ |
-| 78 | `codeblocks.openContainingFolder` | 打开所在文件夹 | · | ✔ | · | · | · | · | ✅ |
-| 79 | `codeblocks.toggleCompile` | 编译文件 | · | ✔ | · | · | · | · | ✅ |
-| 80 | `codeblocks.toggleLink` | 链接文件 | · | ✔ | · | · | · | · | ✅ |
-| 81 | `codeblocks.compileFile` | 构建文件 | · | ✔ | · | · | ✔ | · | ✅ |
-| 82 | `codeblocks.cleanFile` | 清理文件 | · | ✔ | · | · | · | · | ✅ |
-| 83 | `codeblocks.editFileBuildCommand` | 编辑自定义构建命令... | · | ✔ | · | · | · | · | ✅ |
-| 84 | `codeblocks.nextError` | Code::Blocks: 下一个错误 | · | ✔ | · | · | · | ✔ | ✅ |
-| 85 | `codeblocks.prevError` | Code::Blocks: 上一个错误 | · | · | · | · | · | ✔ | ✅ |
-| 86 | `codeblocks.compileCurrentFile` | Code::Blocks: 编译当前文件 | · | ✔ | · | · | · | ✔ | ✅ |
-| 87 | `codeblocks.clearErrors` | Code::Blocks: 清除全部错误 | · | ✔ | · | · | · | ✔ | ✅ |
-| 88 | `codeblocks.activatePriorProject` | Code::Blocks: 激活上一个工程 | · | ✔ | · | · | · | · | ✅ |
-| 89 | `codeblocks.activateNextProject` | Code::Blocks: 激活下一个工程 | · | ✔ | · | · | · | · | ✅ |
-| 90 | `codeblocks.toggleCategorize` | Code::Blocks: 按文件类型分组显示工程树 | · | ✔ | · | · | · | ✔ | ✅ |
-| 91 | `codeblocks.clearRecentProjects` | Code::Blocks: 清除最近工程 | · | ✔ | · | · | · | · | ✅ |
-| 92 | `codeblocks.projectNotes` | Code::Blocks: 工程备注 | · | ✔ | · | · | · | · | ✅ |
-| 93 | `codeblocks.setProgramArguments` | Code::Blocks: 设置程序参数 | · | ✔ | · | · | · | · | ✅ |
-| 94 | `codeblocks.showGlobalVariables` | Code::Blocks: 显示全局变量 | · | ✔ | · | · | · | ✔ | ✅ |
-| 95 | `codeblocks.clearBacktickCache` | Code::Blocks: 清除反引号缓存 | · | ✔ | · | · | · | · | ✅ |
-| 96 | `codeblocks.keybindings.check` | Code::Blocks: 检查快捷键冲突 | · | · | · | · | · | ✔ | ✅ |
-| 97 | `codeblocks.keybindings.apply` | Code::Blocks: 应用快捷键 | · | · | · | · | · | ✔ | ✅ |
-| 98 | `codeblocks.keybindings.configure` | Code::Blocks: 配置快捷键... | · | ✔ | · | · | · | · | ✅ |
-| 99 | `codeblocks.keybindings.reset` | Code::Blocks: 重置快捷键 | · | · | · | · | · | ✔ | ✅ |
-| 100 | `codeblocks.keybindings.panel` | Code::Blocks: 快捷键设置 | · | ✔ | · | ✔ | · | ✔ | ✅ |
-| 101 | `codeblocks.keybindings.export` | Code::Blocks: 导出快捷键方案 | · | ✔ | · | · | · | · | ✅ |
-| 102 | `codeblocks.keybindings.import` | Code::Blocks: 导入快捷键方案 | · | ✔ | · | · | · | · | ✅ |
-| 103 | `codeblocks.debug.refreshRegisters` | Code::Blocks: 刷新寄存器 | · | · | · | · | · | ✔ | ✅ |
-| 104 | `codeblocks.debug.sendGdbCommand` | Code::Blocks: 发送 GDB 命令... | · | ✔ | · | · | · | · | ✅ |
-| 105 | `codeblocks.debug.setNextStatement` | Code::Blocks: 设置下一条语句 | · | ✔ | · | · | · | ✔ | ✅ |
-| 106 | `codeblocks.debug.attachToProcess` | Code::Blocks: 附加到进程... | · | ✔ | · | · | · | · | ✅ |
-| 107 | `codeblocks.debug.detach` | Code::Blocks: 分离调试 | · | ✔ | · | · | · | · | ✅ |
-| 108 | `codeblocks.debug.addSymbolFile` | Code::Blocks: 添加符号文件... | · | ✔ | · | · | · | · | ✅ |
-| 109 | `codeblocks.debug.infoFrame` | Code::Blocks: 调试信息 · 当前栈帧 | · | ✔ | · | · | · | ✔ | ✅ |
-| 110 | `codeblocks.debug.infoSharedLibrary` | Code::Blocks: 调试信息 · 已加载库 | · | ✔ | · | · | · | · | ✅ |
-| 111 | `codeblocks.debug.infoFiles` | Code::Blocks: 调试信息 · 目标与文件 | · | ✔ | · | · | · | ✔ | ✅ |
-| 112 | `codeblocks.debug.infoFloat` | Code::Blocks: 调试信息 · FPU 状态 | · | ✔ | · | · | · | · | ✅ |
-| 113 | `codeblocks.debug.infoSignals` | Code::Blocks: 调试信息 · 信号处理 | · | ✔ | · | · | · | · | ✅ |
+| 63 | `codeblocks.closeProject` | 关闭工程 | · | ✔ | · | · | · | · | ✅ |
+| 64 | `codeblocks.saveProject` | 保存工程 | · | ✔ | · | · | · | · | ✅ |
+| 65 | `codeblocks.removeFiles` | 移除文件… | · | ✔ | · | · | · | · | ✅ |
+| 66 | `codeblocks.projectTree.expandAll` | 全部展开 | · | ✔ | · | · | · | · | ✅ |
+| 67 | `codeblocks.projectTree.collapseAll` | 全部折叠 | · | ✔ | · | · | · | · | ✅ |
+| 68 | `codeblocks.reloadProject` | Code::Blocks: 从磁盘重新加载工程 | · | ✔ | · | · | · | · | ✅ |
+| 69 | `codeblocks.buildProject` | 构建 | · | ✔ | · | · | · | · | ✅ |
+| 70 | `codeblocks.rebuildProject` | 重新构建 | · | ✔ | · | · | · | · | ✅ |
+| 71 | `codeblocks.cleanProject` | 清理 | · | ✔ | · | · | · | · | ✅ |
+| 72 | `codeblocks.addFile` | 添加文件... | · | ✔ | · | · | · | · | ✅ |
+| 73 | `codeblocks.addFilesRecursively` | 递归添加文件... | · | ✔ | · | · | · | · | ✅ |
+| 74 | `codeblocks.findFile` | 查找文件... | · | ✔ | · | · | · | · | ✅ |
+| 75 | `codeblocks.searchProjectFiles` | 工程搜索：查找工程文件 | · | ✔ | · | · | · | · | ✅ |
+| 76 | `codeblocks.searchInProjectFiles` | 工程搜索：在工程文件中搜索 | · | ✔ | · | · | · | · | ✅ |
+| 77 | `codeblocks.fileProperties` | 属性... | · | ✔ | · | · | · | ✔ | ✅ |
+| 78 | `codeblocks.renameFile` | 重命名文件... | · | ✔ | · | · | · | · | ✅ |
+| 79 | `codeblocks.newVirtualFolder` | 新建虚拟文件夹... | · | ✔ | · | · | · | · | ✅ |
+| 80 | `codeblocks.renameVirtualFolder` | 重命名虚拟文件夹... | · | ✔ | · | · | · | · | ✅ |
+| 81 | `codeblocks.deleteVirtualFolder` | 删除虚拟文件夹 | · | ✔ | · | · | · | · | ✅ |
+| 82 | `codeblocks.removeFile` | 从工程移除文件 | · | ✔ | · | · | · | · | ✅ |
+| 83 | `codeblocks.openContainingFolder` | 打开所在文件夹 | · | ✔ | · | · | · | · | ✅ |
+| 84 | `codeblocks.toggleCompile` | 编译文件 | · | ✔ | · | · | · | · | ✅ |
+| 85 | `codeblocks.toggleLink` | 链接文件 | · | ✔ | · | · | · | · | ✅ |
+| 86 | `codeblocks.compileFile` | 构建文件 | · | ✔ | · | · | ✔ | · | ✅ |
+| 87 | `codeblocks.cleanFile` | 清理文件 | · | ✔ | · | · | · | · | ✅ |
+| 88 | `codeblocks.editFileBuildCommand` | 编辑自定义构建命令... | · | ✔ | · | · | · | · | ✅ |
+| 89 | `codeblocks.nextError` | Code::Blocks: 下一个错误 | · | ✔ | · | · | · | ✔ | ✅ |
+| 90 | `codeblocks.prevError` | Code::Blocks: 上一个错误 | · | · | · | · | · | ✔ | ✅ |
+| 91 | `codeblocks.compileCurrentFile` | Code::Blocks: 编译当前文件 | · | ✔ | · | · | · | ✔ | ✅ |
+| 92 | `codeblocks.clearErrors` | Code::Blocks: 清除全部错误 | · | ✔ | · | · | · | ✔ | ✅ |
+| 93 | `codeblocks.activatePriorProject` | Code::Blocks: 激活上一个工程 | · | ✔ | · | · | · | · | ✅ |
+| 94 | `codeblocks.activateNextProject` | Code::Blocks: 激活下一个工程 | · | ✔ | · | · | · | · | ✅ |
+| 95 | `codeblocks.toggleCategorize` | Code::Blocks: 按文件类型分组显示工程树 | · | ✔ | · | · | · | ✔ | ✅ |
+| 96 | `codeblocks.clearRecentProjects` | Code::Blocks: 清除最近工程 | · | ✔ | · | · | · | · | ✅ |
+| 97 | `codeblocks.projectNotes` | Code::Blocks: 工程备注 | · | ✔ | · | · | · | · | ✅ |
+| 98 | `codeblocks.setProgramArguments` | Code::Blocks: 设置程序参数 | · | ✔ | · | · | · | · | ✅ |
+| 99 | `codeblocks.showGlobalVariables` | Code::Blocks: 显示全局变量 | · | ✔ | · | · | · | ✔ | ✅ |
+| 100 | `codeblocks.clearBacktickCache` | Code::Blocks: 清除反引号缓存 | · | ✔ | · | · | · | · | ✅ |
+| 101 | `codeblocks.keybindings.check` | Code::Blocks: 检查快捷键冲突 | · | · | · | · | · | ✔ | ✅ |
+| 102 | `codeblocks.keybindings.apply` | Code::Blocks: 应用快捷键 | · | · | · | · | · | ✔ | ✅ |
+| 103 | `codeblocks.keybindings.configure` | Code::Blocks: 配置快捷键... | · | ✔ | · | · | · | · | ✅ |
+| 104 | `codeblocks.keybindings.reset` | Code::Blocks: 重置快捷键 | · | · | · | · | · | ✔ | ✅ |
+| 105 | `codeblocks.keybindings.panel` | Code::Blocks: 快捷键设置 | · | ✔ | · | ✔ | · | ✔ | ✅ |
+| 106 | `codeblocks.keybindings.export` | Code::Blocks: 导出快捷键方案 | · | ✔ | · | · | · | · | ✅ |
+| 107 | `codeblocks.keybindings.import` | Code::Blocks: 导入快捷键方案 | · | ✔ | · | · | · | · | ✅ |
+| 108 | `codeblocks.debug.refreshRegisters` | Code::Blocks: 刷新寄存器 | · | · | · | · | · | ✔ | ✅ |
+| 109 | `codeblocks.debug.sendGdbCommand` | Code::Blocks: 发送 GDB 命令... | · | ✔ | · | · | · | · | ✅ |
+| 110 | `codeblocks.debug.setNextStatement` | Code::Blocks: 设置下一条语句 | · | ✔ | · | · | · | ✔ | ✅ |
+| 111 | `codeblocks.debug.attachToProcess` | Code::Blocks: 附加到进程... | · | ✔ | · | · | · | · | ✅ |
+| 112 | `codeblocks.debug.detach` | Code::Blocks: 分离调试 | · | ✔ | · | · | · | · | ✅ |
+| 113 | `codeblocks.debug.addSymbolFile` | Code::Blocks: 添加符号文件... | · | ✔ | · | · | · | · | ✅ |
+| 114 | `codeblocks.debug.infoFrame` | Code::Blocks: 调试信息 · 当前栈帧 | · | ✔ | · | · | · | ✔ | ✅ |
+| 115 | `codeblocks.debug.infoSharedLibrary` | Code::Blocks: 调试信息 · 已加载库 | · | ✔ | · | · | · | · | ✅ |
+| 116 | `codeblocks.debug.infoFiles` | Code::Blocks: 调试信息 · 目标与文件 | · | ✔ | · | · | · | ✔ | ✅ |
+| 117 | `codeblocks.debug.infoFloat` | Code::Blocks: 调试信息 · FPU 状态 | · | ✔ | · | · | · | · | ✅ |
+| 118 | `codeblocks.debug.infoSignals` | Code::Blocks: 调试信息 · 信号处理 | · | ✔ | · | · | · | · | ✅ |
 
 未覆盖 2 项：`codeblocks.detectCompilers`、`codeblocks.restartClangd`
 
@@ -155,90 +160,93 @@
 | # | 标识 | 标题 | 契约 | 无头 | E2E | 视觉 | 性能 | 宿主 | 状态 |
 |---|------|------|------|------|------|------|------|------|------|
 | 1 | `codeblocks.compilerId` |  | ✔ | ✔ | ✔ | · | · | · | ✅ |
-| 2 | `codeblocks.masterPath` |  | ✔ | ✔ | · | · | · | · | ✅ |
-| 3 | `codeblocks.compilerPrograms` |  | ✔ | ✔ | ✔ | · | · | ✔ | ✅ |
-| 4 | `codeblocks.saveBeforeBuild` |  | ✔ | ✔ | · | · | · | · | ✅ |
-| 5 | `codeblocks.parallelJobs` |  | ✔ | ✔ | · | · | · | · | ✅ |
-| 6 | `codeblocks.build.compilerCache` |  | ✔ | ✔ | ✔ | · | · | · | ✅ |
-| 7 | `codeblocks.build.compilerCachePath` |  | ✔ | ✔ | ✔ | · | · | · | ✅ |
-| 8 | `codeblocks.build.skipIncludeDeps` |  | ✔ | · | ✔ | · | ✔ | · | ✅ |
-| 9 | `codeblocks.build.linkInputExtensions` |  | ✔ | ✔ | · | · | · | · | ✅ |
-| 10 | `codeblocks.build.verboseOutput` |  | ✔ | · | ✔ | · | · | · | ✅ |
-| 11 | `codeblocks.build.profile` |  | ✔ | ✔ | · | · | · | · | ✅ |
-| 12 | `codeblocks.build.traceProcesses` |  | ✔ | ✔ | · | · | · | · | ✅ |
-| 13 | `codeblocks.build.lowerCompilerPriority` |  | ✔ | ✔ | · | · | · | · | ✅ |
-| 14 | `codeblocks.build.autoExcludeOutputs` |  | ✔ | ✔ | · | · | · | · | ✅ |
-| 15 | `codeblocks.build.sampleSystem` |  | ✔ | ✔ | · | · | · | · | ✅ |
-| 16 | `codeblocks.build.performanceAdvisor` |  | ✔ | ✔ | · | · | · | · | ✅ |
-| 17 | `codeblocks.build.compileCommandsOnlyTargets` |  | ✔ | ✔ | · | · | · | · | ✅ |
-| 18 | `codeblocks.build.scriptExitGraceMs` |  | ✔ | ✔ | · | · | · | · | ✅ |
-| 19 | `codeblocks.build.scriptCommandTimeoutMs` |  | ✔ | ✔ | · | · | · | · | ✅ |
-| 20 | `codeblocks.build.strictQuoting` |  | ✔ | ✔ | · | · | · | · | ✅ |
-| 21 | `codeblocks.build.asmUsesCompilerVar` |  | ✔ | ✔ | · | · | · | · | ✅ |
-| 22 | `codeblocks.build.responseFile` |  | ✔ | ✔ | · | · | · | · | ✅ |
-| 23 | `codeblocks.build.cleanResponseFiles` |  | ✔ | ✔ | · | · | · | · | ✅ |
-| 24 | `codeblocks.maxReportedErrors` |  | ✔ | ✔ | · | · | · | · | ✅ |
-| 25 | `codeblocks.build.plainCbLog` |  | ✔ | ✔ | ✔ | · | · | · | ✅ |
-| 26 | `codeblocks.build.persistLog` |  | ✔ | ✔ | · | · | · | ✔ | ✅ |
-| 27 | `codeblocks.build.outputTimestamp` |  | ✔ | ✔ | · | · | · | · | ✅ |
-| 28 | `codeblocks.build.saveHtmlLog` |  | ✔ | ✔ | · | · | · | ✔ | ✅ |
-| 29 | `codeblocks.build.saveHtmlLogFullCommandLine` |  | ✔ | ✔ | · | · | · | · | ✅ |
-| 30 | `codeblocks.log.english` |  | ✔ | ✔ | · | · | · | · | ✅ |
-| 31 | `codeblocks.ui.quietSuccess` |  | ✔ | ✔ | · | · | · | · | ✅ |
-| 32 | `codeblocks.ui.quietFailure` |  | ✔ | ✔ | · | · | · | · | ✅ |
-| 33 | `codeblocks.ui.buildLogAutoFocus` |  | ✔ | ✔ | · | · | · | · | ✅ |
-| 34 | `codeblocks.ui.buildLogFocusFirstError` |  | ✔ | ✔ | · | · | · | · | ✅ |
-| 35 | `codeblocks.workspace.pathGuard` |  | ✔ | ✔ | · | · | · | · | ✅ |
-| 36 | `codeblocks.detect.autoOpen` |  | ✔ | ✔ | · | · | · | · | ✅ |
-| 37 | `codeblocks.detect.autoOpenThreshold` |  | ✔ | ✔ | · | · | · | · | ✅ |
-| 38 | `codeblocks.detect.checkExternalChanges` |  | ✔ | ✔ | · | · | · | · | ✅ |
-| 39 | `codeblocks.projectTree.categorize` |  | ✔ | ✔ | · | · | · | · | ✅ |
-| 40 | `codeblocks.gdbTimeoutMs` |  | ✔ | ✔ | · | · | · | · | ✅ |
-| 41 | `codeblocks.debug.initCommands` |  | ✔ | ✔ | · | · | · | · | ✅ |
-| 42 | `codeblocks.debug.userArguments` |  | ✔ | · | ✔ | · | · | · | ✅ |
-| 43 | `codeblocks.debug.disableInit` |  | ✔ | ✔ | ✔ | · | · | · | ✅ |
-| 44 | `codeblocks.debug.printPretty` |  | ✔ | · | ✔ | · | · | · | ✅ |
-| 45 | `codeblocks.debug.printElements` |  | ✔ | ✔ | ✔ | · | · | · | ✅ |
-| 46 | `codeblocks.debug.disassemblyFlavor` |  | ✔ | · | ✔ | · | · | · | ✅ |
-| 47 | `codeblocks.debug.instructionSet` |  | ✔ | ✔ | · | · | · | · | ✅ |
-| 48 | `codeblocks.debug.charset` |  | ✔ | ✔ | · | · | · | · | ✅ |
-| 49 | `codeblocks.debug.gdbPath` |  | ✔ | ✔ | · | · | · | · | ✅ |
-| 50 | `codeblocks.debug.trace` |  | ✔ | · | ✔ | · | · | · | ✅ |
-| 51 | `codeblocks.debug.registers` |  | ✔ | ✔ | ✔ | · | · | ✔ | ✅ |
-| 52 | `codeblocks.debug.addOtherProjectDirs` |  | ✔ | ✔ | · | · | · | · | ✅ |
-| 53 | `codeblocks.clangd.enabled` |  | ✔ | ✔ | ✔ | · | · | ✔ | ✅ |
-| 54 | `codeblocks.clangd.buildLogDiagnostics` |  | ✔ | ✔ | · | · | · | · | ✅ |
-| 55 | `codeblocks.clangd.restartOnActiveProjectSwitch` |  | ✔ | ✔ | · | · | · | · | ✅ |
-| 56 | `codeblocks.clangd.forcedIncludes` |  | ✔ | ✔ | · | · | · | · | ✅ |
-| 57 | `codeblocks.clangd.suppressedWarnings` |  | ✔ | ✔ | · | · | · | · | ✅ |
-| 58 | `codeblocks.clangd.suppressHeaderDiagnostics` |  | ✔ | ✔ | · | · | · | · | ✅ |
-| 59 | `codeblocks.clangd.unusedIncludes` |  | ✔ | ✔ | · | · | · | · | ✅ |
-| 60 | `codeblocks.clangd.headerInsertion` |  | ✔ | ✔ | · | · | · | · | ✅ |
-| 61 | `codeblocks.clangd.indexBackground` |  | ✔ | ✔ | · | · | · | · | ✅ |
-| 62 | `codeblocks.clangd.indexStandardLibrary` |  | ✔ | ✔ | · | · | · | · | ✅ |
-| 63 | `codeblocks.clangd.clangTidy` |  | ✔ | ✔ | · | · | · | · | ✅ |
-| 64 | `codeblocks.clangd.completionAllScopes` |  | ✔ | ✔ | · | · | · | · | ✅ |
-| 65 | `codeblocks.clangd.inlayHints` |  | ✔ | ✔ | · | · | · | · | ✅ |
-| 66 | `codeblocks.clangd.documentationCommentFormat` |  | ✔ | ✔ | · | · | · | · | ✅ |
-| 67 | `codeblocks.clangd.excludeDirs` |  | ✔ | ✔ | · | · | · | · | ✅ |
-| 68 | `codeblocks.clangd.builtinHeaders` |  | ✔ | ✔ | · | · | · | · | ✅ |
-| 69 | `codeblocks.clangd.extraConfig` |  | ✔ | ✔ | · | · | · | · | ✅ |
-| 70 | `codeblocks.ui.language` |  | ✔ | ✔ | · | · | · | ✔ | ✅ |
-| 71 | `codeblocks.ui.projectToolbar` |  | ✔ | ✔ | · | · | · | · | ✅ |
-| 72 | `codeblocks.ui.symbolsView` |  | ✔ | ✔ | · | · | · | · | ✅ |
-| 73 | `codeblocks.ui.recentProjectsLimit` |  | ✔ | ✔ | · | · | · | · | ✅ |
-| 74 | `codeblocks.ui.findFileOpen` |  | ✔ | ✔ | · | · | · | · | ✅ |
-| 75 | `codeblocks.search.scope` |  | ✔ | · | · | · | · | · | ✅ |
-| 76 | `codeblocks.search.keepHistory` |  | ✔ | ✔ | · | · | · | · | ✅ |
-| 77 | `codeblocks.editor.autoHeaderGuard` |  | ✔ | ✔ | · | · | · | · | ✅ |
-| 78 | `codeblocks.editor.headerGuardStyle` |  | ✔ | ✔ | · | · | · | · | ✅ |
-| 79 | `codeblocks.editor.tidyCommentWidth` |  | ✔ | ✔ | · | · | · | · | ✅ |
-| 80 | `codeblocks.editor.asmHashComment` |  | ✔ | ✔ | · | · | · | · | ✅ |
-| 81 | `codeblocks.astyleOptions` |  | ✔ | ✔ | · | · | · | · | ✅ |
-| 82 | `codeblocks.todo.keywords` |  | ✔ | ✔ | · | · | · | · | ✅ |
-| 83 | `codeblocks.tools` |  | ✔ | ✔ | · | · | · | · | ✅ |
-| 84 | `codeblocks.keybindings.cbStyle` |  | ✔ | ✔ | · | · | · | · | ✅ |
-| 85 | `codeblocks.keybindings.overrides` |  | ✔ | ✔ | · | · | · | · | ✅ |
+| 2 | `codeblocks.compiler.customFlags` |  | ✔ | · | · | · | · | · | ✅ |
+| 3 | `codeblocks.compiler.flagOverrides` |  | ✔ | · | · | · | · | · | ✅ |
+| 4 | `codeblocks.compiler.languageFlags` |  | ✔ | · | · | · | · | · | ✅ |
+| 5 | `codeblocks.masterPath` |  | ✔ | ✔ | · | · | · | · | ✅ |
+| 6 | `codeblocks.compilerPrograms` |  | ✔ | ✔ | ✔ | · | · | ✔ | ✅ |
+| 7 | `codeblocks.saveBeforeBuild` |  | ✔ | ✔ | · | · | · | · | ✅ |
+| 8 | `codeblocks.parallelJobs` |  | ✔ | ✔ | · | · | · | · | ✅ |
+| 9 | `codeblocks.build.compilerCache` |  | ✔ | ✔ | ✔ | · | · | · | ✅ |
+| 10 | `codeblocks.build.compilerCachePath` |  | ✔ | ✔ | ✔ | · | · | · | ✅ |
+| 11 | `codeblocks.build.skipIncludeDeps` |  | ✔ | · | ✔ | · | ✔ | · | ✅ |
+| 12 | `codeblocks.build.linkInputExtensions` |  | ✔ | ✔ | · | · | · | · | ✅ |
+| 13 | `codeblocks.build.verboseOutput` |  | ✔ | · | ✔ | · | · | · | ✅ |
+| 14 | `codeblocks.build.profile` |  | ✔ | ✔ | · | · | · | · | ✅ |
+| 15 | `codeblocks.build.traceProcesses` |  | ✔ | ✔ | · | · | · | · | ✅ |
+| 16 | `codeblocks.build.lowerCompilerPriority` |  | ✔ | ✔ | · | · | · | · | ✅ |
+| 17 | `codeblocks.build.autoExcludeOutputs` |  | ✔ | ✔ | · | · | · | · | ✅ |
+| 18 | `codeblocks.build.sampleSystem` |  | ✔ | ✔ | · | · | · | · | ✅ |
+| 19 | `codeblocks.build.performanceAdvisor` |  | ✔ | ✔ | · | · | · | · | ✅ |
+| 20 | `codeblocks.build.compileCommandsOnlyTargets` |  | ✔ | ✔ | · | · | · | · | ✅ |
+| 21 | `codeblocks.build.scriptExitGraceMs` |  | ✔ | ✔ | · | · | · | · | ✅ |
+| 22 | `codeblocks.build.scriptCommandTimeoutMs` |  | ✔ | ✔ | · | · | · | · | ✅ |
+| 23 | `codeblocks.build.strictQuoting` |  | ✔ | ✔ | · | · | · | · | ✅ |
+| 24 | `codeblocks.build.asmUsesCompilerVar` |  | ✔ | ✔ | · | · | · | · | ✅ |
+| 25 | `codeblocks.build.responseFile` |  | ✔ | ✔ | · | · | · | · | ✅ |
+| 26 | `codeblocks.build.cleanResponseFiles` |  | ✔ | ✔ | · | · | · | · | ✅ |
+| 27 | `codeblocks.maxReportedErrors` |  | ✔ | ✔ | · | · | · | · | ✅ |
+| 28 | `codeblocks.build.plainCbLog` |  | ✔ | ✔ | ✔ | · | · | · | ✅ |
+| 29 | `codeblocks.build.persistLog` |  | ✔ | ✔ | · | · | · | ✔ | ✅ |
+| 30 | `codeblocks.build.outputTimestamp` |  | ✔ | ✔ | · | · | · | · | ✅ |
+| 31 | `codeblocks.build.saveHtmlLog` |  | ✔ | ✔ | · | · | · | ✔ | ✅ |
+| 32 | `codeblocks.build.saveHtmlLogFullCommandLine` |  | ✔ | ✔ | · | · | · | · | ✅ |
+| 33 | `codeblocks.log.english` |  | ✔ | ✔ | · | · | · | · | ✅ |
+| 34 | `codeblocks.ui.quietSuccess` |  | ✔ | ✔ | · | · | · | · | ✅ |
+| 35 | `codeblocks.ui.quietFailure` |  | ✔ | ✔ | · | · | · | · | ✅ |
+| 36 | `codeblocks.ui.buildLogAutoFocus` |  | ✔ | ✔ | · | · | · | · | ✅ |
+| 37 | `codeblocks.ui.buildLogFocusFirstError` |  | ✔ | ✔ | · | · | · | · | ✅ |
+| 38 | `codeblocks.workspace.pathGuard` |  | ✔ | ✔ | · | · | · | · | ✅ |
+| 39 | `codeblocks.detect.autoOpen` |  | ✔ | ✔ | · | · | · | · | ✅ |
+| 40 | `codeblocks.detect.autoOpenThreshold` |  | ✔ | ✔ | · | · | · | · | ✅ |
+| 41 | `codeblocks.detect.checkExternalChanges` |  | ✔ | ✔ | · | · | · | · | ✅ |
+| 42 | `codeblocks.projectTree.categorize` |  | ✔ | ✔ | · | · | · | · | ✅ |
+| 43 | `codeblocks.gdbTimeoutMs` |  | ✔ | ✔ | · | · | · | · | ✅ |
+| 44 | `codeblocks.debug.initCommands` |  | ✔ | ✔ | · | · | · | · | ✅ |
+| 45 | `codeblocks.debug.userArguments` |  | ✔ | · | ✔ | · | · | · | ✅ |
+| 46 | `codeblocks.debug.disableInit` |  | ✔ | ✔ | ✔ | · | · | · | ✅ |
+| 47 | `codeblocks.debug.printPretty` |  | ✔ | · | ✔ | · | · | · | ✅ |
+| 48 | `codeblocks.debug.printElements` |  | ✔ | ✔ | ✔ | · | · | · | ✅ |
+| 49 | `codeblocks.debug.disassemblyFlavor` |  | ✔ | · | ✔ | · | · | · | ✅ |
+| 50 | `codeblocks.debug.instructionSet` |  | ✔ | ✔ | · | · | · | · | ✅ |
+| 51 | `codeblocks.debug.charset` |  | ✔ | ✔ | · | · | · | · | ✅ |
+| 52 | `codeblocks.debug.gdbPath` |  | ✔ | ✔ | · | · | · | · | ✅ |
+| 53 | `codeblocks.debug.trace` |  | ✔ | · | ✔ | · | · | · | ✅ |
+| 54 | `codeblocks.debug.registers` |  | ✔ | ✔ | ✔ | · | · | ✔ | ✅ |
+| 55 | `codeblocks.debug.addOtherProjectDirs` |  | ✔ | ✔ | · | · | · | · | ✅ |
+| 56 | `codeblocks.clangd.enabled` |  | ✔ | ✔ | ✔ | · | · | ✔ | ✅ |
+| 57 | `codeblocks.clangd.buildLogDiagnostics` |  | ✔ | ✔ | · | · | · | · | ✅ |
+| 58 | `codeblocks.clangd.restartOnActiveProjectSwitch` |  | ✔ | ✔ | · | · | · | · | ✅ |
+| 59 | `codeblocks.clangd.forcedIncludes` |  | ✔ | ✔ | · | · | · | · | ✅ |
+| 60 | `codeblocks.clangd.suppressedWarnings` |  | ✔ | ✔ | · | · | · | · | ✅ |
+| 61 | `codeblocks.clangd.suppressHeaderDiagnostics` |  | ✔ | ✔ | · | · | · | · | ✅ |
+| 62 | `codeblocks.clangd.unusedIncludes` |  | ✔ | ✔ | · | · | · | · | ✅ |
+| 63 | `codeblocks.clangd.headerInsertion` |  | ✔ | ✔ | · | · | · | · | ✅ |
+| 64 | `codeblocks.clangd.indexBackground` |  | ✔ | ✔ | · | · | · | · | ✅ |
+| 65 | `codeblocks.clangd.indexStandardLibrary` |  | ✔ | ✔ | · | · | · | · | ✅ |
+| 66 | `codeblocks.clangd.clangTidy` |  | ✔ | ✔ | · | · | · | · | ✅ |
+| 67 | `codeblocks.clangd.completionAllScopes` |  | ✔ | ✔ | · | · | · | · | ✅ |
+| 68 | `codeblocks.clangd.inlayHints` |  | ✔ | ✔ | · | · | · | · | ✅ |
+| 69 | `codeblocks.clangd.documentationCommentFormat` |  | ✔ | ✔ | · | · | · | · | ✅ |
+| 70 | `codeblocks.clangd.excludeDirs` |  | ✔ | ✔ | · | · | · | · | ✅ |
+| 71 | `codeblocks.clangd.builtinHeaders` |  | ✔ | ✔ | · | · | · | · | ✅ |
+| 72 | `codeblocks.clangd.extraConfig` |  | ✔ | ✔ | · | · | · | · | ✅ |
+| 73 | `codeblocks.ui.language` |  | ✔ | ✔ | · | · | · | ✔ | ✅ |
+| 74 | `codeblocks.ui.projectToolbar` |  | ✔ | ✔ | · | · | · | · | ✅ |
+| 75 | `codeblocks.ui.symbolsView` |  | ✔ | ✔ | · | · | · | · | ✅ |
+| 76 | `codeblocks.ui.recentProjectsLimit` |  | ✔ | ✔ | · | · | · | · | ✅ |
+| 77 | `codeblocks.ui.findFileOpen` |  | ✔ | ✔ | · | · | · | · | ✅ |
+| 78 | `codeblocks.search.scope` |  | ✔ | · | · | · | · | · | ✅ |
+| 79 | `codeblocks.search.keepHistory` |  | ✔ | ✔ | · | · | · | · | ✅ |
+| 80 | `codeblocks.editor.autoHeaderGuard` |  | ✔ | ✔ | · | · | · | · | ✅ |
+| 81 | `codeblocks.editor.headerGuardStyle` |  | ✔ | ✔ | · | · | · | · | ✅ |
+| 82 | `codeblocks.editor.tidyCommentWidth` |  | ✔ | ✔ | · | · | · | · | ✅ |
+| 83 | `codeblocks.editor.asmHashComment` |  | ✔ | ✔ | · | · | · | · | ✅ |
+| 84 | `codeblocks.astyleOptions` |  | ✔ | ✔ | · | · | · | · | ✅ |
+| 85 | `codeblocks.todo.keywords` |  | ✔ | ✔ | · | · | · | · | ✅ |
+| 86 | `codeblocks.tools` |  | ✔ | ✔ | · | · | · | · | ✅ |
+| 87 | `codeblocks.keybindings.cbStyle` |  | ✔ | ✔ | · | · | · | · | ✅ |
+| 88 | `codeblocks.keybindings.overrides` |  | ✔ | ✔ | · | · | · | · | ✅ |
 
 未覆盖 0 项
 

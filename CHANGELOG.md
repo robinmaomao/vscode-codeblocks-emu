@@ -3,6 +3,53 @@
 本文件记录**正式版**里程碑；近期 dev 迭代的逐轮发布说明见 [`docs/release/`](./docs/release/)（`0.8.xx-dev.md`），
 `0.8.76`–`0.8.128` 的 dev 说明已合并归档到 [`docs/release/archive/`](./docs/release/archive/)；版本号与维护约定见 [`docs/release/00-index.md`](./docs/release/00-index.md)。
 
+## 0.8.151 — 2026-11-12
+
+> 体验版：工程属性 / 构建选项 UI 二次精修（严格对齐 CB `project_options.xrc`），并补齐工程右键菜单与保存/展开能力。
+
+**Properties 版式（按 CB XRC 重排）**
+
+- **Project settings**：去掉 3 张分组卡片，改为 CB 的单张 2 列 FlexGrid；`执行目录` 回到 Makefile 右列子行；PCH 改为「标签 + 标题为 `策略` 的 radio box」；`对象文件名生成` / `检查外部修改的文件` 改为「左标签 + 右复选框 + 红字」；`工程的依赖… / 工程的构建选项…` 置于右下。
+- **Build targets**：`Build target files:` 从跨栏移回右栏（`Selected build target options` 下方）；左侧按钮加弹簧分组，↑/↓ 使用 SVG 箭头；标签补冒号与 CB 静态分隔线；列表去掉图标。
+- **Build scripts**：左右 1:2；`校验所有已附加脚本` 移到左栏工程概览树下方；脚本列表右侧上下 spin。
+- **Notes / C/C++ parser**：去卡片、内容撑满；**Debugger** 子标签改用 Build options 同款 `.bo-subtabs`。
+- **按钮/控件统一复用 Build options**：页签 `.bo-tabs/.bo-tab`（去图标）、页脚 `.bo-footer/.bo-toolbar/.bo-status`、操作行 `.bo-actions`、↑/↓ `.bo-move-buttons`、模态 `.bo-modal*`；控件 24px / 字号 12px / 行距 4px；`保存` 用 `default` 描边。
+- **还原设置**：Build options 与 Properties 都新增「还原设置」（丢弃未保存修改，回到上次保存值）；底部按钮补描边；Linker settings 包入 CB 卡片；Linker executable 工程级只读展示并说明「按目标保存」。
+
+**工程右键菜单（对齐 CB 顺序）**
+
+- 分组顺序改为 `00_save` / `01_files` / `02_find` / `03_tree` / `04_build` / `05_options` / `06_extra`；补 `Save Project` / `Close Project` / `Remove Files…` / `Project Tree ▸ (Expand All / Collapse All)`。
+- **Expand All 修复**：VS Code 只对新元素采用 `collapsibleState`；改为清空工程树节点缓存重建并 `reveal({expand:true})` 兜底；该状态为一次性，工程重载/重新分组后不再把用户折叠的节点顶开。
+
+**WebView 模态修正（沙箱不含 `allow-modals`）**
+
+- Debugger 搜索目录「添加/编辑」改用面板内 `askText` 模态（原 `window.prompt` 在 WebView 中静默失效）。
+- 「还原设置」改用面板内 `confirmBox` 确认（原 `window.confirm` 恒为 false，按钮点了没反应）。
+
+**其他**
+
+- i18n 补齐 `Target:`、`Selected build target options`、`策略`、`Makefile：`、目标字段等中英词条；英文界面无中文残留。
+- 文档：usage(.en) §7.3/§7.5 更新面板版式与环境变量入口。
+
+- 验证：`npm test` **TOTAL=189 FAIL=0 SKIP=1**；`npm run test:contract` 3/3（44 + 6 + 707 断言）；`npm run test:e2e` 6/6；`npm run test:visual` 18/18（基线重生成）；`npm run test:pack` 1/1（15 断言）。
+- 发布说明见 [`docs/release/0.8.151.md`](./docs/release/0.8.151.md)；测试结果见 [`docs/testing/test-report-0.8.151.md`](./docs/testing/test-report-0.8.151.md)。
+
+## 0.8.150 — 2026-11-12
+
+> 功能版：工程右键 `Build options…` / `Properties…` 完整移植 Code::Blocks。
+
+**Build options / Properties 移植**
+
+- **入口**：工程/目标节点右键新增 `Build options…`（`codeblocks.compilerOptions`，标题由「Compiler Options…」改为「Build options…」）与 `Properties…`；独立面板与属性面板内的覆盖层共用同一套视图，保存链路只有一份。
+- **视图对齐 CB**：左侧工程/目标树 + 右侧 Selected compiler 字段 + 六个页签（编译器设置 / 链接器设置 / 搜索目录 / 构建前·后步骤 / 自定义变量 / `"Make" commands`）；标志按分类分组、右侧复选框与参数列、底部红色右键提示；链接库与其它链接器选项并排、↑/↓ 在左；搜索目录的子页签位于 Policy 上方。
+- **Compiler Flags 右键菜单**：`新建参数…` / `修改参数…` / `删除参数` / `仅 C 参数…` / `仅 C++ 参数…` / `展开所有分类` / `折叠所有分类`（对齐 `compileroptionsdlg.cpp` 菜单）。新增设置 `codeblocks.compiler.customFlags`（自定义参数）、`codeblocks.compiler.flagOverrides`（覆盖/隐藏内置参数，清空即恢复）、`codeblocks.compiler.languageFlags`（仅 C / 仅 C++，覆盖 XML `<Sort>` 基线），设置项 85 → **88**。
+- **`"Make" commands`**：CB 在 XRC 中隐藏 `Dist-clean` 与 `Silent build` 并派生 Silent build；本版按方案 1 显示但只读——Silent build 始终为 `<build> > $(CMD_NULL)` 并随 Build 刷新，Dist-clean 仅在工程已有非默认值时只读显示，保存时对工程与目标统一重算。
+- **Selected compiler 自动匹配**：`<Option compiler="riscv32-v2" />` 自动落到 `RISCV32-V2`（id 精确 → 忽略大小写/连字符 → 名称匹配）；未注册编译器显示「(未找到)」而非静默回退，空值回退扩展默认编译器。
+- **Properties**：6 个页签（工程设置 / 构建目标 / 脚本 / 备注 / C/C++ 解析器选项 / 调试器）；文件属性改为模态并支持工程树文件右键直达（选中 + 滚入可视区）；脚本页签对 `<Script file>` 做 Squirrel 语法校验（不执行）；解析器页签读写 `<code_completion><search_path add>`。
+- **解析/写回修复**：`<ExtraCommands>` 无 `Add` 时不再提前返回（`<MakeCommands>` 得以解析）；写回保留未建模字段与 legacy `<Build><Option>` 子节点、显式空串视为清空；`listCompilers` 排除 `options_common_*.xml`；过期目标快照先整体校验再落字段（`Target not found`）并在工程重载时关闭面板；Squirrel 校验器不再把字符串字面量当运算符。
+- 验证：`npm test` **TOTAL=188 FAIL=0 SKIP=1**；`npm run test:contract` 3/3；`npm run test:e2e` 6/6；`npm run test:visual` 18/18（基线按新 UI 重生成）；`npm run test:pack` 1/1。
+- 发布说明见 [`docs/release/0.8.150.md`](./docs/release/0.8.150.md)；测试结果见 [`docs/testing/test-report-0.8.150-archive.md`](./docs/testing/test-report-0.8.150-archive.md)。
+
 ## 0.8.148 — 2026-11-11
 
 > 修复版：Build Log（诊断来源 `build`）里编译/链接错误点击不跳转。
@@ -14,7 +61,7 @@
 - **修复**：`resolveDiagnosticLocation` 改用原始 token 比较；`.o/.obj` 只作为「找同名源码」的线索（工程索引 + 同目录源码回退），绝不返回对象文件；Build Log / Problems 统一过滤不可导航位置（伪工具名、构建产物、残留段名、不存在的文件），无源码位置条目显示「无源码位置（链接器/工具输出）」且不挂跳转命令；`codeblocks.openLocation` 失败弹出可见警告。
 - **ANSI**：统一清理子进程行输出中的颜色转义（CSI/OSC），`-fdiagnostics-color=always` 的工程不再因颜色码导致整行解析失败。
 - 验证：`npm test` **TOTAL=188 FAIL=0 SKIP=1**；`npm run test:contract` 3/3；`npm run test:e2e` 6/6（链接期诊断 9 断言）；`npm run test:pack` 1/1。
-- 发布说明见 [`docs/release/0.8.148.md`](./docs/release/0.8.148.md)；测试结果见 [`docs/testing/test-report-0.8.148.md`](./docs/testing/test-report-0.8.148.md)。
+- 发布说明见 [`docs/release/0.8.148.md`](./docs/release/0.8.148.md)；测试结果见 [`docs/testing/test-report-0.8.148-archive.md`](./docs/testing/test-report-0.8.148-archive.md)。
 
 ## 0.8.147 — 2026-11-11
 
