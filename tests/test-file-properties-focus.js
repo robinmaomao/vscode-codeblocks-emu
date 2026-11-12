@@ -1,6 +1,6 @@
-﻿// 批次一 M3 回归：文件节点「属性」直达工程属性面板的文件 tab 并定位该行
-//  - ProjectPropertiesPanel.show 支持 (initialTab, focusFile)
-//  - 注入的 focusFile 会写入脚本状态，并在 switchTab 之前选中 + 滚入可视区
+﻿// 批次一 M3 回归：文件节点「属性」直达工程属性面板并定位该行
+//  - ProjectPropertiesPanel.show 支持 (initialTab, focusFile)（第 6 个参数为 Build options 运行时，可选）
+//  - 注入的 focusFile 会写入脚本状态，选中该行 → 打开文件属性模态 → 滚入可视区 → 再切初始 tab
 const fs = require('fs');
 const path = require('path');
 
@@ -14,37 +14,30 @@ const dist = fs.readFileSync(path.resolve(__dirname, '../dist/ui/projectProperti
 
 // ---- 1. 面板 API ----
 check('show 支持 focusFile 参数（构造 → show → 实例字段）',
-  /static show\(project, extensionUri, onSave, initialTab, focusFile\)/.test(dist)
+  /static show\(project, extensionUri, onSave, initialTab, focusFile(?:, \w+)?\)/.test(dist)
   && /this\.focusFile = focusFile;/.test(dist), 'focusFile 参数', '存在');
-check('focusFile 注入模板变量 ${focusFileJs}',
-  /const focusFileJs = JSON\.stringify\(this\.focusFile \?\? null\)/.test(dist) && /let focusFile = \$\{focusFileJs\};/.test(dist),
-  'focusFileJs', '存在');
+check('focusFile 以 JSON 注入模板（缺省为 null）',
+  /const focusFileJs = JSON\.stringify\(this\.focusFile \?\? null\)/.test(dist)
+  && /let focusFile = \$\{focusFileJs\};/.test(dist), 'focusFileJs', '存在');
 
-// ---- 2. 注入行为（提取模板并插值） ----
-const startMarker = 'return `';
-const s = dist.indexOf(startMarker);
-const tplStart = s + startMarker.length;
-const tplEnd = dist.indexOf('`;', tplStart);
-const tpl = dist.slice(tplStart, tplEnd);
-
-const render = (focusFile) => tpl
-  .replace('${focusFileJs}', JSON.stringify(focusFile))
-  .replace('${initialTabJs}', JSON.stringify(focusFile ? 'files' : 'targets'));
-
-const withFile = render('src/main.c');
-check('携带文件时脚本含定位块（选中 + scrollIntoView + files tab）',
-  /let focusFile = "src\/main\.c";/.test(withFile)
-  && /selectedFile = fi;/.test(withFile)
-  && /scrollIntoView\(\{ block: 'center' \}\)/.test(withFile)
-  && /switchTab\('files'\)/.test(withFile),
-  'locate-block', '存在');
-const withoutFile = render(null);
-check('未携带文件时 focusFile = null（不执行定位）',
-  /let focusFile = null;/.test(withoutFile) && withFile !== withoutFile, 'null', 'null');
+// ---- 2. 注入行为：定位块（选中 → 打开文件属性模态 → 滚入可视区） ----
+const focusAt = dist.indexOf('if (focusFile) {');
+const focusBlock = focusAt >= 0 ? dist.slice(focusAt, dist.indexOf('switchTab(activeTab);', focusAt)) : '';
+check('携带文件时定位块选中该行并打开文件属性模态',
+  focusBlock.includes('files.findIndex(f => f.relativeFilename === focusFile)')
+  && focusBlock.includes('selectedFile = fi;')
+  && focusBlock.includes('openFileModal(fi);'),
+  focusBlock || '无定位块', 'selectedFile + openFileModal');
+const modalAt = dist.indexOf('function openFileModal(index) {');
+const modalBlock = modalAt >= 0 ? dist.slice(modalAt, dist.indexOf('\n    }', modalAt)) : '';
+check('打开模态后把选中行滚入可视区',
+  modalBlock.includes("document.querySelector('#flist .item.selected')")
+  && modalBlock.includes("scrollIntoView({ block: 'nearest' })")
+  && modalBlock.indexOf("style.display = 'flex'") < modalBlock.indexOf('scrollIntoView'),
+  modalBlock || '无 openFileModal', 'scrollIntoView');
 
 // ---- 3. 定位顺序：先选中渲染，再切 tab（switchTab 内会再 renderFileForm） ----
-const focusAt = withFile.indexOf("if (focusFile) {");
-const switchAt = withFile.indexOf('switchTab(activeTab);');
+const switchAt = dist.indexOf('switchTab(activeTab);');
 check('定位块位于初始 switchTab 之前', focusAt > 0 && switchAt > focusAt, { focusAt, switchAt }, 'focus < switch');
 
 // ---- 4. extension.ts 命令接线（dist 冒烟：命令注册 + focusFile 传递） ----

@@ -225,6 +225,8 @@ export interface Project {
   pchMode: number;
   /** 扩展对象命名（<Option extended_obj_names="1">：foo.c → foo.c.o，默认 false） */
   extendedObjNames: boolean;
+  /** 是否检测外部修改的工程文件（<Option check_files>，默认 true，projectloader.cpp） */
+  checkForExternallyModifiedFiles: boolean;
   /** 平台位掩码（<Option platforms>，对齐 SetPlatforms，默认 spAll=0xff） */
   platforms: number;
   /** .cbp 文件绝对路径 */

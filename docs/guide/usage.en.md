@@ -1,7 +1,7 @@
 ﻿﻿﻿﻿# Code::Blocks for VS Code — Usage Guide
 
 > Language: **English** ｜ [中文](./usage.md)
-> Version: 0.8.148 ｜ Native port of Code::Blocks core features to VS Code, driving GCC / GDB directly, **without** `tasks.json` / `launch.json`.
+> Version: 0.8.151 ｜ Native port of Code::Blocks core features to VS Code, driving GCC / GDB directly, **without** `tasks.json` / `launch.json`.
 
 ---
 
@@ -50,7 +50,7 @@ Code::Blocks for VS Code is a "mini IDE kernel": it parses `.cbp` / `.workspace`
 ### 2.1 Install from VSIX
 
 ```powershell
-code --install-extension codeblocks-vscode-0.8.148.vsix --force
+code --install-extension codeblocks-vscode-0.8.151.vsix --force
 ```
 
 ### 2.2 Build from source
@@ -58,7 +58,7 @@ code --install-extension codeblocks-vscode-0.8.148.vsix --force
 ```powershell
 npm install
 npm run package
-code --install-extension codeblocks-vscode-0.8.148.vsix --force
+code --install-extension codeblocks-vscode-0.8.151.vsix --force
 ```
 
 > `npm run package` = `vsce package` (before packaging, the `vscode:prepublish` hook runs `tsc` compilation (`dist/`, for local testing) + the **esbuild single-file bundle** (`bundle/extension.js`, the release entry));
@@ -158,16 +158,26 @@ Other status bar items: **build target (Target)**, **build menu (Build)**, **com
 
 ### 5.3 Context menus
 
-**Project node:**
+**Project node (order aligned with Code::Blocks 20.03):**
 
 | Command | Description |
 |------|------|
-| Move Up / Move Down | Change the compile order |
-| Remove Project | Remove from the workspace (does not delete files on disk) |
-| Build / Rebuild | Incremental / full build of this project |
+| Save Project | Write the in-memory model back to the `.cbp` (edits are already persisted; this is the explicit save/fallback) |
+| Close Project | Close the project (unload from the sidebar; files on disk are kept; no forced confirmation, matching CB) |
 | Add Files... | Add files to the `.cbp` |
 | Add Files Recursively... | Pick a directory and collect source files recursively (filters `.git`/`obj`/`bin`/`*.cbp`); with multiple build targets, asks which one to add to (aligned with CB) |
+| Remove Files... | Multi-select project files and **remove them from the project** (files on disk are kept; matches CB `Remove files...`) |
 | Find File... | Fuzzy-find within this project and **expand the project tree level by level to locate it** (locates only by default, does not open the file) |
+| Project Search: Search Project Files / Search in Project Files | In-project search (no CB counterpart; extension enhancement kept in the Find group) |
+| Project Tree ▸ | Submenu: **Expand All** / **Collapse All** (matches CB `Project tree` submenu) |
+| Add New Virtual Folder... | Create a virtual folder |
+| Code::Blocks: Reload Project from Disk | Reload from disk (equivalent to CB `Reparse this project`; fallback when the watcher misses a change) |
+| Build / Rebuild / Clean | Incremental / full build and clean of this project |
+| Build options... | Project-level Build options (matches CB `Build options...`) |
+| Properties... | Project properties (matches CB `Properties...`) |
+| Select Build Target for Project | Pick this project's build target (extension enhancement) |
+| Move Up / Move Down | Change the compile order (extension enhancement) |
+| Remove Project | Remove from the workspace with confirmation (does not delete files on disk; extension enhancement kept alongside Close Project) |
 
 **Folder / virtual folder / file group node:**
 
@@ -286,7 +296,7 @@ Template directory: `<globalStorage>/templates/<id>/` (`template.json` manifest 
 - Command: `Code::Blocks: Compiler Options`
 - The Webview lists the `<Option>` entries of `options_<id>.xml` grouped by Category; checked items are written back to the project / target compiler options.
 - **Apply writes to the `.cbp` immediately** (Code::Blocks keeps the change in memory and saves the project; this extension has no "project modified" state, so it persists right away). Only the options listed in the XML are managed — **custom options typed in the Project properties page (e.g. `-pipe`) are preserved**, and write failures are reported in the panel status area.
-- Key points of the Project properties panel (`Properties…`): the build targets page has the "**Dependencies and additional outputs**" group (`external_deps`/`additional_output`, forcing a relink when newer than the output), the "**Environment variables**" group (`<Environment>`, one `name=value` per line) and the "**Advanced**" group (run working directory / deps output directory / platform / host program / console runner / import library·def file / library prefix·extension policy); the project settings page has "**Environment variables**" and "**Project custom variables**" (for the `$(name)` macro) as well as "**Project compilation and output**" (platform / PCH policy / extended object naming) and "**Makefile mode**" (custom Makefile / file name / execution directory).
+- The Project properties panel (`Properties…`) is laid out like CB `ProjectOptionsDlg`: a `Target:` selector on top plus 6 tabs (Project settings / Build targets / Build scripts / Notes / C/C++ parser options / Debugger), and a bottom-left toolbar `Save | Save and Close | Restore settings` (restore discards unsaved edits back to the last saved values). The build targets page has the target list plus a vertical button stack on the left (Add/Rename/Copy/Delete/↑/↓ and Virtual targets... / Dependencies... / Re-order... / Build options... / Create project from target...) and the "Selected build target options" form on the right, with the "Build target files:" list beneath it (matching CB's two stacked static boxes); extension-only fields live in the "**Advanced (extension)**" group (target title / compiler ID / execution parameters / deps output directory / host program / console runner / external dependencies / additional outputs / target environment variables). The project settings page follows the CB order Title / Platforms / Filename / Makefile (with the two red hints) / Execution directory, plus the precompiled-header radio group, the build checkboxes and the "Project dependencies…" / "Project build options…" buttons at the bottom right; extension-only fields (default compiler ID / virtual folders / project custom variables) live in the "**Advanced (extension)**" group.
 - The target list supports **Move Up/Move Down** (changing the target order, which affects export and traversal order, aligned with CB Re-order) and "**Export as project**" (exporting the selected target as a standalone `.cbp` containing only its files, aligned with CB Create project from target; also reachable from the Command Palette / Project menu `Create Project from Target…`).
 - The "Build scripts" page supports **running post-build even when there is no build command** (`Mode after=always`, aligned with the CB Pre/post page option); all other pages (run parameters / search directories / virtual targets, etc.) are also present.
 - Panel usability: **saving works even for tabs that were never opened** (unrendered forms are skipped by element-existence guards); collection or write failures are shown in the status area on the right of the toolbar (no more silent no-op); on narrow panels (< 720 px) the list and the form stack vertically and button labels no longer wrap one character per line.
@@ -300,8 +310,8 @@ Template directory: `<globalStorage>/templates/<id>/` (`template.json` manifest 
 
 ### 7.5 Environment variables (aligned with CB Build options → Custom variables)
 
-- **Editing entry points** (Project properties panel): the **project settings page** "Environment variables" + the **build targets page** "Environment variables" group,
-  both one `name=value` per line; written back to `<Build><Environment>` / `<Target><Environment>` in the `.cbp`
+- **Editing entry points** (Project properties panel): **build targets page → Advanced (extension) → "Target environment variables"** (one `name=value` per line); project-level variables are edited on the **Build options → Custom variables** page,
+  written back to `<Build><Environment>` / `<Target><Environment>` in the `.cbp`
   (aligned with the Custom variables page of the Code::Blocks build options dialog).
 - **Use 1 · macro expansion**: `$(NAME)` in build/run commands expands by "**target overrides project**"; macro name lookup is case-insensitive
   (`$(port)` and `$(PORT)` are equivalent, aligned with CB `Upper()`); on a miss it falls back to system environment variables.

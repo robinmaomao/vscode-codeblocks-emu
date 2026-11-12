@@ -17,6 +17,7 @@ export function buildCompilerCacheKey(
   id: string,
   masterPath: string,
   programs: Record<string, string> | undefined,
+  extra = '',
 ): string {
   let programsKey: string;
   try {
@@ -24,7 +25,7 @@ export function buildCompilerCacheKey(
   } catch {
     programsKey = ''; // 不可序列化（循环引用等）时不参与键
   }
-  return `${id}\u0000${masterPath}\u0000${programsKey}`;
+  return `${id}\u0000${masterPath}\u0000${programsKey}${extra ? `\u0000${extra}` : ''}`;
 }
 
 /** 简易有界 Map（FIFO 淘汰；键空间小，无需 LRU 计龄） */

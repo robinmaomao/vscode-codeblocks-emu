@@ -2,7 +2,7 @@
 
 > 语言：**中文** ｜ [English](./usage.en.md)
 >
-> 版本：0.8.148 ｜ 本扩展为 Code::Blocks 核心功能的原生移植，直接驱动 GCC / GDB，**不依赖** `tasks.json` / `launch.json`。
+> 版本：0.8.151 ｜ 本扩展为 Code::Blocks 核心功能的原生移植，直接驱动 GCC / GDB，**不依赖** `tasks.json` / `launch.json`。
 
 ---
 
@@ -51,7 +51,7 @@ Code::Blocks for VS Code 是一个「迷你 IDE 内核」：直接解析 `.cbp` 
 ### 2.1 从 VSIX 安装
 
 ```powershell
-code --install-extension codeblocks-vscode-0.8.148.vsix --force
+code --install-extension codeblocks-vscode-0.8.151.vsix --force
 ```
 
 ### 2.2 从源码构建
@@ -59,7 +59,7 @@ code --install-extension codeblocks-vscode-0.8.148.vsix --force
 ```powershell
 npm install
 npm run package
-code --install-extension codeblocks-vscode-0.8.148.vsix --force
+code --install-extension codeblocks-vscode-0.8.151.vsix --force
 ```
 
 > `npm run package` = `vsce package`（打包前自动执行 `vscode:prepublish` 钩子 = `tsc` 编译（`dist/`，本地测试用）+ **esbuild 单文件打包**（`bundle/extension.js`，发布入口））；
@@ -159,16 +159,26 @@ code --extensionDevelopmentPath="." --disable-extensions --new-window
 
 ### 5.3 右键菜单
 
-**项目节点：**
+**项目节点（顺序对齐 Code::Blocks 20.03）：**
 
 | 命令 | 说明 |
 |------|------|
-| Move Up / Move Down | 调整编译顺序 |
-| Remove Project | 从工作区移除（不删除磁盘文件） |
-| Build / Rebuild | 增量 / 全量编译该项目 |
+| Save Project | 把当前内存模型写回 `.cbp`（平时编辑即落盘，此处为显式保存兜底） |
+| Close Project | 关闭工程（从侧栏卸载，不删除磁盘文件；无强制确认，对齐 CB） |
 | Add Files... | 向 `.cbp` 添加文件 |
 | Add Files Recursively... | 选目录递归收录源文件（过滤 `.git`/`obj`/`bin`/`*.cbp`）；多构建目标时询问归属（对齐 CB） |
+| Remove Files... | 多选工程文件后**从工程**移除（不删除磁盘文件，对齐 CB `Remove files...`） |
 | Find File... | 在本工程内模糊查找并**在工程树中逐级展开定位**（默认仅定位，不打开文件） |
+| Project Search: Search Project Files / Search in Project Files | 工程内搜索（CB 无对应项，扩展增强，保留在「查找」组） |
+| Project Tree ▸ | 子菜单：**Expand All** / **Collapse All**（对齐 CB `Project tree` 子菜单） |
+| Add New Virtual Folder... | 新建虚拟文件夹 |
+| Code::Blocks: Reload Project from Disk | 从磁盘重载（等价 CB `Reparse this project`；监视器漏报时的兜底） |
+| Build / Rebuild / Clean | 增量 / 全量编译、清理该项目 |
+| Build options... | 工程级 Build options（对齐 CB `Build options...`） |
+| Properties... | 工程属性（对齐 CB `Properties...`） |
+| Select Build Target for Project | 选择该工程的构建目标（扩展增强） |
+| Move Up / Move Down | 调整编译顺序（扩展增强） |
+| Remove Project | 从工作区移除（带确认、不删除磁盘文件；扩展增强，与 Close Project 并存） |
 
 **文件夹 / 虚拟文件夹 / 文件分组节点：**
 
@@ -288,7 +298,7 @@ code --extensionDevelopmentPath="." --disable-extensions --new-window
 - Webview 按 Category 分组展示 `options_<id>.xml` 中的 `<Option>`，勾选后写回项目 / 目标编译选项。
 - 「应用」**立即写回 `.cbp`**（Code::Blocks 是"改内存 + 保存工程"，本扩展没有工程"已修改"状态，故直接落盘，重开工程不丢）；
   仅管理 XML 里列出的选项，**手写在工程属性页的自定义选项（如 `-pipe`）会原样保留**；写盘失败会在面板状态区显示原因。
-- 工程属性面板（`Properties…`）要点：构建目标页含「**依赖与附加输出**」分组（`external_deps`/`additional_output`，比输出新时强制重链接）、「**环境变量**」分组（`<Environment>`，每行 `name=value`）与「**高级**」分组（运行工作目录 / deps 输出目录 / 平台 / 宿主程序 / console runner / import 库·def 文件 / 库前缀·扩展名策略）；项目设置页含「**环境变量**」与「**项目自定义变量**」（供 `$(name)` 宏）以及「**工程编译与输出**」（平台 / PCH 策略 / 扩展对象命名）与「**Makefile 模式**」（自定义 Makefile / 文件名 / 执行目录）。
+- 工程属性面板（`Properties…`）版式对齐 CB `ProjectOptionsDlg`：顶部 `目标：` 选择器 + 6 个页签（项目设置 / 构建目标 / 构建脚本 / 备注 / C/C++ 解析器选项 / 调试器），底部左侧为 `保存 | 保存并关闭 | 还原设置`（还原 = 丢弃未保存修改，回到上次保存值）。构建目标页左列是目标列表 + 竖排按钮（添加/重命名/复制/删除/↑/↓，以及虚拟目标…/依赖…/重排…/构建选项…/从目标创建工程…），右列是「所选构建目标选项」表单，其下为「构建目标文件」列表（对齐 CB 右栏上下两个静态框），扩展字段收在「**高级（扩展）**」分组（目标标题 / 编译器 ID / 执行参数 / deps 输出目录 / 宿主程序 / console runner / 外部依赖 / 附加输出 / 目标环境变量）；项目设置页按 CB 顺序排列 Title / Platforms / Filename / Makefile（含两条红色提示）/ Execution directory，另有预编译头单选组、构建页复选框与右下角「工程的依赖…」「工程的构建选项…」，扩展字段（默认编译器 ID / 虚拟文件夹 / 项目自定义变量）收在「**高级（扩展）**」分组。
 - 目标列表支持**上移/下移**（调整目标顺序，影响导出与遍历顺序，对齐 CB Re-order）与「**导出为工程**」（把选中目标导出为只包含其文件的独立 `.cbp`，对齐 CB Create project from target；也可从命令面板 / Project 菜单 `Create Project from Target…` 调用）。
 - 「构建脚本」页支持**无构建命令时也执行 post-build**（`Mode after=always`，对齐 CB Pre/post 页选项）；另有运行参数 / 搜索目录 / 虚拟目标等全部页。
 - 面板可用性：**未切到过的 tab 也能正常保存**（保存前按"元素是否存在"跳过未渲染表单）；收集或写盘失败会在顶栏右侧状态区显示原因（不再静默无反应）；窄面板（< 720 px）下左侧列表与右侧表单自动改为上下堆叠，按钮不再逐字换行成竖排。
@@ -302,8 +312,8 @@ code --extensionDevelopmentPath="." --disable-extensions --new-window
 
 ### 7.5 环境变量（对齐 CB Build options → Custom variables）
 
-- **编辑入口**（工程属性面板）：**项目设置页**「环境变量」+ **构建目标页**「环境变量」分组，
-  均为每行 `name=value`；写回 `.cbp` 的 `<Build><Environment>` / `<Target><Environment>`
+- **编辑入口**（工程属性面板）：**构建目标页 → 高级（扩展） →「目标环境变量」**（每行 `name=value`）；项目级变量在 **Build options → Custom variables** 页编辑，
+  写回 `.cbp` 的 `<Build><Environment>` / `<Target><Environment>`
   （对齐 Code::Blocks 构建选项对话框的 Custom variables 页）。
 - **用途一·宏展开**：构建/运行命令中的 `$(NAME)` 按「**目标覆盖项目**」展开；宏名查找大小写不敏感
   （`$(port)` 与 `$(PORT)` 等效，对齐 CB `Upper()`）；未命中再回退系统环境变量。

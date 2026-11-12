@@ -27,6 +27,9 @@
 | `codeblocks.compilerId` | string | `gcc` |  | 默认编译器 ID（对应 `options_<id>.xml`）。工程未指定编译器或单文件编译时使用；修改后状态栏 `Compiler:` 即时刷新，并按新编译器重新生成 clangd 编译数据库（实际变化时重启 clangd）。 |
 | `codeblocks.masterPath` | string | `""` | machine-overridable | 编译器安装根目录；留空则从 `PATH` 探测。修改后编译命令、系统头路径与 clangd 数据库同步更新。 |
 | `codeblocks.compilerPrograms` | object | `{}` | machine-overridable | 按编译器 ID 分组的程序路径表，可覆盖 `C` / `CPP` / `LD` / `LIB` / `WINDRES` / `MAKE` / `DBGconfig`。通常由「探测编译器」自动写入；交叉编译时可显式指定。 |
+| `codeblocks.compiler.customFlags` | object | `{}` | application | 按编译器 ID 分组的新增编译器参数（Build options 右键「新建参数…」写入）。每项含 `name` / `option` / 可选 `category`，参与编译选项勾选列表。 |
+| `codeblocks.compiler.flagOverrides` | object | `{}` | application | 按编译器 ID 分组的**内置参数覆盖**：`modified` 以原始 `option` 为键给出新名称/参数/分类，`removed` 列出要隐藏的原始 `option`。清空该设置即恢复 XML 默认参数。 |
+| `codeblocks.compiler.languageFlags` | object | `{}` | application | 按编译器 ID 分组的「仅 C」`cOnly` / 「仅 C++」`cppOnly` 参数；设置后覆盖编译器 XML 的 `<Sort CFlags/CPPFlags>`，构建时按文件语言注入。 |
 
 示例：
 

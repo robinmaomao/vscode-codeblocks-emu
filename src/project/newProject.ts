@@ -396,6 +396,7 @@ export function createProjectFromTemplate(
     commonTopLevelPath: projectDir,
     pchMode: 1,
     extendedObjNames: false,
+    checkForExternallyModifiedFiles: true,
     platforms: 0xff,
     filename: path.join(projectDir, `${name}.cbp`),
     compilerId,

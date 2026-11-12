@@ -5,7 +5,7 @@
  * 空节点省略规则。未映射到模型的原生元素（如 <Option check_files> 等）从
  * 原始 XML 节点（rawProject）透传，保证「往返」不丢失。
  */
-import { Project, BuildTarget, TargetType, ProjectFile, OptionsRelationType, LinkerExecutableOption, EnvVariable, PLATFORM_ALL } from './types';
+import { Project, BuildTarget, TargetType, ProjectFile, OptionsRelationType, LinkerExecutableOption, EnvVariable, PLATFORM_ALL, MakeCommandsMap } from './types';
 import { XMLBuilder } from 'fast-xml-parser';
 import { defaultCompile, defaultLink, shouldWriteCompilerVar } from './fileTypes';
 
@@ -53,6 +53,7 @@ function passthroughProjectOptions(rawProject: unknown): { key: string; value: s
   const handled = new Set([
     'title', 'compiler', 'virtualFolders', 'notes', 'show_notes',
     'platforms', 'pch_mode', 'makefile', 'makefile_is_custom', 'execution_dir', 'extended_obj_names',
+    'check_files',
   ]);
   const out: { key: string; value: string }[] = [];
   for (const o of asArray<any>(raw?.Option)) {
@@ -140,24 +141,86 @@ function writeEnvironment(L: string[], indent: string, vars: EnvVariable[]): voi
   L.push(`${indent}</Environment>`);
 }
 
-/** 透传 <MakeCommands> 元素（makefile 项目的 make 命令，保留原始 XML） */
-function writeMakeCommands(L: string[], node: unknown, indent: string): void {
-  if (node === undefined || node === null) return;
-  try {
-    const builder = new XMLBuilder({
-      ignoreAttributes: false,
-      attributeNamePrefix: '@_',
-      format: true,
-      indentBy: '\t',
-      suppressEmptyNode: true,
-    });
-    const xml = builder.build({ MakeCommands: node });
-    for (const line of xml.split('\n')) {
-      if (line.trim()) L.push(indent + line);
+/** MakeCommands 子元素顺序（对齐 DoMakeCommands：Build/CompileFile/Clean/DistClean/AskRebuildNeeded/SilentBuild） */
+const MAKE_COMMAND_ELEMENTS: Array<[keyof MakeCommandsMap, string]> = [
+  ['build', 'Build'],
+  ['compileFile', 'CompileFile'],
+  ['clean', 'Clean'],
+  ['distClean', 'DistClean'],
+  ['askRebuildNeeded', 'AskRebuildNeeded'],
+  ['silentBuild', 'SilentBuild'],
+];
+
+/**
+ * 写 <MakeCommands>（makefile 项目的 make 命令）。
+ *
+ * 模型值优先；模型未提供的命令回退原始 XML，未知属性/子节点继续透传。
+ */
+function writeMakeCommands(
+  L: string[],
+  commands: MakeCommandsMap | undefined,
+  rawNode: unknown,
+  indent: string,
+): void {
+  const raw = Array.isArray(rawNode) ? rawNode[0] : rawNode;
+  const rawAttrs = attrs(raw);
+  const known = new Set(MAKE_COMMAND_ELEMENTS.map(([, element]) => element));
+  const parts: string[] = [];
+  for (const [phase, element] of MAKE_COMMAND_ELEMENTS) {
+    const provided = !!commands && Object.prototype.hasOwnProperty.call(commands, phase);
+    const modelValue = provided ? String(commands![phase] ?? '').trim() : undefined;
+    const el = (raw as any)?.[element];
+    const one = Array.isArray(el) ? el[0] : el;
+    // 旧格式 <MakeCommands><Build><Option .../></Build></MakeCommands>：无 command 属性但有子节点 → 原样透传
+    const hasChildren = !!one && typeof one === 'object' && Object.keys(one).some((k) => !k.startsWith('@_') && k !== '#text');
+    if (hasChildren && !modelValue) {
+      try {
+        const builder = new XMLBuilder({
+          ignoreAttributes: false,
+          attributeNamePrefix: '@_',
+          format: true,
+          indentBy: '\t',
+          suppressEmptyNode: true,
+        });
+        const xml = builder.build({ [element]: one });
+        for (const line of String(xml).split('\n')) {
+          if (line.trim()) parts.push(indent + '\t' + line);
+        }
+      } catch {
+        // 忽略无法透传的节点
+      }
+      continue;
     }
-  } catch {
-    // 忽略透传失败
+    // 模型未提供 → 回退原始 XML；模型显式为空 → 视为已清空（不写空 command）
+    const value = provided ? modelValue : (one?.['@_command'] ? String(one['@_command']) : undefined);
+    if (value) parts.push(`${indent}\t<${element} command="${esc(value)}" />`);
   }
+  // 未知子节点原样保留
+  for (const [key, value] of Object.entries(raw ?? {})) {
+    if (key.startsWith('@_') || key === '#text' || known.has(key)) continue;
+    try {
+      const builder = new XMLBuilder({
+        ignoreAttributes: false,
+        attributeNamePrefix: '@_',
+        format: true,
+        indentBy: '\t',
+        suppressEmptyNode: true,
+      });
+      const xml = builder.build({ [key]: value });
+      for (const line of String(xml).split('\n')) {
+        if (line.trim()) parts.push(indent + '\t' + line);
+      }
+    } catch {
+      // 忽略无法透传的节点
+    }
+  }
+  const attrText = Object.entries(rawAttrs)
+    .map(([key, value]) => ` ${key}="${esc(value)}"`)
+    .join('');
+  if (!parts.length && !attrText) return;
+  L.push(`${indent}<MakeCommands${attrText}>`);
+  L.push(...parts);
+  L.push(`${indent}</MakeCommands>`);
 }
 
 /** 从原始项目节点提取目标级 <MakeCommands>（按目标标题匹配） */
@@ -243,7 +306,7 @@ function writeTarget(L: string[], t: BuildTarget, rawProject: unknown): void {
   writeLinker(L, '\t\t\t\t', t.linkerOptions, t.linkLibs, t.libDirs, t.linkerExecutable);
   writeExtraCommands(L, '\t\t\t\t', t.commandsBeforeBuild, t.commandsAfterBuild, t.alwaysRunPostBuildSteps);
   writeEnvironment(L, '\t\t\t\t', t.envVars);
-  writeMakeCommands(L, targetMakeCommands(rawProject, t.title), '\t\t\t\t');
+  writeMakeCommands(L, t.makeCommands, targetMakeCommands(rawProject, t.title), '\t\t\t\t');
   L.push('\t\t\t</Target>');
 }
 
@@ -339,6 +402,9 @@ export function serializeProject(project: Project): string {
   if (project.extendedObjNames) {
     L.push('\t\t<Option extended_obj_names="1" />');
   }
+  if (!project.checkForExternallyModifiedFiles) {
+    L.push('\t\t<Option check_files="0" />');
+  }
   if (project.showNotesOnLoad || project.notes) {
     const show = project.showNotesOnLoad ? 1 : 0;
     if (project.notes) {
@@ -351,7 +417,7 @@ export function serializeProject(project: Project): string {
   }
 
   // 项目级 MakeCommands（对齐 ExportTargetAsProject：位于 <Build> 之前）
-  writeMakeCommands(L, (project.rawProject as any)?.MakeCommands, '\t\t');
+  writeMakeCommands(L, project.makeCommands, (project.rawProject as any)?.MakeCommands, '\t\t');
 
   L.push('\t\t<Build>');
   for (const t of project.buildTargets) {

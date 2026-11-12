@@ -222,6 +222,18 @@ export class CodeBlocksConfig {
     return this.userCompilers.get(lower);
   }
 
+  /** 列出用户自定义编译器（按 id 去重，保留声明顺序） */
+  listUserCompilers(): UserCompilerConfig[] {
+    const seen = new Set<string>();
+    const out: UserCompilerConfig[] = [];
+    for (const cfg of this.userCompilers.values()) {
+      if (seen.has(cfg.id)) continue;
+      seen.add(cfg.id);
+      out.push(cfg);
+    }
+    return out;
+  }
+
   /** 全局编译器变量：变量名 → { base/include/lib/obj/bin/cflags/lflags... }（默认集优先合并） */
   globalVariables(): Record<string, Record<string, string>> {
     const out: Record<string, Record<string, string>> = {};

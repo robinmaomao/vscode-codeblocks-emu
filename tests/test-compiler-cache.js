@@ -55,7 +55,7 @@ check('C4 dist 缓存命中早退（compilerResultCache.get）', /compilerResult
 // D-20：程序路径改为「按家族 id 解析」后，缓存键使用**解析结果**（resolveProgramsForCompiler 的返回值），
 // 因此这里断言「键由 id + masterPath + 解析出的程序表构成」，且解析函数（按家族 id + 全局 id）确实被调用。
 check('C5 dist 缓存键由 id/masterPath/解析后的程序表构成（D-20 后形态）',
-  /buildCompilerCacheKey\)\(id, masterPath, programs\)/.test(ext)
+  /buildCompilerCacheKey\)\(id, masterPath, programs[^)]*\)/.test(ext)
   && /resolveProgramsForCompiler\)\(cfg\.get\('compilerPrograms', \{\}\), id, cfg\.get\('compilerId'/.test(ext), null);
 
 console.log(`\ncompiler-cache: pass=${pass} fail=${fail}`);
