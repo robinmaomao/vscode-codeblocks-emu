@@ -2,7 +2,7 @@
   "name": "codeblocks-vscode",
   "displayName": "%extension.displayName%",
   "description": "%extension.description%",
-  "version": "0.8.148",
+  "version": "0.8.150",
   "icon": "resources/icon.png",
   "publisher": "robinmaomao",
   "author": {
@@ -197,11 +197,13 @@
       {
         "command": "codeblocks.compilerOptions",
         "title": "%command.codeblocks.compilerOptions.title%",
+        "category": "Code::Blocks",
         "icon": "$(settings-gear)"
       },
       {
         "command": "codeblocks.projectProperties",
         "title": "%command.codeblocks.projectProperties.title%",
+        "category": "Code::Blocks",
         "icon": "$(gear)"
       },
       {
@@ -626,6 +628,101 @@
             "type": "string",
             "default": "gcc",
             "description": "%configuration.codeblocks.compilerId.description%"
+          },
+          "codeblocks.compiler.customFlags": {
+            "type": "object",
+            "scope": "application",
+            "default": {},
+            "markdownDescription": "%configuration.codeblocks.compiler.customFlags.description%",
+            "additionalProperties": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": [
+                  "name",
+                  "option"
+                ],
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "description": "显示名称，例如 Enable C++20"
+                  },
+                  "option": {
+                    "type": "string",
+                    "description": "传给编译器的参数，例如 -std=c++20"
+                  },
+                  "category": {
+                    "type": "string",
+                    "description": "分类（可选），默认为 Custom flags"
+                  }
+                }
+              }
+            }
+          },
+          "codeblocks.compiler.flagOverrides": {
+            "type": "object",
+            "scope": "application",
+            "default": {},
+            "markdownDescription": "%configuration.codeblocks.compiler.flagOverrides.description%",
+            "additionalProperties": {
+              "type": "object",
+              "properties": {
+                "modified": {
+                  "type": "object",
+                  "description": "原始参数 → 覆盖后的名称/参数/分类",
+                  "additionalProperties": {
+                    "type": "object",
+                    "required": [
+                      "name",
+                      "option"
+                    ],
+                    "properties": {
+                      "name": {
+                        "type": "string"
+                      },
+                      "option": {
+                        "type": "string"
+                      },
+                      "category": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                },
+                "removed": {
+                  "type": "array",
+                  "description": "被删除的内置参数（原始 option）",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          },
+          "codeblocks.compiler.languageFlags": {
+            "type": "object",
+            "scope": "application",
+            "default": {},
+            "markdownDescription": "%configuration.codeblocks.compiler.languageFlags.description%",
+            "additionalProperties": {
+              "type": "object",
+              "properties": {
+                "cOnly": {
+                  "type": "array",
+                  "description": "仅 C 编译时使用的参数（覆盖编译器 XML 的 <Sort CFlags>）",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "cppOnly": {
+                  "type": "array",
+                  "description": "仅 C++ 编译时使用的参数（覆盖编译器 XML 的 <Sort CPPFlags>）",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
           },
           "codeblocks.masterPath": {
             "type": "string",
@@ -1838,9 +1935,14 @@
           "group": "inline@4"
         },
         {
-          "command": "codeblocks.projectProperties",
+          "command": "codeblocks.compilerOptions",
           "when": "view == codeblocks.projectTree && viewItem == project",
           "group": "0_properties@1"
+        },
+        {
+          "command": "codeblocks.projectProperties",
+          "when": "view == codeblocks.projectTree && viewItem == project",
+          "group": "0_properties@2"
         },
         {
           "command": "codeblocks.moveProjectUp",
@@ -1860,7 +1962,7 @@
         {
           "command": "codeblocks.reloadProject",
           "when": "view == codeblocks.projectTree && viewItem == project",
-          "group": "0_properties@2"
+          "group": "0_properties@3"
         },
         {
           "command": "codeblocks.buildProject",

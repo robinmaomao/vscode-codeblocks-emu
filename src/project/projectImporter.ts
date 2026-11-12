@@ -359,6 +359,7 @@ export function buildProjectFromImport(
     commonTopLevelPath: basePath,
     pchMode: 1,
     extendedObjNames: false,
+    checkForExternallyModifiedFiles: true,
     platforms: 0xff,
     filename: cbpPath,
     compilerId,

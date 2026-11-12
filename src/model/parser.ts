@@ -210,6 +210,7 @@ export class ProjectParser {
       commonTopLevelPath: basePath,
       pchMode: 1,
       extendedObjNames: false,
+      checkForExternallyModifiedFiles: true,
       platforms: 0xff,
       filename,
       compilerId: '',
@@ -363,6 +364,10 @@ export class ProjectParser {
       // 扩展对象命名（projectloader.cpp:1524：<Option extended_obj_names="1">）
       if (node['@_extended_obj_names'] !== undefined) {
         project.extendedObjNames = node['@_extended_obj_names'] === '1' || node['@_extended_obj_names'] === 'true';
+      }
+      // 外部修改检测（projectloader.cpp：<Option check_files>，默认 true）
+      if (node['@_check_files'] !== undefined) {
+        project.checkForExternallyModifiedFiles = node['@_check_files'] !== '0' && node['@_check_files'] !== 'false';
       }
       // 项目级平台过滤（projectloader.cpp:399-463：<Option platforms>，默认 spAll）
       if (node['@_platforms'] !== undefined) {
@@ -626,14 +631,16 @@ export class ProjectParser {
       }
     }
     // <ExtraCommands><Add before=".." after=".."/></ExtraCommands>
+    // 注意：不能在此直接 return——<MakeCommands> 节点没有 Add，提前返回会让 make 命令永不解析
     let adds = node.Add;
-    if (adds === undefined) return;
-    if (!Array.isArray(adds)) adds = [adds];
-    for (const add of adds) {
-      const before = String(add['@_before'] ?? '');
-      const after = String(add['@_after'] ?? '');
-      if (before) sink.commandsBeforeBuild.push(before);
-      if (after) sink.commandsAfterBuild.push(after);
+    if (adds !== undefined) {
+      if (!Array.isArray(adds)) adds = [adds];
+      for (const add of adds) {
+        const before = String(add['@_before'] ?? '');
+        const after = String(add['@_after'] ?? '');
+        if (before) sink.commandsBeforeBuild.push(before);
+        if (after) sink.commandsAfterBuild.push(after);
+      }
     }
     // makefile 模式：<MakeCommands><Build command="..."/><Clean .../>（DoMakeCommands:329-358）
     if (sink.makeCommands) {

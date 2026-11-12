@@ -28,6 +28,7 @@
 | [0.8.146.md](./0.8.146.md) | clangd `#ifdef` 关闭区域（inactive regions）不再变暗修复：语言客户端原地重启后装饰无法重建 |
 | [0.8.147.md](./0.8.147.md) | 工程搜索体验：Text 结果排版对齐内置 Search + Files 模式 Search 按钮/同一行布局 + 切视图后两模式搜索记录保持 + 开关与选项置灰 |
 | [0.8.148.md](./0.8.148.md) | Build Log（诊断来源 `build`）错误点击不跳转修复：链接期段名伪路径、`.o/.obj` 对象文件、无源码位置条目与 ANSI 彩色输出 |
+| [0.8.150.md](./0.8.150.md) | 工程右键 `Build options…` / `Properties…` 完整移植 Code::Blocks：共享 Build options 视图、Compiler Flags 右键菜单（新建/修改/删除/仅 C/仅 C++/展开折叠）+ 覆盖与自定义参数、Silent build 派生、Selected compiler 自动匹配 |
 
 ## 分支预发布版本（branch prerelease）
 

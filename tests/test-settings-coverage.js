@@ -99,16 +99,31 @@ const srcFiles = [];
   }
 })(path.join(ROOT, 'src'));
 const srcTexts = srcFiles.map((f) => fs.readFileSync(f, 'utf-8'));
+// `const X_SETTING = 'compiler.customFlags'` + `.get(X_SETTING, ...)` 是推荐写法：
+// 把常量名解析回键，避免「用常量读取」的设置被误判为无读点。
+const settingConsts = new Map(); // 常量名 -> 设置键（去掉 codeblocks. 前缀）
+for (const t of srcTexts) {
+  for (const l of t.split(/\r?\n/)) {
+    const m = l.match(/\bconst\s+([A-Za-z_][A-Za-z0-9_]*)\s*(?::\s*string\s*)?=\s*['"`]([^'"`]+)['"`]/);
+    if (m && m[2].includes('.')) settingConsts.set(m[1], m[2]);
+  }
+}
 const readByLiteral = (bare) => {
   const needle = new RegExp(`['"\`]${bare.replace(/\./g, '\\.')}['"\`]`);
-  return srcTexts.some((t) => t.split(/\r?\n/).some((l) => needle.test(l) && isConfigRead(l)));
+  const names = [...settingConsts].filter(([, v]) => v === bare).map(([k]) => k);
+  const viaConst = names.length
+    ? new RegExp(`\\.get\\s*(<[^>]*>)?\\s*\\(\\s*(?:${names.join('|')})\\b`)
+    : null;
+  return srcTexts.some((t) => t.split(/\r?\n/).some((l) =>
+    (needle.test(l) && isConfigRead(l)) || (viaConst ? viaConst.test(l) : false)));
 };
-const readExceptions = new Set(['codeblocks.ui.language', 'codeblocks.ui.symbolsView', 'codeblocks.editor.asmHashComment']);
+// 例外：ui.symbolsView 仅由 package.json 视图 when 子句使用，不在代码中读取
+const readExceptions = new Set(['codeblocks.ui.symbolsView']);
 const missingReads = declaredKeys.filter((k) => {
   if (readExceptions.has(k)) return false;
   return !readByLiteral(k.replace(/^codeblocks\./, ''));
 });
-check('全部设置键都有真实源码读取点（ui.language / editor.asmHashComment 常量、ui.symbolsView when 子句除外）',
+check('全部设置键都有真实源码读取点（常量读取已解析；ui.symbolsView 仅 when 子句除外）',
   missingReads.length === 0, missingReads);
 check('覆盖清单未引用已删除设置', !SETTINGS.some(([k]) => k === 'codeblocks.clangd.queryDriver'),
   SETTINGS.filter(([k]) => k === 'codeblocks.clangd.queryDriver'));
