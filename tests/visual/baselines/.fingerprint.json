@@ -10,7 +10,7 @@
     "id": "win32-x64_msedge-121_dsf1",
     "label": "win32-x64 / msedge 121 / dsf=1 / font=332e298f"
   },
-  "capturedAt": "2026-11-12T11:10:20.724Z",
+  "capturedAt": "2026-11-12T16:35:28.494Z",
   "note": "入库基线由本机渲染生成（--update）；跨机运行会降级为容差判定并提示",
   "surfaces": 18
 }

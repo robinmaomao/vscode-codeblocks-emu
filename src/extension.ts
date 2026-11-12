@@ -1191,6 +1191,62 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     }),
   );
 
+  // 关闭工程（对齐 CB Project → Close project：从侧栏卸载，磁盘文件保留；与带确认的 Remove Project 并存）
+  context.subscriptions.push(
+    vscode.commands.registerCommand('codeblocks.closeProject', async (node?: any) => {
+      const filename = resolveProjectFilename(node) ?? activeProject?.filename;
+      if (!filename) return;
+      const project = openProjects.find((p) => normPath(p.filename) === normPath(filename));
+      if (!project) return;
+      removeProject(project.filename);
+      vscode.window.showInformationMessage(i18n.t('Project closed: {0}', path.basename(project.filename)));
+    }),
+  );
+
+  // 保存工程（对齐 CB Project → Save project：把内存模型写回 .cbp）
+  context.subscriptions.push(
+    vscode.commands.registerCommand('codeblocks.saveProject', async (node?: any) => {
+      const filename = resolveProjectFilename(node) ?? activeProject?.filename;
+      if (!filename) return;
+      await saveProjectToDisk(filename);
+    }),
+  );
+
+  // 从工程移除文件（对齐 CB Project → Remove files...，磁盘文件保留）
+  context.subscriptions.push(
+    vscode.commands.registerCommand('codeblocks.removeFiles', async (node?: any) => {
+      const filename = resolveProjectFilename(node) ?? activeProject?.filename;
+      if (!filename) return;
+      const project = openProjects.find((p) => normPath(p.filename) === normPath(filename));
+      if (!project) return;
+      await removeFilesFromProject(project);
+    }),
+  );
+
+  // 工程树全部展开 / 折叠（对齐 CB Project → Project tree 子菜单）
+  context.subscriptions.push(
+    vscode.commands.registerCommand('codeblocks.projectTree.expandAll', async () => {
+      projectTreeProvider?.setExpandAll(true);
+      if (!projectTreeProvider || !projectTreeView) return;
+      // 工程节点带稳定 id，视图会沿用其折叠状态：逐个 reveal({expand:true}) 强制展开
+      for (const project of openProjects) {
+        const node = projectTreeProvider.getProjectNode(project.filename);
+        if (!node) continue;
+        try {
+          await projectTreeView.reveal(node, { expand: true, select: false, focus: false });
+        } catch {
+          // 节点尚未渲染 / 工程已关闭：忽略
+        }
+      }
+    }),
+  );
+  context.subscriptions.push(
+    vscode.commands.registerCommand('codeblocks.projectTree.collapseAll', async () => {
+      projectTreeProvider?.setExpandAll(false);
+      await vscode.commands.executeCommand('workbench.actions.treeView.codeblocks.projectTree.collapseAll');
+    }),
+  );
+
   // 增量编译单个项目（右键）
   context.subscriptions.push(
     vscode.commands.registerCommand('codeblocks.buildProject', async (node?: any) => {
@@ -5469,6 +5525,63 @@ function removeProject(filename: string): void {
   analysisTreeProvider?.refresh();
   projectSearch?.provider.notifyContextChanged();
   outputChannel.info(logT('[Code::Blocks] Project removed: {0}', removed.title));
+}
+
+/**
+ * 保存工程：把内存模型写回 .cbp（对齐 CB Project → Save project）。
+ * 平时编辑即落盘，此命令是显式保存入口与兜底。
+ */
+async function saveProjectToDisk(filename: string): Promise<void> {
+  const project = openProjects.find((p) => normPath(p.filename) === normPath(filename));
+  if (!project) return;
+  try {
+    writeCbpAndRemember(project.filename, serializeProject(project));
+    projectTreeProvider?.setProjects(openProjects);
+    outputChannel.info(logT('[Code::Blocks] Project saved: {0}', project.title));
+    vscode.window.showInformationMessage(i18n.t('Project saved: {0}', path.basename(project.filename)));
+  } catch (err) {
+    vscode.window.showErrorMessage(i18n.t('Failed to save the project: {0}', (err as Error).message));
+  }
+}
+
+/** 从工程移除多个文件（对齐 CB Project → Remove files...，磁盘文件保留） */
+async function removeFilesFromProject(project: Project): Promise<void> {
+  const files = project.files ?? [];
+  if (!files.length) {
+    vscode.window.showInformationMessage(i18n.t('This project has no files to remove.'));
+    return;
+  }
+  const picks = await vscode.window.showQuickPick(
+    files.map((f) => ({ label: f.relativeFilename })),
+    {
+      canPickMany: true,
+      placeHolder: i18n.t('Select the files to remove from the project (the files on disk are kept)'),
+    },
+  );
+  if (!picks || !picks.length) return;
+  const confirm = await vscode.window.showWarningMessage(
+    i18n.t('Remove {0} file(s) from project "{1}"? (the files on disk are kept)', picks.length, project.title),
+    { modal: true },
+    'Remove',
+  );
+  if (confirm !== 'Remove') return;
+
+  const failed: string[] = [];
+  for (const pick of picks) {
+    try {
+      removeUnitFromCbp(project.filename, pick.label);
+    } catch {
+      failed.push(pick.label);
+    }
+  }
+  const removed = picks.length - failed.length;
+  if (removed > 0) {
+    outputChannel.info(logT('[Code::Blocks] {0} file(s) removed from the project: {1}', removed, project.title));
+    await reloadProjectFromDisk(project.filename);
+  }
+  if (failed.length) {
+    vscode.window.showErrorMessage(i18n.t('Failed to remove the file: {0}', failed.join(', ')));
+  }
 }
 
 /** 从项目移除文件（保留磁盘文件，写回 .cbp 删除对应 <Unit> 节点） */

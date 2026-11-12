@@ -31,7 +31,7 @@ class TreeNode extends vscode.TreeItem {
 
   constructor(
     public readonly label: string,
-    public readonly collapsibleState: vscode.TreeItemCollapsibleState,
+    public collapsibleState: vscode.TreeItemCollapsibleState,
     public readonly kind: 'project' | 'folder' | 'file' | 'virtualFolder' | 'fileGroup',
     public readonly project?: Project,
     public readonly resourceUri?: vscode.Uri,
@@ -167,6 +167,8 @@ export class ProjectTreeProvider implements vscode.TreeDataProvider<TreeNode> {
   private missingPending = new Map<string, Set<TreeNode>>();
   /** 是否已调度异步检查（去抖 50ms 合并） */
   private missingCheckScheduled = false;
+  /** 全部展开请求（对齐 CB Project tree → Expand all）：渲染时把折叠节点提升为展开 */
+  private expandAllRequested = false;
 
   /** 设置资源根目录（用于加载图标） */
   setResourcesDir(dir: string): void {
@@ -188,6 +190,7 @@ export class ProjectTreeProvider implements vscode.TreeDataProvider<TreeNode> {
 
   setProjects(projects: Project[]): void {
     this.projects = projects;
+    this.expandAllRequested = false; // 一次性：工程重载后不再强制展开（避免粘住折叠操作）
     this.dirIndexCache.clear();
     this.nodeCache.clear();
     this.parentMap = new WeakMap<TreeNode, TreeNode>();
@@ -202,10 +205,33 @@ export class ProjectTreeProvider implements vscode.TreeDataProvider<TreeNode> {
     this._onDidChangeTreeData.fire(undefined);
   }
 
+  /** 取工程节点（reveal / 强制展开用；未打开时返回 undefined） */
+  getProjectNode(filename: string): TreeNode | undefined {
+    const project = this.projects.find((p) => p.filename === filename);
+    return project ? this.projectNode(project) : undefined;
+  }
+
+  /**
+   * 全部展开 / 折叠（对齐 CB 工程右键 Project tree 子菜单）。
+   *
+   * VS Code 只在新元素首次出现时采用 TreeItem.collapsibleState，对已渲染过的元素沿用视图里的
+   * 折叠状态；因此这里必须丢弃节点缓存、生成全新的元素实例，再按 expandAllRequested 提升状态。
+   */
+  setExpandAll(expand: boolean): void {
+    this.expandAllRequested = expand;
+    this.dirIndexCache.clear();
+    this.nodeCache.clear();
+    this.parentMap = new WeakMap<TreeNode, TreeNode>();
+    this.missingCache.clear();
+    this.missingPending.clear();
+    this._onDidChangeTreeData.fire(undefined);
+  }
+
   /** 设置是否按文件类型分组 */
   setCategorize(categorize: boolean): void {
     if (this.categorize === categorize) return;
     this.categorize = categorize;
+    this.expandAllRequested = false; // 一次性：重新分组后不再强制展开
     this.dirIndexCache.clear();
     this.nodeCache.clear();
     this.parentMap = new WeakMap<TreeNode, TreeNode>();
@@ -220,6 +246,10 @@ export class ProjectTreeProvider implements vscode.TreeDataProvider<TreeNode> {
   }
 
   getTreeItem(element: TreeNode): vscode.TreeItem {
+    // Expand all（CB Project tree → Expand all）：setExpandAll 已重建元素实例，这里给新实例置为展开
+    if (this.expandAllRequested && element.collapsibleState === vscode.TreeItemCollapsibleState.Collapsed) {
+      element.collapsibleState = vscode.TreeItemCollapsibleState.Expanded;
+    }
     // 项目节点图标在此实时计算：getTreeItem 每次渲染都会调用，拿到的是最新 activeProject，
     // 避免只在 getChildren 里算一次、切换活动工程时被 TreeView 节点复用缓存吞掉（绿点不更新）。
     if (element.kind === 'project') {

@@ -6,7 +6,7 @@ An extension that natively ports the Code::Blocks core features to VS Code — a
 
 Open a `.cbp` / `.workspace` project directly in VS Code and get a build, debug, and project browsing experience aligned with Code::Blocks.
 
-> **Author**: Robinmaomao ｜ **Version**: 0.8.150
+> **Author**: Robinmaomao ｜ **Version**: 0.8.151
 
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](./LICENSE.md)
 
@@ -118,10 +118,10 @@ code --install-extension robinmaomao.codeblocks-vscode
 
 ### Option 2: install from GitHub Releases
 
-Download `codeblocks-vscode-0.8.150.vsix` from [Releases](https://github.com/robinmaomao/vscode-codeblocks-emu/releases):
+Download `codeblocks-vscode-0.8.151.vsix` from [Releases](https://github.com/robinmaomao/vscode-codeblocks-emu/releases):
 
 ```powershell
-code --install-extension codeblocks-vscode-0.8.150.vsix --force
+code --install-extension codeblocks-vscode-0.8.151.vsix --force
 ```
 
 ### Option 3: build from source
@@ -129,7 +129,7 @@ code --install-extension codeblocks-vscode-0.8.150.vsix --force
 ```powershell
 npm install
 npm run package
-code --install-extension codeblocks-vscode-0.8.150.vsix --force
+code --install-extension codeblocks-vscode-0.8.151.vsix --force
 ```
 
 > `npm run package` = `vsce package` (packaging runs the `vscode:prepublish` hook automatically = `tsc` compile (`dist/`, for local tests) + esbuild single-file bundle (`bundle/extension.js`, the release entry)); running `npx vsce package` / `npx vsce publish` directly also builds automatically and never packs a stale or missing `bundle/`; on Windows, prefer `npm.cmd` / `npx.cmd` (PSReadLine execution policy).

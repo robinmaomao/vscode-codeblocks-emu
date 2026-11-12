@@ -2,7 +2,7 @@
   "name": "codeblocks-vscode",
   "displayName": "%extension.displayName%",
   "description": "%extension.description%",
-  "version": "0.8.150",
+  "version": "0.8.151",
   "icon": "resources/icon.png",
   "publisher": "robinmaomao",
   "author": {
@@ -330,6 +330,31 @@
         "command": "codeblocks.removeProject",
         "title": "%command.codeblocks.removeProject.title%",
         "icon": "$(close)"
+      },
+      {
+        "command": "codeblocks.closeProject",
+        "title": "%command.codeblocks.closeProject.title%",
+        "icon": "$(close-all)"
+      },
+      {
+        "command": "codeblocks.saveProject",
+        "title": "%command.codeblocks.saveProject.title%",
+        "icon": "$(save)"
+      },
+      {
+        "command": "codeblocks.removeFiles",
+        "title": "%command.codeblocks.removeFiles.title%",
+        "icon": "$(remove)"
+      },
+      {
+        "command": "codeblocks.projectTree.expandAll",
+        "title": "%command.codeblocks.projectTree.expandAll.title%",
+        "icon": "$(expand-all)"
+      },
+      {
+        "command": "codeblocks.projectTree.collapseAll",
+        "title": "%command.codeblocks.projectTree.collapseAll.title%",
+        "icon": "$(collapse-all)"
       },
       {
         "command": "codeblocks.reloadProject",
@@ -1744,7 +1769,25 @@
         ]
       }
     ],
+    "submenus": [
+      {
+        "id": "codeblocks.projectTree.menu",
+        "label": "%submenu.codeblocks.projectTree.menu%"
+      }
+    ],
     "menus": {
+      "codeblocks.projectTree.menu": [
+        {
+          "command": "codeblocks.projectTree.expandAll",
+          "group": "1_tree@1",
+          "when": "view == codeblocks.projectTree && viewItem == project"
+        },
+        {
+          "command": "codeblocks.projectTree.collapseAll",
+          "group": "1_tree@2",
+          "when": "view == codeblocks.projectTree && viewItem == project"
+        }
+      ],
       "commandPalette": [
         {
           "command": "codeblocks.buildLog.showAllMessages",
@@ -1910,9 +1953,104 @@
           "group": "9_copy@2"
         },
         {
+          "command": "codeblocks.saveProject",
+          "when": "view == codeblocks.projectTree && viewItem == project",
+          "group": "00_save@1"
+        },
+        {
+          "command": "codeblocks.closeProject",
+          "when": "view == codeblocks.projectTree && viewItem == project",
+          "group": "00_save@2"
+        },
+        {
+          "command": "codeblocks.addFile",
+          "when": "view == codeblocks.projectTree && viewItem == project",
+          "group": "01_files@1"
+        },
+        {
+          "command": "codeblocks.addFilesRecursively",
+          "when": "view == codeblocks.projectTree && viewItem == project",
+          "group": "01_files@2"
+        },
+        {
+          "command": "codeblocks.removeFiles",
+          "when": "view == codeblocks.projectTree && viewItem == project",
+          "group": "01_files@3"
+        },
+        {
+          "command": "codeblocks.findFile",
+          "when": "view == codeblocks.projectTree && viewItem == project",
+          "group": "02_find@1"
+        },
+        {
+          "command": "codeblocks.searchProjectFiles",
+          "when": "view == codeblocks.projectTree && viewItem == project",
+          "group": "02_find@2"
+        },
+        {
+          "command": "codeblocks.searchInProjectFiles",
+          "when": "view == codeblocks.projectTree && viewItem == project",
+          "group": "02_find@3"
+        },
+        {
+          "submenu": "codeblocks.projectTree.menu",
+          "when": "view == codeblocks.projectTree && viewItem == project",
+          "group": "03_tree@1"
+        },
+        {
+          "command": "codeblocks.newVirtualFolder",
+          "when": "view == codeblocks.projectTree && viewItem == project",
+          "group": "03_tree@2"
+        },
+        {
+          "command": "codeblocks.reloadProject",
+          "when": "view == codeblocks.projectTree && viewItem == project",
+          "group": "03_tree@3"
+        },
+        {
+          "command": "codeblocks.buildProject",
+          "when": "view == codeblocks.projectTree && viewItem == project",
+          "group": "04_build@1"
+        },
+        {
+          "command": "codeblocks.rebuildProject",
+          "when": "view == codeblocks.projectTree && viewItem == project",
+          "group": "04_build@2"
+        },
+        {
+          "command": "codeblocks.cleanProject",
+          "when": "view == codeblocks.projectTree && viewItem == project",
+          "group": "04_build@3"
+        },
+        {
+          "command": "codeblocks.compilerOptions",
+          "when": "view == codeblocks.projectTree && viewItem == project",
+          "group": "05_options@1"
+        },
+        {
+          "command": "codeblocks.projectProperties",
+          "when": "view == codeblocks.projectTree && viewItem == project",
+          "group": "05_options@2"
+        },
+        {
           "command": "codeblocks.selectProjectTarget",
           "when": "view == codeblocks.projectTree && viewItem == project",
-          "group": "1_project@1"
+          "group": "06_extra@1"
+        },
+        {
+          "command": "codeblocks.moveProjectUp",
+          "when": "view == codeblocks.projectTree && viewItem == project",
+          "group": "06_extra@2"
+        },
+        {
+          "command": "codeblocks.moveProjectDown",
+          "when": "view == codeblocks.projectTree && viewItem == project",
+          "group": "06_extra@3"
+        },
+        {
+          "command": "codeblocks.removeProject",
+          "when": "view == codeblocks.projectTree && viewItem == project",
+          "group": "06_extra@4"
         },
         {
           "command": "codeblocks.buildProject",
@@ -1933,61 +2071,6 @@
           "command": "codeblocks.projectProperties",
           "when": "view == codeblocks.projectTree && viewItem == project",
           "group": "inline@4"
-        },
-        {
-          "command": "codeblocks.compilerOptions",
-          "when": "view == codeblocks.projectTree && viewItem == project",
-          "group": "0_properties@1"
-        },
-        {
-          "command": "codeblocks.projectProperties",
-          "when": "view == codeblocks.projectTree && viewItem == project",
-          "group": "0_properties@2"
-        },
-        {
-          "command": "codeblocks.moveProjectUp",
-          "when": "view == codeblocks.projectTree && viewItem == project",
-          "group": "1_move@1"
-        },
-        {
-          "command": "codeblocks.moveProjectDown",
-          "when": "view == codeblocks.projectTree && viewItem == project",
-          "group": "1_move@2"
-        },
-        {
-          "command": "codeblocks.removeProject",
-          "when": "view == codeblocks.projectTree && viewItem == project",
-          "group": "1_move@3"
-        },
-        {
-          "command": "codeblocks.reloadProject",
-          "when": "view == codeblocks.projectTree && viewItem == project",
-          "group": "0_properties@3"
-        },
-        {
-          "command": "codeblocks.buildProject",
-          "when": "view == codeblocks.projectTree && viewItem == project",
-          "group": "2_build@1"
-        },
-        {
-          "command": "codeblocks.rebuildProject",
-          "when": "view == codeblocks.projectTree && viewItem == project",
-          "group": "2_build@2"
-        },
-        {
-          "command": "codeblocks.cleanProject",
-          "when": "view == codeblocks.projectTree && viewItem == project",
-          "group": "2_build@3"
-        },
-        {
-          "command": "codeblocks.addFile",
-          "when": "view == codeblocks.projectTree && viewItem == project",
-          "group": "3_add@1"
-        },
-        {
-          "command": "codeblocks.addFilesRecursively",
-          "when": "view == codeblocks.projectTree && viewItem == project",
-          "group": "3_add@2"
         },
         {
           "command": "codeblocks.addFile",
@@ -2038,11 +2121,6 @@
           "command": "codeblocks.renameFile",
           "when": "view == codeblocks.projectTree && viewItem =~ /^file/",
           "group": "1_file@5"
-        },
-        {
-          "command": "codeblocks.newVirtualFolder",
-          "when": "view == codeblocks.projectTree && viewItem == project",
-          "group": "5_vf@1"
         },
         {
           "command": "codeblocks.newVirtualFolder",

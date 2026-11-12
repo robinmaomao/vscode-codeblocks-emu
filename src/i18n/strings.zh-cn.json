@@ -1248,7 +1248,6 @@
   "Empty script path": "脚本路径为空",
   "File not found: {0}": "文件不存在：{0}",
   "Build options saved": "构建选项已保存",
-  "Build target options": "构建目标选项",
   "File properties": "文件属性",
   "Dependencies": "依赖",
   "Re-order build targets": "重新排序构建目标",
@@ -1282,5 +1281,19 @@
   "Delete this built-in compiler flag?\nYou can restore the defaults by clearing \"codeblocks.compiler.flagOverrides\" in Settings.": "删除这个内置编译器参数？\n可在设置中清空 codeblocks.compiler.flagOverrides 恢复默认。",
   "A compiler flag with the same option already exists.": "已存在相同参数的编译器参数。",
   "Read-only: Code::Blocks derives it from the build command (Build + \" > $(CMD_NULL)\") and rewrites it when saving.": "只读：Code::Blocks 由构建命令派生该值（Build + \" > $(CMD_NULL)\"），并在保存时自动重写。",
-  "Read-only: only used by scripts/SDK calls. This extension has no Dist-clean command.": "只读：仅供脚本/SDK 调用使用；本扩展没有 Dist-clean 命令。"
+  "Read-only: only used by scripts/SDK calls. This extension has no Dist-clean command.": "只读：仅供脚本/SDK 调用使用；本扩展没有 Dist-clean 命令。",
+  "Restore settings": "还原设置",
+  "Discard unsaved changes and restore the saved settings?": "放弃未保存的修改，恢复为已保存的设置？",
+  "Settings restored": "已还原为保存的设置",
+  "Only used by build targets; Code::Blocks stores it per target (<LinkerExe>), so it is read-only for the project.": "仅构建目标使用；Code::Blocks 按目标保存该值（<LinkerExe>），因此工程级只读。",
+  "Selected build target options": "所选构建目标选项",
+  "Target:": "目标：",
+  "Project closed: {0}": "已关闭工程：{0}",
+  "Project saved: {0}": "已保存工程：{0}",
+  "[Code::Blocks] Project saved: {0}": "[Code::Blocks] 已保存工程：{0}",
+  "[Code::Blocks] {0} file(s) removed from the project: {1}": "[Code::Blocks] 已从工程移除 {0} 个文件：{1}",
+  "Failed to save the project: {0}": "保存工程失败：{0}",
+  "This project has no files to remove.": "该工程没有可移除的文件。",
+  "Select the files to remove from the project (the files on disk are kept)": "选择要从工程移除的文件（磁盘文件保留）",
+  "Remove {0} file(s) from project \"{1}\"? (the files on disk are kept)": "确定从工程 \"{1}\" 移除 {0} 个文件吗？（磁盘文件保留）"
 }

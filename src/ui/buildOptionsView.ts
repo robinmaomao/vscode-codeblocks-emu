@@ -105,6 +105,7 @@ function labels(): Record<string, string> {
     linkLibraries: i18n.t('Link libraries:'),
     otherLinker: i18n.t('Other linker options:'),
     linkerExecutable: i18n.t('Linker executable:'),
+    linkerExecutableHint: i18n.t('Only used by build targets; Code::Blocks stores it per target (<LinkerExe>), so it is read-only for the project.'),
     autoDetect: i18n.t('Auto-detect'),
     cCompiler: i18n.t('C compiler'),
     cppCompiler: i18n.t('C++ compiler'),
@@ -135,6 +136,9 @@ function labels(): Record<string, string> {
     down: i18n.t('Down'),
     save: i18n.t('Save'),
     saveClose: i18n.t('Save and Close'),
+    restore: i18n.t('Restore settings'),
+    restoreConfirm: i18n.t('Discard unsaved changes and restore the saved settings?'),
+    restoreDone: i18n.t('Settings restored'),
     close: i18n.t('Close'),
     saved: i18n.t('Saved ✔️'),
     saveFailed: i18n.t('Save failed:'),
@@ -357,6 +361,7 @@ export function buildOptionsCss(): string {
   .bo-menu-sep { height: 1px; margin: 3px 4px; background: var(--vscode-menu-separatorBackground, var(--bo-border)); }
   .bo-confirm-text { white-space: pre-line; font-size: 12px; line-height: 1.55; }
   .bo-inline-row { display: flex; align-items: center; gap: 8px; }
+  .bo-root .bo-inline-row select:disabled { opacity: .6; cursor: default; }
   .bo-inline-label { font-size: 12px; white-space: nowrap; }
   .bo-inline-select { width: 220px; flex: none; }
   .bo-root .bo-inline-row .bo-inline-select { width: 220px; flex: 0 0 auto; }
@@ -370,6 +375,7 @@ export function buildOptionsCss(): string {
   .bo-extras .bo-card-body { flex: 1; display: flex; flex-direction: column; min-height: 0; }
   .bo-extras textarea { flex: 1; min-height: 150px; resize: vertical; }
   .bo-card-body > .bo-vars-list .bo-list { height: 300px; min-height: 300px; max-height: 300px; }
+  .bo-footer .bo-toolbar button { border-color: var(--vscode-button-border, var(--bo-border)); }
   .bo-root button.default, .bo-modal button.default { border-color: var(--vscode-focusBorder); }
   .bo-footer { justify-content: flex-start; }
   .bo-toolbar { display: inline-flex; align-items: center; gap: 8px; }
@@ -419,6 +425,10 @@ export function buildOptionsScript(data: BuildOptionsData, embedded: boolean): s
   (function () {
     var BOOT = ${payload};
     var DATA = BOOT.data;
+    /** 已保存的设置快照：还原设置时回到这里（保存成功后同步） */
+    var BASE = clone(BOOT.data);
+    /** 正在提交的保存快照（宿主回 saved 后才并入 BASE，失败则丢弃） */
+    var pendingSave = null;
     var L = BOOT.labels;
     var embedded = BOOT.embedded;
     var scopeKey = 'project';
@@ -571,12 +581,13 @@ export function buildOptionsScript(data: BuildOptionsData, embedded: boolean): s
       if (!el) return;
       el.innerHTML = embedded
         ? '<button id="bo-close" class="default">' + esc(L.close) + '</button>'
-        : '<button id="bo-save" class="default">' + esc(L.save) + '</button><button id="bo-save-close">' + esc(L.saveClose) + '</button>';
+        : '<button id="bo-save" class="default">' + esc(L.save) + '</button><button id="bo-save-close">' + esc(L.saveClose) + '</button><button id="bo-restore">' + esc(L.restore) + '</button>';
       if (embedded) {
         q('close').addEventListener('click', function () { collectPage(); hideOverlay(); });
       } else {
-        q('save').addEventListener('click', function () { collectPage(); status('...'); post({ type: 'save', data: readData(), close: false }); });
-        q('save-close').addEventListener('click', function () { collectPage(); status('...'); post({ type: 'save', data: readData(), close: true }); });
+        q('save').addEventListener('click', function () { submit(false); });
+        q('save-close').addEventListener('click', function () { submit(true); });
+        q('restore').addEventListener('click', restoreSaved);
       }
     }
     function card(title, body, extraClass) {
@@ -954,11 +965,16 @@ export function buildOptionsScript(data: BuildOptionsData, embedded: boolean): s
         actions('linker', '', { hideMove: true }) +
         '<div class="bo-actions"><button data-act="copy">' + esc(L.copySelected) + '</button></div>';
       var right = '<textarea id="bo-other-linker" class="bo-fixed-text">' + esc(sc.linkerOptions.join('\\n')) + '</textarea>';
-      var exe = isProject() ? '' : '<div class="bo-inline-row span-2"><span class="bo-inline-label">' + esc(L.linkerExecutable) + '</span><select id="bo-linker-exe" class="bo-inline-select">' +
+      // Linker executable 是 Code::Blocks 的目标级属性（<Linker><LinkerExe>）：工程作用域下只读展示
+      var exeDisabled = isProject();
+      var exe = '<div class="bo-inline-row span-2"><span class="bo-inline-label">' + esc(L.linkerExecutable) + '</span><select id="bo-linker-exe" class="bo-inline-select"' +
+        (exeDisabled ? ' disabled title="' + esc(L.linkerExecutableHint) + '"' : '') + '>' +
         [[0, L.autoDetect], [1, L.cCompiler], [2, L.cppCompiler], [3, L.linker]].map(function (o) { return '<option value="' + o[0] + '"' + (Number(sc.linkerExecutable) === o[0] ? ' selected' : '') + '>' + esc(o[1]) + '</option>'; }).join('') +
-        '</select></div>';
-      el.innerHTML = policyRow('bo-pol-linker', sc.relations.linker, L.policy, isProject()) + '<div class="bo-sep"></div>' +
-        pageGrid(card(L.linkLibraries, left) + card(L.otherLinker, right) + exe);
+        '</select></div>' + (exeDisabled ? '<div class="bo-hint span-2">' + esc(L.linkerExecutableHint) + '</div>' : '');
+      el.innerHTML = '<section class="bo-card"><div class="bo-card-body">' +
+        policyRow('bo-pol-linker', sc.relations.linker, L.policy, isProject()) + '<div class="bo-sep"></div>' +
+        pageGrid(card(L.linkLibraries, left) + card(L.otherLinker, right) + exe) +
+        '</div></section>';
       var pol = q('pol-linker');
       if (pol) pol.addEventListener('change', function () { sc.relations.linker = Number(pol.value); });
       bindList('linker', sc.linkLibs);
@@ -976,7 +992,7 @@ export function buildOptionsScript(data: BuildOptionsData, embedded: boolean): s
         };
       }
       var le = q('linker-exe');
-      if (le) le.addEventListener('change', function () { sc.linkerExecutable = Number(le.value); });
+      if (le && !exeDisabled) le.addEventListener('change', function () { sc.linkerExecutable = Number(le.value); });
       var x = q('other-linker'); if (x) x.addEventListener('change', function () { collectPage(); });
       refreshActionState('linker', sc.linkLibs);
     }
@@ -1116,7 +1132,7 @@ export function buildOptionsScript(data: BuildOptionsData, embedded: boolean): s
       var sc = current();
       if (page === 'linker') {
         var ol = q('other-linker'); if (ol) sc.linkerOptions = ol.value.split('\\n').map(function (s) { return s.trim(); }).filter(Boolean);
-        var le = q('linker-exe'); if (le) sc.linkerExecutable = Number(le.value);
+        var le = q('linker-exe'); if (le && !isProject()) sc.linkerExecutable = Number(le.value);
       } else if (page === 'extras') {
         var pre = q('pre'); if (pre) sc.commandsBefore = pre.value.split('\\n').map(function (s) { return s.trim(); }).filter(Boolean);
         var po = q('post'); if (po) sc.commandsAfter = po.value.split('\\n').map(function (s) { return s.trim(); }).filter(Boolean);
@@ -1137,6 +1153,22 @@ export function buildOptionsScript(data: BuildOptionsData, embedded: boolean): s
       applyDerivedSilent();
       return clone(DATA);
     }
+    function submit(close) {
+      var data = readData();
+      pendingSave = data;
+      status('...');
+      post({ type: 'save', data: data, close: close });
+    }
+    /** 还原设置：丢弃未保存的修改，把对话框恢复为工程/目标当前的已存储值 */
+    function restoreSaved() {
+      confirmBox(L.restore, function () {
+        DATA = clone(BASE);
+        selected = { linker: -1, dir: -1, vars: -1 };
+        if (scopeKey !== 'project' && !DATA.targets[Number(scopeKey)]) scopeKey = 'project';
+        render();
+        status(L.restoreDone);
+      }, esc(L.restoreConfirm));
+    }
     function showOverlay() {
       var ov = document.getElementById('bo-overlay');
       if (ov) ov.style.display = 'flex';
@@ -1147,7 +1179,7 @@ export function buildOptionsScript(data: BuildOptionsData, embedded: boolean): s
     }
     window.cbBuildOptions = {
       open: function (data, scope) {
-        if (data) DATA = clone(data);
+        if (data) { DATA = clone(data); BASE = clone(data); }
         scopeKey = scope == null ? 'project' : String(scope);
         page = 'compiler'; dirTab = 'compiler'; compilerTab = 'flags';
         selected = { linker: -1, dir: -1, vars: -1 };
@@ -1159,14 +1191,23 @@ export function buildOptionsScript(data: BuildOptionsData, embedded: boolean): s
     };
     window.addEventListener('message', function (e) {
       var msg = e.data || {};
-      if (msg.type === 'saved') { status(L.saved); }
-      else if (msg.type === 'error') { status((L.saveFailed + ' ' + (msg.message || '')), true); }
+      if (msg.type === 'saved') {
+        if (pendingSave) { BASE = pendingSave; pendingSave = null; }
+        status(L.saved);
+      }
+      else if (msg.type === 'error') { pendingSave = null; status((L.saveFailed + ' ' + (msg.message || '')), true); }
       else if (msg.type === 'compilerFlags') {
         if (msg.compilerId) {
-          if (msg.catalog) DATA.compilerCatalogs[msg.compilerId] = msg.catalog;
+          if (msg.catalog) {
+            DATA.compilerCatalogs[msg.compilerId] = msg.catalog;
+            // 参数目录是扩展设置（不是工程数据），还原设置后仍应保留
+            if (BASE.compilerCatalogs) BASE.compilerCatalogs[msg.compilerId] = msg.catalog;
+          }
           if (msg.cOnly || msg.cppOnly) {
+            var flags = { cOnly: msg.cOnly || [], cppOnly: msg.cppOnly || [] };
             DATA.compilerFlags = DATA.compilerFlags || {};
-            DATA.compilerFlags[msg.compilerId] = { cOnly: msg.cOnly || [], cppOnly: msg.cppOnly || [] };
+            DATA.compilerFlags[msg.compilerId] = flags;
+            if (BASE.compilerFlags) BASE.compilerFlags[msg.compilerId] = { cOnly: flags.cOnly, cppOnly: flags.cppOnly };
           }
         }
         if (msg.error) status(msg.error, true); else status(L.customFlagsSaved);

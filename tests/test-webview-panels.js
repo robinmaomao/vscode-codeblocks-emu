@@ -167,13 +167,21 @@ function fnBody(script, name) {
     !/document\.getElementById\(/.test(fnBody(script, 'collectScriptsForm') || ''),
     fnBody(script, 'collectScriptsForm'));
   const dbgBody = fnBody(script, 'collectDebugForm') || '';
-  check('工程属性：collectDebugForm 作用域失效时跳过 remote 段（保留 search_path）',
-    /dbg\.searchPaths = optionsLines\(/.test(dbgBody) && /if \(selectedDebugScope !== '' && !scopeTarget\) return;/.test(dbgBody), dbgBody.slice(0, 240));
+  check('工程属性：collectDebugForm 未渲染时跳过 remote 段（保留 search_path）',
+    /if \(!document\.getElementById\('dbg-conn'\)\) return;/.test(dbgBody) && !/dbg\.searchPaths = optionsLines\(/.test(dbgBody), dbgBody.slice(0, 240));
   // 调试器远程配置按目标标题索引：改名/删除目标时必须同步，否则保存出孤儿 <remote_debugging target="…"> 节点
   check('工程属性：目标改名同步调试器远程配置',
     /dbg\.remote\.forEach\(r => \{ if \(r\.target === oldTitle\) r\.target = newTitle; \}\)/.test(script), null);
   check('工程属性：目标删除清掉调试器远程配置',
     /dbg\.remote = dbg\.remote\.filter\(r => r\.target !== removedTitle\)/.test(script), null);
+  // VS Code WebView 的 iframe 沙箱不含 allow-modals：window.prompt/confirm 静默失效，必须用面板内模态
+  check('工程属性：WebView 内不使用 window.prompt / window.confirm',
+    !/window\.prompt\s*\(/.test(script) && !/window\.confirm\s*\(/.test(script),
+    (script.match(/window\.(prompt|confirm)\s*\(/) || [null])[0]);
+  check('工程属性：输入/确认走面板内模态（askText / confirmBox）',
+    /function askText\(/.test(script) && /function confirmBox\(/.test(script), null);
+  check('工程属性：还原设置使用 confirmBox 确认',
+    /confirmBox\('/.test(fnBody(script, 'restoreSettings') || ''), fnBody(script, 'restoreSettings'));
 }
 
 // 编译选项（Build options）：共享视图 = CSS + HTML 片段 + 内联脚本（0.8.150 起重写为 Code::Blocks 对齐版）
