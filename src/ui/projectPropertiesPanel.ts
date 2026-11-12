@@ -265,6 +265,8 @@ const ICONS = {
   options: '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M2 4.5h12M2 11.5h12M5 2v5M11 9v5" stroke="currentColor" stroke-width="1.2"/></svg>',
   dirs: '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M1.5 3.5h4l2 2h7v7.5h-13z" stroke="currentColor"/></svg>',
   settings: '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><circle cx="8" cy="8" r="2" fill="currentColor"/><path d="M8 1v2M8 13v2M1 8h2M13 8h2M3 3l1.5 1.5M11.5 11.5L13 13M13 3l-1.5 1.5M4.5 11.5L3 13" stroke="currentColor" stroke-width="1.2"/></svg>',
+  moveUp: '<svg viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M8 3.5v9M4 7.5 8 3.5l4 4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  moveDown: '<svg viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M8 12.5v-9M4 8.5l4 4 4-4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>',
 };
 
 /** Build options 覆盖层所需的编译器目录（由宿主提供） */
@@ -621,42 +623,23 @@ export class ProjectPropertiesPanel {
     }
     /* 项目标题栏：单行路径，避免长路径换行挤压内容 */
     .project-header {
-      padding: 9px 16px 8px; flex-shrink: 0;
+      padding: 6px 12px 4px; flex-shrink: 0;
       border-bottom: 1px solid var(--cb-border);
       background: var(--vscode-sideBarSectionHeader-background, var(--cb-surface));
     }
-    .project-title { font-size: 15px; font-weight: 600; line-height: 20px; }
+    .project-title { font-size: 13px; font-weight: 600; line-height: 18px; }
     .project-subtitle {
       font-size: 11px; color: var(--vscode-descriptionForeground); margin-top: 1px;
       overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     }
-    /* 主体：顶部页签 + 内容区（对齐 CB ProjectOptionsDlg） */
+    /* 主体：顶部页签 + 内容区（对齐 CB ProjectOptionsDlg；页签复用 build options 的 .bo-tabs/.bo-tab） */
     .main { flex: 1; display: flex; flex-direction: column; overflow: hidden; min-height: 0; }
-    .tabs {
-      display: flex; flex-direction: row; gap: 2px; flex-shrink: 0;
-      overflow-x: auto; overflow-y: hidden; padding: 0 12px;
-      border-right: none; border-bottom: 1px solid var(--cb-border);
-      background: var(--vscode-editor-background); scrollbar-width: thin;
-    }
-    .tabs::-webkit-scrollbar { height: 4px; }
-    .tabs::-webkit-scrollbar-thumb { background: var(--vscode-scrollbarSlider-background, rgba(128,128,128,.45)); border-radius: 2px; }
-    .tab {
-      display: flex; align-items: center; gap: 7px;
-      background: transparent; color: var(--vscode-descriptionForeground);
-      border: none; border-bottom: 2px solid transparent;
-      padding: 10px 10px 8px; border-radius: 0; cursor: pointer;
-      font-size: 12px; line-height: 16px; white-space: nowrap; text-align: left;
-    }
-    .tab:hover { background: var(--vscode-list-hoverBackground); color: var(--vscode-foreground); }
-    .tab:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: -1px; }
-    .tab.active { color: var(--vscode-foreground); border-bottom-color: var(--vscode-focusBorder); font-weight: 600; background: transparent; }
-    .tab-icon { display: inline-flex; width: 16px; height: 16px; flex: none; opacity: .9; }
     /* 内容区 */
     .content { flex: 1; overflow-y: auto; min-width: 0; }
-    .tab-pane { width: 100%; max-width: 1100px; margin: 0 auto; padding: 16px 20px 28px; box-sizing: border-box; }
-    .layout { display: grid; grid-template-columns: minmax(200px, 260px) minmax(0, 1fr); gap: 16px; align-items: start; }
-    .targets-layout { display: grid; grid-template-columns: minmax(280px, 320px) minmax(0, 1fr); gap: 16px; align-items: start; }
-    .targets-column { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+    .tab-pane { width: 100%; padding: 8px 12px 12px; box-sizing: border-box; }
+    .layout { display: grid; grid-template-columns: minmax(200px, 260px) minmax(0, 1fr); gap: 10px; align-items: start; }
+    .targets-layout { display: grid; grid-template-columns: minmax(230px, 280px) minmax(0, 1fr); gap: 10px; align-items: start; }
+    .targets-column { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
     .targets-main { min-width: 0; }
     .targets-files { grid-column: 1 / -1; }
     /* 卡片 */
@@ -762,14 +745,117 @@ export class ProjectPropertiesPanel {
     #modal-reorder .modal-box { width: min(560px, 100%); }
     #modal-external .modal-box { width: min(720px, 100%); }
     ${buildOptionsCss()}
+    /* ===== Code::Blocks 版式覆盖（属性面板专用；沿用 .bo-root 基底） ===== */
+    .cb-props { background: var(--vscode-editor-background); }
+    .cb-props .project-header { padding: 10px 14px 8px; }
+    /* target: 下拉左对齐并加长（CB 顶部 target 选择器） */
+    .cb-props .target-row { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
+    .cb-props .target-row label { font-size: 12px; color: var(--vscode-foreground); white-space: nowrap; }
+    .cb-props .target-row select { height: 24px; min-width: 220px; max-width: 420px; }
+    /* 静态框：CB wxStaticBox（标题压在边框上，无底色） */
+    .cb-props .card { position: relative; margin-top: 12px; border: 1px solid var(--bo-border); border-radius: 0; background: transparent; overflow: visible; }
+    .cb-props .card-header { position: absolute; top: -7px; left: 8px; display: inline-flex; align-items: center; gap: 6px; min-height: 0; padding: 0 4px; border: none; background: var(--vscode-editor-background); font-size: 12px; font-weight: 400; }
+    .cb-props .card-body { padding: 12px 8px 8px; }
+    .cb-props .card-footer { justify-content: flex-end; background: transparent; border-top: 1px solid var(--bo-border); }
+    .cb-props .targets-layout { grid-template-columns: minmax(300px, 340px) minmax(0, 1fr); }
+    .cb-props .targets-column > .card { margin-top: 0; }
+    /* CB wxStaticLine */
+    .cb-props .cb-sep { height: 1px; margin: 4px 0; background: var(--bo-border); border: 0; }
+    /* 表单行：CB 的「标签固定列 + 控件」，vgap/hgap = 4 */
+    .cb-props .form-grid { display: flex; flex-direction: column; gap: 4px; align-items: stretch; }
+    .cb-props .form-grid > label { display: grid; grid-template-columns: minmax(120px, 170px) minmax(0, 1fr); gap: 0 4px; align-items: center; margin: 0; }
+    .cb-props .form-grid > label > .field-name { grid-column: 1; grid-row: 1; margin: 0; font-weight: 400; font-size: 12px; line-height: 18px; }
+    .cb-props .form-grid > label > .hint { grid-column: 2; }
+    .cb-props .form-grid > label > .inline-field { min-width: 0; display: flex; gap: 4px; align-items: center; }
+    .cb-props .form-grid > .checks { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; padding-left: calc(min(170px, 22vw) + 4px); }
+    .cb-props .form-grid > label.check { display: flex; align-items: center; gap: 6px; padding-left: calc(min(170px, 22vw) + 4px); }
+    .cb-props .form-grid > label.check > span { min-width: 0; }
+    .cb-props .form-grid > .row { display: grid; grid-template-columns: minmax(120px, 170px) minmax(0, 1fr); gap: 0 4px; align-items: start; }
+    .cb-props .form-grid > .row > .field-name { grid-column: 1; margin: 0; font-weight: 400; font-size: 12px; line-height: 18px; padding-top: 3px; }
+    .cb-props .sub-block { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; min-width: 0; }
+    .cb-props .sub-block > .check { display: flex; align-items: center; gap: 6px; }
+    .cb-props .sub-row { display: flex; align-items: center; gap: 4px; width: 100%; }
+    .cb-props .sub-row > .field-name { font-weight: 400; font-size: 12px; white-space: nowrap; }
+    .cb-props .sub-row > input { flex: 1; min-width: 0; }
+    .cb-props .static-value { font-size: 12px; line-height: 24px; color: var(--vscode-descriptionForeground); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .cb-props .settings-actions { display: flex; justify-content: flex-end; gap: 6px; margin-top: 8px; }
+    .cb-props .cb-gap8 { height: 8px; }
+    .cb-props .form-grid > .hint { padding-left: calc(min(170px, 22vw) + 4px); }
+    .cb-props .checks label.check { display: inline-flex; align-items: center; gap: 6px; margin: 0; }
+    /* CB 的红色说明文字：位置/换行按 CB，颜色用主题错误色保证可读 */
+    .cb-props .hint { font-size: 11px; line-height: 1.35; }
+    .cb-props .hint.red { color: var(--vscode-errorForeground, #f48771); max-width: 72ch; }
+    /* 度量：CB 24px 控件；按钮皮肤来自 .bo-root/.bo-actions/.bo-move-buttons，不在此覆盖 */
+    .cb-props input:not([type="checkbox"]):not([type="radio"]),
+    .cb-props select { height: 24px; font-size: 12px; padding: 2px 6px; box-sizing: border-box; }
+    .cb-props textarea { font-size: 12px; line-height: 1.4; }
+    .cb-props input[type="checkbox"], .cb-props input[type="radio"] { width: 14px; height: 14px; flex: none; accent-color: var(--vscode-checkbox-background, var(--vscode-focusBorder)); }
+    .cb-props .cb-browse { width: 24px; height: 24px; flex: none; padding: 0; line-height: 1; }
+    /* 按钮皮肤对齐 build options：次级背景 + 描边；default/add 用 focus 描边 */
+    .cb-props button { border-color: var(--vscode-button-border, var(--bo-border)); }
+    .cb-props button.default, .cb-props button[data-act="add"] { border-color: var(--vscode-focusBorder); }
+    .cb-props button.danger { border-color: transparent; }
+    .cb-props button.primary { border-color: transparent; }
+    /* 页脚：与 build options 相同结构，仅收窄高度贴近 CB 按钮条 */
+    .bo-root.cb-props > .bo-footer { min-height: 40px; padding: 0 12px; }
+    .bo-root.cb-props > .bo-footer .bo-toolbar { gap: 6px; }
+    /* 列表高度（外观复用 .bo-list / 旧 .list） */
+    .cb-props .list { max-height: 220px; min-height: 76px; }
+    .cb-props .list-with-stack { display: grid; grid-template-columns: minmax(0, 1fr) max-content; gap: 6px; align-items: stretch; }
+    .cb-props .list-with-stack .list { max-height: 320px; }
+    .cb-props .list-with-stack #list { max-height: 320px; }
+    .cb-props .btn-stack { display: flex; flex-direction: column; gap: 4px; flex: none; }
+    .cb-props .btn-stack button { width: 100%; text-align: center; }
+    .cb-props .btn-column { display: flex; flex-direction: column; gap: 4px; min-width: 112px; }
+    .cb-props .btn-column > button { width: 100%; }
+    .cb-props .btn-spacer { flex: 1; min-height: 10px; }
+    .cb-props .bo-actions .spacer { flex: 1; }
+    .cb-props .bo-actions button svg { width: 14px; height: 14px; }
+    /* 脚本页：CB 1:2 分栏（左概览树 / 右已附加脚本） */
+    .cb-props .scripts-layout { display: grid; grid-template-columns: minmax(220px, 1fr) minmax(0, 2fr); gap: 10px; align-items: stretch; }
+    .cb-props .scripts-layout .list { max-height: none; min-height: 240px; }
+    .cb-props .scripts-column { display: flex; flex-direction: column; min-width: 0; }
+    .cb-props .scripts-column > .list { flex: 1; }
+    .cb-props .list-with-spin { display: grid; grid-template-columns: minmax(0, 1fr) max-content; gap: 6px; align-items: stretch; flex: 1; min-height: 240px; }
+    .cb-props .list-with-spin > .list { min-height: 240px; }
+    .cb-props .field-label { font-size: 12px; line-height: 18px; margin: 0 0 4px; }
+    .cb-props .plain-actions { display: flex; justify-content: center; gap: 6px; margin-top: 6px; }
+    .cb-props .tree-item { display: flex; align-items: center; gap: 6px; min-height: 24px; padding: 2px 8px; cursor: pointer; user-select: none; }
+    .cb-props .tree-item:hover { background: var(--vscode-list-hoverBackground); }
+    .cb-props .tree-item.selected { background: var(--vscode-list-inactiveSelectionBackground, var(--vscode-list-hoverBackground)); }
+    .cb-props .tree-item.child { padding-left: 24px; }
+    /* 撑满型页签（备注 / 解析器 / 脚本） */
+    .cb-props .fill-pane { display: flex; flex-direction: column; min-height: calc(100vh - 160px); }
+    .cb-props .fill-pane .fill-control { flex: 1; min-height: 160px; }
+    .cb-props .centered-actions { justify-content: center; }
+    /* 单选组（CB wxRadioBox） */
+    .cb-props .radio-box { border: 1px solid var(--bo-border); border-radius: 0; margin: 0; padding: 2px 10px 8px; min-width: 0; }
+    .cb-props .radio-box > legend { padding: 0 4px; font-size: 12px; }
+    .cb-props .radio-group { display: flex; flex-direction: column; gap: 4px; }
+    .cb-props .radio-group label.check { display: flex; align-items: center; gap: 6px; }
+    /* 页内模态：容器改用 build options 的 .bo-modal 结构，这里只收窄对话框宽度 */
+    #modal-platform .bo-modal-box { width: min(420px, 100%); }
+    #modal-reorder .bo-modal-box { width: min(560px, 100%); }
+    #modal-external .bo-modal-box { width: min(720px, 100%); }
+    #modal-vtargets .bo-modal-box, #modal-files .bo-modal-box { width: min(860px, 100%); }
+
     @media (max-width: 760px) {
       .targets-layout, .layout { grid-template-columns: minmax(0, 1fr); }
       .form-grid { grid-template-columns: minmax(0, 1fr); }
       .form-grid > .span-2 { grid-column: auto; }
-      .tab-pane { padding: 12px 14px 22px; }
+      .tab-pane { padding: 8px; }
       .project-subtitle { display: none; }
-      .modal .layout, .modal .form-grid { grid-template-columns: minmax(0, 1fr); }
-      .modal { padding: 12px; }
+      .bo-modal .layout, .bo-modal .form-grid { grid-template-columns: minmax(0, 1fr); }
+      .bo-modal { padding: 12px; }
+      /* .cb-props 覆盖层选择器优先级更高，窄屏折叠必须在此重复声明 */
+      .cb-props .targets-layout, .cb-props .layout, .cb-props .scripts-layout { grid-template-columns: minmax(0, 1fr); }
+      .cb-props .form-grid > label, .cb-props .form-grid > .row, .cb-props .modal .form-grid > label { grid-template-columns: minmax(0, 1fr); }
+      .cb-props .form-grid > label > .field-name,
+      .cb-props .form-grid > .row > .field-name,
+      .cb-props .form-grid > label > .inline-field,
+      .cb-props .form-grid > label > .hint { grid-column: 1 / -1; grid-row: auto; }
+      .cb-props .form-grid > .checks, .cb-props .form-grid > label.check, .cb-props .form-grid > .hint { padding-left: 0; }
+      .cb-props .target-row select { width: 100%; min-width: 0; }
     }
     @media (prefers-reduced-motion: reduce) {
       * { transition: none !important; }
@@ -777,24 +863,23 @@ export class ProjectPropertiesPanel {
   </style>
 </head>
 <body>
+<div class="bo-root cb-props">
   <div class="project-header">
     <div class="project-title">${this.escapeHtml(this.project.title)}</div>
     <div class="project-subtitle">${this.escapeHtml(this.project.filename)}</div>
-  </div>
-  <div class="toolbar">
-    <button id="save" class="primary">${i18n.t('Save')}</button>
-    <button id="saveClose">${i18n.t('Save and Close')}</button>
-    <select id="targetSwitch" title="${i18n.t('Quick switch to this target')}" style="max-width:240px;width:auto"></select>
-    <span id="status"></span>
+    <div class="target-row">
+      <label for="targetSwitch">${i18n.t('Target:')}</label>
+      <select id="targetSwitch" title="${i18n.t('Quick switch to this target')}"></select>
+    </div>
   </div>
   <div class="main">
-    <nav class="tabs">
-      <button class="tab active" data-tab="settings" id="tabbtn-settings"><span class="tab-icon">${ICONS.settings}</span>${i18n.t('Project settings')}</button>
-      <button class="tab" data-tab="targets" id="tabbtn-targets"><span class="tab-icon">${ICONS.target}</span>${i18n.t('Build targets')}</button>
-      <button class="tab" data-tab="scripts" id="tabbtn-scripts"><span class="tab-icon">${ICONS.settings}</span>${i18n.t('Build scripts')}</button>
-      <button class="tab" data-tab="notes" id="tabbtn-notes"><span class="tab-icon">${ICONS.file}</span>${i18n.t('Notes')}</button>
-      <button class="tab" data-tab="parser" id="tabbtn-parser"><span class="tab-icon">${ICONS.options}</span>${i18n.t('C/C++ parser options')}</button>
-      <button class="tab" data-tab="debugger" id="tabbtn-debugger"><span class="tab-icon">${ICONS.options}</span>${i18n.t('Debugger')}</button>
+    <nav class="bo-tabs">
+      <button class="bo-tab active" data-tab="settings" id="tabbtn-settings">${i18n.t('Project settings')}</button>
+      <button class="bo-tab" data-tab="targets" id="tabbtn-targets">${i18n.t('Build targets')}</button>
+      <button class="bo-tab" data-tab="scripts" id="tabbtn-scripts">${i18n.t('Build scripts')}</button>
+      <button class="bo-tab" data-tab="notes" id="tabbtn-notes">${i18n.t('Notes')}</button>
+      <button class="bo-tab" data-tab="parser" id="tabbtn-parser">${i18n.t('C/C++ parser options')}</button>
+      <button class="bo-tab" data-tab="debugger" id="tabbtn-debugger">${i18n.t('Debugger')}</button>
     </nav>
     <div class="content">
       <div id="tab-settings" class="tab-pane">
@@ -805,44 +890,54 @@ export class ProjectPropertiesPanel {
           <section class="card">
             <div class="card-header"><span class="card-title">${i18n.t('Build targets')}</span><span class="card-subtitle" id="target-count"></span></div>
             <div class="card-body">
-              <div class="list" id="list"></div>
-              <div class="list-actions">
-                <button id="add" class="primary" title="${i18n.tr('添加目标')}">${i18n.tr('添加')}</button>
-                <button id="renameTarget" title="${i18n.tr('重命名选中目标')}">${i18n.tr('重命名')}</button>
-                <button id="copy" title="${i18n.tr('复制选中目标')}">${i18n.tr('复制')}</button>
-                <button id="remove" class="danger" title="${i18n.tr('删除选中目标')}">${i18n.tr('删除')}</button>
-                <button id="up" class="icon" title="${i18n.tr('上移选中目标')}">↑</button>
-                <button id="down" class="icon" title="${i18n.tr('下移选中目标')}">↓</button>
-              </div>
-              <div class="list-actions">
-                <button id="virtualTargets" title="${i18n.tr('虚拟目标…')}">${i18n.tr('虚拟目标…')}</button>
-                <button id="externalDeps" title="${i18n.tr('外部依赖与附加输出…')}">${i18n.tr('依赖…')}</button>
-                <button id="reorderTargets" title="${i18n.tr('重排目标顺序…')}">${i18n.tr('重排…')}</button>
-                <button id="targetBuildOptions" title="${i18n.tr('目标构建选项…')}">${i18n.tr('构建选项…')}</button>
-                <button id="exportTarget" title="${i18n.tr('把选中目标导出为独立工程（对齐 CB Create project from target）')}">${i18n.tr('从目标创建工程…')}</button>
-              </div>
-            </div>
-          </section>
-          <section class="card targets-main">
-            <div class="card-header">${i18n.t('Build target options')}</div>
-            <div class="card-body"><div class="form" id="form"></div></div>
-          </section>
-          <section class="card targets-files">
-            <div class="card-header">
-              <span class="card-title">${i18n.t('Build target files:')}</span>
-              <span class="card-subtitle" id="file-count"></span>
-            </div>
-            <div class="card-body">
-              <div class="list" id="tflist"></div>
-              <div class="list-actions">
-                <button id="toggleChecks">${i18n.tr('切换勾选')}</button>
-                <button id="allOn">${i18n.tr('全部选中')}</button>
-                <button id="allOff">${i18n.tr('全部取消')}</button>
-                <span class="spacer"></span>
-                <button id="fileProps">${i18n.tr('选中文件属性…')}</button>
+              <div class="list-with-stack">
+                <div class="list" id="list"></div>
+                <div class="btn-column">
+                  <div class="btn-stack">
+                    <button id="add" data-act="add" title="${i18n.tr('添加目标')}">${i18n.tr('添加')}</button>
+                    <button id="renameTarget" title="${i18n.tr('重命名选中目标')}">${i18n.tr('重命名')}</button>
+                    <button id="copy" title="${i18n.tr('复制选中目标')}">${i18n.tr('复制')}</button>
+                    <button id="remove" class="danger" title="${i18n.tr('删除选中目标')}">${i18n.tr('删除')}</button>
+                  </div>
+                  <div class="bo-move-buttons">
+                    <button id="up" title="${i18n.tr('上移选中目标')}" aria-label="${i18n.tr('上移选中目标')}">${ICONS.moveUp}</button>
+                    <button id="down" title="${i18n.tr('下移选中目标')}" aria-label="${i18n.tr('下移选中目标')}">${ICONS.moveDown}</button>
+                  </div>
+                  <div class="btn-spacer"></div>
+                  <div class="btn-stack">
+                    <button id="virtualTargets" title="${i18n.tr('虚拟目标…')}">${i18n.tr('虚拟目标…')}</button>
+                    <button id="externalDeps" title="${i18n.tr('外部依赖与附加输出…')}">${i18n.tr('依赖…')}</button>
+                    <button id="reorderTargets" title="${i18n.tr('重排目标顺序…')}">${i18n.tr('重排…')}</button>
+                    <button id="targetBuildOptions" title="${i18n.tr('目标构建选项…')}">${i18n.tr('构建选项…')}</button>
+                  </div>
+                  <div class="btn-spacer"></div>
+                  <button id="exportTarget" title="${i18n.tr('把选中目标导出为独立工程（对齐 CB Create project from target）')}">${i18n.tr('从目标创建工程…')}</button>
+                </div>
               </div>
             </div>
           </section>
+          <div class="targets-column">
+            <section class="card targets-main">
+              <div class="card-header">${i18n.t('Selected build target options')}</div>
+              <div class="card-body"><div class="form" id="form"></div></div>
+            </section>
+            <section class="card">
+              <div class="card-header">
+                <span class="card-title">${i18n.t('Build target files:')}</span>
+                <span class="card-subtitle" id="file-count"></span>
+              </div>
+              <div class="card-body">
+                <div class="list" id="tflist"></div>
+                <div class="bo-actions">
+                  <button id="toggleChecks">${i18n.tr('切换勾选')}</button>
+                  <button id="allOn">${i18n.tr('全部选中')}</button>
+                  <button id="allOff">${i18n.tr('全部取消')}</button>
+                  <span class="spacer"></span>
+                  <button id="fileProps">${i18n.tr('选中文件属性…')}</button>
+                </div>
+              </div>
+            </section>
+          </div>
         </div>
       </div>
       <div id="tab-scripts" class="tab-pane" style="display:none">
@@ -859,46 +954,54 @@ export class ProjectPropertiesPanel {
       </div>
     </div>
   </div>
+  <div class="bo-footer">
+    <span class="bo-toolbar">
+      <button id="save" class="default">${i18n.t('Save')}</button>
+      <button id="saveClose">${i18n.t('Save and Close')}</button>
+      <button id="restore">${i18n.t('Restore settings')}</button>
+    </span>
+    <span class="bo-status" id="status"></span>
+  </div>
 
   <!-- 虚拟目标（CB: Virtual targets...） -->
-  <div class="modal" id="modal-vtargets" style="display:none">
-    <div class="modal-box">
-      <div class="modal-head"><div class="modal-title">${i18n.t('Virtual targets')}</div></div>
-      <div class="modal-body">
+  <div class="bo-modal" id="modal-vtargets" style="display:none">
+    <div class="bo-modal-box">
+      <div class="bo-modal-title"><span>${i18n.t('Virtual targets')}</span><button class="bo-modal-x" data-close-modal="modal-vtargets" aria-label="${i18n.t('Close')}">×</button></div>
+      <div class="bo-modal-body">
         <div class="layout">
           <div>
-            <div class="list" id="vtlist"></div>
-            <div class="list-actions">
-              <button id="vt-add" class="primary">${i18n.tr('添加')}</button>
+            <div class="list" id="vtlist" style="min-height:200px"></div>
+            <div class="bo-actions">
+              <button id="vt-add" data-act="add">${i18n.tr('添加')}</button>
               <button id="vt-remove" class="danger">${i18n.tr('删除')}</button>
             </div>
           </div>
           <div class="form" id="vtform"></div>
         </div>
       </div>
-      <div class="modal-actions"><button id="vt-close">${i18n.t('Close')}</button></div>
+      <div class="bo-modal-actions"><button id="vt-close" class="default">${i18n.t('Close')}</button></div>
     </div>
   </div>
 
   <!-- 文件属性（CB: Selected file properties） -->
-  <div class="modal" id="modal-files" style="display:none">
-    <div class="modal-box">
-      <div class="modal-head"><div class="modal-title">${i18n.t('File properties')}</div></div>
-      <div class="modal-body">
+  <div class="bo-modal" id="modal-files" style="display:none">
+    <div class="bo-modal-box">
+      <div class="bo-modal-title"><span>${i18n.t('File properties')}</span><button class="bo-modal-x" data-close-modal="modal-files" aria-label="${i18n.t('Close')}">×</button></div>
+      <div class="bo-modal-body">
         <div class="layout">
-          <div><div class="list" id="flist"></div></div>
+          <div><div class="list" id="flist" style="min-height:200px"></div></div>
           <div class="form" id="fform"></div>
         </div>
       </div>
-      <div class="modal-actions"><button id="ff-close">${i18n.t('Close')}</button></div>
+      <div class="bo-modal-actions"><button id="ff-close" class="default">${i18n.t('Close')}</button></div>
     </div>
   </div>
 
   <!-- 外部依赖（CB: Dependencies...） -->
-  <div class="modal" id="modal-external" style="display:none">
-    <div class="modal-box">
-      <div class="modal-head"><div class="modal-title">${i18n.t('Dependencies')}</div></div>
-      <div class="modal-body">
+  <div class="bo-modal" id="modal-external" style="display:none">
+    <div class="bo-modal-box">
+      <div class="bo-modal-title"><span>${i18n.t('Dependencies')}</span><button class="bo-modal-x" data-close-modal="modal-external" aria-label="${i18n.t('Cancel')}">×</button></div>
+      <div class="bo-modal-body">
         <div class="form">
           <label><span class="field-name">${i18n.tr('外部依赖文件（每行一个）')}</span><textarea id="ext-deps"></textarea>
             <div class="hint">${i18n.tr('比输出文件新时强制重链接')}</div></label>
@@ -906,43 +1009,48 @@ export class ProjectPropertiesPanel {
             <div class="hint">${i18n.tr('外部依赖比它新时强制重链接')}</div></label>
         </div>
       </div>
-      <div class="modal-actions"><button id="ext-ok" class="primary">${i18n.t('OK')}</button><button id="ext-cancel">${i18n.t('Cancel')}</button></div>
+      <div class="bo-modal-actions"><button id="ext-cancel">${i18n.t('Cancel')}</button><button id="ext-ok" class="default">${i18n.t('OK')}</button></div>
     </div>
   </div>
 
   <!-- 目标重排（CB: Re-order...） -->
-  <div class="modal" id="modal-reorder" style="display:none">
-    <div class="modal-box">
-      <div class="modal-head"><div class="modal-title">${i18n.t('Re-order build targets')}</div></div>
-      <div class="modal-body">
-        <div class="list" id="reorder-list"></div>
-        <div class="list-actions"><button id="reorder-up" class="icon">↑</button><button id="reorder-down" class="icon">↓</button></div>
+  <div class="bo-modal" id="modal-reorder" style="display:none">
+    <div class="bo-modal-box">
+      <div class="bo-modal-title"><span>${i18n.t('Re-order build targets')}</span><button class="bo-modal-x" data-close-modal="modal-reorder" aria-label="${i18n.t('Cancel')}">×</button></div>
+      <div class="bo-modal-body">
+        <div class="list" id="reorder-list" style="min-height:200px"></div>
+        <div class="bo-actions">
+          <button id="reorder-up" title="${i18n.tr('上移')}" aria-label="${i18n.tr('上移')}">${ICONS.moveUp}</button>
+          <button id="reorder-down" title="${i18n.tr('下移')}" aria-label="${i18n.tr('下移')}">${ICONS.moveDown}</button>
+        </div>
       </div>
-      <div class="modal-actions"><button id="reorder-ok" class="primary">${i18n.t('OK')}</button><button id="reorder-cancel">${i18n.t('Cancel')}</button></div>
+      <div class="bo-modal-actions"><button id="reorder-cancel">${i18n.t('Cancel')}</button><button id="reorder-ok" class="default">${i18n.t('OK')}</button></div>
     </div>
   </div>
 
   <!-- 平台多选（CB: Platforms ...） -->
-  <div class="modal" id="modal-platform" style="display:none">
-    <div class="modal-box">
-      <div class="modal-head"><div class="modal-title">${i18n.t('Build target platforms')}</div></div>
-      <div class="modal-body">
+  <div class="bo-modal" id="modal-platform" style="display:none">
+    <div class="bo-modal-box">
+      <div class="bo-modal-title"><span>${i18n.t('Build target platforms')}</span><button class="bo-modal-x" data-close-modal="modal-platform" aria-label="${i18n.t('Cancel')}">×</button></div>
+      <div class="bo-modal-body">
         <div class="checks">
           <label class="check"><input type="checkbox" id="plat-win"> Windows</label>
           <label class="check"><input type="checkbox" id="plat-unix"> Unix</label>
           <label class="check"><input type="checkbox" id="plat-mac"> Mac</label>
         </div>
       </div>
-      <div class="modal-actions"><button id="plat-ok" class="primary">${i18n.t('OK')}</button><button id="plat-cancel">${i18n.t('Cancel')}</button></div>
+      <div class="bo-modal-actions"><button id="plat-cancel">${i18n.t('Cancel')}</button><button id="plat-ok" class="default">${i18n.t('OK')}</button></div>
     </div>
   </div>
 
-  <!-- Build options 页内覆盖层（与独立面板共用视图） -->
-  <div id="bo-overlay" class="bo-overlay" style="display:none">
-    <div class="bo-dialog">
-      <div id="bo-root-host" class="bo-root">${buildOptionsMarkup(true)}</div>
-    </div>
   </div>
+
+<!-- Build options 页内覆盖层（与独立面板共用视图；放在 .bo-root 外，避免继承 properties 的紧凑度量） -->
+<div id="bo-overlay" class="bo-overlay" style="display:none">
+  <div class="bo-dialog">
+    <div id="bo-root-host" class="bo-root">${buildOptionsMarkup(true)}</div>
+  </div>
+</div>
 
   <script>
     const vscode = acquireVsCodeApi();
@@ -1023,7 +1131,7 @@ export class ProjectPropertiesPanel {
         return;
       }
       el.innerHTML = targets.map((t, i) =>
-        '<div class="item' + (i === selected ? ' selected' : '') + '" data-i="' + i + '"><span class="item-icon">' + data.icons.target + '</span><span class="item-label">' + esc(t.title) + '</span></div>'
+        '<div class="item' + (i === selected ? ' selected' : '') + '" data-i="' + i + '"><span class="item-label">' + esc(t.title) + '</span></div>'
       ).join('');
       const targetCount = document.getElementById('target-count');
       if (targetCount) targetCount.textContent = '(' + targets.length + ')';
@@ -1044,40 +1152,38 @@ export class ProjectPropertiesPanel {
       const t = targets[selected];
       const platText = (t.platforms & 7) === 7 ? 'All' : [(t.platforms & 4) ? 'Windows' : '', (t.platforms & 2) ? 'Unix' : '', (t.platforms & 1) ? 'Mac' : ''].filter(Boolean).join(';');
       el.innerHTML =
-        '<div class="form-section">' +
-          '<div class="form-grid">' +
-            '<label><span class="field-name">${i18n.tr('平台')}</span><span class="inline-field"><input id="f-platforms-text" value="' + escAttr(platText) + '" readonly><button id="f-platforms-btn">...</button></span></label>' +
-            '<span style="display:none"><input type="checkbox" id="f-pwin"' + ((t.platforms & 4) ? ' checked' : '') + '><input type="checkbox" id="f-punix"' + ((t.platforms & 2) ? ' checked' : '') + '><input type="checkbox" id="f-pmac"' + ((t.platforms & 1) ? ' checked' : '') + '></span>' +
-            '<label><span class="field-name">${i18n.tr('类型')}</span><select id="f-type">${typeOptions}</select></label>' +
-            '<div class="checks span-2">' +
-              '<label class="check"><input type="checkbox" id="f-console"' + (t.useConsoleRunner !== false ? ' checked' : '') + '> ${i18n.tr('执行结束时暂停')}</label>' +
-              '<label class="check"><input type="checkbox" id="f-staticchk"' + (t.createStaticLib ? ' checked' : '') + '> ${i18n.tr('创建导入库')}</label>' +
-              '<label class="check"><input type="checkbox" id="f-defchk"' + (t.createDefFile ? ' checked' : '') + '> ${i18n.tr('创建 .DEF 导出文件')}</label>' +
-            '</div>' +
-            '<label class="span-2"><span class="field-name">${i18n.tr('输出文件名')}</span><span class="inline-field"><input id="f-output" value="' + escAttr(t.outputFilename) + '"><button data-browse="file" data-target="f-output">...</button></span><div class="hint">${i18n.tr('相对项目根目录，如 bin/Debug/hello')}</div></label>' +
-            '<label><span class="field-name">import ${i18n.tr('库文件名')}</span><span class="inline-field"><input id="f-implib" value="' + escAttr(t.impLib || '') + '"><button data-browse="file" data-target="f-implib">...</button></span></label>' +
-            '<label><span class="field-name">def ${i18n.tr('文件名')}</span><span class="inline-field"><input id="f-deffile" value="' + escAttr(t.defFile || '') + '"><button data-browse="file" data-target="f-deffile">...</button></span></label>' +
-            '<label><span class="field-name">${i18n.tr('执行工作目录')}</span><span class="inline-field"><input id="f-workdir" value="' + escAttr(t.workingDir || '') + '"><button data-browse="folder" data-target="f-workdir">...</button></span></label>' +
-            '<label><span class="field-name">${i18n.tr('对象输出目录')}</span><span class="inline-field"><input id="f-object" value="' + escAttr(t.objectOutput || '') + '"><button data-browse="folder" data-target="f-object">...</button></span></label>' +
-            '<div class="checks span-2">' +
-              '<label class="check"><input type="checkbox" id="f-prefix"' + (t.prefixAuto !== false ? ' checked' : '') + '> ${i18n.tr('自动生成文件名前缀')}</label>' +
-              '<label class="check"><input type="checkbox" id="f-ext"' + (t.extensionAuto !== false ? ' checked' : '') + '> ${i18n.tr('自动生成文件名扩展名')}</label>' +
-            '</div>' +
-          '</div>' +
+        '<div class="form-grid">' +
+          '<label><span class="field-name">${i18n.tr('平台：')}</span><span class="inline-field"><input id="f-platforms-text" value="' + escAttr(platText) + '" readonly><button id="f-platforms-btn" class="cb-browse">...</button></span></label>' +
+          '<span style="display:none"><input type="checkbox" id="f-pwin"' + ((t.platforms & 4) ? ' checked' : '') + '><input type="checkbox" id="f-punix"' + ((t.platforms & 2) ? ' checked' : '') + '><input type="checkbox" id="f-pmac"' + ((t.platforms & 1) ? ' checked' : '') + '></span>' +
+          '<label><span class="field-name">${i18n.tr('类型：')}</span><select id="f-type">${typeOptions}</select></label>' +
+          '<div class="row"><span class="field-name"></span><div class="sub-block">' +
+            '<label class="check"><input type="checkbox" id="f-console"' + (t.useConsoleRunner !== false ? ' checked' : '') + '> <span>${i18n.tr('执行结束时暂停')}</span></label>' +
+            '<label class="check"><input type="checkbox" id="f-staticchk"' + (t.createStaticLib ? ' checked' : '') + '> <span>${i18n.tr('创建导入库')}</span></label>' +
+            '<label class="check"><input type="checkbox" id="f-defchk"' + (t.createDefFile ? ' checked' : '') + '> <span>${i18n.tr('创建 .DEF 导出文件')}</span></label>' +
+            '<div class="cb-sep" style="width:100%"></div>' +
+          '</div></div>' +
+          '<label><span class="field-name">${i18n.tr('输出文件名：')}</span><span class="inline-field"><input id="f-output" value="' + escAttr(t.outputFilename) + '" title="${i18n.tr('相对项目根目录，如 bin/Debug/hello')}"><button class="cb-browse" data-browse="file" data-target="f-output">...</button></span></label>' +
+          '<label><span class="field-name">${i18n.tr('导入库文件名：')}</span><span class="inline-field"><input id="f-implib" value="' + escAttr(t.impLib || '') + '"><button class="cb-browse" data-browse="file" data-target="f-implib">...</button></span></label>' +
+          '<label><span class="field-name">${i18n.tr('定义文件文件名：')}</span><span class="inline-field"><input id="f-deffile" value="' + escAttr(t.defFile || '') + '"><button class="cb-browse" data-browse="file" data-target="f-deffile">...</button></span></label>' +
+          '<label><span class="field-name">${i18n.tr('执行工作目录：')}</span><span class="inline-field"><input id="f-workdir" value="' + escAttr(t.workingDir || '') + '"><button class="cb-browse" data-browse="folder" data-target="f-workdir">...</button></span></label>' +
+          '<label><span class="field-name">${i18n.tr('对象输出目录：')}</span><span class="inline-field"><input id="f-object" value="' + escAttr(t.objectOutput || '') + '"><button class="cb-browse" data-browse="folder" data-target="f-object">...</button></span></label>' +
+          '<div class="row"><span class="field-name"></span><div class="sub-block">' +
+            '<label class="check"><input type="checkbox" id="f-prefix"' + (t.prefixAuto !== false ? ' checked' : '') + '> <span>${i18n.tr('自动生成文件名前缀')}</span></label>' +
+            '<label class="check"><input type="checkbox" id="f-ext"' + (t.extensionAuto !== false ? ' checked' : '') + '> <span>${i18n.tr('自动生成文件名扩展名')}</span></label>' +
+            '<div class="cb-sep" style="width:100%"></div>' +
+          '</div></div>' +
         '</div>' +
-        '<details class="fg"><summary>${i18n.tr('高级（扩展）')}</summary>' +
-          '<div class="form-grid">' +
-            '<label><span class="field-name">${i18n.tr('目标标题')}</span><input id="f-title" value="' + escAttr(t.title) + '"></label>' +
-            '<label><span class="field-name">${i18n.tr('编译器 ID')}</span><input id="f-compiler" value="' + escAttr(t.compilerId) + '"></label>' +
-            '<label><span class="field-name">${i18n.tr('执行参数')}</span><input id="f-params" value="' + escAttr(t.executionParameters || '') + '"></label>' +
-            '<label><span class="field-name">deps ${i18n.tr('输出目录')}</span><input id="f-deps" value="' + escAttr(t.depsOutput || '') + '"></label>' +
-            '<label class="span-2"><span class="field-name">${i18n.tr('宿主程序（库/CommandsOnly 目标运行/调试用）')}</span><input id="f-host" value="' + escAttr(t.hostApplication || '') + '"></label>' +
-            '<label class="check span-2"><input type="checkbox" id="f-hostterm"' + (t.runHostApplicationInTerminal !== false ? ' checked' : '') + '> ${i18n.tr('宿主程序在终端运行')}</label>' +
-            '<label><span class="field-name">${i18n.tr('外部依赖（每行一个）')}</span><textarea id="f-extdeps">' + esc((t.externalDeps || []).join('\\n')) + '</textarea></label>' +
-            '<label><span class="field-name">${i18n.tr('附加输出（每行一个）')}</span><textarea id="f-addout">' + esc((t.additionalOutput || []).join('\\n')) + '</textarea></label>' +
-            '<label class="span-2"><span class="field-name">${i18n.tr('目标环境变量（每行 name=value）')}</span><textarea id="f-envvars">' + esc((t.envVars || []).map(v => v.name + '=' + v.value).join('\\n')) + '</textarea></label>' +
-          '</div>' +
-        '</details>';
+        '<section class="card"><div class="card-header">${i18n.tr('高级（扩展）')}</div><div class="card-body"><div class="form-grid">' +
+          '<label><span class="field-name">${i18n.tr('目标标题')}</span><input id="f-title" value="' + escAttr(t.title) + '"></label>' +
+          '<label><span class="field-name">${i18n.tr('编译器 ID')}</span><input id="f-compiler" value="' + escAttr(t.compilerId) + '"></label>' +
+          '<label><span class="field-name">${i18n.tr('执行参数')}</span><input id="f-params" value="' + escAttr(t.executionParameters || '') + '"></label>' +
+          '<label><span class="field-name">deps ${i18n.tr('输出目录')}</span><input id="f-deps" value="' + escAttr(t.depsOutput || '') + '"></label>' +
+          '<label><span class="field-name">${i18n.tr('宿主程序（库/CommandsOnly 目标运行/调试用）')}</span><input id="f-host" value="' + escAttr(t.hostApplication || '') + '"></label>' +
+          '<div class="row"><span class="field-name"></span><div class="sub-block"><label class="check"><input type="checkbox" id="f-hostterm"' + (t.runHostApplicationInTerminal !== false ? ' checked' : '') + '> <span>${i18n.tr('宿主程序在终端运行')}</span></label></div></div>' +
+          '<label><span class="field-name">${i18n.tr('外部依赖（每行一个）')}</span><textarea id="f-extdeps">' + esc((t.externalDeps || []).join('\\n')) + '</textarea></label>' +
+          '<label><span class="field-name">${i18n.tr('附加输出（每行一个）')}</span><textarea id="f-addout">' + esc((t.additionalOutput || []).join('\\n')) + '</textarea></label>' +
+          '<label><span class="field-name">${i18n.tr('目标环境变量（每行 name=value）')}</span><textarea id="f-envvars">' + esc((t.envVars || []).map(v => v.name + '=' + v.value).join('\\n')) + '</textarea></label>' +
+        '</div></div></section>';
       document.getElementById('f-type').value = String(t.targetType);
       ['f-title', 'f-type', 'f-output', 'f-object', 'f-compiler', 'f-params', 'f-extdeps', 'f-addout', 'f-envvars',
         'f-workdir', 'f-deps', 'f-pwin', 'f-punix', 'f-pmac', 'f-host', 'f-hostterm', 'f-console',
@@ -1486,56 +1592,49 @@ export class ProjectPropertiesPanel {
       const el = document.getElementById('sform');
       const platText = (projSettings.platforms & 7) === 7 ? 'All'
         : [(projSettings.platforms & 4) ? 'Windows' : '', (projSettings.platforms & 2) ? 'Unix' : '', (projSettings.platforms & 1) ? 'Mac' : ''].filter(Boolean).join(';');
+      const pchOptions = [
+        [0, '${i18n.tr('在与原始头文件同目录生成 PCH')}'],
+        [1, '${i18n.tr('在对象输出目录生成 PCH')}'],
+        [2, '${i18n.tr('在原头文件旁生成 PCH（默认）')}'],
+      ];
       el.innerHTML =
-        '<section class="card">' +
-          '<div class="card-header">${i18n.t('Project settings')}</div>' +
-          '<div class="card-body"><div class="form-grid">' +
-            '<label><span class="field-name">${i18n.tr('标题：')}</span><input id="set-title" value="' + escAttr(projSettings.title) + '"></label>' +
-            '<label><span class="field-name">${i18n.tr('平台：')}</span><span class="inline-field"><input id="set-platforms-text" value="' + escAttr(platText) + '" readonly><button id="set-platforms-btn">...</button></span></label>' +
-            '<span style="display:none"><input type="checkbox" id="set-pwin"' + ((projSettings.platforms & 4) ? ' checked' : '') + '><input type="checkbox" id="set-punix"' + ((projSettings.platforms & 2) ? ' checked' : '') + '><input type="checkbox" id="set-pmac"' + ((projSettings.platforms & 1) ? ' checked' : '') + '></span>' +
-            '<label class="span-2"><span class="field-name">${i18n.tr('文件名：')}</span><input value="' + escAttr(data.filename) + '" readonly></label>' +
+        '<div class="form-grid">' +
+          '<label><span class="field-name">${i18n.tr('标题：')}</span><input id="set-title" value="' + escAttr(projSettings.title) + '"></label>' +
+          '<label><span class="field-name">${i18n.tr('平台：')}</span><span class="inline-field"><input id="set-platforms-text" value="' + escAttr(platText) + '" readonly><button id="set-platforms-btn" class="cb-browse">...</button></span></label>' +
+          '<span style="display:none"><input type="checkbox" id="set-pwin"' + ((projSettings.platforms & 4) ? ' checked' : '') + '><input type="checkbox" id="set-punix"' + ((projSettings.platforms & 2) ? ' checked' : '') + '><input type="checkbox" id="set-pmac"' + ((projSettings.platforms & 1) ? ' checked' : '') + '></span>' +
+          '<label><span class="field-name">${i18n.tr('文件名：')}</span><span class="static-value" title="' + escAttr(data.filename) + '">' + esc(data.filename) + '</span></label>' +
+          '<label><span class="field-name">${i18n.tr('Makefile：')}</span><span class="inline-field"><input id="set-mkfile" value="' + escAttr(projSettings.makefile || '') + '"></span></label>' +
+          '<div class="row"><span class="field-name"></span><div class="sub-block">' +
+            '<label class="check"><input type="checkbox" id="set-mkcustom"' + (projSettings.makefileIsCustom ? ' checked' : '') + '> <span>${i18n.tr('这是一个自定义 Makefile')}</span></label>' +
+            '<div class="hint red">${i18n.tr('文件必须存在，不会自动生成 Makefile！')}</div>' +
+            '<div class="hint red">${i18n.tr('如果在此处修改，工程构建选项里的特殊设置只有在保存工程后才会启用/禁用。')}</div>' +
+            '<div class="sub-row"><span class="field-name">${i18n.tr('执行目录：')}</span><input id="set-mkdir" value="' + escAttr(projSettings.executionDir || '') + '"><button class="cb-browse" data-browse="folder" data-target="set-mkdir">...</button></div>' +
           '</div></div>' +
-        '</section>' +
-        '<section class="card">' +
-          '<div class="card-header">Makefile</div>' +
-          '<div class="card-body"><div class="form-grid">' +
-            '<label class="span-2"><span class="field-name">Makefile</span><span class="inline-field"><input id="set-mkfile" value="' + escAttr(projSettings.makefile || '') + '"><button data-browse="file" data-target="set-mkfile">...</button></span></label>' +
-            '<label class="check"><input type="checkbox" id="set-mkcustom"' + (projSettings.makefileIsCustom ? ' checked' : '') + '> ${i18n.tr('这是一个自定义 Makefile')}</label>' +
-            '<label><span class="field-name">${i18n.tr('执行目录：')}</span><span class="inline-field"><input id="set-mkdir" value="' + escAttr(projSettings.executionDir || '') + '"><button data-browse="folder" data-target="set-mkdir">...</button></span></label>' +
-            '<div class="hint span-2">${i18n.tr('文件必须存在，不会自动生成 Makefile！修改后，工程构建选项中的特殊设置只有在保存工程后才会启用/禁用。')}</div>' +
+          '<div class="row"><span class="field-name">${i18n.tr('预编译头：')}</span><fieldset class="radio-box"><legend>${i18n.tr('策略')}</legend><div class="radio-group">' +
+            pchOptions.map(o => '<label class="check"><input type="radio" name="set-pch" id="set-pch-' + o[0] + '" value="' + o[0] + '"' + (Number(projSettings.pchMode) === o[0] ? ' checked' : '') + '><span>' + o[1] + '</span></label>').join('') +
+          '</div></fieldset></div>' +
+          '<div class="row"><span class="field-name"></span><div class="sub-block"><div class="hint red">${i18n.tr('如果修改 PCH 生成策略，请手动删除旧 PCH 文件（或目录）以避免冲突……')}</div></div></div>' +
+          '<div class="row cb-gap8"><span class="field-name"></span><span></span></div>' +
+          '<div class="row"><span class="field-name">${i18n.tr('对象文件名生成：')}</span><div class="sub-block">' +
+            '<label class="check"><input type="checkbox" id="set-extobj"' + (projSettings.extendedObjNames ? ' checked' : '') + '> <span>${i18n.tr('生成扩展对象名（例如 "foo.cpp.o" 而不是 "foo.o"）')}</span></label>' +
+            '<div class="hint red">${i18n.tr('（此设置主要用于包含大量同名但扩展名不同文件的大型工程）')}</div>' +
           '</div></div>' +
-        '</section>' +
-        '<section class="card">' +
-          '<div class="card-header">${i18n.t('Build')}</div>' +
-          '<div class="card-body"><div class="form-grid">' +
-            '<label class="span-2"><span class="field-name">${i18n.tr('预编译头：')}</span><select id="set-pch" title="Strategy">' +
-              '<option value="0">${i18n.tr('PCH 与源文件同目录')}</option>' +
-              '<option value="1">${i18n.tr('PCH 与对象文件同目录')}</option>' +
-              '<option value="2">${i18n.tr('PCH 与源文件同名 .gch')}</option>' +
-            '</select><div class="hint">${i18n.tr('如果修改 PCH 生成策略，请手动删除旧 PCH 文件（或目录）以避免冲突……')}</div></label>' +
-            '<div class="checks span-2">' +
-              '<label class="check"><input type="checkbox" id="set-extobj"' + (projSettings.extendedObjNames ? ' checked' : '') + '> ${i18n.tr('生成扩展对象名（例如 "foo.cpp.o" 而不是 "foo.o"）')}</label>' +
-              '<label class="check"><input type="checkbox" id="set-checkfiles"' + (projSettings.checkForExternallyModifiedFiles !== false ? ' checked' : '') + '> ${i18n.tr('检查外部修改的文件（大多数情况下应勾选）')}</label>' +
-            '</div>' +
-            '<div class="hint span-2">${i18n.tr('（此设置主要用于包含大量同名但扩展名不同文件的大型工程）')}</div>' +
-            '<div class="hint span-2">${i18n.tr('（关闭外部修改检查主要用于慢速网络共享上的工程。注意：外部修改可能静默覆盖文件，如果你没有在 Code::Blocks 内保存它们）')}</div>' +
+          '<div class="row"><span class="field-name">${i18n.tr('检查外部修改的文件：')}</span><div class="sub-block">' +
+            '<label class="check"><input type="checkbox" id="set-checkfiles"' + (projSettings.checkForExternallyModifiedFiles !== false ? ' checked' : '') + '> <span>${i18n.tr('检查外部修改的文件（大多数情况下应勾选）')}</span></label>' +
+            '<div class="hint red">${i18n.tr('（关闭外部修改检查主要用于慢速网络共享上的工程。注意：外部修改可能静默覆盖文件，如果你没有在 Code::Blocks 内保存它们）')}</div>' +
           '</div></div>' +
-          '<div class="card-footer"><button id="set-project-deps">${i18n.tr('工程的依赖…')}</button><button id="set-project-build-options">${i18n.tr('工程的构建选项…')}</button></div>' +
-        '</section>' +
-        '<section class="card"><div class="card-body">' +
-          '<details class="fg"><summary>${i18n.tr('高级（扩展）')}</summary>' +
-            '<div class="form-grid">' +
-              '<label><span class="field-name">${i18n.tr('默认编译器 ID')}</span><input id="set-compiler" value="' + escAttr(projSettings.compilerId) + '"></label>' +
-              '<label><span class="field-name">${i18n.tr('虚拟文件夹')}</span><textarea id="set-vfolders">' + esc(projSettings.virtualFolders.join('\\n')) + '</textarea></label>' +
-              '<label class="span-2"><span class="field-name">${i18n.tr('项目自定义变量（每行 name=value）')}</span><textarea id="set-vars">' + esc(projSettings.customVariables.map(v => v.name + '=' + v.value).join('\\n')) + '</textarea></label>' +
-            '</div>' +
-          '</details>' +
-        '</div></section>';
-      document.getElementById('set-pch').value = String(projSettings.pchMode);
+        '</div>' +
+        '<div class="settings-actions"><button id="set-project-deps">${i18n.tr('工程的依赖…')}</button><button id="set-project-build-options">${i18n.tr('工程的构建选项…')}</button></div>' +
+        '<section class="card"><div class="card-header">${i18n.tr('高级（扩展）')}</div><div class="card-body"><div class="form-grid">' +
+          '<label><span class="field-name">${i18n.tr('默认编译器 ID')}</span><input id="set-compiler" value="' + escAttr(projSettings.compilerId) + '"></label>' +
+          '<label><span class="field-name">${i18n.tr('虚拟文件夹')}</span><textarea id="set-vfolders">' + esc(projSettings.virtualFolders.join('\\n')) + '</textarea></label>' +
+          '<label><span class="field-name">${i18n.tr('项目自定义变量（每行 name=value）')}</span><textarea id="set-vars">' + esc(projSettings.customVariables.map(v => v.name + '=' + v.value).join('\\n')) + '</textarea></label>' +
+        '</div></div></section>';
       ['set-title', 'set-compiler', 'set-vfolders', 'set-vars', 'set-checkfiles',
-        'set-pwin', 'set-punix', 'set-pmac', 'set-pch', 'set-extobj', 'set-mkcustom', 'set-mkfile', 'set-mkdir'].forEach(id => {
+        'set-pwin', 'set-punix', 'set-pmac', 'set-extobj', 'set-mkcustom', 'set-mkfile', 'set-mkdir'].forEach(id => {
         const e = document.getElementById(id); if (e) e.addEventListener('change', () => collectSettingsForm());
       });
+      el.querySelectorAll('input[name="set-pch"]').forEach(r => r.addEventListener('change', () => collectSettingsForm()));
       document.getElementById('set-platforms-btn').addEventListener('click', () => openPlatformModal('project', -1));
       document.getElementById('set-project-deps').addEventListener('click', () => vscode.postMessage({ type: 'editDependencies' }));
       document.getElementById('set-project-build-options').addEventListener('click', () => openBuildOptions('project'));
@@ -1555,7 +1654,8 @@ export class ProjectPropertiesPanel {
       const su = document.getElementById('set-punix').checked;
       const sm = document.getElementById('set-pmac').checked;
       projSettings.platforms = (sw && su && sm) ? 255 : ((sw ? 4 : 0) | (su ? 2 : 0) | (sm ? 1 : 0));
-      projSettings.pchMode = Number(document.getElementById('set-pch').value) || 1;
+      const pchRadio = el.querySelector('input[name="set-pch"]:checked');
+      if (pchRadio) projSettings.pchMode = Number(pchRadio.value) || 0;
       projSettings.extendedObjNames = document.getElementById('set-extobj').checked;
       projSettings.makefileIsCustom = document.getElementById('set-mkcustom').checked;
       projSettings.makefile = document.getElementById('set-mkfile').value.trim();
@@ -1572,35 +1672,41 @@ export class ProjectPropertiesPanel {
       const el = document.getElementById('scrform');
       if (selectedScriptScope !== 'project' && selectedScriptScope >= targets.length) selectedScriptScope = 'project';
       const cur = scriptScope();
-      const scopeSel =
-        '<select id="scr-scope">' +
-        '<option value="project">' + esc(projSettings.title) + '</option>' +
-        targets.map((t, i) => '<option value="' + i + '">' + esc(t.title) + '</option>').join('') +
-        '</select>';
       el.innerHTML =
-        '<section class="card">' +
-          '<div class="card-header">${i18n.t('Build scripts')}</div>' +
-          '<div class="card-body">' +
-          '<label><span class="field-name">${i18n.tr('工程概览：')}</span>' + scopeSel + '</label>' +
-          '<div class="list-toolbar"><span class="field-name" style="margin:0">${i18n.tr('已附加的构建脚本：')}</span><span class="spacer"></span></div>' +
-          '<div class="list" id="scr-list-box"></div>' +
-          '<div class="list-actions">' +
-            '<button id="scr-add" class="primary">${i18n.tr('添加')}</button>' +
-            '<button id="scr-remove" class="danger">${i18n.tr('删除')}</button>' +
-            '<button id="scr-up" class="icon" title="${i18n.tr('上移')}">↑</button>' +
-            '<button id="scr-down" class="icon" title="${i18n.tr('下移')}">↓</button>' +
-            '<span class="spacer"></span>' +
-            '<button id="scr-validate">${i18n.tr('校验所有已附加脚本')}</button>' +
+        '<div class="scripts-layout">' +
+          '<div class="scripts-column">' +
+            '<div class="field-label">${i18n.tr('工程概览：')}</div>' +
+            '<div class="list fill-control" id="scr-tree"></div>' +
+            '<div class="plain-actions"><button id="scr-validate">${i18n.tr('校验所有已附加脚本')}</button></div>' +
           '</div>' +
-          '<div class="hint" id="scr-status"></div>' +
-        '</div></section>';
-      document.getElementById('scr-scope').value = String(selectedScriptScope);
-      document.getElementById('scr-scope').addEventListener('change', () => {
-        selectedScriptScope = document.getElementById('scr-scope').value;
-        selectedScriptScope = selectedScriptScope === 'project' ? 'project' : Number(selectedScriptScope);
+          '<div class="scripts-column">' +
+            '<div class="field-label">${i18n.tr('已附加的构建脚本：')}</div>' +
+            '<div class="list-with-spin">' +
+              '<div class="list fill-control" id="scr-list-box" title="${i18n.tr('构建前/后命令在 Build options → 构建前/后步骤 中编辑。')}"></div>' +
+              '<div class="bo-move-buttons">' +
+                '<button id="scr-up" title="${i18n.tr('上移')}" aria-label="${i18n.tr('上移')}">${ICONS.moveUp}</button>' +
+                '<button id="scr-down" title="${i18n.tr('下移')}" aria-label="${i18n.tr('下移')}">${ICONS.moveDown}</button>' +
+              '</div>' +
+            '</div>' +
+            '<div class="plain-actions">' +
+              '<button id="scr-add">${i18n.tr('添加')}</button>' +
+              '<button id="scr-remove">${i18n.tr('删除')}</button>' +
+            '</div>' +
+            '<div class="hint" id="scr-status"></div>' +
+          '</div>' +
+        '</div>';
+      // 工程概览树（工程 + 各构建目标），点击切换作用域
+      const tree = document.getElementById('scr-tree');
+      const treeRow = (scope, label, child) =>
+        '<div class="tree-item' + (child ? ' child' : '') + (String(selectedScriptScope) === String(scope) ? ' selected' : '') + '" data-scope="' + scope + '">' +
+        '<span class="item-label">' + esc(label) + '</span></div>';
+      tree.innerHTML = treeRow('project', projSettings.title, false) +
+        targets.map((t, i) => treeRow(i, t.title, true)).join('');
+      tree.querySelectorAll('.tree-item').forEach(row => row.addEventListener('click', () => {
+        selectedScriptScope = row.dataset.scope === 'project' ? 'project' : Number(row.dataset.scope);
         selectedScript = -1;
         renderScriptsForm();
-      });
+      }));
       const box = document.getElementById('scr-list-box');
       box.innerHTML = cur.scripts.length
         ? cur.scripts.map((s, i) => '<div class="item' + (selectedScript === i ? ' selected' : '') + '" data-i="' + i + '"><span class="item-label">' + esc(s) + '</span></div>').join('')
@@ -1640,14 +1746,12 @@ export class ProjectPropertiesPanel {
     function renderNotesForm() {
       const el = document.getElementById('ntform');
       el.innerHTML =
-        '<section class="card">' +
-          '<div class="card-header">${i18n.t('Notes')}</div>' +
-          '<div class="card-body">' +
-          '<label><span class="field-name">${i18n.tr('项目备注')}</span>' +
-          '<textarea id="nt-text" style="min-height:220px">' + esc(notes.notes) + '</textarea></label>' +
-          '<label class="check"><input type="checkbox" id="nt-show"' + (notes.showNotesOnLoad ? ' checked' : '') + '>' +
-          '<span class="field-name" style="display:inline">${i18n.tr('加载项目时显示备注')}</span></label>' +
-        '</div></section>';
+        '<div class="fill-pane">' +
+          '<div class="field-label">${i18n.tr('项目备注：')}</div>' +
+          '<textarea id="nt-text" class="fill-control">' + esc(notes.notes) + '</textarea>' +
+          '<label class="check" style="margin-top:6px"><input type="checkbox" id="nt-show"' + (notes.showNotesOnLoad ? ' checked' : '') + '>' +
+          '<span>${i18n.tr('加载项目时自动显示这些备注（仅当备注非空）')}</span></label>' +
+        '</div>';
       document.getElementById('nt-text').addEventListener('change', () => collectNotesForm());
       document.getElementById('nt-show').addEventListener('change', () => collectNotesForm());
     }
@@ -1661,6 +1765,8 @@ export class ProjectPropertiesPanel {
 
     // ---- 调试器 tab（R3/R4）----
     let selectedDebugScope = '';
+    let selectedDbgPath = -1;
+    let dbgSubTab = 'remote';
     function dbgRemoteFor(target) {
       let r = dbg.remote.find(x => x.target === target);
       if (!r) {
@@ -1672,59 +1778,112 @@ export class ProjectPropertiesPanel {
     function renderDebugForm() {
       const el = document.getElementById('dbgform');
       if (selectedDebugScope !== '' && Number(selectedDebugScope) >= targets.length) selectedDebugScope = '';
-      const scopes = [{ v: '', label: '${i18n.tr('项目级默认')}' }].concat(targets.map((t, i) => ({ v: String(i), label: t.title })));
-      const scopeSel = '<select id="dbg-scope">' + scopes.map(s => '<option value="' + s.v + '">' + esc(s.label) + '</option>').join('') + '</select>';
-      const scopeName = selectedDebugScope === '' ? '' : targets[Number(selectedDebugScope)].title;
-      const r = selectedDebugScope === '' ? dbgRemoteFor('') : dbgRemoteFor(scopeName);
+      if (selectedDbgPath >= dbg.searchPaths.length) selectedDbgPath = dbg.searchPaths.length - 1;
+      const r = selectedDebugScope === '' ? dbgRemoteFor('') : dbgRemoteFor(targets[Number(selectedDebugScope)].title);
+      const pathRows = dbg.searchPaths.length
+        ? dbg.searchPaths.map((p, i) => '<div class="item' + (i === selectedDbgPath ? ' selected' : '') + '" data-i="' + i + '"><span class="item-label">' + esc(p) + '</span></div>').join('')
+        : '<div class="empty">${i18n.tr('（空）')}</div>';
+      const scopeRows = '<div class="tree-item' + (selectedDebugScope === '' ? ' selected' : '') + '" data-scope="">' + esc('<Project>') + '</div>' +
+        targets.map((t, i) => '<div class="tree-item child' + (String(selectedDebugScope) === String(i) ? ' selected' : '') + '" data-scope="' + i + '">' + esc(t.title) + '</div>').join('');
       const connSel = [[0, 'TCP (IP:${i18n.tr('端口)')}'], [1, 'UDP (IP:${i18n.tr('端口)')}'], [2, '${i18n.tr('串口 Serial')}']]
         .map(c => '<option value="' + c[0] + '">' + c[1] + '</option>').join('');
+      const subTab = (id, label) => '<button class="bo-subtab' + (dbgSubTab === id ? ' active' : '') + '" data-dtab="' + id + '">' + esc(label) + '</button>';
+      const panel = (id, html) => '<div class="bo-subpage" data-dpanel="' + id + '"' + (dbgSubTab === id ? '' : ' style="display:none"') + '>' + html + '</div>';
       el.innerHTML =
         '<section class="card">' +
-          '<div class="card-header">${i18n.t('Debugger')}</div>' +
-          '<div class="card-body"><div class="form-grid">' +
-            '<label class="span-2"><span class="field-name">${i18n.tr('作用域')}</span>' + scopeSel +
-              '<div class="hint">${i18n.tr('项目级默认 = 未单独配置的目标共用（对齐 CB 的')} &lt;Project&gt; ${i18n.tr('行）；同名时目标覆盖项目')}</div></label>' +
-            '<label class="span-2"><span class="field-name">${i18n.tr('源搜索目录（每行一个）')}</span>' +
-              '<textarea id="dbg-paths">' + esc(dbg.searchPaths.join('\\n')) + '</textarea>' +
-              '<div class="hint">${i18n.tr('调试会话向 GDB 发 directory 命令（对齐 CB debugger search paths；支持 $(VAR) 宏与相对项目根路径）')}</div></label>' +
-          '</div></div>' +
+          '<div class="card-header">${i18n.tr('附加调试器搜索目录：')}</div>' +
+          '<div class="card-body">' +
+            '<div class="list-with-stack">' +
+              '<div class="list" id="dbg-paths-list" style="min-height:110px">' + pathRows + '</div>' +
+              '<div class="btn-stack">' +
+                '<button id="dbg-path-add">${i18n.tr('添加')}</button>' +
+                '<button id="dbg-path-edit">${i18n.tr('编辑')}</button>' +
+                '<button id="dbg-path-del">${i18n.tr('删除')}</button>' +
+              '</div>' +
+            '</div>' +
+            '<div class="hint">${i18n.tr('调试会话向 GDB 发 directory 命令（对齐 CB debugger search paths；支持 $(VAR) 宏与相对项目根路径）')}</div>' +
+          '</div>' +
         '</section>' +
         '<section class="card">' +
-          '<div class="card-header">${i18n.tr('远程目标（')}' + esc(scopeName || '${i18n.tr('项目级默认')}') + '）</div>' +
-          '<div class="card-body"><div class="form-grid">' +
-            '<label><span class="field-name">${i18n.tr('连接类型')}</span><select id="dbg-conn">' + connSel + '</select></label>' +
-            '<label><span class="field-name">${i18n.tr('串口')}</span><input id="dbg-serial" value="' + escAttr(r.serialPort) + '" placeholder="COM3 / /dev/ttyUSB0"></label>' +
-            '<label><span class="field-name">${i18n.tr('波特率')}</span><input id="dbg-baud" value="' + escAttr(r.serialBaud) + '"></label>' +
-            '<label><span class="field-name">IP ${i18n.tr('地址')}</span><input id="dbg-ip" value="' + escAttr(r.ip) + '"></label>' +
-            '<label><span class="field-name">${i18n.tr('端口')}</span><input id="dbg-port" value="' + escAttr(r.ipPort) + '"></label>' +
-            '<div class="checks span-2">' +
-              '<label class="check"><input type="checkbox" id="dbg-ext"' + (r.extendedRemote ? ' checked' : '') + '> ${i18n.tr('使用 extended-remote')}</label>' +
-              '<label class="check"><input type="checkbox" id="dbg-skip"' + (r.skipLDpath ? ' checked' : '') + '> ${i18n.tr('跳过 PATH/LD_LIBRARY_PATH 注入')}</label>' +
+          '<div class="card-header">${i18n.tr('远程调试支持（仅 GDB）：')}</div>' +
+          '<div class="card-body">' +
+            '<div class="scripts-layout">' +
+              '<div class="list" id="dbg-scope-list" style="min-height:170px">' + scopeRows + '</div>' +
+              '<div>' +
+                '<div class="bo-subtabs">' +
+                  subTab('remote', '${i18n.tr('远程连接')}') +
+                  subTab('gdb', '${i18n.tr('附加 GDB 命令')}') +
+                  subTab('shell', '${i18n.tr('附加 shell 命令')}') +
+                '</div>' +
+                panel('remote',
+                  '<div class="form-grid">' +
+                    '<label><span class="field-name">${i18n.tr('连接类型：')}</span><select id="dbg-conn">' + connSel + '</select></label>' +
+                    '<label><span class="field-name">${i18n.tr('串口：')}</span><input id="dbg-serial" value="' + escAttr(r.serialPort) + '" placeholder="COM3 / /dev/ttyUSB0"></label>' +
+                    '<label><span class="field-name">${i18n.tr('波特率：')}</span><input id="dbg-baud" value="' + escAttr(r.serialBaud) + '"></label>' +
+                    '<label><span class="field-name">IP ${i18n.tr('地址：')}</span><input id="dbg-ip" value="' + escAttr(r.ip) + '"></label>' +
+                    '<label><span class="field-name">${i18n.tr('端口：')}</span><input id="dbg-port" value="' + escAttr(r.ipPort) + '"></label>' +
+                    '<label class="check"><input type="checkbox" id="dbg-ext"' + (r.extendedRemote ? ' checked' : '') + '> <span>${i18n.tr('使用 extended-remote 连接')}</span></label>' +
+                    '<label class="check"><input type="checkbox" id="dbg-skip"' + (r.skipLDpath ? ' checked' : '') + '> <span>${i18n.tr('启动调试器前不要调整 LD_LIBRARY_PATH')}</span></label>' +
+                  '</div>') +
+                panel('gdb',
+                  '<div class="form-grid">' +
+                    '<label><span class="field-name">${i18n.tr('连接前命令（每行一条，任意调试均执行）')}</span><textarea id="dbg-before">' + esc(r.additionalCmdsBefore) + '</textarea></label>' +
+                    '<label><span class="field-name">${i18n.tr('连接后命令（每行一条）')}</span><textarea id="dbg-after">' + esc(r.additionalCmds) + '</textarea></label>' +
+                  '</div>') +
+                panel('shell',
+                  '<div class="form-grid">' +
+                    '<label><span class="field-name">${i18n.tr('连接前 shell 命令（每行一条）')}</span><textarea id="dbg-before-shell">' + esc(r.additionalShellCmdsBefore) + '</textarea></label>' +
+                    '<label><span class="field-name">${i18n.tr('连接后 shell 命令（每行一条）')}</span><textarea id="dbg-after-shell">' + esc(r.additionalShellCmdsAfter) + '</textarea></label>' +
+                  '</div>') +
+                '<div class="hint">${i18n.tr('连接顺序（对齐 CB）：连接前命令 → 连接前 shell → [set remotebaud] → target [extended-]remote → 连接后命令 → 连接后 shell；有效连接（串口需端口+波特率；TCP/UDP 需 IP+端口）时启动用 continue 而非 run')}</div>' +
+              '</div>' +
             '</div>' +
-            '<label><span class="field-name">${i18n.tr('连接前命令（每行一条，任意调试均执行）')}</span><textarea id="dbg-before">' + esc(r.additionalCmdsBefore) + '</textarea></label>' +
-            '<label><span class="field-name">${i18n.tr('连接前 shell 命令（每行一条）')}</span><textarea id="dbg-before-shell">' + esc(r.additionalShellCmdsBefore) + '</textarea></label>' +
-            '<label><span class="field-name">${i18n.tr('连接后命令（每行一条）')}</span><textarea id="dbg-after">' + esc(r.additionalCmds) + '</textarea></label>' +
-            '<label><span class="field-name">${i18n.tr('连接后 shell 命令（每行一条）')}</span><textarea id="dbg-after-shell">' + esc(r.additionalShellCmdsAfter) + '</textarea></label>' +
-            '<div class="hint span-2">${i18n.tr('连接顺序（对齐 CB）：连接前命令 → 连接前 shell → [set remotebaud] → target [extended-]remote → 连接后命令 → 连接后 shell；有效连接（串口需端口+波特率；TCP/UDP 需 IP+端口）时启动用 continue 而非 run')}</div>' +
-          '</div></div>' +
+          '</div>' +
         '</section>';
-      document.getElementById('dbg-scope').value = selectedDebugScope;
       document.getElementById('dbg-conn').value = String(r.connType);
-      document.getElementById('dbg-scope').addEventListener('change', () => {
+      // 作用域列表：<Project> = 项目级默认（未单独配置的目标共用）
+      el.querySelectorAll('#dbg-scope-list .tree-item').forEach(row => row.addEventListener('click', () => {
         collectDebugForm();
-        selectedDebugScope = document.getElementById('dbg-scope').value;
+        selectedDebugScope = row.dataset.scope === '' ? '' : String(row.dataset.scope);
+        renderDebugForm();
+      }));
+      // 子标签：远程连接 / 附加 GDB 命令 / 附加 shell 命令
+      el.querySelectorAll('[data-dtab]').forEach(b => b.addEventListener('click', () => {
+        collectDebugForm();
+        dbgSubTab = b.dataset.dtab;
+        renderDebugForm();
+      }));
+      // 搜索目录列表：添加 / 编辑 / 删除
+      el.querySelectorAll('#dbg-paths-list .item').forEach(row => row.addEventListener('click', () => {
+        selectedDbgPath = Number(row.dataset.i);
+        renderDebugForm();
+      }));
+      document.getElementById('dbg-path-add').addEventListener('click', () => {
+        askText('${i18n.tr('附加调试器搜索目录')}', '', v => {
+          if (v && v.trim()) { dbg.searchPaths.push(v.trim()); selectedDbgPath = dbg.searchPaths.length - 1; renderDebugForm(); }
+        });
+      });
+      document.getElementById('dbg-path-edit').addEventListener('click', () => {
+        if (selectedDbgPath < 0) return;
+        askText('${i18n.tr('附加调试器搜索目录')}', dbg.searchPaths[selectedDbgPath], v => {
+          if (v !== null && v.trim()) { dbg.searchPaths[selectedDbgPath] = v.trim(); renderDebugForm(); }
+        });
+      });
+      document.getElementById('dbg-path-del').addEventListener('click', () => {
+        if (selectedDbgPath < 0) return;
+        dbg.searchPaths.splice(selectedDbgPath, 1);
+        selectedDbgPath = Math.min(selectedDbgPath, dbg.searchPaths.length - 1);
         renderDebugForm();
       });
-      ['dbg-paths', 'dbg-conn', 'dbg-serial', 'dbg-baud', 'dbg-ip', 'dbg-port', 'dbg-ext', 'dbg-skip', 'dbg-before', 'dbg-before-shell', 'dbg-after', 'dbg-after-shell'].forEach(id => {
-        document.getElementById(id).addEventListener('change', () => collectDebugForm());
+      ['dbg-conn', 'dbg-serial', 'dbg-baud', 'dbg-ip', 'dbg-port', 'dbg-ext', 'dbg-skip', 'dbg-before', 'dbg-before-shell', 'dbg-after', 'dbg-after-shell'].forEach(id => {
+        const f = document.getElementById(id);
+        if (f) f.addEventListener('change', () => collectDebugForm());
       });
     }
     function collectDebugForm() {
-      const paths = document.getElementById('dbg-paths');
-      if (!paths) return;
-      dbg.searchPaths = optionsLines(paths.value);
+      if (!document.getElementById('dbg-conn')) return;
       const scopeTarget = selectedDebugScope === '' ? undefined : targets[Number(selectedDebugScope)];
-      // 目标被删除后作用域索引可能失效：search_path 已收集，跳过 remote 段
+      // 目标被删除后作用域索引可能失效：search_path 已由列表直接维护，跳过 remote 段
       if (selectedDebugScope !== '' && !scopeTarget) return;
       const cur = dbgRemoteFor(scopeTarget ? scopeTarget.title : '');
       cur.connType = Number(document.getElementById('dbg-conn').value) || 0;
@@ -1744,18 +1903,16 @@ export class ProjectPropertiesPanel {
     function renderParserForm() {
       const el = document.getElementById('pform');
       el.innerHTML =
-        '<section class="card">' +
-          '<div class="card-header">${i18n.t('C/C++ parser options')}</div>' +
-          '<div class="card-body">' +
-          '<div class="list-toolbar"><span class="field-name" style="margin:0">${i18n.tr('附加搜索路径：')}</span><span class="spacer"></span></div>' +
-          '<div class="list" id="parser-list"></div>' +
-          '<div class="list-actions">' +
-            '<button id="parser-add" class="primary">${i18n.tr('添加')}</button>' +
+        '<div class="fill-pane">' +
+          '<div class="field-label">${i18n.tr('附加搜索路径：')}</div>' +
+          '<div class="list fill-control" id="parser-list"></div>' +
+          '<div class="plain-actions">' +
+            '<button id="parser-add">${i18n.tr('添加')}</button>' +
             '<button id="parser-edit">${i18n.tr('编辑')}</button>' +
-            '<button id="parser-del" class="danger">${i18n.tr('删除')}</button>' +
+            '<button id="parser-del">${i18n.tr('删除')}</button>' +
           '</div>' +
-          '<div class="hint">${i18n.tr('写入 Extensions/code_completion/search_path；用于 C/C++ 解析与代码补全')}</div>' +
-        '</div></section>';
+          '<div class="hint" style="margin-top:6px">${i18n.tr('写入 Extensions/code_completion/search_path；用于 C/C++ 解析与代码补全')}</div>' +
+        '</div>';
       const list = document.getElementById('parser-list');
       list.innerHTML = parserPaths.length
         ? parserPaths.map((p, i) => '<div class="item' + (i === selectedParser ? ' selected' : '') + '" data-i="' + i + '"><span class="item-label">' + esc(p) + '</span></div>').join('')
@@ -1780,7 +1937,7 @@ export class ProjectPropertiesPanel {
         ? files.map((f, i) => {
             const checked = f.buildTargets.includes(title) ? ' checked' : '';
             return '<label class="item' + (i === selectedTargetFile ? ' selected' : '') + '" data-i="' + i + '" title="' + escAttr(f.relativeFilename) + '">' +
-              '<input type="checkbox" data-fi="' + i + '"' + checked + '><span class="item-icon">' + data.icons.file + '</span><span class="item-label">' + esc(f.relativeFilename) + '</span></label>';
+              '<input type="checkbox" data-fi="' + i + '"' + checked + '><span class="item-label">' + esc(f.relativeFilename) + '</span></label>';
           }).join('')
         : '<div class="empty">${i18n.tr('（无文件）')}</div>';
       const fileCount = document.getElementById('file-count');
@@ -1830,16 +1987,26 @@ export class ProjectPropertiesPanel {
     // ---- 通用输入/确认模态 ----
     function askText(title, initial, cb) {
       const wrap = document.createElement('div');
-      wrap.className = 'modal';
-      wrap.innerHTML = '<div class="modal-box"><div class="modal-head"><div class="modal-title">' + esc(title) + '</div></div>' +
-        '<div class="modal-body"><input id="ask-text-input" value="' + escAttr(initial || '') + '" style="width:100%"></div>' +
-        '<div class="modal-actions"><button id="ask-cancel">${i18n.t('Cancel')}</button><button id="ask-ok" class="primary">${i18n.t('OK')}</button></div></div>';
+      wrap.className = 'bo-modal';
+      wrap.innerHTML = '<div class="bo-modal-box"><div class="bo-modal-title"><span>' + esc(title) + '</span></div>' +
+        '<div class="bo-modal-body"><input id="ask-text-input" type="text" value="' + escAttr(initial || '') + '" style="width:100%"></div>' +
+        '<div class="bo-modal-actions"><button id="ask-cancel">${i18n.t('Cancel')}</button><button id="ask-ok" class="default">${i18n.t('OK')}</button></div></div>';
       document.body.appendChild(wrap);
       const input = wrap.querySelector('#ask-text-input');
       input.focus(); input.select();
       wrap.querySelector('#ask-cancel').addEventListener('click', () => wrap.remove());
       wrap.querySelector('#ask-ok').addEventListener('click', () => { const v = input.value; wrap.remove(); cb(v); });
       input.addEventListener('keydown', e => { if (e.key === 'Enter') { const v = input.value; wrap.remove(); cb(v); } if (e.key === 'Escape') wrap.remove(); });
+    }
+
+    function confirmBox(title, cb) {
+      const wrap = document.createElement('div');
+      wrap.className = 'bo-modal';
+      wrap.innerHTML = '<div class="bo-modal-box"><div class="bo-modal-title"><span>' + esc(title) + '</span></div>' +
+        '<div class="bo-modal-actions"><button id="confirm-cancel">${i18n.t('Cancel')}</button><button id="confirm-ok" class="default">${i18n.t('OK')}</button></div></div>';
+      document.body.appendChild(wrap);
+      wrap.querySelector('#confirm-cancel').addEventListener('click', () => wrap.remove());
+      wrap.querySelector('#confirm-ok').addEventListener('click', () => { wrap.remove(); cb(); });
     }
 
     // ---- 平台选择（对齐 CB 的 Platforms ... 对话框） ----
@@ -1858,6 +2025,17 @@ export class ProjectPropertiesPanel {
       if (platformScope.kind === 'project') projSettings.platforms = p; else targets[platformScope.index].platforms = p;
       document.getElementById('modal-platform').style.display = 'none';
       renderSettingsForm(); renderForm();
+    });
+
+    // 模态右上角 ×（build options 同款 .bo-modal-x）
+    document.querySelectorAll('[data-close-modal]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const modal = document.getElementById(btn.dataset.closeModal);
+        if (!modal) return;
+        if (modal.id === 'modal-vtargets') collectVTForm();
+        if (modal.id === 'modal-files') { collectFileForm(); renderTargetFileList(); }
+        modal.style.display = 'none';
+      });
     });
 
     // ---- 虚拟目标模态 ----
@@ -2083,9 +2261,50 @@ export class ProjectPropertiesPanel {
     document.getElementById('save').addEventListener('click', () => doSave(false));
     document.getElementById('saveClose').addEventListener('click', () => doSave(true));
 
+    // ---- 还原设置（对齐 Build options 同名按钮：丢弃未保存修改，回到上次保存的内容） ----
+    function snapshotDrafts() {
+      return JSON.parse(JSON.stringify({
+        targets, files,
+        projOpts, targetOpts, projDirs, targetDirs,
+        projSettings, projScripts, targetScripts,
+        notes, virtualTargets, dbg, parserPaths,
+      }));
+    }
+    let restoreBaseline = null;
+    function applyDrafts(b) {
+      targets = b.targets;
+      files = b.files;
+      projOpts = b.projOpts;
+      targetOpts = b.targetOpts;
+      projDirs = b.projDirs;
+      targetDirs = b.targetDirs;
+      projSettings = b.projSettings;
+      projScripts = b.projScripts;
+      targetScripts = b.targetScripts;
+      notes = b.notes;
+      virtualTargets = b.virtualTargets;
+      dbg = b.dbg;
+      parserPaths = b.parserPaths;
+      if (selected >= targets.length) selected = Math.max(0, targets.length - 1);
+      if (selectedFile >= files.length) selectedFile = Math.max(0, files.length - 1);
+      if (selectedVT >= virtualTargets.length) selectedVT = Math.max(0, virtualTargets.length - 1);
+    }
+    function restoreSettings() {
+      if (!restoreBaseline) return;
+      confirmBox('${i18n.t('Discard unsaved changes and restore the saved settings?')}', () => {
+        applyDrafts(JSON.parse(JSON.stringify(restoreBaseline)));
+        renderList(); renderForm(); renderTargetFileList();
+        renderVTList(); renderScriptsForm(); renderSettingsForm(); renderNotesForm(); renderParserForm(); renderDebugForm();
+        setStatus('${i18n.t('Settings restored')}');
+      });
+    }
+    document.getElementById('restore').addEventListener('click', restoreSettings);
+    setTimeout(() => { restoreBaseline = snapshotDrafts(); }, 0);
+
     window.addEventListener('message', e => {
       if (e.data.type === 'saved') {
         setStatus('${i18n.tr('已保存 ✔️')}');
+        restoreBaseline = snapshotDrafts();
       } else if (e.data.type === 'error') {
         setStatus('${i18n.tr('保存失败:')}' + ' ' + e.data.message);
       } else if (e.data.type === 'browseResult') {
