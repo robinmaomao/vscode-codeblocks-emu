@@ -234,6 +234,7 @@ export class ProjectParser {
       makefileIsCustom: false,
       makefile: '',
       executionDir: '',
+      defaultExecuteTarget: '',
       makeCommands: {},
       customVariables: {},
       files: [],
@@ -379,6 +380,8 @@ export class ProjectParser {
       }
       if (node['@_makefile'] !== undefined) project.makefile = toUnix(String(node['@_makefile']));
       if (node['@_execution_dir'] !== undefined) project.executionDir = toUnix(String(node['@_execution_dir']));
+      // 默认执行目标（projectloader.cpp:1506 <Option default_target>）
+      if (node['@_default_target'] !== undefined) project.defaultExecuteTarget = String(node['@_default_target']);
       // 项目备注：<Option show_notes="1"><notes><![CDATA[...]]></notes></Option>
       if (node['@_show_notes'] !== undefined) {
         project.showNotesOnLoad = String(node['@_show_notes']) !== '0';
@@ -465,7 +468,7 @@ export class ProjectParser {
         executionParameters: '',
         workingDir: '',
         hostApplication: '',
-        runHostApplicationInTerminal: true,
+        runHostApplicationInTerminal: false,
         makeCommands: {},
         optionRelations: defaultRelations(),
         compilerOptions: [],

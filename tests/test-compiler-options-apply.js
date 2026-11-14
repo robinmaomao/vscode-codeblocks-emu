@@ -103,6 +103,7 @@ async function runPanelCase(c) {
   const { installVscodeMock } = require('./_harness/vscodeMock');
   const mock = installVscodeMock({ config: {} });
   const { BuildOptionsPanel } = require('../dist/ui/buildOptionsPanel');
+  const { buildOptionsPage } = require('../dist/ui/buildOptionsView');
 
   const uri = mock.vscode.Uri.file(ROOT);
   const lastWebview = () => mock.webviews[mock.webviews.length - 1].webview;
@@ -122,31 +123,18 @@ async function runPanelCase(c) {
     { project: ['-pipe'], target: ['-g'] });
   c.check('P2 保存成功回发 saved', wv.posted.some((m) => m.type === 'saved'), wv.posted.map((m) => m.type), ['saved']);
 
-  // ---- 扩展字段（原 Properties「高级（扩展）」）：扩展页 + 项目自定义变量随快照保存 ----
+  // ---- Build options 与 CB 一致：不再承载扩展字段（deps/外部依赖/附加输出/宿主程序/自定义变量） ----
   {
-    const ext = makeData();
-    ext.customVariables = [{ name: 'FOO', value: 'bar' }];
-    ext.targets[0].depsOutput = 'deps/Debug/';
-    ext.targets[0].externalDeps = ['libfoo.a'];
-    ext.targets[0].additionalOutput = ['extra.txt'];
-    ext.targets[0].hostApplication = 'host.exe';
-    ext.targets[0].runHostApplicationInTerminal = false;
-    let extReceived;
-    BuildOptionsPanel.show('app', path.join(ROOT, 'app.cbp'), ext, uri, async (d) => { extReceived = d; });
-    const extWv = lastWebview();
-    extWv.__emit({ type: 'save', data: ext });
-    await sleep(20);
-    c.check('P8 扩展字段随快照保存（deps/外部依赖/附加输出/宿主程序/终端）',
-      !!extReceived
-      && extReceived.targets[0].depsOutput === 'deps/Debug/'
-      && JSON.stringify(extReceived.targets[0].externalDeps) === JSON.stringify(['libfoo.a'])
-      && JSON.stringify(extReceived.targets[0].additionalOutput) === JSON.stringify(['extra.txt'])
-      && extReceived.targets[0].hostApplication === 'host.exe'
-      && extReceived.targets[0].runHostApplicationInTerminal === false,
-      extReceived && extReceived.targets[0]);
-    c.check('P9 项目自定义变量随快照保存',
-      !!extReceived && JSON.stringify(extReceived.customVariables) === JSON.stringify([{ name: 'FOO', value: 'bar' }]),
-      extReceived && extReceived.customVariables);
+    const live = makeData();
+    live.customVariables = [{ name: 'FOO', value: 'bar' }];
+    live.targets[0].depsOutput = 'deps/Debug/';
+    live.targets[0].hostApplication = 'host.exe';
+    const html = buildOptionsPage(live, 'project');
+    c.check('P8 Build options 页面不含扩展页与自定义变量入口',
+      !html.includes('bo-ext-depsout') && !html.includes('bo-ext-host') && !html.includes('bo-customvars')
+      && !html.includes('data-page="extension"'), null);
+    c.check('P9 Build options 数据模型与清理后源码不再含扩展字段',
+      !/depsOutput|externalDeps|additionalOutput|hostApplication|extensionTab|bo-customvars/.test(fs.readFileSync(path.join(ROOT, 'src/ui/buildOptionsView.ts'), 'utf8')), null);
   }
 
   // ---- 保存失败 → 回发 error（含原因），且不误报成功 ----

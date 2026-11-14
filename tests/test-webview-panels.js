@@ -186,7 +186,7 @@ function fnBody(script, name) {
     /function askText\(/.test(script) && /function confirmBox\(/.test(script), null);
   check('工程属性：还原设置使用 confirmBox 确认',
     /confirmBox\('/.test(fnBody(script, 'restoreSettings') || ''), fnBody(script, 'restoreSettings'));
-  // 对齐 CB project_options.xrc：两个页面都没有「高级（扩展）」分组，扩展字段改由 Build options 编辑
+  // 对齐 CB project_options.xrc：两个页面都没有「高级（扩展）」分组（扩展字段由 CB 对应入口承载）
   check('工程属性：Project settings / Build targets 不再内嵌「高级（扩展）」',
     !/i18n\.tr\('高级（扩展）'\)/.test(script) && !/set-compiler|set-vfolders|set-vars|f-title|f-params|f-extdeps|f-addout|f-envvars/.test(script), null);
   check('工程属性：目标表单守卫改用 f-type（重命名改由左栏按钮）',
@@ -276,21 +276,13 @@ function fnBody(script, name) {
     check('编译选项：只读派生输入有独立样式（.bo-derived-input）', /\.bo-derived-input\s*\{/.test(cssTpl), null);
   }
 
-  // 扩展字段（原 Properties「高级（扩展）」）：目标作用域新增「扩展」页 + 项目自定义变量并入「自定义变量」页
-  check('编译选项：扩展页仅在目标作用域出现（pageList）',
-    /if \(!isProject\(\)\) pages\.push\(\['extension', L\.extensionTab\]\);/.test(dist), null);
-  check('编译选项：扩展页渲染字段（deps 输出/宿主程序/外部依赖/附加输出）',
-    /renderExtension\(el\)/.test(dist) && /bo-ext-depsout/.test(dist) && /bo-ext-host/.test(dist)
-    && /bo-ext-extdeps/.test(dist) && /bo-ext-addout/.test(dist), null);
-  check('编译选项：扩展页收集写回当前作用域',
-    /page === 'extension' && !isProject\(\)/.test(dist) && /sc\.depsOutput = de\.value\.trim\(\)/.test(dist)
-    && /sc\.externalDeps = lines\('ext-extdeps'\)/.test(dist), null);
-  check('编译选项：切到工程作用域时扩展页回落到编译器设置',
-    /function ensurePage\(\)/.test(dist)
-    && /page = ids\.indexOf\('compiler'\) >= 0 \? 'compiler' : ids\[0\];/.test(dist), null);
-  check('编译选项：自定义变量页含项目自定义变量（仅工程作用域）',
-    /bo-customvars/.test(dist) && /isProject\(\) \? '<section class="bo-card">/.test(dist)
-    && /DATA\.customVariables = cv\.value\.split/.test(dist), null);
+  // 对齐 CB compiler_options.xrc：Build options 不含扩展页 / 项目自定义变量（扩展字段改由 Set Programs' Arguments 等 CB 入口承载）
+  check('编译选项：无扩展页与项目自定义变量入口',
+    !/pages\.push\(\['extension'/.test(dist) && !/renderExtension/.test(dist)
+    && !/bo-ext-depsout/.test(dist) && !/bo-customvars/.test(dist), null);
+  check('编译选项：Make 页仅四行（Dist-clean / Silent 在 CB XRC 中隐藏）',
+    !/mk-dist/.test(dist) && !/mk-silent/.test(dist)
+    && /row\('mk-build'/.test(dist) && /row\('mk-ask'/.test(dist), null);
 }
 
 {

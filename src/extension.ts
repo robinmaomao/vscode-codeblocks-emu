@@ -30,6 +30,7 @@ import {
 import { CodeBlocksConfig } from './compiler/codeblocksConfig';
 import { detectAllCompilersAsync, DetectedCompiler } from './compiler/detector';
 import { BuildOptionsPanel } from './ui/buildOptionsPanel';
+import { RunTargetsPanel, RunTargetsData } from './ui/runTargetsPanel';
 import { BuildOptionsData, BuildOptionsScopeData } from './ui/buildOptionsView';
 import { ProjectPropertiesPanel, TargetEditData, FileEditData, BuildOptionsEditData, SearchDirsEditData, ProjectSettingsEditData, BuildScriptsEditData, NotesEditData, VirtualTargetEditData, DebuggerSettingsEditData, BuildOptionsRuntime } from './ui/projectPropertiesPanel';
 import { applyProjectCodeCompletionSearchPaths, parseProjectCodeCompletionSearchPaths } from './model/projectCodeCompletionExtensions';
@@ -1794,7 +1795,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     }),
   );
 
-  // 设置目标执行参数（对齐 Project → Set programs' arguments…）
+  // 目标运行设置（对齐 CB Project → Set programs' arguments… → SelectTargetDlg）
   context.subscriptions.push(
     vscode.commands.registerCommand('codeblocks.setProgramArguments', async () => {
       const project = requireProject();
@@ -1803,25 +1804,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         vscode.window.showWarningMessage(i18n.t('The project has no build targets'));
         return;
       }
-      const remembered = getSelectedTarget(project);
-      let target = project.buildTargets.find((t) => t.title === remembered) ?? project.buildTargets[0];
-      if (project.buildTargets.length > 1) {
-        const picked = await vscode.window.showQuickPick(
-          project.buildTargets.map((t) => ({ label: t.title, description: t.title === remembered ? i18n.t('Current') : undefined, t })),
-          { placeHolder: i18n.t('Select a target ({0})', project.title) },
-        );
-        if (!picked) return;
-        target = picked.t;
-      }
-      const value = await vscode.window.showInputBox({
-        prompt: i18n.t('Execution parameters ({0}) — passed to the program when running/debugging', target.title),
-        value: target.executionParameters ?? '',
-        placeHolder: i18n.t('For example --verbose input.txt'),
-      });
-      if (value === undefined) return;
-      target.executionParameters = value;
-      await persistProjectAndReload(project);
-      vscode.window.setStatusBarMessage(i18n.t('Execution parameters saved: {0}', target.title), 3000);
+      openRunTargetsPanel(project);
     }),
   );
 
@@ -3726,13 +3709,8 @@ function buildOptionsDataFor(project: Project): BuildOptionsData {
         res: t.optionRelations[OptionsRelationType.ResDirs],
       },
     ),
-    // 扩展字段（CB project_options 无对应控件）：由 Build options 扩展页编辑
+    // 目标类型：对齐 CB 的 Commands only 页禁用规则
     targetType: t.targetType,
-    depsOutput: t.depsOutput ?? '',
-    externalDeps: [...(t.externalDeps ?? [])],
-    additionalOutput: [...(t.additionalOutput ?? [])],
-    hostApplication: t.hostApplication ?? '',
-    runHostApplicationInTerminal: t.runHostApplicationInTerminal !== false,
   }));
   const runtime = buildOptionsRuntimeFor(project);
   return {
@@ -3746,8 +3724,36 @@ function buildOptionsDataFor(project: Project): BuildOptionsData {
     compilerBaseCatalogs: runtime.compilerBaseCatalogs,
     compilerFlags: runtime.compilerFlags,
     defaultCompilerId: runtime.defaultCompilerId,
-    customVariables: Object.entries(project.customVariables ?? {}).map(([name, value]) => ({ name, value })),
   };
+}
+
+/** 打开 Set programs' arguments 对话框（对齐 CB SelectTargetDlg：每目标的运行参数 / 宿主程序） */
+function openRunTargetsPanel(project: Project): void {
+  const data: RunTargetsData = {
+    projectTitle: project.title,
+    commonTopLevelPath: project.commonTopLevelPath || project.basePath,
+    defaultExecuteTarget: project.defaultExecuteTarget ?? '',
+    activeTarget: getSelectedTarget(project),
+    targets: project.buildTargets.map((t) => ({
+      title: t.title,
+      executionParameters: t.executionParameters ?? '',
+      hostApplication: t.hostApplication ?? '',
+      runHostApplicationInTerminal: t.runHostApplicationInTerminal === true,
+    })),
+  };
+  RunTargetsPanel.show(data, async (saved) => {
+    const live = openProjects.find((p) => normPath(p.filename) === normPath(project.filename));
+    if (!live) throw new Error(i18n.t('Project is not open: {0}', project.title));
+    for (const s of saved.targets) {
+      const t = live.buildTargets.find((x) => x.title === s.title);
+      if (!t) throw new Error(i18n.t('Target not found: {0}', s.title));
+      t.executionParameters = String(s.executionParameters ?? '');
+      t.hostApplication = String(s.hostApplication ?? '');
+      t.runHostApplicationInTerminal = s.runHostApplicationInTerminal === true;
+    }
+    live.defaultExecuteTarget = String(saved.defaultExecuteTarget ?? '');
+    await persistProjectAndReload(live);
+  });
 }
 
 /** 把 Build options 面板数据应用回工程模型 */
@@ -3772,12 +3778,6 @@ function applyBuildOptionsData(project: Project, data: BuildOptionsData): void {
   project.alwaysRunPostBuildSteps = data.project.alwaysPost === true;
   project.envVars = (data.project.envVars ?? []).filter((v) => v.name).map((v) => ({ name: v.name, value: v.value }));
   project.makeCommands = { ...(data.project.makeCommands ?? {}) };
-  // 项目自定义变量（<Extensions>）：原 Properties「高级（扩展）」，现由 Build options 自定义变量页编辑
-  if (data.customVariables) {
-    project.customVariables = Object.fromEntries(
-      data.customVariables.filter((v) => v.name).map((v) => [v.name, v.value]),
-    );
-  }
   for (const { s, t } of targetPairs) {
     t.compilerId = s.compilerId || t.compilerId;
     t.compilerOptions = [...s.compilerOptions];
@@ -3792,12 +3792,6 @@ function applyBuildOptionsData(project: Project, data: BuildOptionsData): void {
     t.alwaysRunPostBuildSteps = s.alwaysPost === true;
     t.envVars = (s.envVars ?? []).filter((v) => v.name).map((v) => ({ name: v.name, value: v.value }));
     t.makeCommands = { ...(s.makeCommands ?? {}) };
-    // 扩展字段（Build options 扩展页）：只在快照带该字段时覆盖，避免旧数据/测试夹具清空模型
-    if (s.depsOutput !== undefined) t.depsOutput = s.depsOutput;
-    if (s.externalDeps) t.externalDeps = [...s.externalDeps];
-    if (s.additionalOutput) t.additionalOutput = [...s.additionalOutput];
-    if (s.hostApplication !== undefined) t.hostApplication = s.hostApplication;
-    if (s.runHostApplicationInTerminal !== undefined) t.runHostApplicationInTerminal = s.runHostApplicationInTerminal !== false;
     t.linkerExecutable = Number(s.linkerExecutable ?? 0) as LinkerExecutableOption;
     t.optionRelations[OptionsRelationType.CompilerOptions] = s.relations.compiler;
     t.optionRelations[OptionsRelationType.LinkerOptions] = s.relations.linker;
@@ -4511,6 +4505,7 @@ function refreshOpenPanelsForLanguage(): void {
   ProjectPropertiesPanel.refreshTitleIfOpen();
   KeybindingPanel.refreshTitleIfOpen();
   BuildOptionsPanel.refreshTitleIfOpen();
+  RunTargetsPanel.refreshTitleIfOpen();
 }
 
 async function promptReloadForPersistLog(): Promise<void> {
@@ -5260,7 +5255,7 @@ function createEmptyTarget(): BuildTarget {
     executionParameters: '',
     workingDir: '',
     hostApplication: '',
-    runHostApplicationInTerminal: true,
+    runHostApplicationInTerminal: false,
     makeCommands: {},
     optionRelations: {
       [OptionsRelationType.CompilerOptions]: OptionsRelation.AppendToParentOptions,
@@ -5385,7 +5380,7 @@ async function saveProjectProperties(
     t.depsOutput = e.depsOutput ?? '';
     t.platforms = Number.isFinite(e.platforms) ? e.platforms : t.platforms;
     t.hostApplication = e.hostApplication ?? '';
-    t.runHostApplicationInTerminal = e.runHostApplicationInTerminal !== false;
+    t.runHostApplicationInTerminal = e.runHostApplicationInTerminal === true;
     t.useConsoleRunner = e.useConsoleRunner !== false;
     t.impLib = e.impLib ?? '';
     t.defFile = e.defFile ?? '';
@@ -8895,6 +8890,24 @@ async function run(): Promise<void> {
       : '';
     if (!host) {
       vscode.window.showErrorMessage('You must select a host application to "run" a library...');
+      return;
+    }
+    // 对齐 compilergcc.cpp:2046：Run host in terminal 未勾选时直接启动，不建终端
+    if (!target.runHostApplicationInTerminal) {
+      try {
+        const child = spawn(`"${host}" ${args}`.trim(), {
+          cwd: runWorkingDir(project, target, vars),
+          env: Object.keys(env).length ? { ...(process.env as Record<string, string>), ...env } : process.env,
+          detached: true,
+          stdio: 'ignore',
+          shell: true,
+          windowsHide: true,
+        });
+        child.on('error', (err) => vscode.window.showErrorMessage(String(err.message || err)));
+        child.unref();
+      } catch (err) {
+        vscode.window.showErrorMessage(String((err as Error).message || err));
+      }
       return;
     }
     // UI 核查 N2（方案 C）：同名终端先弃后建，避免连续运行堆积同名标签
