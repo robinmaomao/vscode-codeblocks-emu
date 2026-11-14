@@ -280,6 +280,8 @@ export interface BuildOptionsRuntime {
   compilerFlags?: Record<string, { cOnly: string[]; cppOnly: string[] }>;
   /** 扩展设置中的默认编译器（工程未声明 compiler 时的回退） */
   defaultCompilerId?: string;
+  /** 工程编译器是否支持 PCH（CB rbPCHStrategy->Enable(hasPCH)） */
+  supportsPch?: boolean;
   defineSwitch: string;
 }
 
@@ -516,6 +518,7 @@ export class ProjectPropertiesPanel {
     };
     const boTargetScopes: BuildOptionsScopeData[] = this.project.buildTargets.map((t) => ({
       title: t.title,
+      targetType: t.targetType,
       compilerId: t.compilerId,
       compilerOptions: [...t.compilerOptions],
       resourceCompilerOptions: [...t.resourceCompilerOptions],
@@ -537,6 +540,11 @@ export class ProjectPropertiesPanel {
       alwaysPost: t.alwaysRunPostBuildSteps === true,
       envVars: t.envVars.map((v) => ({ name: v.name, value: v.value })),
       makeCommands: { ...(t.makeCommands ?? {}) },
+      depsOutput: t.depsOutput ?? '',
+      externalDeps: [...(t.externalDeps ?? [])],
+      additionalOutput: [...(t.additionalOutput ?? [])],
+      hostApplication: t.hostApplication ?? '',
+      runHostApplicationInTerminal: t.runHostApplicationInTerminal !== false,
     }));
     const initialBoData: BuildOptionsData = {
       projectTitle: this.project.title,
@@ -546,12 +554,14 @@ export class ProjectPropertiesPanel {
       targets: boTargetScopes,
       compilers: boRuntime.compilers,
       compilerCatalogs: boRuntime.compilerCatalogs,
+      customVariables: Object.entries(this.project.customVariables ?? {}).map(([name, value]) => ({ name, value })),
     };
 
     const data = JSON.stringify({
       title: this.project.title,
       compilerId: cmp,
       filename: this.project.filename,
+      basePath: this.project.basePath,
       targets,
       files,
       projectOpts,
@@ -585,6 +595,10 @@ export class ProjectPropertiesPanel {
       --cb-surface: var(--vscode-editorWidget-background, var(--vscode-editor-background));
       --cb-surface-muted: var(--vscode-sideBar-background, rgba(128,128,128,.06));
       --cb-gap: 14px;
+      /* CB 标签列：随面板宽度按比例（960px 下约 212px），并限制在合理区间 */
+      --cb-label-w: clamp(150px, 22%, 280px);
+      /* Build targets 页标签列略窄（CB 约 110px / 960） */
+      --cb-label-w-targets: clamp(120px, 18%, 200px);
     }
     html, body { height: 100%; margin: 0; }
     body {
@@ -638,10 +652,9 @@ export class ProjectPropertiesPanel {
     .content { flex: 1; overflow-y: auto; min-width: 0; }
     .tab-pane { width: 100%; padding: 8px 12px 12px; box-sizing: border-box; }
     .layout { display: grid; grid-template-columns: minmax(200px, 260px) minmax(0, 1fr); gap: 10px; align-items: start; }
-    .targets-layout { display: grid; grid-template-columns: minmax(230px, 280px) minmax(0, 1fr); gap: 10px; align-items: start; }
+    .targets-layout { display: grid; grid-template-columns: minmax(230px, 280px) minmax(0, 1fr); gap: 10px; align-items: stretch; }
     .targets-column { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
     .targets-main { min-width: 0; }
-    .targets-files { grid-column: 1 / -1; }
     /* 卡片 */
     .card { border: 1px solid var(--cb-border); border-radius: var(--cb-radius); background: var(--cb-surface); overflow: hidden; min-width: 0; }
     .card-header {
@@ -757,39 +770,52 @@ export class ProjectPropertiesPanel {
     .cb-props .card-header { position: absolute; top: -7px; left: 8px; display: inline-flex; align-items: center; gap: 6px; min-height: 0; padding: 0 4px; border: none; background: var(--vscode-editor-background); font-size: 12px; font-weight: 400; }
     .cb-props .card-body { padding: 12px 8px 8px; }
     .cb-props .card-footer { justify-content: flex-end; background: transparent; border-top: 1px solid var(--bo-border); }
-    .cb-props .targets-layout { grid-template-columns: minmax(300px, 340px) minmax(0, 1fr); }
+    .cb-props .targets-layout { grid-template-columns: clamp(220px, 26%, 300px) minmax(0, 1fr); }
+    .cb-props .targets-layout > .card { display: flex; flex-direction: column; min-height: 0; }
+    .cb-props .targets-layout > .card > .card-body { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+    .cb-props .targets-layout > .card .list-with-stack { flex: 1; min-height: 0; }
+    .cb-props .targets-layout .list-with-stack .list { max-height: none; flex: 1; min-height: 120px; }
     .cb-props .targets-column > .card { margin-top: 0; }
-    /* CB wxStaticLine */
-    .cb-props .cb-sep { height: 1px; margin: 4px 0; background: var(--bo-border); border: 0; }
-    /* 表单行：CB 的「标签固定列 + 控件」，vgap/hgap = 4 */
-    .cb-props .form-grid { display: flex; flex-direction: column; gap: 4px; align-items: stretch; }
-    .cb-props .form-grid > label { display: grid; grid-template-columns: minmax(120px, 170px) minmax(0, 1fr); gap: 0 4px; align-items: center; margin: 0; }
+    /* 文件静态框：列表弹性填充，底部工具栏始终可见（CB 的 Build target files 静态框） */
+    .cb-props .targets-column > .card:last-child { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+    .cb-props .targets-column > .card:last-child > .card-body { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+    .cb-props #tflist { flex: 1 1 auto; min-height: 100px; max-height: 120px; }
+    /* 表单行：CB 的「标签固定列 + 控件」，vgap/hgap = 4；标签列宽度按面板比例（CB ~22%） */
+    .cb-props .form-grid { display: flex; flex-direction: column; gap: 4px; align-items: stretch; --cb-form-label-w: var(--cb-label-w); }
+    .cb-props #form .form-grid { --cb-form-label-w: var(--cb-label-w-targets); }
+    .cb-props .form-grid > label { display: grid; grid-template-columns: var(--cb-form-label-w) minmax(0, 1fr); gap: 0 4px; align-items: center; margin: 0; }
     .cb-props .form-grid > label > .field-name { grid-column: 1; grid-row: 1; margin: 0; font-weight: 400; font-size: 12px; line-height: 18px; }
     .cb-props .form-grid > label > .hint { grid-column: 2; }
     .cb-props .form-grid > label > .inline-field { min-width: 0; display: flex; gap: 4px; align-items: center; }
-    .cb-props .form-grid > .checks { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; padding-left: calc(min(170px, 22vw) + 4px); }
-    .cb-props .form-grid > label.check { display: flex; align-items: center; gap: 6px; padding-left: calc(min(170px, 22vw) + 4px); }
+    .cb-props .form-grid > .checks { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; padding-left: calc(var(--cb-form-label-w) + 4px); }
+    .cb-props .form-grid > label.check { display: flex; align-items: center; gap: 6px; padding-left: calc(var(--cb-form-label-w) + 4px); }
     .cb-props .form-grid > label.check > span { min-width: 0; }
-    .cb-props .form-grid > .row { display: grid; grid-template-columns: minmax(120px, 170px) minmax(0, 1fr); gap: 0 4px; align-items: start; }
+    .cb-props .form-grid > .row { display: grid; grid-template-columns: var(--cb-form-label-w) minmax(0, 1fr); gap: 0 4px; align-items: start; }
     .cb-props .form-grid > .row > .field-name { grid-column: 1; margin: 0; font-weight: 400; font-size: 12px; line-height: 18px; padding-top: 3px; }
     .cb-props .sub-block { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; min-width: 0; }
     .cb-props .sub-block > .check { display: flex; align-items: center; gap: 6px; }
     .cb-props .sub-row { display: flex; align-items: center; gap: 4px; width: 100%; }
     .cb-props .sub-row > .field-name { font-weight: 400; font-size: 12px; white-space: nowrap; }
     .cb-props .sub-row > input { flex: 1; min-width: 0; }
-    .cb-props .static-value { font-size: 12px; line-height: 24px; color: var(--vscode-descriptionForeground); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .cb-props .settings-actions { display: flex; justify-content: flex-end; gap: 6px; margin-top: 8px; }
+    .cb-props .static-value { font-size: 12px; line-height: 24px; color: var(--vscode-foreground); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .cb-props .settings-actions { display: flex; justify-content: flex-end; gap: 6px; margin-top: 10px; }
     .cb-props .cb-gap8 { height: 8px; }
-    .cb-props .form-grid > .hint { padding-left: calc(min(170px, 22vw) + 4px); }
+    .cb-props .form-grid > .hint { padding-left: calc(var(--cb-form-label-w) + 4px); }
     .cb-props .checks label.check { display: inline-flex; align-items: center; gap: 6px; margin: 0; }
     /* CB 的红色说明文字：位置/换行按 CB，颜色用主题错误色保证可读 */
     .cb-props .hint { font-size: 11px; line-height: 1.35; }
-    .cb-props .hint.red { color: var(--vscode-errorForeground, #f48771); max-width: 72ch; }
+    .cb-props .hint.red { color: var(--vscode-errorForeground, #f48771); max-width: 68%; }
     /* 度量：CB 24px 控件；按钮皮肤来自 .bo-root/.bo-actions/.bo-move-buttons，不在此覆盖 */
     .cb-props input:not([type="checkbox"]):not([type="radio"]),
     .cb-props select { height: 24px; font-size: 12px; padding: 2px 6px; box-sizing: border-box; }
     .cb-props textarea { font-size: 12px; line-height: 1.4; }
     .cb-props input[type="checkbox"], .cb-props input[type="radio"] { width: 14px; height: 14px; flex: none; accent-color: var(--vscode-checkbox-background, var(--vscode-focusBorder)); }
+    /* CB 的灰色态：禁用控件保留文本，仅降低对比度 */
+    .cb-props input:disabled, .cb-props select:disabled, .cb-props textarea:disabled { opacity: .65; }
+    .cb-props button:disabled { opacity: .5; cursor: default; pointer-events: none; }
+    .cb-props label:has(input:disabled) > .field-name { opacity: .65; }
+    .cb-props label.check:has(input:disabled) { opacity: .65; }
+    .cb-props .row:has(input:disabled) > .field-name { opacity: .65; }
     .cb-props .cb-browse { width: 24px; height: 24px; flex: none; padding: 0; line-height: 1; }
     /* 按钮皮肤对齐 build options：次级背景 + 描边；default/add 用 focus 描边 */
     .cb-props button { border-color: var(--vscode-button-border, var(--bo-border)); }
@@ -819,7 +845,25 @@ export class ProjectPropertiesPanel {
     .cb-props .list-with-spin { display: grid; grid-template-columns: minmax(0, 1fr) max-content; gap: 6px; align-items: stretch; flex: 1; min-height: 240px; }
     .cb-props .list-with-spin > .list { min-height: 240px; }
     .cb-props .field-label { font-size: 12px; line-height: 18px; margin: 0 0 4px; }
+    /* Debugger：CB wxNotebook 页签 + 内容区（平铺页签，激活页与内容区连成一体） */
+    .cb-props .dbg-tabs { display: flex; align-items: flex-end; gap: 0; margin: 0; padding: 0; border-bottom: 1px solid var(--bo-border); }
+    .cb-props .dbg-tab { background: transparent; border: 1px solid transparent; border-bottom: none; border-radius: 0; padding: 4px 10px; font-size: 12px; line-height: 18px; color: var(--vscode-descriptionForeground); cursor: pointer; }
+    .cb-props .dbg-tab:hover { color: var(--vscode-foreground); }
+    .cb-props .dbg-tab.active { background: var(--vscode-editor-background); border-color: var(--bo-border); color: var(--vscode-foreground); margin-bottom: -1px; padding-bottom: 5px; }
+    .cb-props .dbg-page { border: 1px solid var(--bo-border); border-top: none; padding: 10px 12px; }
+    /* Debugger 远程连接：CB 两列字段（Serial+Baud / IP+Port），标签 90px */
+    .cb-props .dbg-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 4px 12px; align-items: start; }
+    .cb-props .dbg-grid > .span-2 { grid-column: 1 / -1; }
+    .cb-props .dbg-grid > label { display: grid; grid-template-columns: 90px minmax(0, 1fr); gap: 0 4px; align-items: center; margin: 0; }
+    .cb-props .dbg-grid > label.short { grid-template-columns: 90px max-content; }
+    .cb-props .dbg-grid > label.short > input { width: 120px; }
+    .cb-props .dbg-grid > label > .field-name { margin: 0; font-weight: 400; font-size: 12px; line-height: 18px; white-space: nowrap; }
+    .cb-props .dbg-grid > label > input, .cb-props .dbg-grid > label > select { min-width: 0; }
+    .cb-props .dbg-grid > label.check { display: flex; align-items: center; gap: 6px; grid-template-columns: none; margin-top: 10px; }
+    .cb-props .dbg-scope-grid { display: grid; grid-template-columns: clamp(110px, 14%, 150px) minmax(0, 1fr); gap: 10px; align-items: start; }
     .cb-props .plain-actions { display: flex; justify-content: center; gap: 6px; margin-top: 6px; }
+    /* C/C++ parser options：Add/Edit/Remove 左对齐（CB 按钮紧跟列表左侧） */
+    .cb-props .plain-actions.left { justify-content: flex-start; }
     .cb-props .tree-item { display: flex; align-items: center; gap: 6px; min-height: 24px; padding: 2px 8px; cursor: pointer; user-select: none; }
     .cb-props .tree-item:hover { background: var(--vscode-list-hoverBackground); }
     .cb-props .tree-item.selected { background: var(--vscode-list-inactiveSelectionBackground, var(--vscode-list-hoverBackground)); }
@@ -829,7 +873,7 @@ export class ProjectPropertiesPanel {
     .cb-props .fill-pane .fill-control { flex: 1; min-height: 160px; }
     .cb-props .centered-actions { justify-content: center; }
     /* 单选组（CB wxRadioBox） */
-    .cb-props .radio-box { border: 1px solid var(--bo-border); border-radius: 0; margin: 0; padding: 2px 10px 8px; min-width: 0; }
+    .cb-props .radio-box { border: 1px solid var(--bo-border); border-radius: 0; margin: 0; padding: 2px 10px 8px; width: max-content; min-width: 300px; max-width: 100%; box-sizing: border-box; }
     .cb-props .radio-box > legend { padding: 0 4px; font-size: 12px; }
     .cb-props .radio-group { display: flex; flex-direction: column; gap: 4px; }
     .cb-props .radio-group label.check { display: flex; align-items: center; gap: 6px; }
@@ -888,7 +932,7 @@ export class ProjectPropertiesPanel {
       <div id="tab-targets" class="tab-pane" style="display:none">
         <div class="targets-layout">
           <section class="card">
-            <div class="card-header"><span class="card-title">${i18n.t('Build targets')}</span><span class="card-subtitle" id="target-count"></span></div>
+            <div class="card-header"><span class="card-title">${i18n.t('Build targets')}</span></div>
             <div class="card-body">
               <div class="list-with-stack">
                 <div class="list" id="list"></div>
@@ -924,7 +968,6 @@ export class ProjectPropertiesPanel {
             <section class="card">
               <div class="card-header">
                 <span class="card-title">${i18n.t('Build target files:')}</span>
-                <span class="card-subtitle" id="file-count"></span>
               </div>
               <div class="card-body">
                 <div class="list" id="tflist"></div>
@@ -933,7 +976,7 @@ export class ProjectPropertiesPanel {
                   <button id="allOn">${i18n.tr('全部选中')}</button>
                   <button id="allOff">${i18n.tr('全部取消')}</button>
                   <span class="spacer"></span>
-                  <button id="fileProps">${i18n.tr('选中文件属性…')}</button>
+                  <button id="fileProps">${i18n.tr('选中文件属性')}</button>
                 </div>
               </div>
             </section>
@@ -1080,6 +1123,7 @@ export class ProjectPropertiesPanel {
     };
     let parserPaths = [...projSettings.codeCompletionSearchPaths];
     const boRuntime = data.boRuntime || { compilers: [], compilerCatalogs: {}, defineSwitch: '-D' };
+    if (boRuntime.supportsPch === undefined) boRuntime.supportsPch = true;
     let projScripts = { scripts: [...data.projectScripts.scripts], before: [...data.projectScripts.before], after: [...data.projectScripts.after], always: data.projectScripts.always === true };
     let targetScripts = data.targetScripts.map(s => ({ scripts: [...s.scripts], before: [...s.before], after: [...s.after], always: s.always === true }));
     let notes = { notes: data.notes.notes, showNotesOnLoad: data.notes.showNotesOnLoad };
@@ -1094,6 +1138,11 @@ export class ProjectPropertiesPanel {
     let activeTab = ${initialTabJs};
     let focusFile = ${focusFileJs};
     if (activeTab === 'files' || activeTab === 'vtargets' || activeTab === 'options' || activeTab === 'dirs') activeTab = 'targets';
+    // CB 默认值：未显式配置时按 CB 的显示值呈现；未被用户改动则保存时仍写回空串（不污染 .cbp）
+    const DEFAULT_MAKEFILE = 'Makefile';
+    const DEFAULT_WORKDIR = '.';
+    const DEFAULT_LIB_EXPR = '$(TARGET_OUTPUT_DIR)$(TARGET_OUTPUT_BASENAME)';
+    const DEFAULT_EXEC_DIR = data.basePath || '';
 
     function esc(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
     function escAttr(s) { return esc(s).replace(/"/g, '&quot;'); }
@@ -1113,6 +1162,7 @@ export class ProjectPropertiesPanel {
       if (tab === 'notes') renderNotesForm();
       if (tab === 'parser') renderParserForm();
       if (tab === 'debugger') renderDebugForm();
+      syncEnabledStates();
     }
     document.getElementById('tabbtn-settings').addEventListener('click', () => { collectTargetForm(); switchTab('settings'); });
     document.getElementById('tabbtn-targets').addEventListener('click', () => { collectTargetForm(); switchTab('targets'); });
@@ -1126,15 +1176,11 @@ export class ProjectPropertiesPanel {
       const el = document.getElementById('list');
       if (!targets.length) {
         el.innerHTML = '<div class="empty">${i18n.tr('（无构建目标）')}</div>';
-        const targetCount = document.getElementById('target-count');
-        if (targetCount) targetCount.textContent = '(0)';
         return;
       }
       el.innerHTML = targets.map((t, i) =>
         '<div class="item' + (i === selected ? ' selected' : '') + '" data-i="' + i + '"><span class="item-label">' + esc(t.title) + '</span></div>'
       ).join('');
-      const targetCount = document.getElementById('target-count');
-      if (targetCount) targetCount.textContent = '(' + targets.length + ')';
       el.querySelectorAll('.item').forEach(div => {
         div.addEventListener('click', () => { selected = +div.dataset.i; renderList(); renderForm(); renderTargetFileList(); });
       });
@@ -1144,6 +1190,7 @@ export class ProjectPropertiesPanel {
         sel.innerHTML = targets.map((t, i) => '<option value="' + i + '">' + esc(t.title) + '</option>').join('');
         sel.value = String(selected);
       }
+      syncEnabledStates();
     }
 
     function renderForm() {
@@ -1160,33 +1207,22 @@ export class ProjectPropertiesPanel {
             '<label class="check"><input type="checkbox" id="f-console"' + (t.useConsoleRunner !== false ? ' checked' : '') + '> <span>${i18n.tr('执行结束时暂停')}</span></label>' +
             '<label class="check"><input type="checkbox" id="f-staticchk"' + (t.createStaticLib ? ' checked' : '') + '> <span>${i18n.tr('创建导入库')}</span></label>' +
             '<label class="check"><input type="checkbox" id="f-defchk"' + (t.createDefFile ? ' checked' : '') + '> <span>${i18n.tr('创建 .DEF 导出文件')}</span></label>' +
-            '<div class="cb-sep" style="width:100%"></div>' +
           '</div></div>' +
+          '<div class="cb-gap8"></div>' +
           '<label><span class="field-name">${i18n.tr('输出文件名：')}</span><span class="inline-field"><input id="f-output" value="' + escAttr(t.outputFilename) + '" title="${i18n.tr('相对项目根目录，如 bin/Debug/hello')}"><button class="cb-browse" data-browse="file" data-target="f-output">...</button></span></label>' +
-          '<label><span class="field-name">${i18n.tr('导入库文件名：')}</span><span class="inline-field"><input id="f-implib" value="' + escAttr(t.impLib || '') + '"><button class="cb-browse" data-browse="file" data-target="f-implib">...</button></span></label>' +
-          '<label><span class="field-name">${i18n.tr('定义文件文件名：')}</span><span class="inline-field"><input id="f-deffile" value="' + escAttr(t.defFile || '') + '"><button class="cb-browse" data-browse="file" data-target="f-deffile">...</button></span></label>' +
-          '<label><span class="field-name">${i18n.tr('执行工作目录：')}</span><span class="inline-field"><input id="f-workdir" value="' + escAttr(t.workingDir || '') + '"><button class="cb-browse" data-browse="folder" data-target="f-workdir">...</button></span></label>' +
-          '<label><span class="field-name">${i18n.tr('对象输出目录：')}</span><span class="inline-field"><input id="f-object" value="' + escAttr(t.objectOutput || '') + '"><button class="cb-browse" data-browse="folder" data-target="f-object">...</button></span></label>' +
+          '<label><span class="field-name">${i18n.tr('导入库文件名：')}</span><span class="inline-field"><input id="f-implib" value="' + escAttr(t.impLib || DEFAULT_LIB_EXPR) + '" title="' + escAttr(DEFAULT_LIB_EXPR) + '"><button class="cb-browse" data-browse="file" data-target="f-implib">...</button></span></label>' +
+          '<label><span class="field-name">${i18n.tr('定义文件文件名：')}</span><span class="inline-field"><input id="f-deffile" value="' + escAttr(t.defFile || DEFAULT_LIB_EXPR) + '" title="' + escAttr(DEFAULT_LIB_EXPR) + '"><button class="cb-browse" data-browse="file" data-target="f-deffile">...</button></span></label>' +
           '<div class="row"><span class="field-name"></span><div class="sub-block">' +
             '<label class="check"><input type="checkbox" id="f-prefix"' + (t.prefixAuto !== false ? ' checked' : '') + '> <span>${i18n.tr('自动生成文件名前缀')}</span></label>' +
             '<label class="check"><input type="checkbox" id="f-ext"' + (t.extensionAuto !== false ? ' checked' : '') + '> <span>${i18n.tr('自动生成文件名扩展名')}</span></label>' +
-            '<div class="cb-sep" style="width:100%"></div>' +
           '</div></div>' +
-        '</div>' +
-        '<section class="card"><div class="card-header">${i18n.tr('高级（扩展）')}</div><div class="card-body"><div class="form-grid">' +
-          '<label><span class="field-name">${i18n.tr('目标标题')}</span><input id="f-title" value="' + escAttr(t.title) + '"></label>' +
-          '<label><span class="field-name">${i18n.tr('编译器 ID')}</span><input id="f-compiler" value="' + escAttr(t.compilerId) + '"></label>' +
-          '<label><span class="field-name">${i18n.tr('执行参数')}</span><input id="f-params" value="' + escAttr(t.executionParameters || '') + '"></label>' +
-          '<label><span class="field-name">deps ${i18n.tr('输出目录')}</span><input id="f-deps" value="' + escAttr(t.depsOutput || '') + '"></label>' +
-          '<label><span class="field-name">${i18n.tr('宿主程序（库/CommandsOnly 目标运行/调试用）')}</span><input id="f-host" value="' + escAttr(t.hostApplication || '') + '"></label>' +
-          '<div class="row"><span class="field-name"></span><div class="sub-block"><label class="check"><input type="checkbox" id="f-hostterm"' + (t.runHostApplicationInTerminal !== false ? ' checked' : '') + '> <span>${i18n.tr('宿主程序在终端运行')}</span></label></div></div>' +
-          '<label><span class="field-name">${i18n.tr('外部依赖（每行一个）')}</span><textarea id="f-extdeps">' + esc((t.externalDeps || []).join('\\n')) + '</textarea></label>' +
-          '<label><span class="field-name">${i18n.tr('附加输出（每行一个）')}</span><textarea id="f-addout">' + esc((t.additionalOutput || []).join('\\n')) + '</textarea></label>' +
-          '<label><span class="field-name">${i18n.tr('目标环境变量（每行 name=value）')}</span><textarea id="f-envvars">' + esc((t.envVars || []).map(v => v.name + '=' + v.value).join('\\n')) + '</textarea></label>' +
-        '</div></div></section>';
+          '<div class="cb-gap8"></div>' +
+          '<label><span class="field-name">${i18n.tr('执行工作目录：')}</span><span class="inline-field"><input id="f-workdir" value="' + escAttr(t.workingDir || DEFAULT_WORKDIR) + '"><button class="cb-browse" data-browse="folder" data-target="f-workdir">...</button></span></label>' +
+          '<label><span class="field-name">${i18n.tr('对象输出目录：')}</span><span class="inline-field"><input id="f-object" value="' + escAttr(t.objectOutput || '') + '"><button class="cb-browse" data-browse="folder" data-target="f-object">...</button></span></label>' +
+        '</div>';
       document.getElementById('f-type').value = String(t.targetType);
-      ['f-title', 'f-type', 'f-output', 'f-object', 'f-compiler', 'f-params', 'f-extdeps', 'f-addout', 'f-envvars',
-        'f-workdir', 'f-deps', 'f-pwin', 'f-punix', 'f-pmac', 'f-host', 'f-hostterm', 'f-console',
+      ['f-type', 'f-output', 'f-object', 'f-console',
+        'f-workdir', 'f-pwin', 'f-punix', 'f-pmac',
         'f-implib', 'f-deffile', 'f-defchk', 'f-staticchk', 'f-prefix', 'f-ext'].forEach(id => {
         const e = document.getElementById(id); if (e) e.addEventListener('change', () => collectTargetForm());
       });
@@ -1196,52 +1232,37 @@ export class ProjectPropertiesPanel {
           vscode.postMessage({ type: 'browse', kind: btn.dataset.browse, target: btn.dataset.target, value: document.getElementById(btn.dataset.target).value });
         });
       });
+      document.getElementById('f-type').addEventListener('change', applyTargetTypeRules);
+      document.getElementById('f-staticchk').addEventListener('change', syncEnabledStates);
+      document.getElementById('f-defchk').addEventListener('change', syncEnabledStates);
+      syncEnabledStates();
     }
 
     function collectTargetForm() {
       // 表单未渲染时元素不存在（例如本次会话从未切到该 tab）：跳过收集，避免保存时抛异常
-      if (!targets.length || !document.getElementById('f-title')) return;
+      if (!targets.length || !document.getElementById('f-type')) return;
       const t = targets[selected];
-      const oldTitle = t.title;
-      const newTitle = document.getElementById('f-title').value.trim() || oldTitle;
-      t.title = newTitle;
       t.targetType = Number(document.getElementById('f-type').value);
       t.outputFilename = document.getElementById('f-output').value;
       t.objectOutput = document.getElementById('f-object').value;
-      t.compilerId = document.getElementById('f-compiler').value.trim();
-      t.executionParameters = document.getElementById('f-params').value;
-      t.externalDeps = optionsLines(document.getElementById('f-extdeps').value);
-      t.additionalOutput = optionsLines(document.getElementById('f-addout').value);
-      t.envVars = parseVarLines(document.getElementById('f-envvars').value);
-      // R6：高级字段
-      t.workingDir = document.getElementById('f-workdir').value.trim();
-      t.depsOutput = document.getElementById('f-deps').value.trim();
+      // 目标标题/编译器 ID/执行参数/宿主程序等扩展字段：改由左栏「重命名」、Build options
+      // 的 Selected compiler / 扩展页与 Project → Set programs' arguments… 编辑，这里不再读取。
+      // CB 默认值（"." / "$(TARGET_OUTPUT_DIR)$(TARGET_OUTPUT_BASENAME)"）：未改动时写回空串，保持 .cbp 原样
+      const workdir = document.getElementById('f-workdir').value.trim();
+      t.workingDir = workdir === DEFAULT_WORKDIR ? '' : workdir;
       const pw = document.getElementById('f-pwin').checked;
       const pu = document.getElementById('f-punix').checked;
       const pm = document.getElementById('f-pmac').checked;
       t.platforms = (pw && pu && pm) ? 255 : ((pw ? 4 : 0) | (pu ? 2 : 0) | (pm ? 1 : 0));
-      t.hostApplication = document.getElementById('f-host').value.trim();
-      t.runHostApplicationInTerminal = document.getElementById('f-hostterm').checked;
       t.useConsoleRunner = document.getElementById('f-console').checked;
-      t.impLib = document.getElementById('f-implib').value.trim();
-      t.defFile = document.getElementById('f-deffile').value.trim();
+      const impLib = document.getElementById('f-implib').value.trim();
+      t.impLib = impLib === DEFAULT_LIB_EXPR ? '' : impLib;
+      const defFile = document.getElementById('f-deffile').value.trim();
+      t.defFile = defFile === DEFAULT_LIB_EXPR ? '' : defFile;
       t.createDefFile = document.getElementById('f-defchk').checked;
       t.createStaticLib = document.getElementById('f-staticchk').checked;
       t.prefixAuto = document.getElementById('f-prefix').checked;
       t.extensionAuto = document.getElementById('f-ext').checked;
-      // 目标重命名：同步文件归属引用
-      if (oldTitle !== newTitle) {
-        files.forEach(f => {
-          const i = f.buildTargets.indexOf(oldTitle);
-          if (i >= 0) f.buildTargets[i] = newTitle;
-        });
-        virtualTargets.forEach(v => {
-          const i = v.targets.indexOf(oldTitle);
-          if (i >= 0) v.targets[i] = newTitle;
-        });
-        // 调试器远程配置按目标标题索引：改名后同步，否则原配置变成无法匹配的孤儿节点
-        dbg.remote.forEach(r => { if (r.target === oldTitle) r.target = newTitle; });
-      }
       renderList();
     }
 
@@ -1386,8 +1407,6 @@ export class ProjectPropertiesPanel {
       const el = document.getElementById('flist');
       if (!files.length) {
         el.innerHTML = '<div class="empty">${i18n.tr('（无文件）')}</div>';
-        const fileCount = document.getElementById('file-count');
-        if (fileCount) fileCount.textContent = '0/0';
         return;
       }
       el.innerHTML = files.map((f, i) =>
@@ -1603,34 +1622,29 @@ export class ProjectPropertiesPanel {
           '<label><span class="field-name">${i18n.tr('平台：')}</span><span class="inline-field"><input id="set-platforms-text" value="' + escAttr(platText) + '" readonly><button id="set-platforms-btn" class="cb-browse">...</button></span></label>' +
           '<span style="display:none"><input type="checkbox" id="set-pwin"' + ((projSettings.platforms & 4) ? ' checked' : '') + '><input type="checkbox" id="set-punix"' + ((projSettings.platforms & 2) ? ' checked' : '') + '><input type="checkbox" id="set-pmac"' + ((projSettings.platforms & 1) ? ' checked' : '') + '></span>' +
           '<label><span class="field-name">${i18n.tr('文件名：')}</span><span class="static-value" title="' + escAttr(data.filename) + '">' + esc(data.filename) + '</span></label>' +
-          '<label><span class="field-name">${i18n.tr('Makefile：')}</span><span class="inline-field"><input id="set-mkfile" value="' + escAttr(projSettings.makefile || '') + '"></span></label>' +
+          '<label><span class="field-name">${i18n.tr('Makefile：')}</span><span class="inline-field"><input id="set-mkfile" value="' + escAttr(projSettings.makefile || DEFAULT_MAKEFILE) + '"></span></label>' +
           '<div class="row"><span class="field-name"></span><div class="sub-block">' +
             '<label class="check"><input type="checkbox" id="set-mkcustom"' + (projSettings.makefileIsCustom ? ' checked' : '') + '> <span>${i18n.tr('这是一个自定义 Makefile')}</span></label>' +
             '<div class="hint red">${i18n.tr('文件必须存在，不会自动生成 Makefile！')}</div>' +
             '<div class="hint red">${i18n.tr('如果在此处修改，工程构建选项里的特殊设置只有在保存工程后才会启用/禁用。')}</div>' +
-            '<div class="sub-row"><span class="field-name">${i18n.tr('执行目录：')}</span><input id="set-mkdir" value="' + escAttr(projSettings.executionDir || '') + '"><button class="cb-browse" data-browse="folder" data-target="set-mkdir">...</button></div>' +
+            '<div class="sub-row"><span class="field-name">${i18n.tr('执行目录：')}</span><input id="set-mkdir" value="' + escAttr(projSettings.executionDir || DEFAULT_EXEC_DIR) + '" title="' + escAttr(DEFAULT_EXEC_DIR) + '"><button class="cb-browse" data-browse="folder" data-target="set-mkdir">...</button></div>' +
           '</div></div>' +
           '<div class="row"><span class="field-name">${i18n.tr('预编译头：')}</span><fieldset class="radio-box"><legend>${i18n.tr('策略')}</legend><div class="radio-group">' +
             pchOptions.map(o => '<label class="check"><input type="radio" name="set-pch" id="set-pch-' + o[0] + '" value="' + o[0] + '"' + (Number(projSettings.pchMode) === o[0] ? ' checked' : '') + '><span>' + o[1] + '</span></label>').join('') +
           '</div></fieldset></div>' +
-          '<div class="row"><span class="field-name"></span><div class="sub-block"><div class="hint red">${i18n.tr('如果修改 PCH 生成策略，请手动删除旧 PCH 文件（或目录）以避免冲突……')}</div></div></div>' +
+          '<div class="row"><span class="field-name"></span><div class="sub-block"><div class="hint red">${i18n.tr('如果修改 PCH 生成策略，')}<br>${i18n.tr('请手动删除旧 PCH 文件（或目录）以避免冲突')}</div></div></div>' +
           '<div class="row cb-gap8"><span class="field-name"></span><span></span></div>' +
           '<div class="row"><span class="field-name">${i18n.tr('对象文件名生成：')}</span><div class="sub-block">' +
             '<label class="check"><input type="checkbox" id="set-extobj"' + (projSettings.extendedObjNames ? ' checked' : '') + '> <span>${i18n.tr('生成扩展对象名（例如 "foo.cpp.o" 而不是 "foo.o"）')}</span></label>' +
             '<div class="hint red">${i18n.tr('（此设置主要用于包含大量同名但扩展名不同文件的大型工程）')}</div>' +
           '</div></div>' +
-          '<div class="row"><span class="field-name">${i18n.tr('检查外部修改的文件：')}</span><div class="sub-block">' +
+          '<div class="row" style="margin-top:8px"><span class="field-name">${i18n.tr('检查外部修改的文件：')}</span><div class="sub-block">' +
             '<label class="check"><input type="checkbox" id="set-checkfiles"' + (projSettings.checkForExternallyModifiedFiles !== false ? ' checked' : '') + '> <span>${i18n.tr('检查外部修改的文件（大多数情况下应勾选）')}</span></label>' +
             '<div class="hint red">${i18n.tr('（关闭外部修改检查主要用于慢速网络共享上的工程。注意：外部修改可能静默覆盖文件，如果你没有在 Code::Blocks 内保存它们）')}</div>' +
           '</div></div>' +
         '</div>' +
-        '<div class="settings-actions"><button id="set-project-deps">${i18n.tr('工程的依赖…')}</button><button id="set-project-build-options">${i18n.tr('工程的构建选项…')}</button></div>' +
-        '<section class="card"><div class="card-header">${i18n.tr('高级（扩展）')}</div><div class="card-body"><div class="form-grid">' +
-          '<label><span class="field-name">${i18n.tr('默认编译器 ID')}</span><input id="set-compiler" value="' + escAttr(projSettings.compilerId) + '"></label>' +
-          '<label><span class="field-name">${i18n.tr('虚拟文件夹')}</span><textarea id="set-vfolders">' + esc(projSettings.virtualFolders.join('\\n')) + '</textarea></label>' +
-          '<label><span class="field-name">${i18n.tr('项目自定义变量（每行 name=value）')}</span><textarea id="set-vars">' + esc(projSettings.customVariables.map(v => v.name + '=' + v.value).join('\\n')) + '</textarea></label>' +
-        '</div></div></section>';
-      ['set-title', 'set-compiler', 'set-vfolders', 'set-vars', 'set-checkfiles',
+        '<div class="settings-actions"><button id="set-project-deps">${i18n.tr('工程的依赖…')}</button><button id="set-project-build-options">${i18n.tr('工程的构建选项…')}</button></div>';
+      ['set-title', 'set-checkfiles',
         'set-pwin', 'set-punix', 'set-pmac', 'set-extobj', 'set-mkcustom', 'set-mkfile', 'set-mkdir'].forEach(id => {
         const e = document.getElementById(id); if (e) e.addEventListener('change', () => collectSettingsForm());
       });
@@ -1641,15 +1655,14 @@ export class ProjectPropertiesPanel {
       el.querySelectorAll('button[data-browse]').forEach(btn => {
         btn.addEventListener('click', () => vscode.postMessage({ type: 'browse', kind: btn.dataset.browse, target: btn.dataset.target, value: document.getElementById(btn.dataset.target).value }));
       });
+      document.getElementById('set-mkcustom').addEventListener('change', () => { collectSettingsForm(); syncEnabledStates(); });
+      syncEnabledStates();
     }
 
     function collectSettingsForm() {
       const el = document.getElementById('sform');
       if (!el || !el.querySelector('#set-title')) return;
       projSettings.title = document.getElementById('set-title').value.trim() || projSettings.title;
-      projSettings.compilerId = document.getElementById('set-compiler').value.trim();
-      projSettings.virtualFolders = optionsLines(document.getElementById('set-vfolders').value);
-      projSettings.customVariables = parseVarLines(document.getElementById('set-vars').value);
       const sw = document.getElementById('set-pwin').checked;
       const su = document.getElementById('set-punix').checked;
       const sm = document.getElementById('set-pmac').checked;
@@ -1658,9 +1671,101 @@ export class ProjectPropertiesPanel {
       if (pchRadio) projSettings.pchMode = Number(pchRadio.value) || 0;
       projSettings.extendedObjNames = document.getElementById('set-extobj').checked;
       projSettings.makefileIsCustom = document.getElementById('set-mkcustom').checked;
-      projSettings.makefile = document.getElementById('set-mkfile').value.trim();
-      projSettings.executionDir = document.getElementById('set-mkdir').value.trim();
+      // CB 默认值：保持默认时不写入 .cbp（空串 = 使用 CB 默认解析）
+      const mk = document.getElementById('set-mkfile').value.trim();
+      projSettings.makefile = mk === DEFAULT_MAKEFILE ? '' : mk;
+      const execDir = document.getElementById('set-mkdir').value.trim();
+      projSettings.executionDir = execDir === DEFAULT_EXEC_DIR ? '' : execDir;
       projSettings.checkForExternallyModifiedFiles = document.getElementById('set-checkfiles').checked;
+    }
+
+    // ---- CB 启用/禁用联动（对齐 codeblocks-src projectoptionsdlg.cpp） ----
+    function setDisabled(id, disabled) {
+      const el = document.getElementById(id);
+      if (el) el.disabled = !!disabled;
+    }
+    function setBrowseDisabled(target, disabled) {
+      document.querySelectorAll('button[data-browse][data-target="' + target + '"]').forEach(b => { b.disabled = !!disabled; });
+    }
+    /**
+     * 一次性同步所有控件的可用状态：
+     *  - 自定义 Makefile：Execution dir 启用；PCH / 对象目录 / 目标文件列表与工具栏 / 脚本页禁用
+     *  - 目标类型：Console runner / Create import library / .DEF / Import / Definition / Working dir
+     *  - 目标数量与列表选中项：Rename / Duplicate / Delete / Re-order / Export / File properties
+     */
+    function syncEnabledStates() {
+      const mkEl = document.getElementById('set-mkcustom');
+      const customMake = mkEl ? mkEl.checked : projSettings.makefileIsCustom === true;
+      const supportsPch = !boRuntime || boRuntime.supportsPch !== false;
+      // Project settings
+      setDisabled('set-mkdir', !customMake);
+      setBrowseDisabled('set-mkdir', !customMake);
+      document.querySelectorAll('input[name="set-pch"]').forEach(r => { r.disabled = customMake || !supportsPch; });
+
+      // Build targets
+      const typeEl = document.getElementById('f-type');
+      if (typeEl) {
+        const type = Number(typeEl.value);
+        const dynamic = type === 3;
+        const commandsOnly = type === 4;
+        const workdirOn = type === 0 || type === 1 || type === 3 || type === 5;
+        const staticChk = document.getElementById('f-staticchk');
+        const defChk = document.getElementById('f-defchk');
+        const impOn = dynamic && !!staticChk && staticChk.checked;
+        const defOn = dynamic && !!defChk && defChk.checked;
+        setDisabled('f-console', type !== 1);
+        setDisabled('f-staticchk', !dynamic);
+        setDisabled('f-defchk', !dynamic);
+        setDisabled('f-output', commandsOnly);
+        setBrowseDisabled('f-output', commandsOnly);
+        setDisabled('f-implib', !impOn || commandsOnly);
+        setDisabled('f-deffile', !defOn || commandsOnly);
+        setBrowseDisabled('f-implib', !impOn || commandsOnly);
+        setBrowseDisabled('f-deffile', !defOn || commandsOnly);
+        setDisabled('f-workdir', !workdirOn || commandsOnly);
+        setBrowseDisabled('f-workdir', !workdirOn || commandsOnly);
+        setDisabled('f-object', customMake || commandsOnly);
+        setBrowseDisabled('f-object', customMake || commandsOnly);
+        document.querySelectorAll('#tflist input[type="checkbox"]').forEach(cb => { cb.disabled = customMake; });
+        ['toggleChecks', 'allOn', 'allOff'].forEach(id => setDisabled(id, customMake));
+        setDisabled('fileProps', customMake || !files.length);
+        setDisabled('remove', targets.length <= 1);
+        setDisabled('reorderTargets', targets.length <= 1);
+        setDisabled('renameTarget', !targets.length);
+        setDisabled('copy', !targets.length);
+        setDisabled('exportTarget', !targets.length);
+        setDisabled('targetBuildOptions', !targets.length);
+      }
+
+      // Build scripts（CB：自定义 Makefile 时整页只读）
+      ['scr-tree', 'scr-list-box', 'scr-add', 'scr-validate'].forEach(id => setDisabled(id, customMake));
+      const scriptSel = !customMake && selectedScript >= 0;
+      setDisabled('scr-remove', !scriptSel);
+      setDisabled('scr-up', !scriptSel);
+      setDisabled('scr-down', !scriptSel);
+
+      // Parser / Debugger：无选中项时不可编辑
+      setDisabled('parser-edit', selectedParser < 0);
+      setDisabled('parser-del', selectedParser < 0);
+      setDisabled('dbg-path-edit', selectedDbgPath < 0);
+      setDisabled('dbg-path-del', selectedDbgPath < 0);
+    }
+    /** 目标类型切换：对齐 CB OnProjectTypeChanged 的清空规则 */
+    function applyTargetTypeRules() {
+      const el = document.getElementById('f-type');
+      if (!el) return;
+      const type = Number(el.value);
+      const clear = (id) => { const f = document.getElementById(id); if (f) f.value = ''; };
+      if (type === 2) {
+        // Static library：CB 清空 Import library / Definition file
+        clear('f-implib');
+        clear('f-deffile');
+      } else if (type === 4) {
+        // Commands only：CB 清空并禁用全部输出/文件名/目录
+        ['f-output', 'f-implib', 'f-deffile', 'f-workdir', 'f-object'].forEach(clear);
+      }
+      collectTargetForm();
+      syncEnabledStates();
     }
 
     // ---- 构建脚本 tab（CB: Project overview + Attached build scripts）----
@@ -1736,6 +1841,7 @@ export class ProjectPropertiesPanel {
         vscode.postMessage({ type: 'validateScripts', scripts: all });
         const st = document.getElementById('scr-status'); if (st) st.textContent = '${i18n.tr('校验中…')}';
       });
+      syncEnabledStates();
     }
 
     function collectScriptsForm() {
@@ -1787,43 +1893,45 @@ export class ProjectPropertiesPanel {
         targets.map((t, i) => '<div class="tree-item child' + (String(selectedDebugScope) === String(i) ? ' selected' : '') + '" data-scope="' + i + '">' + esc(t.title) + '</div>').join('');
       const connSel = [[0, 'TCP (IP:${i18n.tr('端口)')}'], [1, 'UDP (IP:${i18n.tr('端口)')}'], [2, '${i18n.tr('串口 Serial')}']]
         .map(c => '<option value="' + c[0] + '">' + c[1] + '</option>').join('');
-      const subTab = (id, label) => '<button class="bo-subtab' + (dbgSubTab === id ? ' active' : '') + '" data-dtab="' + id + '">' + esc(label) + '</button>';
-      const panel = (id, html) => '<div class="bo-subpage" data-dpanel="' + id + '"' + (dbgSubTab === id ? '' : ' style="display:none"') + '>' + html + '</div>';
+      const subTab = (id, label) => '<button class="dbg-tab' + (dbgSubTab === id ? ' active' : '') + '" data-dtab="' + id + '">' + esc(label) + '</button>';
+      const panel = (id, html) => '<div class="dbg-page" data-dpanel="' + id + '"' + (dbgSubTab === id ? '' : ' style="display:none"') + '>' + html + '</div>';
       el.innerHTML =
         '<section class="card">' +
           '<div class="card-header">${i18n.tr('附加调试器搜索目录：')}</div>' +
           '<div class="card-body">' +
             '<div class="list-with-stack">' +
-              '<div class="list" id="dbg-paths-list" style="min-height:110px">' + pathRows + '</div>' +
+              '<div class="list" id="dbg-paths-list" style="height:150px" title="${i18n.tr('调试会话向 GDB 发 directory 命令（对齐 CB debugger search paths；支持 $(VAR) 宏与相对项目根路径）')}">' + pathRows + '</div>' +
               '<div class="btn-stack">' +
                 '<button id="dbg-path-add">${i18n.tr('添加')}</button>' +
-                '<button id="dbg-path-edit">${i18n.tr('编辑')}</button>' +
-                '<button id="dbg-path-del">${i18n.tr('删除')}</button>' +
+                '<button id="dbg-path-edit"' + (selectedDbgPath < 0 ? ' disabled' : '') + '>${i18n.tr('编辑')}</button>' +
+                '<button id="dbg-path-del"' + (selectedDbgPath < 0 ? ' disabled' : '') + '>${i18n.tr('删除')}</button>' +
               '</div>' +
             '</div>' +
-            '<div class="hint">${i18n.tr('调试会话向 GDB 发 directory 命令（对齐 CB debugger search paths；支持 $(VAR) 宏与相对项目根路径）')}</div>' +
           '</div>' +
         '</section>' +
         '<section class="card">' +
           '<div class="card-header">${i18n.tr('远程调试支持（仅 GDB）：')}</div>' +
           '<div class="card-body">' +
-            '<div class="scripts-layout">' +
-              '<div class="list" id="dbg-scope-list" style="min-height:170px">' + scopeRows + '</div>' +
+            '<div class="dbg-scope-grid">' +
               '<div>' +
-                '<div class="bo-subtabs">' +
+                '<div class="field-label">${i18n.tr('选择目标：')}</div>' +
+                '<div class="list" id="dbg-scope-list" style="height:90px">' + scopeRows + '</div>' +
+              '</div>' +
+              '<div style="min-width:0" title="${i18n.tr('连接顺序（对齐 CB）：连接前命令 → 连接前 shell → [set remotebaud] → target [extended-]remote → 连接后命令 → 连接后 shell；有效连接（串口需端口+波特率；TCP/UDP 需 IP+端口）时启动用 continue 而非 run')}">' +
+                '<div class="dbg-tabs">' +
                   subTab('remote', '${i18n.tr('远程连接')}') +
                   subTab('gdb', '${i18n.tr('附加 GDB 命令')}') +
                   subTab('shell', '${i18n.tr('附加 shell 命令')}') +
                 '</div>' +
                 panel('remote',
-                  '<div class="form-grid">' +
-                    '<label><span class="field-name">${i18n.tr('连接类型：')}</span><select id="dbg-conn">' + connSel + '</select></label>' +
+                  '<div class="dbg-grid">' +
+                    '<label class="span-2" style="grid-template-columns:90px max-content"><span class="field-name">${i18n.tr('连接类型：')}</span><select id="dbg-conn" style="width:120px">' + connSel + '</select></label>' +
                     '<label><span class="field-name">${i18n.tr('串口：')}</span><input id="dbg-serial" value="' + escAttr(r.serialPort) + '" placeholder="COM3 / /dev/ttyUSB0"></label>' +
-                    '<label><span class="field-name">${i18n.tr('波特率：')}</span><input id="dbg-baud" value="' + escAttr(r.serialBaud) + '"></label>' +
+                    '<label class="short"><span class="field-name">${i18n.tr('波特率：')}</span><input id="dbg-baud" list="dbg-baud-list" value="' + escAttr(r.serialBaud) + '"><datalist id="dbg-baud-list"><option value="4800"><option value="9600"><option value="19200"><option value="38400"><option value="57600"><option value="115200"><option value="230400"></datalist></label>' +
                     '<label><span class="field-name">IP ${i18n.tr('地址：')}</span><input id="dbg-ip" value="' + escAttr(r.ip) + '"></label>' +
-                    '<label><span class="field-name">${i18n.tr('端口：')}</span><input id="dbg-port" value="' + escAttr(r.ipPort) + '"></label>' +
-                    '<label class="check"><input type="checkbox" id="dbg-ext"' + (r.extendedRemote ? ' checked' : '') + '> <span>${i18n.tr('使用 extended-remote 连接')}</span></label>' +
-                    '<label class="check"><input type="checkbox" id="dbg-skip"' + (r.skipLDpath ? ' checked' : '') + '> <span>${i18n.tr('启动调试器前不要调整 LD_LIBRARY_PATH')}</span></label>' +
+                    '<label class="short"><span class="field-name">${i18n.tr('端口：')}</span><input id="dbg-port" value="' + escAttr(r.ipPort) + '"></label>' +
+                    '<label class="check span-2"><input type="checkbox" id="dbg-ext"' + (r.extendedRemote ? ' checked' : '') + '> <span>${i18n.tr('使用 extended-remote 连接')}</span></label>' +
+                    '<label class="check span-2" style="margin-top:0"><input type="checkbox" id="dbg-skip"' + (r.skipLDpath ? ' checked' : '') + '> <span>${i18n.tr('启动调试器前不要调整 LD_LIBRARY_PATH')}</span></label>' +
                   '</div>') +
                 panel('gdb',
                   '<div class="form-grid">' +
@@ -1835,7 +1943,6 @@ export class ProjectPropertiesPanel {
                     '<label><span class="field-name">${i18n.tr('连接前 shell 命令（每行一条）')}</span><textarea id="dbg-before-shell">' + esc(r.additionalShellCmdsBefore) + '</textarea></label>' +
                     '<label><span class="field-name">${i18n.tr('连接后 shell 命令（每行一条）')}</span><textarea id="dbg-after-shell">' + esc(r.additionalShellCmdsAfter) + '</textarea></label>' +
                   '</div>') +
-                '<div class="hint">${i18n.tr('连接顺序（对齐 CB）：连接前命令 → 连接前 shell → [set remotebaud] → target [extended-]remote → 连接后命令 → 连接后 shell；有效连接（串口需端口+波特率；TCP/UDP 需 IP+端口）时启动用 continue 而非 run')}</div>' +
               '</div>' +
             '</div>' +
           '</div>' +
@@ -1879,6 +1986,7 @@ export class ProjectPropertiesPanel {
         const f = document.getElementById(id);
         if (f) f.addEventListener('change', () => collectDebugForm());
       });
+      syncEnabledStates();
     }
     function collectDebugForm() {
       if (!document.getElementById('dbg-conn')) return;
@@ -1906,7 +2014,7 @@ export class ProjectPropertiesPanel {
         '<div class="fill-pane">' +
           '<div class="field-label">${i18n.tr('附加搜索路径：')}</div>' +
           '<div class="list fill-control" id="parser-list"></div>' +
-          '<div class="plain-actions">' +
+          '<div class="plain-actions left">' +
             '<button id="parser-add">${i18n.tr('添加')}</button>' +
             '<button id="parser-edit">${i18n.tr('编辑')}</button>' +
             '<button id="parser-del">${i18n.tr('删除')}</button>' +
@@ -1923,6 +2031,7 @@ export class ProjectPropertiesPanel {
       document.getElementById('parser-add').addEventListener('click', () => askText('${i18n.tr('添加搜索目录')}', '', v => { if (v) { parserPaths.push(v); selectedParser = parserPaths.length - 1; renderParserForm(); } }));
       document.getElementById('parser-edit').addEventListener('click', () => { if (selectedParser >= 0) askText('${i18n.tr('编辑搜索目录')}', parserPaths[selectedParser], v => { if (v !== null) { parserPaths[selectedParser] = v; renderParserForm(); } }); });
       document.getElementById('parser-del').addEventListener('click', () => { if (selectedParser >= 0) { parserPaths.splice(selectedParser, 1); selectedParser = Math.min(selectedParser, parserPaths.length - 1); renderParserForm(); } });
+      syncEnabledStates();
     }
     let selectedParser = -1;
 
@@ -1940,11 +2049,6 @@ export class ProjectPropertiesPanel {
               '<input type="checkbox" data-fi="' + i + '"' + checked + '><span class="item-label">' + esc(f.relativeFilename) + '</span></label>';
           }).join('')
         : '<div class="empty">${i18n.tr('（无文件）')}</div>';
-      const fileCount = document.getElementById('file-count');
-      if (fileCount) {
-        const checkedCount = files.filter((f) => f.buildTargets.includes(title)).length;
-        fileCount.textContent = checkedCount + '/' + files.length;
-      }
       el.querySelectorAll('.item').forEach(row => {
         row.addEventListener('click', ev => {
           if (ev.target && ev.target.tagName === 'INPUT') return;
@@ -1958,13 +2062,9 @@ export class ProjectPropertiesPanel {
           const t = targets[selected].title;
           if (cb.checked) { if (!f.buildTargets.includes(t)) f.buildTargets.push(t); }
           else f.buildTargets = f.buildTargets.filter(x => x !== t);
-          const fileCount = document.getElementById('file-count');
-          if (fileCount) {
-            const checkedCount = files.filter((x) => x.buildTargets.includes(t)).length;
-            fileCount.textContent = checkedCount + '/' + files.length;
-          }
         });
       });
+      syncEnabledStates();
     }
     function toggleTargetFileChecks(on) {
       if (!targets.length) return;
@@ -2144,7 +2244,13 @@ export class ProjectPropertiesPanel {
         commandsAfter: [...s.after],
         alwaysPost: !!s.always,
         envVars: (settings.envVars || []).map(v => ({ name: v.name, value: v.value })),
-        makeCommands: { ...(settings.makeCommands || {}) }
+        makeCommands: { ...(settings.makeCommands || {}) },
+        // 扩展字段（CB project_options 无对应控件）：原先在 Properties「高级（扩展）」，现由 Build options 扩展页编辑
+        depsOutput: settings.depsOutput || '',
+        externalDeps: [...(settings.externalDeps || [])],
+        additionalOutput: [...(settings.additionalOutput || [])],
+        hostApplication: settings.hostApplication || '',
+        runHostApplicationInTerminal: settings.runHostApplicationInTerminal !== false
       };
     }
     function buildOptionsBootstrap() {
@@ -2158,7 +2264,8 @@ export class ProjectPropertiesPanel {
         compilerCatalogs: boRuntime.compilerCatalogs || {},
         compilerBaseCatalogs: boRuntime.compilerBaseCatalogs || {},
         compilerFlags: boRuntime.compilerFlags || {},
-        defaultCompilerId: boRuntime.defaultCompilerId || ''
+        defaultCompilerId: boRuntime.defaultCompilerId || '',
+        customVariables: (projSettings.customVariables || []).map(v => ({ name: v.name, value: v.value }))
       };
     }
     function applyBuildOptions(bo) {
@@ -2176,6 +2283,7 @@ export class ProjectPropertiesPanel {
       projSettings.compilerId = bo.project.compilerId;
       projSettings.envVars = (bo.project.envVars || []).map(v => ({ ...v }));
       projSettings.makeCommands = { ...(bo.project.makeCommands || {}) };
+      if (bo.customVariables) projSettings.customVariables = bo.customVariables.map(v => ({ name: v.name, value: v.value }));
       // 覆盖层里编辑过的编译器参数目录/语言参数要回写到本面板的运行时副本，
       // 否则关闭后重新打开会拿到最初的数据（新增/删除的参数看起来"丢了"）
       if (bo.compilerCatalogs) boRuntime.compilerCatalogs = bo.compilerCatalogs;
@@ -2188,6 +2296,12 @@ export class ProjectPropertiesPanel {
         targets[i].linkerExecutable = t.linkerExecutable;
         targets[i].envVars = (t.envVars || []).map(v => ({ ...v }));
         targets[i].makeCommands = { ...(t.makeCommands || {}) };
+        // 扩展字段（Build options 扩展页 / 自定义变量页）
+        if (t.depsOutput !== undefined) targets[i].depsOutput = t.depsOutput;
+        if (t.externalDeps) targets[i].externalDeps = [...t.externalDeps];
+        if (t.additionalOutput) targets[i].additionalOutput = [...t.additionalOutput];
+        if (t.hostApplication !== undefined) targets[i].hostApplication = t.hostApplication;
+        if (t.runHostApplicationInTerminal !== undefined) targets[i].runHostApplicationInTerminal = t.runHostApplicationInTerminal !== false;
         targetOpts[i].compilerOptions = [...t.compilerOptions];
         targetOpts[i].linkerOptions = [...t.linkerOptions];
         targetOpts[i].linkLibs = [...t.linkLibs];

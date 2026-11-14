@@ -10,6 +10,8 @@ import * as i18n from '../i18n';
 /** 单个作用域（工程或一个构建目标）的构建选项 */
 export interface BuildOptionsScopeData {
   title: string;
+  /** 目标类型（TargetType；仅目标作用域有值，用于对齐 CB 的 Commands only 页禁用） */
+  targetType?: number;
   compilerId: string;
   compilerOptions: string[];
   resourceCompilerOptions: string[];
@@ -38,6 +40,13 @@ export interface BuildOptionsScopeData {
     askRebuildNeeded?: string;
     silentBuild?: string;
   };
+  // ---- 扩展字段（Code::Blocks project_options 对话框无对应控件）----
+  /** 依赖文件输出目录（`.cbp` depsOutput） */
+  depsOutput?: string;
+  externalDeps?: string[];
+  additionalOutput?: string[];
+  hostApplication?: string;
+  runHostApplicationInTerminal?: boolean;
 }
 
 export interface BuildOptionsCompilerOption {
@@ -78,6 +87,8 @@ export interface BuildOptionsData {
   /** 未合并的编译器原始目录（编辑后重新合并用） */
   compilerBaseCatalogs?: Record<string, BuildOptionsCompilerOption[]>;
   compilerFlags?: Record<string, BuildOptionsLanguageFlags>;
+  /** 项目自定义变量（`.cbp` `<Extensions>`；CB 属性对话框无控件，原「高级（扩展）」迁入自定义变量页） */
+  customVariables?: Array<{ name: string; value: string }>;
 }
 
 /** 视图文案（一次性翻译，供内联脚本使用） */
@@ -145,6 +156,8 @@ function labels(): Record<string, string> {
     enterValue: i18n.t('Enter a value'),
     confirmDelete: i18n.t('Delete the selected item?'),
     selectTargets: i18n.t('Please select which target to copy these entries to:'),
+    commandsOnlyPage: i18n.t('This target is "Commands only": compiler, linker, search directories and "Make" commands are disabled.'),
+    compilerNotFound: i18n.t('The project/target compiler was not found. Choose an installed compiler to edit the options.'),
     ok: i18n.t('OK'),
     cancel: i18n.t('Cancel'),
     noItems: i18n.t('(empty)'),
@@ -169,9 +182,16 @@ function labels(): Record<string, string> {
     flagOption: i18n.t('Option'),
     flagCategory: i18n.t('Category'),
     flagRequired: i18n.t('Both name and option are required.'),
-    moreCommands: i18n.t('More commands'),
     silentBuildHint: i18n.t('Read-only: Code::Blocks derives it from the build command (Build + " > $(CMD_NULL)") and rewrites it when saving.'),
-    distCleanHint: i18n.t('Read-only: only used by scripts/SDK calls. This extension has no Dist-clean command.'),
+    extensionTab: i18n.t('Extensions'),
+    extensionHint: i18n.t('These fields have no control in the Code::Blocks project options dialog; they are stored in the .cbp and used by the build engine.'),
+    extensionProjectHint: i18n.t('Select a build target to edit the extension fields.'),
+    depsOutput: i18n.t('Dependencies output directory:'),
+    externalDeps: i18n.t('External dependencies (one per line)'),
+    additionalOutput: i18n.t('Additional output files (one per line)'),
+    hostApplication: i18n.t('Host application:'),
+    hostInTerminal: i18n.t('Run host application in terminal'),
+    projectCustomVars: i18n.t('Project custom variables (<Extensions>, one name=value per line)'),
   };
 }
 
@@ -208,7 +228,9 @@ export function buildOptionsCss(): string {
   .bo-root .bo-tab { flex: none; background: transparent; color: var(--vscode-descriptionForeground); border: none; border-bottom: 2px solid transparent; border-radius: 0; padding: 10px 8px 8px; cursor: pointer; font-size: 12px; line-height: 16px; white-space: nowrap; }
   .bo-root .bo-tab:hover { color: var(--vscode-foreground); background: var(--vscode-list-hoverBackground); }
   .bo-root .bo-tab.active { color: var(--vscode-foreground); border-bottom-color: var(--vscode-focusBorder); font-weight: 600; background: transparent; }
+  .bo-root .bo-tab:disabled, .bo-root .bo-tab:disabled:hover { color: var(--vscode-disabledForeground, var(--vscode-descriptionForeground)); opacity: .5; cursor: default; background: transparent; border-bottom-color: transparent; }
   .bo-page { flex: 1; overflow: auto; padding: 16px 20px 24px; min-height: 0; }
+  .bo-page.is-disabled { pointer-events: none; opacity: .6; }
   .bo-page-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px; align-items: start; max-width: 1080px; }
   .bo-page-grid > .span-2 { grid-column: 1 / -1; }
   .bo-card { border: 1px solid var(--bo-border); border-radius: var(--bo-radius); background: var(--bo-surface); overflow: hidden; min-width: 0; }
@@ -379,7 +401,7 @@ export function buildOptionsCss(): string {
   .bo-root button.default, .bo-modal button.default { border-color: var(--vscode-focusBorder); }
   .bo-footer { justify-content: flex-start; }
   .bo-toolbar { display: inline-flex; align-items: center; gap: 8px; }
-  .bo-check { display: inline-flex; align-items: center; gap: 8px; margin-top: 8px; font-size: 12px; }
+  .bo-check { display: flex; align-items: center; gap: 8px; margin: 8px 0 0; font-size: 12px; }
   .bo-check input[type=checkbox] { width: 16px; height: 16px; flex: none; accent-color: var(--vscode-checkbox-background, var(--vscode-focusBorder)); }
   .bo-menu { position: fixed; z-index: 90; min-width: 180px; padding: 4px; display: flex; flex-direction: column; gap: 2px; background: var(--vscode-menu-background, var(--vscode-editorWidget-background, var(--vscode-editor-background, #252526))); border: 1px solid var(--vscode-menu-border, var(--bo-border)); border-radius: 4px; box-shadow: 0 6px 18px rgba(0,0,0,.4); }
   .bo-menu button { text-align: left; background: transparent; color: var(--vscode-menu-foreground, var(--vscode-foreground)); border: none; border-radius: 3px; padding: 5px 10px; }
@@ -406,6 +428,7 @@ export function buildOptionsMarkup(embedded = false): string {
         <legend id="bo-compiler-legend"></legend>
         <span class="bo-compiler-box" id="bo-compiler-box"></span>
       </fieldset>
+      <div class="bo-red-note" id="bo-compiler-note" style="display:none"></div>
       <div class="bo-tabs" id="bo-tabs"></div>
       <div class="bo-page" id="bo-page"></div>
     </div>
@@ -435,13 +458,17 @@ export function buildOptionsScript(data: BuildOptionsData, embedded: boolean): s
     var page = 'compiler';
     var dirTab = 'compiler';
     var compilerTab = 'flags';
-    var selected = { linker: -1, dir: -1, vars: -1 };
+    var selected = { linker: [], dir: [], vars: [] };
+    /** 多选锚点：Shift 连选时使用（-1 = 无） */
+    var anchor = { linker: -1, dir: -1, vars: -1 };
+    function resetSelection() {
+      selected = { linker: [], dir: [], vars: [] };
+      anchor = { linker: -1, dir: -1, vars: -1 };
+    }
     /** 分类折叠状态：category → true 表示已折叠 */
     var collapsedFlags = {};
     /** Compiler Flags 列表滚动位置（重绘后回填） */
     var flagsScroll = 0;
-    /** Code::Blocks 默认 Dist-clean 命令（CompileTargetBase 构造函数） */
-    var DIST_CLEAN_DEFAULT = '$make -f $makefile distclean$target';
     var ICON_UP = '<svg viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M8 3.5v9M4 7.5 8 3.5l4 4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>';
     var ICON_DOWN = '<svg viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M8 12.5v-9M4 8.5l4 4 4-4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>';
     var ICON_PROJECT = '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M1.5 3.5h4l1.5 2h7.5v7.5h-13z" stroke="currentColor"/></svg>';
@@ -471,8 +498,25 @@ export function buildOptionsScript(data: BuildOptionsData, embedded: boolean): s
       el.textContent = text || '';
       el.style.color = isError ? 'var(--vscode-errorForeground)' : '';
     }
+    /** Commands only 目标：对齐 CB（compileroptionsdlg.cpp:409-416） */
+    function isCommandsOnly() {
+      return !isProject() && Number(current().targetType) === 4;
+    }
+    /** 工程/目标声明的编译器未安装：对齐 CB（compileroptionsdlg.cpp:395-396 禁用整本 notebook） */
+    function isCompilerMissing() {
+      var sc = current();
+      var wanted = String((sc && sc.compilerId) || DATA.defaultCompilerId || '').trim();
+      if (!wanted) return false;
+      return !(DATA.compilers || []).some(function (c) {
+        return normCompilerId(c.id) === normCompilerId(wanted) || normCompilerId(c.name) === normCompilerId(wanted);
+      });
+    }
+    function pageDisabled(id) {
+      if (isCompilerMissing()) return true;
+      return isCommandsOnly() && (id === 'compiler' || id === 'linker' || id === 'dirs' || id === 'make');
+    }
     function pageList() {
-      return [
+      var pages = [
         ['compiler', L.compilerSettings],
         ['linker', L.linkerSettings],
         ['dirs', L.searchDirectories],
@@ -480,11 +524,30 @@ export function buildOptionsScript(data: BuildOptionsData, embedded: boolean): s
         ['vars', L.customVariables],
         ['make', L.makeCommands]
       ];
+      // 自定义 Makefile：CB 直接移除 Compiler / Linker / Search directories 三页（:432-441）
+      if (DATA.makefileIsCustom) {
+        pages = pages.filter(function (p) { return p[0] !== 'compiler' && p[0] !== 'linker' && p[0] !== 'dirs'; });
+      }
+      // 扩展字段按目标存放（deps 输出目录 / 外部依赖 / 附加输出 / 宿主程序）：仅目标作用域显示
+      if (!isProject()) pages.push(['extension', L.extensionTab]);
+      return pages;
+    }
+    /** 当前页被移除/禁用时回落到 Pre/post（CB 同样把选择强制到 Pre/post） */
+    function ensurePage() {
+      var ids = pageList().map(function (p) { return p[0]; });
+      if (ids.indexOf(page) < 0) {
+        page = ids.indexOf('compiler') >= 0 ? 'compiler' : ids[0];
+        return;
+      }
+      if (isCommandsOnly() && pageDisabled(page)) {
+        page = ids.indexOf('extras') >= 0 ? 'extras' : ids[0];
+      }
     }
     function render() {
       var sc = current();
       var t = q('title'); if (t) t.textContent = titleText();
       renderCompilerBox(sc);
+      ensurePage();
       renderTree();
       renderTabs();
       renderPage();
@@ -527,9 +590,15 @@ export function buildOptionsScript(data: BuildOptionsData, embedded: boolean): s
       if (sel) sel.addEventListener('change', function () {
         collectPage();
         sc.compilerId = sel.value;
-        selected = { linker: -1, dir: -1, vars: -1 };
+        resetSelection();
         render();
       });
+      var note = document.getElementById('bo-compiler-note');
+      if (note) {
+        var missing = isCompilerMissing();
+        note.style.display = missing ? '' : 'none';
+        note.textContent = missing ? L.compilerNotFound : '';
+      }
     }
     function renderTree() {
       var html = '<div class="bo-node' + (isProject() ? ' selected' : '') + '" data-scope="project" title="' + esc(DATA.projectTitle) + '">' +
@@ -545,7 +614,7 @@ export function buildOptionsScript(data: BuildOptionsData, embedded: boolean): s
         n.addEventListener('click', function () {
           collectPage();
           scopeKey = n.getAttribute('data-scope');
-          selected = { linker: -1, dir: -1, vars: -1 };
+          resetSelection();
           render();
         });
       });
@@ -553,14 +622,19 @@ export function buildOptionsScript(data: BuildOptionsData, embedded: boolean): s
     function renderTabs() {
       var el = q('tabs');
       if (!el) return;
+      var missing = isCompilerMissing();
       el.innerHTML = pageList().map(function (p) {
-        return '<button class="bo-tab' + (page === p[0] ? ' active' : '') + '" data-page="' + p[0] + '">' + esc(p[1]) + '</button>';
+        var dis = pageDisabled(p[0]);
+        var hint = dis ? (missing ? L.compilerNotFound : L.commandsOnlyPage) : '';
+        return '<button class="bo-tab' + (page === p[0] ? ' active' : '') + '" data-page="' + p[0] + '"' +
+          (dis ? ' disabled title="' + esc(hint) + '"' : '') + '>' + esc(p[1]) + '</button>';
       }).join('');
       Array.prototype.forEach.call(el.querySelectorAll('.bo-tab'), function (b) {
         b.addEventListener('click', function () {
+          if (b.disabled) return;
           collectPage();
           page = b.getAttribute('data-page');
-          selected = { linker: -1, dir: -1, vars: -1 };
+          resetSelection();
           render();
         });
       });
@@ -600,19 +674,39 @@ export function buildOptionsScript(data: BuildOptionsData, embedded: boolean): s
     }
     function listHtml(items, selKey) {
       if (!items.length) return '<div class="bo-list"><div class="empty">' + esc(L.noItems) + '</div></div>';
+      var sel = selected[selKey] || [];
       return '<div class="bo-list" id="bo-list-' + selKey + '">' + items.map(function (s, i) {
-        return '<div class="row' + (selected[selKey] === i ? ' selected' : '') + '" data-i="' + i + '"><span class="txt">' + esc(s) + '</span></div>';
+        return '<div class="row' + (sel.indexOf(i) >= 0 ? ' selected' : '') + '" data-i="' + i + '"><span class="txt">' + esc(s) + '</span></div>';
       }).join('') + '</div>';
     }
+    /** 列表多选（对齐 CB 的 wxLB_EXTENDED：Ctrl 切换、Shift 连选；Variables 为单选） */
     function bindList(selKey, items) {
       var el = q('list-' + selKey);
       if (!el) return;
       Array.prototype.forEach.call(el.querySelectorAll('.row'), function (r) {
-        r.addEventListener('click', function () {
-          selected[selKey] = Number(r.getAttribute('data-i'));
+        r.addEventListener('click', function (ev) {
+          var i = Number(r.getAttribute('data-i'));
+          var multi = selKey !== 'vars';
+          var cur = selected[selKey] || (selected[selKey] = []);
+          if (multi && (ev.ctrlKey || ev.metaKey)) {
+            var at = cur.indexOf(i);
+            if (at >= 0) cur.splice(at, 1); else cur.push(i);
+            cur.sort(function (a, b) { return a - b; });
+            anchor[selKey] = i;
+          } else if (multi && ev.shiftKey && anchor[selKey] >= 0) {
+            var lo = Math.min(anchor[selKey], i), hi = Math.max(anchor[selKey], i), range = [];
+            for (var k = lo; k <= hi; k++) range.push(k);
+            selected[selKey] = range;
+          } else {
+            selected[selKey] = [i];
+            anchor[selKey] = i;
+          }
           renderPage();
         });
       });
+    }
+    function selectedIndexes(selKey) {
+      return (selected[selKey] || []).slice().sort(function (a, b) { return a - b; });
     }
     function moveButtons() {
       return '<div class="bo-move-buttons">' +
@@ -623,12 +717,22 @@ export function buildOptionsScript(data: BuildOptionsData, embedded: boolean): s
     function bindMove(selKey, items, onChange) {
       Array.prototype.forEach.call(q('page').querySelectorAll('.bo-move-buttons button'), function (b) {
         b.addEventListener('click', function () {
-          var idx = selected[selKey];
+          var sels = selectedIndexes(selKey);
+          if (!sels.length) return;
           if (b.getAttribute('data-move') === 'up') {
-            if (idx > 0) { var t = items[idx - 1]; items[idx - 1] = items[idx]; items[idx] = t; selected[selKey] = idx - 1; onChange(); }
-          } else if (idx >= 0 && idx < items.length - 1) {
-            var t2 = items[idx + 1]; items[idx + 1] = items[idx]; items[idx] = t2; selected[selKey] = idx + 1; onChange();
+            if (sels[0] <= 0) return;
+            sels.forEach(function (n) { var t = items[n - 1]; items[n - 1] = items[n]; items[n] = t; });
+            selected[selKey] = sels.map(function (n) { return n - 1; });
+          } else {
+            if (sels[sels.length - 1] >= items.length - 1) return;
+            for (var i = sels.length - 1; i >= 0; i--) {
+              var n = sels[i], t2 = items[n + 1];
+              items[n + 1] = items[n];
+              items[n] = t2;
+            }
+            selected[selKey] = sels.map(function (x) { return x + 1; });
           }
+          onChange();
         });
       });
     }
@@ -647,13 +751,35 @@ export function buildOptionsScript(data: BuildOptionsData, embedded: boolean): s
       var bar = q('page').querySelector('.bo-actions');
       if (!bar) return;
       function act(name) {
-        var idx = selected[selKey];
-        if (name === 'add') askText(L.add, '', function (v) { if (v) { items.push(v); selected[selKey] = items.length - 1; onChange(); } });
-        else if (name === 'edit') { if (idx >= 0) askText(L.edit, items[idx], function (v) { if (v !== null && v !== undefined) { items[idx] = v; onChange(); } }); }
-        else if (name === 'del') { if (idx >= 0) confirmBox(L.confirmDelete, function () { items.splice(idx, 1); selected[selKey] = Math.min(idx, items.length - 1); onChange(); }); }
-        else if (name === 'clear') { if (items.length) confirmBox(L.confirmDelete, function () { items.length = 0; selected[selKey] = -1; onChange(); }); }
-        else if (name === 'up') { if (idx > 0) { var t = items[idx - 1]; items[idx - 1] = items[idx]; items[idx] = t; selected[selKey] = idx - 1; onChange(); } }
-        else if (name === 'down') { if (idx >= 0 && idx < items.length - 1) { var t2 = items[idx + 1]; items[idx + 1] = items[idx]; items[idx] = t2; selected[selKey] = idx + 1; onChange(); } }
+        var sels = selectedIndexes(selKey);
+        if (name === 'add') askText(L.add, '', function (v) { if (v) { items.push(v); selected[selKey] = [items.length - 1]; anchor[selKey] = items.length - 1; onChange(); } });
+        else if (name === 'edit') {
+          if (sels.length !== 1) return;
+          var idx = sels[0];
+          askText(L.edit, items[idx], function (v) { if (v !== null && v !== undefined) { items[idx] = v; onChange(); } });
+        }
+        else if (name === 'del') {
+          if (!sels.length) return;
+          confirmBox(L.confirmDelete, function () {
+            for (var i = sels.length - 1; i >= 0; i--) items.splice(sels[i], 1);
+            selected[selKey] = [];
+            anchor[selKey] = -1;
+            onChange();
+          });
+        }
+        else if (name === 'clear') { if (items.length) confirmBox(L.confirmDelete, function () { items.length = 0; selected[selKey] = []; anchor[selKey] = -1; onChange(); }); }
+        else if (name === 'up') {
+          if (!sels.length || sels[0] <= 0) return;
+          sels.forEach(function (n) { var t = items[n - 1]; items[n - 1] = items[n]; items[n] = t; });
+          selected[selKey] = sels.map(function (n) { return n - 1; });
+          onChange();
+        }
+        else if (name === 'down') {
+          if (!sels.length || sels[sels.length - 1] >= items.length - 1) return;
+          for (var i = sels.length - 1; i >= 0; i--) { var n = sels[i], t2 = items[n + 1]; items[n + 1] = items[n]; items[n] = t2; }
+          selected[selKey] = sels.map(function (n) { return n + 1; });
+          onChange();
+        }
       }
       Array.prototype.forEach.call(bar.querySelectorAll('button'), function (b) {
         b.addEventListener('click', function () { act(b.getAttribute('data-act')); });
@@ -760,22 +886,25 @@ export function buildOptionsScript(data: BuildOptionsData, embedded: boolean): s
     function refreshActionState(selKey, items) {
       var pageEl = q('page');
       if (!pageEl) return;
-      var idx = selected[selKey];
-      var has = idx >= 0 && idx < items.length;
+      var sels = selectedIndexes(selKey);
+      var has = sels.length > 0;
       ['edit', 'del', 'clear'].forEach(function (name) {
         var b = pageEl.querySelector('.bo-actions button[data-act=' + name + ']');
-        if (b) b.disabled = name === 'clear' ? !items.length : !has;
+        if (b) b.disabled = name === 'clear' ? !items.length : (name === 'edit' ? sels.length !== 1 : !has);
       });
+      // CB UpdateUIListBoxAndButtons：Copy 需要选中项
       var copy = pageEl.querySelector('button[data-act=copy]');
-      if (copy) copy.disabled = !items.length;
-      [['up', !has || idx <= 0], ['down', !has || idx >= items.length - 1]].forEach(function (pair) {
+      if (copy) copy.disabled = !has;
+      var upDis = !has || sels[0] <= 0;
+      var downDis = !has || sels[sels.length - 1] >= items.length - 1;
+      [['up', upDis], ['down', downDis]].forEach(function (pair) {
         var b = pageEl.querySelector('.bo-actions button[data-act=' + pair[0] + ']');
         if (b) b.disabled = pair[1];
       });
       var mv = pageEl.querySelectorAll('.bo-move-buttons button');
       if (mv.length === 2) {
-        mv[0].disabled = !has || idx <= 0;
-        mv[1].disabled = !has || idx >= items.length - 1;
+        mv[0].disabled = upDis;
+        mv[1].disabled = downDis;
       }
     }
     function showMenu(x, y, items) {
@@ -839,8 +968,17 @@ export function buildOptionsScript(data: BuildOptionsData, embedded: boolean): s
       else if (page === 'extras') renderExtras(el);
       else if (page === 'vars') renderVars(el);
       else if (page === 'make') renderMake(el);
+      else if (page === 'extension') renderExtension(el);
       var nextList = el.querySelector('.bo-flag-list');
       if (nextList) nextList.scrollTop = flagsScroll;
+      applyPageDisabled(el);
+    }
+    /** 编译器未安装：CB 会禁用整本 notebook（:395-396），这里禁用当前页全部可编辑控件 */
+    function applyPageDisabled(el) {
+      var dis = isCompilerMissing();
+      if (el) el.classList.toggle('is-disabled', dis);
+      if (!dis || !el) return;
+      Array.prototype.forEach.call(el.querySelectorAll('input, select, textarea, button'), function (c) { c.disabled = true; });
     }
     function renderCompiler(el) {
       var sc = current();
@@ -983,7 +1121,7 @@ export function buildOptionsScript(data: BuildOptionsData, embedded: boolean): s
       var copyBtn = q('page').querySelector('[data-act=copy]');
       if (copyBtn) {
         copyBtn.onclick = function () {
-          var items = sc.linkLibs.slice();
+          var items = selectedIndexes('linker').map(function (i) { return sc.linkLibs[i]; }).filter(function (s) { return !!s; });
           if (!items.length) return;
           askTargets(L.selectTargets, function (idxs) {
             idxs.forEach(function (i) { copyEntries(i === -1 ? DATA.project : DATA.targets[i], 'linkLibs', items); });
@@ -1012,7 +1150,7 @@ export function buildOptionsScript(data: BuildOptionsData, embedded: boolean): s
         actions('dir', L.copyTo, { hideMove: true }) +
         '</div></section>';
       Array.prototype.forEach.call(el.querySelectorAll('[data-subtab]'), function (b) {
-        b.addEventListener('click', function () { collectPage(); dirTab = b.getAttribute('data-sub'); selected.dir = -1; renderPage(); });
+        b.addEventListener('click', function () { collectPage(); dirTab = b.getAttribute('data-sub'); selected.dir = []; anchor.dir = -1; renderPage(); });
       });
       var pol = q('pol-dir');
       if (pol) pol.addEventListener('change', function () {
@@ -1025,7 +1163,7 @@ export function buildOptionsScript(data: BuildOptionsData, embedded: boolean): s
       var copyBtn = q('page').querySelector('[data-act=copy]');
       if (copyBtn) {
         copyBtn.onclick = function () {
-          var items = arr.slice(); if (!items.length) return;
+          var items = selectedIndexes('dir').map(function (i) { return arr[i]; }).filter(function (s) { return !!s; }); if (!items.length) return;
           askTargets(L.selectTargets, function (idxs) {
             idxs.forEach(function (i) { copyEntries(i === -1 ? DATA.project : DATA.targets[i], field, items); });
             renderPage();
@@ -1046,12 +1184,20 @@ export function buildOptionsScript(data: BuildOptionsData, embedded: boolean): s
     function renderVars(el) {
       var sc = current();
       var items = sc.envVars.map(function (v) { return v.name + ' = ' + v.value; });
+      var cvars = (DATA.customVariables || []).map(function (v) { return v.name + '=' + v.value; }).join('\\n');
       el.innerHTML = '<section class="bo-card"><div class="bo-card-body">' +
         '<div class="bo-field-label">' + esc(L.variables) + '</div>' +
         '<div class="bo-vars-list">' + listHtml(items, 'vars') + '</div>' +
         '<div class="bo-red-note bo-preline">' + esc(L.varsHint) + '</div>' +
         actions('vars', '', { hideMove: true }) +
-        '</div></section>';
+        '</div></section>' +
+        // 项目自定义变量：原先在 Properties「高级（扩展）」里，CB 属性对话框无此控件
+        (isProject() ? '<section class="bo-card"><div class="bo-card-body">' +
+          '<div class="bo-field-label">' + esc(L.projectCustomVars) + '</div>' +
+          '<textarea id="bo-customvars">' + esc(cvars) + '</textarea>' +
+          '</div></section>' : '');
+      var cv = q('customvars');
+      if (cv) cv.addEventListener('change', function () { collectPage(); });
       bindList('vars', items);
       bindActions('vars', items, function () {
         sc.envVars = items.map(function (s) {
@@ -1062,7 +1208,32 @@ export function buildOptionsScript(data: BuildOptionsData, embedded: boolean): s
       });
       refreshActionState('vars', items);
     }
-    /* ---- Make 命令：Silent build 派生值 / Dist-clean 只读 ---- */
+    /* ---- 扩展字段（Code::Blocks project_options 无此页）：按目标存放 ---- */
+    function renderExtension(el) {
+      if (isProject()) {
+        el.innerHTML = '<section class="bo-card"><div class="bo-card-body">' +
+          '<div class="bo-red-note">' + esc(L.extensionProjectHint) + '</div>' +
+          '</div></section>';
+        return;
+      }
+      var sc = current();
+      el.innerHTML = '<section class="bo-card"><div class="bo-card-body">' +
+        '<div class="bo-field-label">' + esc(L.depsOutput) + '</div>' +
+        '<input type="text" id="bo-ext-depsout" value="' + esc(sc.depsOutput || '') + '">' +
+        '<div class="bo-field-label">' + esc(L.hostApplication) + '</div>' +
+        '<input type="text" id="bo-ext-host" value="' + esc(sc.hostApplication || '') + '">' +
+        '<label class="bo-check"><input type="checkbox" id="bo-ext-hostterm"' + (sc.runHostApplicationInTerminal !== false ? ' checked' : '') + '><span>' + esc(L.hostInTerminal) + '</span></label>' +
+        '<div class="bo-field-label">' + esc(L.externalDeps) + '</div>' +
+        '<textarea id="bo-ext-extdeps">' + esc((sc.externalDeps || []).join('\\n')) + '</textarea>' +
+        '<div class="bo-field-label">' + esc(L.additionalOutput) + '</div>' +
+        '<textarea id="bo-ext-addout">' + esc((sc.additionalOutput || []).join('\\n')) + '</textarea>' +
+        '<div class="bo-red-note">' + esc(L.extensionHint) + '</div>' +
+        '</div></section>';
+      ['ext-depsout', 'ext-host', 'ext-hostterm', 'ext-extdeps', 'ext-addout'].forEach(function (id) {
+        var x = q(id); if (x) x.addEventListener('change', function () { collectPage(); });
+      });
+    }
+    /* ---- Make 命令：六行对齐 CB；Dist-clean 可编辑，Silent build 为派生只读 ---- */
     function derivedSilent(sc) {
       var build = (sc && sc.makeCommands && sc.makeCommands.build) || '';
       if (build) return build + ' > $(CMD_NULL)';
@@ -1083,7 +1254,8 @@ export function buildOptionsScript(data: BuildOptionsData, embedded: boolean): s
       applyDerivedSilent();
       var out = q('mk-silent');
       if (out) out.value = derivedSilent(sc);
-    }    function renderMake(el) {
+    }
+    function renderMake(el) {
       var sc = current();
       var dis = DATA.makefileIsCustom ? '' : ' disabled';
       var m = sc.makeCommands || {};
@@ -1093,39 +1265,23 @@ export function buildOptionsScript(data: BuildOptionsData, embedded: boolean): s
       function derivedRow(id, label, val, hint) {
         return '<label for="bo-' + id + '">' + esc(label) + '</label><input type="text" id="bo-' + id + '" class="bo-derived-input" value="' + esc(val || '') + '" readonly tabindex="-1" aria-readonly="true" title="' + esc(hint) + '">';
       }
-      var derived = derivedSilent(sc);
-      var customDist = !!m.distClean && String(m.distClean).trim() !== DIST_CLEAN_DEFAULT;
-      var showMore = !!derived || customDist;
       el.innerHTML = '<div class="bo-red-note" style="margin-top:0">' + esc(L.makeHint) + '</div>' +
         '<section class="bo-card"><div class="bo-card-body">' +
           '<div class="bo-label-grid">' +
             row('mk-build', L.buildTarget, m.build) +
             row('mk-compile', L.compileSingle, m.compileFile) +
             row('mk-clean', L.cleanTarget, m.clean) +
+            row('mk-dist', L.distCleanTarget, m.distClean) +
             row('mk-ask', L.askRebuild, m.askRebuildNeeded) +
+            derivedRow('mk-silent', L.silentBuild, derivedSilent(sc), L.silentBuildHint) +
           '</div>' +
-          (showMore
-            ? '<details class="bo-more"><summary>' + esc(L.moreCommands) + '</summary><div class="bo-label-grid">' +
-                (derived ? derivedRow('mk-silent', L.silentBuild, derived, L.silentBuildHint) : '') +
-                (customDist ? derivedRow('mk-dist', L.distCleanTarget, m.distClean, L.distCleanHint) : '') +
-              '</div>' +
-              (derived ? '<div class="bo-hint bo-more-hint">' + esc(L.silentBuildHint) + '</div>' : '') +
-              (customDist ? '<div class="bo-hint bo-more-hint">' + esc(L.distCleanHint) + '</div>' : '') +
-              '</details>'
-            : '') +
         '</div></section>' +
         '<div class="bo-red-note">' + esc(L.knownVars) + '</div>';
-      ['mk-build', 'mk-compile', 'mk-clean', 'mk-ask'].forEach(function (id) {
+      ['mk-build', 'mk-compile', 'mk-clean', 'mk-dist', 'mk-ask'].forEach(function (id) {
         var x = q(id); if (x) x.addEventListener('change', function () { collectPage(); });
       });
       var build = q('mk-build');
-      if (build) {
-        build.addEventListener('input', function () { refreshDerivedSilent(); });
-        build.addEventListener('change', function () {
-          // Build 从空变为非空（或相反）时，「更多命令」需要出现/消失
-          if (!!document.querySelector('#bo-page details') !== !!build.value.trim()) renderPage();
-        });
-      }
+      if (build) build.addEventListener('input', function () { refreshDerivedSilent(); });
     }
     function collectPage() {
       if (page === 'compiler') collectCompilerPage();
@@ -1143,9 +1299,28 @@ export function buildOptionsScript(data: BuildOptionsData, embedded: boolean): s
         fill('build', 'mk-build');
         fill('compileFile', 'mk-compile');
         fill('clean', 'mk-clean');
+        fill('distClean', 'mk-dist');
         fill('askRebuildNeeded', 'mk-ask');
-        // Silent build 为派生值（对齐 CB 保存规则）；Dist-clean 只读展示，保留原值
+        // Silent build 为派生值（对齐 CB 保存规则），不读取输入
         applyDerivedSilent();
+      } else if (page === 'vars') {
+        var cv = q('customvars');
+        if (cv && isProject()) {
+          DATA.customVariables = cv.value.split('\\n').map(function (s) { return s.trim(); }).filter(Boolean).map(function (s) {
+            var i = s.indexOf('=');
+            return i < 0 ? { name: s, value: '' } : { name: s.slice(0, i).trim(), value: s.slice(i + 1).trim() };
+          }).filter(function (v) { return v.name; });
+        }
+      } else if (page === 'extension' && !isProject()) {
+        var de = q('ext-depsout'); if (de) sc.depsOutput = de.value.trim();
+        var ha = q('ext-host'); if (ha) sc.hostApplication = ha.value.trim();
+        var ht = q('ext-hostterm'); if (ht) sc.runHostApplicationInTerminal = ht.checked;
+        var lines = function (id) {
+          var el = q(id);
+          return el ? el.value.split('\\n').map(function (s) { return s.trim(); }).filter(Boolean) : [];
+        };
+        if (q('ext-extdeps')) sc.externalDeps = lines('ext-extdeps');
+        if (q('ext-addout')) sc.additionalOutput = lines('ext-addout');
       }
     }
     function readData() {
@@ -1163,7 +1338,7 @@ export function buildOptionsScript(data: BuildOptionsData, embedded: boolean): s
     function restoreSaved() {
       confirmBox(L.restore, function () {
         DATA = clone(BASE);
-        selected = { linker: -1, dir: -1, vars: -1 };
+        resetSelection();
         if (scopeKey !== 'project' && !DATA.targets[Number(scopeKey)]) scopeKey = 'project';
         render();
         status(L.restoreDone);
@@ -1182,7 +1357,7 @@ export function buildOptionsScript(data: BuildOptionsData, embedded: boolean): s
         if (data) { DATA = clone(data); BASE = clone(data); }
         scopeKey = scope == null ? 'project' : String(scope);
         page = 'compiler'; dirTab = 'compiler'; compilerTab = 'flags';
-        selected = { linker: -1, dir: -1, vars: -1 };
+        resetSelection();
         render(); showOverlay();
       },
       close: function () { collectPage(); hideOverlay(); },
