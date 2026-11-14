@@ -203,10 +203,24 @@ check('3.2 CLI --check 退出 0 且摘要为「N pass, 0 fail」（N = 自动发
   cli.status === 0 && !!cliSummary && Number(cliSummary[1]) === probes.length && cliSummary[2] === '0',
   { status: cli.status, summary: cliSummary && cliSummary[0] }, `exit=0, ${probes.length} pass, 0 fail`);
 
+// 目录子集筛选：期望值按该目录下实际探针数动态计算（新增 fixture 不必改断言）
+function countCbpUnder(relDir) {
+  let n = 0;
+  const walk = (d) => {
+    for (const e of fs.readdirSync(d, { withFileTypes: true })) {
+      const p = path.join(d, e.name);
+      if (e.isDirectory()) walk(p);
+      else if (e.name.endsWith('.cbp')) n++;
+    }
+  };
+  walk(path.join(ROOT, relDir));
+  return n;
+}
+const cliDirProbes = countCbpUnder('tests/visual/fixtures');
 const cliDir = spawnSync(process.execPath, [path.join('tests', 'test-writer.js'), '--check', 'tests/visual/fixtures'], { cwd: ROOT, encoding: 'utf8', timeout: 60000 });
 const cliDirOut = `${cliDir.stdout || ''}${cliDir.stderr || ''}`;
 check('3.3 CLI --check <目录> 只跑该目录探针（子集筛选生效）',
-  cliDir.status === 0 && /1 pass, 0 fail/.test(cliDirOut), cliDirOut.trim().split('\n').pop(), '1 pass, 0 fail');
+  cliDir.status === 0 && new RegExp(`${cliDirProbes} pass, 0 fail`).test(cliDirOut), cliDirOut.trim().split('\n').pop(), `${cliDirProbes} pass, 0 fail`);
 
 const cliManual = spawnSync(process.execPath, [path.join('tests', 'test-writer.js'), 'test-project/hello-cb.cbp'], { cwd: ROOT, encoding: 'utf8', timeout: 60000 });
 const cliManualOut = `${cliManual.stdout || ''}${cliManual.stderr || ''}`;

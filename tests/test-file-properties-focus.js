@@ -20,7 +20,7 @@ check('focusFile 以 JSON 注入模板（缺省为 null）',
   /const focusFileJs = JSON\.stringify\(this\.focusFile \?\? null\)/.test(dist)
   && /let focusFile = \$\{focusFileJs\};/.test(dist), 'focusFileJs', '存在');
 
-// ---- 2. 注入行为：定位块（选中 → 打开文件属性模态 → 滚入可视区） ----
+// ---- 2. 注入行为：定位块（选中 → 打开文件属性模态） ----
 const focusAt = dist.indexOf('if (focusFile) {');
 const focusBlock = focusAt >= 0 ? dist.slice(focusAt, dist.indexOf('switchTab(activeTab);', focusAt)) : '';
 check('携带文件时定位块选中该行并打开文件属性模态',
@@ -30,11 +30,12 @@ check('携带文件时定位块选中该行并打开文件属性模态',
   focusBlock || '无定位块', 'selectedFile + openFileModal');
 const modalAt = dist.indexOf('function openFileModal(index) {');
 const modalBlock = modalAt >= 0 ? dist.slice(modalAt, dist.indexOf('\n    }', modalAt)) : '';
-check('打开模态后把选中行滚入可视区',
-  modalBlock.includes("document.querySelector('#flist .item.selected')")
-  && modalBlock.includes("scrollIntoView({ block: 'nearest' })")
-  && modalBlock.indexOf("style.display = 'flex'") < modalBlock.indexOf('scrollIntoView'),
-  modalBlock || '无 openFileModal', 'scrollIntoView');
+check('打开模态：快照 + 回到 General 页 + 渲染标题/表单',
+  modalBlock.includes('fileSnapshot = JSON.stringify(files[selectedFile])')
+  && modalBlock.includes("fileTab = 'general'")
+  && modalBlock.includes('renderFileTabs(); renderFileForm();')
+  && modalBlock.indexOf("style.display = 'flex'") > modalBlock.indexOf('renderFileForm()'),
+  modalBlock || '无 openFileModal', '快照 + General');
 
 // ---- 3. 定位顺序：先选中渲染，再切 tab（switchTab 内会再 renderFileForm） ----
 const switchAt = dist.indexOf('switchTab(activeTab);');
