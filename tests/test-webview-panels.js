@@ -144,6 +144,10 @@ function fnBody(script, name) {
   check('工程属性：列表列有下限、表单列可收缩（minmax）',
     /minmax\(200px,\s*260px\)/.test(layout) && /minmax\(0,\s*1fr\)/.test(layout), layout);
   check('工程属性：窄面板改为上下堆叠（媒体查询）', /@media\s*\(max-width:\s*760px\)/.test(css), null);
+  // C/C++ parser options 的 Add/Edit/Remove 必须左对齐（CB 按钮行紧跟列表左侧，不居中）
+  check('工程属性：C/C++ parser 按钮行左对齐（.plain-actions.left）',
+    /\.plain-actions\.left\s*\{[^}]*justify-content:\s*flex-start/.test(css) &&
+    /<div class="plain-actions left">[\s\S]{0,200}?id="parser-add"/.test(html), ruleBody(css, '.plain-actions.left'));
 
   const save = fnBody(script, 'doSave') || '';
   check('工程属性：保存前收集异常不再逃逸（try/catch）', /try\s*\{/.test(save) && /catch\s*\(/.test(save), save.slice(0, 120));
@@ -156,7 +160,7 @@ function fnBody(script, name) {
   check('工程属性：虚拟目标表单未渲染时跳过收集',
     /document\.getElementById\('vt-alias'\)/.test(vBody) && /if \(!\w+/.test(vBody), vBody.slice(0, 120));
   check('工程属性：目标表单未渲染时跳过收集',
-    /if \(!targets\.length \|\| !document\.getElementById\('f-title'\)\) return;/.test(tBody), tBody.slice(0, 150));
+    /if \(!targets\.length \|\| !document\.getElementById\('f-type'\)\) return;/.test(tBody), tBody.slice(0, 150));
   // 目标被删除后各目标级 tab 的作用域索引可能失效：collect 必须能跳过而不是抛错（否则整次保存失败）
   for (const name of ['collectOptionsForm', 'collectDirsForm']) {
     const body = fnBody(script, name) || '';
@@ -171,7 +175,7 @@ function fnBody(script, name) {
     /if \(!document\.getElementById\('dbg-conn'\)\) return;/.test(dbgBody) && !/dbg\.searchPaths = optionsLines\(/.test(dbgBody), dbgBody.slice(0, 240));
   // 调试器远程配置按目标标题索引：改名/删除目标时必须同步，否则保存出孤儿 <remote_debugging target="…"> 节点
   check('工程属性：目标改名同步调试器远程配置',
-    /dbg\.remote\.forEach\(r => \{ if \(r\.target === oldTitle\) r\.target = newTitle; \}\)/.test(script), null);
+    /dbg\.remote\.forEach\(r => \{ if \(r\.target === oldTitle\) r\.target = title; \}\)/.test(script), null);
   check('工程属性：目标删除清掉调试器远程配置',
     /dbg\.remote = dbg\.remote\.filter\(r => r\.target !== removedTitle\)/.test(script), null);
   // VS Code WebView 的 iframe 沙箱不含 allow-modals：window.prompt/confirm 静默失效，必须用面板内模态
@@ -182,6 +186,47 @@ function fnBody(script, name) {
     /function askText\(/.test(script) && /function confirmBox\(/.test(script), null);
   check('工程属性：还原设置使用 confirmBox 确认',
     /confirmBox\('/.test(fnBody(script, 'restoreSettings') || ''), fnBody(script, 'restoreSettings'));
+  // 对齐 CB project_options.xrc：两个页面都没有「高级（扩展）」分组，扩展字段改由 Build options 编辑
+  check('工程属性：Project settings / Build targets 不再内嵌「高级（扩展）」',
+    !/i18n\.tr\('高级（扩展）'\)/.test(script) && !/set-compiler|set-vfolders|set-vars|f-title|f-params|f-extdeps|f-addout|f-envvars/.test(script), null);
+  check('工程属性：目标表单守卫改用 f-type（重命名改由左栏按钮）',
+    /document\.getElementById\('f-type'\)\) return;/.test(fnBody(script, 'collectTargetForm') || ''), null);
+  // CB 默认值：未配置时显示默认值，未改动则写回空串（不污染 .cbp）
+  check('工程属性：CB 默认值常量（Makefile / 工作目录 / 导入库宏）',
+    /DEFAULT_MAKEFILE = 'Makefile'/.test(script) && /DEFAULT_WORKDIR = '\.'/.test(script)
+    && /DEFAULT_LIB_EXPR = '\$\(TARGET_OUTPUT_DIR\)\$\(TARGET_OUTPUT_BASENAME\)'/.test(script)
+    && /DEFAULT_EXEC_DIR = data\.basePath/.test(script), null);
+  check('工程属性：Makefile / 执行目录按默认值渲染',
+    /projSettings\.makefile \|\| DEFAULT_MAKEFILE/.test(script) && /projSettings\.executionDir \|\| DEFAULT_EXEC_DIR/.test(script), null);
+  check('工程属性：Makefile / 执行目录未改动时写回空串',
+    /mk === DEFAULT_MAKEFILE \? '' : mk/.test(script) && /execDir === DEFAULT_EXEC_DIR \? '' : execDir/.test(script), null);
+  check('工程属性：导入库 / 定义文件 / 工作目录按 CB 默认值渲染',
+    /t\.impLib \|\| DEFAULT_LIB_EXPR/.test(script) && /t\.defFile \|\| DEFAULT_LIB_EXPR/.test(script)
+    && /t\.workingDir \|\| DEFAULT_WORKDIR/.test(script), null);
+  check('工程属性：导入库 / 定义文件 / 工作目录未改动时写回空串',
+    /impLib === DEFAULT_LIB_EXPR \? '' : impLib/.test(script) && /defFile === DEFAULT_LIB_EXPR \? '' : defFile/.test(script)
+    && /workdir === DEFAULT_WORKDIR \? '' : workdir/.test(script), null);
+  check('工程属性：payload 带 basePath（执行目录默认值）', /basePath: this\.project\.basePath/.test(propsDist), null);
+  // Debugger：CB notebook 页签 + 两列远程字段 + Baud 可编辑下拉
+  check('工程属性：Debugger 使用 CB notebook 页签（.dbg-tabs/.dbg-page）',
+    /class="dbg-tabs"/.test(script) && /class="dbg-page"/.test(script) && /\.dbg-tab\.active/.test(css), null);
+  check('工程属性：Debugger 远程字段两列（.dbg-grid）+ 短字段（波特率/端口）',
+    /class="dbg-grid"/.test(script) && /class="short"/.test(script)
+    && /\.dbg-grid > label\.short > input \{ width: 120px/.test(css), null);
+  check('工程属性：Baud 为可编辑下拉（datalist）',
+    /list="dbg-baud-list"/.test(script) && /id="dbg-baud-list"/.test(script) && /<option value="115200">/.test(script), null);
+  check('工程属性：Debugger 选择目标标签 + 窄列表',
+    /dbg-scope-grid/.test(script) && /id="dbg-scope-list"/.test(script) && /\.dbg-scope-grid \{/.test(css), null);
+  check('工程属性：目标文件列表限高、工具栏常驻',
+    /#tflist \{ flex: 1 1 auto; min-height: 100px; max-height: 120px; \}/.test(css)
+    && /\.targets-column > \.card:last-child \{ flex: 1;/.test(css), null);
+  check('工程属性：Build targets 左列等高、创建工程按钮贴底',
+    /\.targets-layout > \.card > \.card-body \{ flex: 1;/.test(css) && /btn-spacer/.test(html), null);
+  check('工程属性：targets 页不再画分隔线（.cb-sep 已移除）', !/cb-sep/.test(script) && !/\.cb-sep/.test(css), null);
+  check('工程属性：Auto-generate 位于 Execution working dir 之前',
+    script.indexOf("id=\"f-prefix\"") < script.indexOf("id=\"f-workdir\"")
+    && script.indexOf("id=\"f-deffile\"") < script.indexOf("id=\"f-prefix\""), null);
+  check('工程属性：组标题不再显示计数徽标', !/id="target-count"/.test(script) && !/id="file-count"/.test(script), null);
 }
 
 // 编译选项（Build options）：共享视图 = CSS + HTML 片段 + 内联脚本（0.8.150 起重写为 Code::Blocks 对齐版）
@@ -230,6 +275,22 @@ function fnBody(script, name) {
       /\.bo-tabs \{[^}]*overflow-x:\s*auto/.test(cssTpl), null);
     check('编译选项：只读派生输入有独立样式（.bo-derived-input）', /\.bo-derived-input\s*\{/.test(cssTpl), null);
   }
+
+  // 扩展字段（原 Properties「高级（扩展）」）：目标作用域新增「扩展」页 + 项目自定义变量并入「自定义变量」页
+  check('编译选项：扩展页仅在目标作用域出现（pageList）',
+    /if \(!isProject\(\)\) pages\.push\(\['extension', L\.extensionTab\]\);/.test(dist), null);
+  check('编译选项：扩展页渲染字段（deps 输出/宿主程序/外部依赖/附加输出）',
+    /renderExtension\(el\)/.test(dist) && /bo-ext-depsout/.test(dist) && /bo-ext-host/.test(dist)
+    && /bo-ext-extdeps/.test(dist) && /bo-ext-addout/.test(dist), null);
+  check('编译选项：扩展页收集写回当前作用域',
+    /page === 'extension' && !isProject\(\)/.test(dist) && /sc\.depsOutput = de\.value\.trim\(\)/.test(dist)
+    && /sc\.externalDeps = lines\('ext-extdeps'\)/.test(dist), null);
+  check('编译选项：切到工程作用域时扩展页回落到编译器设置',
+    /function ensurePage\(\)/.test(dist)
+    && /page = ids\.indexOf\('compiler'\) >= 0 \? 'compiler' : ids\[0\];/.test(dist), null);
+  check('编译选项：自定义变量页含项目自定义变量（仅工程作用域）',
+    /bo-customvars/.test(dist) && /isProject\(\) \? '<section class="bo-card">/.test(dist)
+    && /DATA\.customVariables = cv\.value\.split/.test(dist), null);
 }
 
 {

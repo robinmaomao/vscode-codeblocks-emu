@@ -298,7 +298,16 @@ code --extensionDevelopmentPath="." --disable-extensions --new-window
 - Webview 按 Category 分组展示 `options_<id>.xml` 中的 `<Option>`，勾选后写回项目 / 目标编译选项。
 - 「应用」**立即写回 `.cbp`**（Code::Blocks 是"改内存 + 保存工程"，本扩展没有工程"已修改"状态，故直接落盘，重开工程不丢）；
   仅管理 XML 里列出的选项，**手写在工程属性页的自定义选项（如 `-pipe`）会原样保留**；写盘失败会在面板状态区显示原因。
-- 工程属性面板（`Properties…`）版式对齐 CB `ProjectOptionsDlg`：顶部 `目标：` 选择器 + 6 个页签（项目设置 / 构建目标 / 构建脚本 / 备注 / C/C++ 解析器选项 / 调试器），底部左侧为 `保存 | 保存并关闭 | 还原设置`（还原 = 丢弃未保存修改，回到上次保存值）。构建目标页左列是目标列表 + 竖排按钮（添加/重命名/复制/删除/↑/↓，以及虚拟目标…/依赖…/重排…/构建选项…/从目标创建工程…），右列是「所选构建目标选项」表单，其下为「构建目标文件」列表（对齐 CB 右栏上下两个静态框），扩展字段收在「**高级（扩展）**」分组（目标标题 / 编译器 ID / 执行参数 / deps 输出目录 / 宿主程序 / console runner / 外部依赖 / 附加输出 / 目标环境变量）；项目设置页按 CB 顺序排列 Title / Platforms / Filename / Makefile（含两条红色提示）/ Execution directory，另有预编译头单选组、构建页复选框与右下角「工程的依赖…」「工程的构建选项…」，扩展字段（默认编译器 ID / 虚拟文件夹 / 项目自定义变量）收在「**高级（扩展）**」分组。
+- 工程属性面板（`Properties…`）版式对齐 CB `ProjectOptionsDlg`：顶部 `目标：` 选择器 + 6 个页签（项目设置 / 构建目标 / 构建脚本 / 备注 / C/C++ 解析器选项 / 调试器），底部左侧为 `保存 | 保存并关闭 | 还原设置`（还原 = 丢弃未保存修改，回到上次保存值）。构建目标页左列是目标列表 + 竖排按钮（添加/重命名/复制/删除/↑/↓，以及虚拟目标…/依赖…/重排…/构建选项…/从目标创建工程…），右列是「所选构建目标选项」表单，其下为「构建目标文件」列表（对齐 CB 右栏上下两个静态框）；项目设置页按 CB 顺序排列 Title / Platforms / Filename / Makefile（含两条红色提示）/ Execution directory，另有预编译头单选组、构建页复选框与右下角「工程的依赖…」「工程的构建选项…」。**两个页面都不再内嵌「高级（扩展）」分组**（CB `project_options.xrc` 没有该容器），扩展字段改到 CB 对应的入口：编译器在 **Build options → Selected compiler**，项目自定义变量在 **Build options → 自定义变量**（工程作用域），目标环境变量在 **Build options → 自定义变量**（目标作用域），目标扩展字段（deps 输出目录 / 宿主程序 / 外部依赖 / 附加输出）在 **Build options → 扩展**（仅目标作用域），目标标题用左栏「重命名」，执行参数用 `Project → Set programs' arguments…`。
+- **CB 默认值**：Project settings 的 `Makefile` 显示 `Makefile`、`执行目录` 显示工程路径；Build targets 的 `导入库文件名` / `定义文件文件名` 显示 `$(TARGET_OUTPUT_DIR)$(TARGET_OUTPUT_BASENAME)`、`执行工作目录` 显示 `.`。这些默认值只是显示，未改动时保存不会写入 `.cbp`。
+- **控件启用状态（对齐 CB `projectoptionsdlg.cpp`）**：禁用时控件与标签都变灰，规则完全照搬 CB ——
+  - `Makefile` 文本框始终可编辑；`执行目录` 只有勾选「使用自定义 Makefile」后才可编辑，其余 Makefile 相关项（输出/导入库/定义文件名、对象输出目录、构建目标文件列表与其切换/全选/全不选、构建脚本页）在自定义 Makefile 下全部禁用。
+  - `创建导入库` / `创建 .DEF 导出文件` 只在目标类型为 **动态库** 时可勾选；`导入库文件名` / `定义文件文件名` 需「对应复选框已勾选 **且** 动态库」才可编辑。
+  - 目标类型切换：**静态库** 清空导入库/定义文件名；**控制台程序** 之外禁用「执行结束后暂停」；**仅命令** 清空并禁用输出文件名 / 导入库 / 定义文件 / 执行工作目录 / 对象输出目录（CB 行为，原值不保留）。
+  - `删除` / `↑` / `↓`（重排）在目标数 ≤ 1 时禁用；无目标时禁用重命名 / 复制 / 导出 / 构建选项；无选中文件时禁用「选中文件属性」；预编译头选项按工程编译器是否支持 PCH 禁用。
+- **Build options 页签/按钮联动**（对齐 CB `compileroptionsdlg.cpp`）：自定义 Makefile 工程**隐藏** Compiler settings / Linker settings / Search directories 三页（CB 直接 `RemovePage`），默认停在 Pre/post；「Make」命令页保留，输入仅在自定义 Makefile 下可编辑。**Commands only** 目标下 Compiler / Linker / Search / “Make” 四页灰显不可点，进入该目标自动切到 Pre/post，Pre/post 与 Custom variables 仍可编辑。Link libraries 与 Search directories 支持 **Ctrl/Shift 多选**：Edit 仅在恰好选中 1 项时可用，Delete / Copy 需有选中项，Clear 需列表非空，↑/↓ 以选中集合的最小/最大下标判断边界，`Copy selected to...` 只复制**选中**的库/目录。Make 页固定六行（Build / Compile / Clean / Dist-clean / Ask / Silent），Dist-clean 在自定义 Makefile 下可编辑并写回，Silent 为只读派生值（`Build + " > $(CMD_NULL)"`）。工程/目标声明的编译器未安装时选项页整体禁用并红字提示，改选已安装编译器后恢复；工程作用域的 Linker executable 只读（CB 存为目标级属性）。「扩展」页是扩展字段入口，不参与上述 CB 规则。
+- **Build targets 版式**：左列与右列等高、`从目标创建工程…` 贴底；字段顺序为 Output / Import / Definition → `自动生成文件名前缀/扩展名` → 执行工作目录 / 对象输出目录；`构建目标文件` 静态框内列表限高，底部工具栏（切换勾选 / 全部选中 / 全部取消 / 选中文件属性）常驻可见。按钮英文名与 CB 一致（Duplicate / Delete / All? / on / All? / off）。
+- **Debugger 版式**：`附加调试器搜索目录` 大列表 + 右侧竖排按钮；`选择目标` 窄列表 + CB notebook 风格子标签（远程连接 / 附加 GDB 命令 / 附加 shell 命令）；远程连接字段两列（串口 + 波特率、IP 地址 + 端口），波特率为可编辑下拉。
 - 目标列表支持**上移/下移**（调整目标顺序，影响导出与遍历顺序，对齐 CB Re-order）与「**导出为工程**」（把选中目标导出为只包含其文件的独立 `.cbp`，对齐 CB Create project from target；也可从命令面板 / Project 菜单 `Create Project from Target…` 调用）。
 - 「构建脚本」页支持**无构建命令时也执行 post-build**（`Mode after=always`，对齐 CB Pre/post 页选项）；另有运行参数 / 搜索目录 / 虚拟目标等全部页。
 - 面板可用性：**未切到过的 tab 也能正常保存**（保存前按"元素是否存在"跳过未渲染表单）；收集或写盘失败会在顶栏右侧状态区显示原因（不再静默无反应）；窄面板（< 720 px）下左侧列表与右侧表单自动改为上下堆叠，按钮不再逐字换行成竖排。
@@ -312,7 +321,7 @@ code --extensionDevelopmentPath="." --disable-extensions --new-window
 
 ### 7.5 环境变量（对齐 CB Build options → Custom variables）
 
-- **编辑入口**（工程属性面板）：**构建目标页 → 高级（扩展） →「目标环境变量」**（每行 `name=value`）；项目级变量在 **Build options → Custom variables** 页编辑，
+- **编辑入口**：在 **Build options → 自定义变量** 页，左侧选中工程节点编辑项目级变量、选中目标节点编辑目标级变量，
   写回 `.cbp` 的 `<Build><Environment>` / `<Target><Environment>`
   （对齐 Code::Blocks 构建选项对话框的 Custom variables 页）。
 - **用途一·宏展开**：构建/运行命令中的 `$(NAME)` 按「**目标覆盖项目**」展开；宏名查找大小写不敏感

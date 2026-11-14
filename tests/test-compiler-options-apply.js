@@ -122,6 +122,33 @@ async function runPanelCase(c) {
     { project: ['-pipe'], target: ['-g'] });
   c.check('P2 保存成功回发 saved', wv.posted.some((m) => m.type === 'saved'), wv.posted.map((m) => m.type), ['saved']);
 
+  // ---- 扩展字段（原 Properties「高级（扩展）」）：扩展页 + 项目自定义变量随快照保存 ----
+  {
+    const ext = makeData();
+    ext.customVariables = [{ name: 'FOO', value: 'bar' }];
+    ext.targets[0].depsOutput = 'deps/Debug/';
+    ext.targets[0].externalDeps = ['libfoo.a'];
+    ext.targets[0].additionalOutput = ['extra.txt'];
+    ext.targets[0].hostApplication = 'host.exe';
+    ext.targets[0].runHostApplicationInTerminal = false;
+    let extReceived;
+    BuildOptionsPanel.show('app', path.join(ROOT, 'app.cbp'), ext, uri, async (d) => { extReceived = d; });
+    const extWv = lastWebview();
+    extWv.__emit({ type: 'save', data: ext });
+    await sleep(20);
+    c.check('P8 扩展字段随快照保存（deps/外部依赖/附加输出/宿主程序/终端）',
+      !!extReceived
+      && extReceived.targets[0].depsOutput === 'deps/Debug/'
+      && JSON.stringify(extReceived.targets[0].externalDeps) === JSON.stringify(['libfoo.a'])
+      && JSON.stringify(extReceived.targets[0].additionalOutput) === JSON.stringify(['extra.txt'])
+      && extReceived.targets[0].hostApplication === 'host.exe'
+      && extReceived.targets[0].runHostApplicationInTerminal === false,
+      extReceived && extReceived.targets[0]);
+    c.check('P9 项目自定义变量随快照保存',
+      !!extReceived && JSON.stringify(extReceived.customVariables) === JSON.stringify([{ name: 'FOO', value: 'bar' }]),
+      extReceived && extReceived.customVariables);
+  }
+
   // ---- 保存失败 → 回发 error（含原因），且不误报成功 ----
   BuildOptionsPanel.show('app', path.join(ROOT, 'app.cbp'), makeData(), uri, async () => { throw new Error('disk full'); });
   wv = lastWebview();

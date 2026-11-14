@@ -3649,6 +3649,7 @@ function buildOptionsRuntimeFor(project: Project): BuildOptionsRuntime {
     compilerBaseCatalogs,
     compilerFlags,
     defaultCompilerId: vscode.workspace.getConfiguration('codeblocks').get<string>('compilerId', 'gcc'),
+    supportsPch: projectCompiler.switches.supportsPCH !== false,
     defineSwitch: projectCompiler.switches.defines || '-D',
   };
 }
@@ -3702,28 +3703,37 @@ function buildOptionsDataFor(project: Project): BuildOptionsData {
     0,
     { compiler: 3, linker: 3, include: 3, lib: 3, res: 3 },
   );
-  const targets = project.buildTargets.map((t) => boScopeData(
-    t.title,
-    t.compilerId,
-    {
-      compilerOptions: t.compilerOptions,
-      linkerOptions: t.linkerOptions,
-      linkLibs: t.linkLibs,
-      resourceCompilerOptions: t.resourceCompilerOptions,
-    },
-    { includeDirs: t.includeDirs, libDirs: t.libDirs, resourceDirs: t.resourceIncludeDirs },
-    { before: t.commandsBeforeBuild, after: t.commandsAfterBuild, always: t.alwaysRunPostBuildSteps },
-    t.envVars,
-    t.makeCommands,
-    t.linkerExecutable ?? 0,
-    {
-      compiler: t.optionRelations[OptionsRelationType.CompilerOptions],
-      linker: t.optionRelations[OptionsRelationType.LinkerOptions],
-      include: t.optionRelations[OptionsRelationType.IncludeDirs],
-      lib: t.optionRelations[OptionsRelationType.LibDirs],
-      res: t.optionRelations[OptionsRelationType.ResDirs],
-    },
-  ));
+  const targets = project.buildTargets.map((t) => ({
+    ...boScopeData(
+      t.title,
+      t.compilerId,
+      {
+        compilerOptions: t.compilerOptions,
+        linkerOptions: t.linkerOptions,
+        linkLibs: t.linkLibs,
+        resourceCompilerOptions: t.resourceCompilerOptions,
+      },
+      { includeDirs: t.includeDirs, libDirs: t.libDirs, resourceDirs: t.resourceIncludeDirs },
+      { before: t.commandsBeforeBuild, after: t.commandsAfterBuild, always: t.alwaysRunPostBuildSteps },
+      t.envVars,
+      t.makeCommands,
+      t.linkerExecutable ?? 0,
+      {
+        compiler: t.optionRelations[OptionsRelationType.CompilerOptions],
+        linker: t.optionRelations[OptionsRelationType.LinkerOptions],
+        include: t.optionRelations[OptionsRelationType.IncludeDirs],
+        lib: t.optionRelations[OptionsRelationType.LibDirs],
+        res: t.optionRelations[OptionsRelationType.ResDirs],
+      },
+    ),
+    // 扩展字段（CB project_options 无对应控件）：由 Build options 扩展页编辑
+    targetType: t.targetType,
+    depsOutput: t.depsOutput ?? '',
+    externalDeps: [...(t.externalDeps ?? [])],
+    additionalOutput: [...(t.additionalOutput ?? [])],
+    hostApplication: t.hostApplication ?? '',
+    runHostApplicationInTerminal: t.runHostApplicationInTerminal !== false,
+  }));
   const runtime = buildOptionsRuntimeFor(project);
   return {
     projectTitle: project.title,
@@ -3736,6 +3746,7 @@ function buildOptionsDataFor(project: Project): BuildOptionsData {
     compilerBaseCatalogs: runtime.compilerBaseCatalogs,
     compilerFlags: runtime.compilerFlags,
     defaultCompilerId: runtime.defaultCompilerId,
+    customVariables: Object.entries(project.customVariables ?? {}).map(([name, value]) => ({ name, value })),
   };
 }
 
@@ -3761,6 +3772,12 @@ function applyBuildOptionsData(project: Project, data: BuildOptionsData): void {
   project.alwaysRunPostBuildSteps = data.project.alwaysPost === true;
   project.envVars = (data.project.envVars ?? []).filter((v) => v.name).map((v) => ({ name: v.name, value: v.value }));
   project.makeCommands = { ...(data.project.makeCommands ?? {}) };
+  // 项目自定义变量（<Extensions>）：原 Properties「高级（扩展）」，现由 Build options 自定义变量页编辑
+  if (data.customVariables) {
+    project.customVariables = Object.fromEntries(
+      data.customVariables.filter((v) => v.name).map((v) => [v.name, v.value]),
+    );
+  }
   for (const { s, t } of targetPairs) {
     t.compilerId = s.compilerId || t.compilerId;
     t.compilerOptions = [...s.compilerOptions];
@@ -3775,6 +3792,12 @@ function applyBuildOptionsData(project: Project, data: BuildOptionsData): void {
     t.alwaysRunPostBuildSteps = s.alwaysPost === true;
     t.envVars = (s.envVars ?? []).filter((v) => v.name).map((v) => ({ name: v.name, value: v.value }));
     t.makeCommands = { ...(s.makeCommands ?? {}) };
+    // 扩展字段（Build options 扩展页）：只在快照带该字段时覆盖，避免旧数据/测试夹具清空模型
+    if (s.depsOutput !== undefined) t.depsOutput = s.depsOutput;
+    if (s.externalDeps) t.externalDeps = [...s.externalDeps];
+    if (s.additionalOutput) t.additionalOutput = [...s.additionalOutput];
+    if (s.hostApplication !== undefined) t.hostApplication = s.hostApplication;
+    if (s.runHostApplicationInTerminal !== undefined) t.runHostApplicationInTerminal = s.runHostApplicationInTerminal !== false;
     t.linkerExecutable = Number(s.linkerExecutable ?? 0) as LinkerExecutableOption;
     t.optionRelations[OptionsRelationType.CompilerOptions] = s.relations.compiler;
     t.optionRelations[OptionsRelationType.LinkerOptions] = s.relations.linker;

@@ -152,13 +152,13 @@ function buildSurfaces() {
     makefileIsCustom: project.makefileIsCustom === true,
     defineSwitch: compiler.switches.defines || '-D',
     project: boScope(project.title, project, allBoth),
-    targets: project.buildTargets.map((t) => boScope(t.title, t, {
+    targets: project.buildTargets.map((t) => ({ ...boScope(t.title, t, {
       compiler: t.optionRelations[OptionsRelationType.CompilerOptions],
       linker: t.optionRelations[OptionsRelationType.LinkerOptions],
       include: t.optionRelations[OptionsRelationType.IncludeDirs],
       lib: t.optionRelations[OptionsRelationType.LibDirs],
       res: t.optionRelations[OptionsRelationType.ResDirs],
-    })),
+    }), targetType: t.targetType })),
     compilers: [{ id: 'gcc', name: 'GNU GCC Compiler' }],
     compilerCatalogs: { gcc: buildCompilerCatalog('gcc', baseCatalog, stores) },
     compilerBaseCatalogs: { gcc: baseCatalog },
