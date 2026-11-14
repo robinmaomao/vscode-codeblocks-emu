@@ -86,13 +86,13 @@ export interface TargetEditData {
   envVars: CustomVariableEditData[];
   /** R6：运行工作目录（<Option working_dir>，空 = 输出目录；Run/Debug 用） */
   workingDir: string;
-  /** R6：deps 输出目录（<Option deps_output>，默认 .deps） */
+  /** R6：deps 输出目录（<Option deps_output>，默认 .deps；CB 无对话框控件，仅原样保留） */
   depsOutput: string;
   /** R6：目标平台位掩码（<Option platforms>，0xff = 全部） */
   platforms: number;
-  /** R6：宿主程序（<Option host_application>，库/CommandsOnly 目标 Run 用） */
+  /** R6：宿主程序（<Option host_application>，库/CommandsOnly 目标 Run 用；编辑入口 Set Programs' Arguments） */
   hostApplication: string;
-  /** R6：宿主程序在终端运行（<Option run_host_application_in_terminal>，默认 true） */
+  /** R6：宿主程序在终端运行（<Option run_host_application_in_terminal>，CB 默认 false） */
   runHostApplicationInTerminal: boolean;
   /** R6：使用 console runner / 结束暂停（<Option use_console_runner>，默认 true） */
   useConsoleRunner: boolean;
@@ -378,7 +378,7 @@ export class ProjectPropertiesPanel {
       depsOutput: t.depsOutput ?? '',
       platforms: t.platforms,
       hostApplication: t.hostApplication ?? '',
-      runHostApplicationInTerminal: t.runHostApplicationInTerminal !== false,
+      runHostApplicationInTerminal: t.runHostApplicationInTerminal === true,
       useConsoleRunner: t.useConsoleRunner !== false,
       impLib: t.impLib ?? '',
       defFile: t.defFile ?? '',
@@ -540,11 +540,6 @@ export class ProjectPropertiesPanel {
       alwaysPost: t.alwaysRunPostBuildSteps === true,
       envVars: t.envVars.map((v) => ({ name: v.name, value: v.value })),
       makeCommands: { ...(t.makeCommands ?? {}) },
-      depsOutput: t.depsOutput ?? '',
-      externalDeps: [...(t.externalDeps ?? [])],
-      additionalOutput: [...(t.additionalOutput ?? [])],
-      hostApplication: t.hostApplication ?? '',
-      runHostApplicationInTerminal: t.runHostApplicationInTerminal !== false,
     }));
     const initialBoData: BuildOptionsData = {
       projectTitle: this.project.title,
@@ -554,7 +549,6 @@ export class ProjectPropertiesPanel {
       targets: boTargetScopes,
       compilers: boRuntime.compilers,
       compilerCatalogs: boRuntime.compilerCatalogs,
-      customVariables: Object.entries(this.project.customVariables ?? {}).map(([name, value]) => ({ name, value })),
     };
 
     const data = JSON.stringify({
@@ -1269,7 +1263,7 @@ export class ProjectPropertiesPanel {
     document.getElementById('add').addEventListener('click', () => {
       collectTargetForm();
       const n = targets.length + 1;
-      targets.push({ originalTitle: '', title: 'Target' + n, targetType: 1, outputFilename: 'bin/Target' + n + '/app', objectOutput: 'obj/Target' + n + '/', compilerId: data.compilerId || 'gcc', executionParameters: '', externalDeps: [], additionalOutput: [], envVars: [], workingDir: '', depsOutput: '', platforms: 255, hostApplication: '', runHostApplicationInTerminal: true, useConsoleRunner: true, impLib: '', defFile: '', createDefFile: false, createStaticLib: false, prefixAuto: true, extensionAuto: true });
+      targets.push({ originalTitle: '', title: 'Target' + n, targetType: 1, outputFilename: 'bin/Target' + n + '/app', objectOutput: 'obj/Target' + n + '/', compilerId: data.compilerId || 'gcc', executionParameters: '', externalDeps: [], additionalOutput: [], envVars: [], workingDir: '', depsOutput: '', platforms: 255, hostApplication: '', runHostApplicationInTerminal: false, useConsoleRunner: true, impLib: '', defFile: '', createDefFile: false, createStaticLib: false, prefixAuto: true, extensionAuto: true });
       targetOpts.push({ compilerOptions: [], linkerOptions: [], linkLibs: [], resourceCompilerOptions: [], relations: { compiler: 3, linker: 3, include: 3, lib: 3, res: 3 } });
       targetDirs.push({ includeDirs: [], libDirs: [], resourceDirs: [] });
       targetScripts.push({ scripts: [], before: [], after: [], always: false });
@@ -2245,12 +2239,7 @@ export class ProjectPropertiesPanel {
         alwaysPost: !!s.always,
         envVars: (settings.envVars || []).map(v => ({ name: v.name, value: v.value })),
         makeCommands: { ...(settings.makeCommands || {}) },
-        // 扩展字段（CB project_options 无对应控件）：原先在 Properties「高级（扩展）」，现由 Build options 扩展页编辑
-        depsOutput: settings.depsOutput || '',
-        externalDeps: [...(settings.externalDeps || [])],
-        additionalOutput: [...(settings.additionalOutput || [])],
-        hostApplication: settings.hostApplication || '',
-        runHostApplicationInTerminal: settings.runHostApplicationInTerminal !== false
+        targetType: settings.targetType
       };
     }
     function buildOptionsBootstrap() {
@@ -2264,8 +2253,7 @@ export class ProjectPropertiesPanel {
         compilerCatalogs: boRuntime.compilerCatalogs || {},
         compilerBaseCatalogs: boRuntime.compilerBaseCatalogs || {},
         compilerFlags: boRuntime.compilerFlags || {},
-        defaultCompilerId: boRuntime.defaultCompilerId || '',
-        customVariables: (projSettings.customVariables || []).map(v => ({ name: v.name, value: v.value }))
+        defaultCompilerId: boRuntime.defaultCompilerId || ''
       };
     }
     function applyBuildOptions(bo) {
@@ -2283,7 +2271,6 @@ export class ProjectPropertiesPanel {
       projSettings.compilerId = bo.project.compilerId;
       projSettings.envVars = (bo.project.envVars || []).map(v => ({ ...v }));
       projSettings.makeCommands = { ...(bo.project.makeCommands || {}) };
-      if (bo.customVariables) projSettings.customVariables = bo.customVariables.map(v => ({ name: v.name, value: v.value }));
       // 覆盖层里编辑过的编译器参数目录/语言参数要回写到本面板的运行时副本，
       // 否则关闭后重新打开会拿到最初的数据（新增/删除的参数看起来"丢了"）
       if (bo.compilerCatalogs) boRuntime.compilerCatalogs = bo.compilerCatalogs;
@@ -2296,12 +2283,6 @@ export class ProjectPropertiesPanel {
         targets[i].linkerExecutable = t.linkerExecutable;
         targets[i].envVars = (t.envVars || []).map(v => ({ ...v }));
         targets[i].makeCommands = { ...(t.makeCommands || {}) };
-        // 扩展字段（Build options 扩展页 / 自定义变量页）
-        if (t.depsOutput !== undefined) targets[i].depsOutput = t.depsOutput;
-        if (t.externalDeps) targets[i].externalDeps = [...t.externalDeps];
-        if (t.additionalOutput) targets[i].additionalOutput = [...t.additionalOutput];
-        if (t.hostApplication !== undefined) targets[i].hostApplication = t.hostApplication;
-        if (t.runHostApplicationInTerminal !== undefined) targets[i].runHostApplicationInTerminal = t.runHostApplicationInTerminal !== false;
         targetOpts[i].compilerOptions = [...t.compilerOptions];
         targetOpts[i].linkerOptions = [...t.linkerOptions];
         targetOpts[i].linkLibs = [...t.linkLibs];
@@ -2579,7 +2560,7 @@ export class ProjectPropertiesPanel {
         depsOutput: String(t.depsOutput ?? ''),
         platforms: Number.isFinite(Number(t.platforms)) ? Number(t.platforms) : 255,
         hostApplication: String(t.hostApplication ?? ''),
-        runHostApplicationInTerminal: t.runHostApplicationInTerminal !== false,
+        runHostApplicationInTerminal: t.runHostApplicationInTerminal === true,
         useConsoleRunner: t.useConsoleRunner !== false,
         impLib: String(t.impLib ?? ''),
         defFile: String(t.defFile ?? ''),

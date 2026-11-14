@@ -69,10 +69,11 @@ check('扩展：列表支持 Ctrl/Shift 多选',
 check('扩展：Copy 只带选中条目到目标',
   /selectedIndexes\('linker'\)\.map\(function \(i\) \{ return sc\.linkLibs\[i\]; \}\)/.test(view)
   && /selectedIndexes\('dir'\)\.map\(function \(i\) \{ return arr\[i\]; \}\)/.test(view), null);
-check('扩展：Make 页六行且 Dist-clean 可写回',
-  /row\('mk-dist', L\.distCleanTarget, m\.distClean\)/.test(view)
-  && /derivedRow\('mk-silent', L\.silentBuild/.test(view)
-  && /fill\('distClean', 'mk-dist'\)/.test(view), null);
+check('扩展：Make 页四行，Dist-clean / Silent 不渲染但数据保留',
+  /row\('mk-build', L\.buildTarget, m\.build\)/.test(view)
+  && /row\('mk-ask', L\.askRebuild, m\.askRebuildNeeded\)/.test(view)
+  && !/mk-dist/.test(view) && !/mk-silent/.test(view)
+  && /applyDerivedSilent\(\)/.test(view), null);
 check('扩展：编译器未安装时禁用页面控件并提示',
   /function isCompilerMissing\(\)/.test(view) && /applyPageDisabled\(el\)/.test(view)
   && /id="bo-compiler-note"/.test(view), null);

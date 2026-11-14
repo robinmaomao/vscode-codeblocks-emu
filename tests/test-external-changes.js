@@ -64,11 +64,22 @@ async function runPromptCase(c) {
   c.check('A1 启动自动打开工程', /已打开项目/.test(outText(app)), outText(app).slice(-120), '含「已打开项目」');
   c.check('A2 初始目标只有 Debug', JSON.stringify(await targetTitles(app)) === JSON.stringify(['Debug']), await targetTitles(app), ['Debug']);
 
-  // ---------- D. 扩展自己写盘不触发弹窗（单目标：只弹输入框） ----------
+  // ---------- D. 扩展自己写盘不触发弹窗（通过 Set Programs' Arguments 对话框保存） ----------
   const beforeSelf = app.records.warningButtons.length;
-  app.setInputBox('--selftest');
   await app.invoke('codeblocks.setProgramArguments');
   await sleep(50);
+  const runWv = app.mock.webviews[app.mock.webviews.length - 1].webview;
+  runWv.__emit({
+    type: 'save',
+    data: {
+      projectTitle: 'app',
+      commonTopLevelPath: path.dirname(cbp),
+      defaultExecuteTarget: '',
+      activeTarget: 'Debug',
+      targets: [{ title: 'Debug', executionParameters: '--selftest', hostApplication: '', runHostApplicationInTerminal: false }],
+    },
+  });
+  await sleep(150);
   c.check('D1 扩展写盘后 .cbp 已更新', /--selftest/.test(fs.readFileSync(cbp, 'utf-8')), 'written', '含 --selftest');
   app.mock.emitFileEvent('change', cbp);
   await sleep(400);

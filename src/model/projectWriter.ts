@@ -53,7 +53,7 @@ function passthroughProjectOptions(rawProject: unknown): { key: string; value: s
   const handled = new Set([
     'title', 'compiler', 'virtualFolders', 'notes', 'show_notes',
     'platforms', 'pch_mode', 'makefile', 'makefile_is_custom', 'execution_dir', 'extended_obj_names',
-    'check_files',
+    'check_files', 'default_target',
   ]);
   const out: { key: string; value: string }[] = [];
   for (const o of asArray<any>(raw?.Option)) {
@@ -391,6 +391,10 @@ export function serializeProject(project: Project): string {
   }
   if (project.pchMode !== 1) {
     L.push(`\t\t<Option pch_mode="${project.pchMode}" />`);
+  }
+  // 默认执行目标（对齐 CB projectloader.cpp:1506：非空且不等于第一个目标才写）
+  if (project.defaultExecuteTarget && project.defaultExecuteTarget !== (project.buildTargets[0]?.title ?? '')) {
+    L.push(`\t\t<Option default_target="${esc(project.defaultExecuteTarget)}" />`);
   }
   for (const { key, value } of passthroughProjectOptions(project.rawProject)) {
     L.push(`\t\t<Option ${key}="${esc(value)}" />`);

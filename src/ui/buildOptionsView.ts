@@ -40,13 +40,6 @@ export interface BuildOptionsScopeData {
     askRebuildNeeded?: string;
     silentBuild?: string;
   };
-  // ---- 扩展字段（Code::Blocks project_options 对话框无对应控件）----
-  /** 依赖文件输出目录（`.cbp` depsOutput） */
-  depsOutput?: string;
-  externalDeps?: string[];
-  additionalOutput?: string[];
-  hostApplication?: string;
-  runHostApplicationInTerminal?: boolean;
 }
 
 export interface BuildOptionsCompilerOption {
@@ -87,8 +80,6 @@ export interface BuildOptionsData {
   /** 未合并的编译器原始目录（编辑后重新合并用） */
   compilerBaseCatalogs?: Record<string, BuildOptionsCompilerOption[]>;
   compilerFlags?: Record<string, BuildOptionsLanguageFlags>;
-  /** 项目自定义变量（`.cbp` `<Extensions>`；CB 属性对话框无控件，原「高级（扩展）」迁入自定义变量页） */
-  customVariables?: Array<{ name: string; value: string }>;
 }
 
 /** 视图文案（一次性翻译，供内联脚本使用） */
@@ -133,9 +124,7 @@ function labels(): Record<string, string> {
     buildTarget: i18n.t('Build project/target:'),
     compileSingle: i18n.t('Compile single file:'),
     cleanTarget: i18n.t('Clean project/target:'),
-    distCleanTarget: i18n.t('Dist-clean project/target:'),
     askRebuild: i18n.t('Ask if rebuild is needed:'),
-    silentBuild: i18n.t('Silent build:'),
     knownVars: i18n.t('Known variables: $make, $makefile, $target, $file and all macro variables'),
     add: i18n.t('Add'),
     edit: i18n.t('Edit'),
@@ -182,16 +171,6 @@ function labels(): Record<string, string> {
     flagOption: i18n.t('Option'),
     flagCategory: i18n.t('Category'),
     flagRequired: i18n.t('Both name and option are required.'),
-    silentBuildHint: i18n.t('Read-only: Code::Blocks derives it from the build command (Build + " > $(CMD_NULL)") and rewrites it when saving.'),
-    extensionTab: i18n.t('Extensions'),
-    extensionHint: i18n.t('These fields have no control in the Code::Blocks project options dialog; they are stored in the .cbp and used by the build engine.'),
-    extensionProjectHint: i18n.t('Select a build target to edit the extension fields.'),
-    depsOutput: i18n.t('Dependencies output directory:'),
-    externalDeps: i18n.t('External dependencies (one per line)'),
-    additionalOutput: i18n.t('Additional output files (one per line)'),
-    hostApplication: i18n.t('Host application:'),
-    hostInTerminal: i18n.t('Run host application in terminal'),
-    projectCustomVars: i18n.t('Project custom variables (<Extensions>, one name=value per line)'),
   };
 }
 
@@ -528,8 +507,6 @@ export function buildOptionsScript(data: BuildOptionsData, embedded: boolean): s
       if (DATA.makefileIsCustom) {
         pages = pages.filter(function (p) { return p[0] !== 'compiler' && p[0] !== 'linker' && p[0] !== 'dirs'; });
       }
-      // 扩展字段按目标存放（deps 输出目录 / 外部依赖 / 附加输出 / 宿主程序）：仅目标作用域显示
-      if (!isProject()) pages.push(['extension', L.extensionTab]);
       return pages;
     }
     /** 当前页被移除/禁用时回落到 Pre/post（CB 同样把选择强制到 Pre/post） */
@@ -968,7 +945,6 @@ export function buildOptionsScript(data: BuildOptionsData, embedded: boolean): s
       else if (page === 'extras') renderExtras(el);
       else if (page === 'vars') renderVars(el);
       else if (page === 'make') renderMake(el);
-      else if (page === 'extension') renderExtension(el);
       var nextList = el.querySelector('.bo-flag-list');
       if (nextList) nextList.scrollTop = flagsScroll;
       applyPageDisabled(el);
@@ -1184,20 +1160,12 @@ export function buildOptionsScript(data: BuildOptionsData, embedded: boolean): s
     function renderVars(el) {
       var sc = current();
       var items = sc.envVars.map(function (v) { return v.name + ' = ' + v.value; });
-      var cvars = (DATA.customVariables || []).map(function (v) { return v.name + '=' + v.value; }).join('\\n');
       el.innerHTML = '<section class="bo-card"><div class="bo-card-body">' +
         '<div class="bo-field-label">' + esc(L.variables) + '</div>' +
         '<div class="bo-vars-list">' + listHtml(items, 'vars') + '</div>' +
         '<div class="bo-red-note bo-preline">' + esc(L.varsHint) + '</div>' +
         actions('vars', '', { hideMove: true }) +
-        '</div></section>' +
-        // 项目自定义变量：原先在 Properties「高级（扩展）」里，CB 属性对话框无此控件
-        (isProject() ? '<section class="bo-card"><div class="bo-card-body">' +
-          '<div class="bo-field-label">' + esc(L.projectCustomVars) + '</div>' +
-          '<textarea id="bo-customvars">' + esc(cvars) + '</textarea>' +
-          '</div></section>' : '');
-      var cv = q('customvars');
-      if (cv) cv.addEventListener('change', function () { collectPage(); });
+        '</div></section>';
       bindList('vars', items);
       bindActions('vars', items, function () {
         sc.envVars = items.map(function (s) {
@@ -1208,32 +1176,7 @@ export function buildOptionsScript(data: BuildOptionsData, embedded: boolean): s
       });
       refreshActionState('vars', items);
     }
-    /* ---- 扩展字段（Code::Blocks project_options 无此页）：按目标存放 ---- */
-    function renderExtension(el) {
-      if (isProject()) {
-        el.innerHTML = '<section class="bo-card"><div class="bo-card-body">' +
-          '<div class="bo-red-note">' + esc(L.extensionProjectHint) + '</div>' +
-          '</div></section>';
-        return;
-      }
-      var sc = current();
-      el.innerHTML = '<section class="bo-card"><div class="bo-card-body">' +
-        '<div class="bo-field-label">' + esc(L.depsOutput) + '</div>' +
-        '<input type="text" id="bo-ext-depsout" value="' + esc(sc.depsOutput || '') + '">' +
-        '<div class="bo-field-label">' + esc(L.hostApplication) + '</div>' +
-        '<input type="text" id="bo-ext-host" value="' + esc(sc.hostApplication || '') + '">' +
-        '<label class="bo-check"><input type="checkbox" id="bo-ext-hostterm"' + (sc.runHostApplicationInTerminal !== false ? ' checked' : '') + '><span>' + esc(L.hostInTerminal) + '</span></label>' +
-        '<div class="bo-field-label">' + esc(L.externalDeps) + '</div>' +
-        '<textarea id="bo-ext-extdeps">' + esc((sc.externalDeps || []).join('\\n')) + '</textarea>' +
-        '<div class="bo-field-label">' + esc(L.additionalOutput) + '</div>' +
-        '<textarea id="bo-ext-addout">' + esc((sc.additionalOutput || []).join('\\n')) + '</textarea>' +
-        '<div class="bo-red-note">' + esc(L.extensionHint) + '</div>' +
-        '</div></section>';
-      ['ext-depsout', 'ext-host', 'ext-hostterm', 'ext-extdeps', 'ext-addout'].forEach(function (id) {
-        var x = q(id); if (x) x.addEventListener('change', function () { collectPage(); });
-      });
-    }
-    /* ---- Make 命令：六行对齐 CB；Dist-clean 可编辑，Silent build 为派生只读 ---- */
+    /* ---- Make 命令：四行对齐 CB（Dist-clean / Silent build 在 XRC 中 <hidden>1</hidden>） ---- */
     function derivedSilent(sc) {
       var build = (sc && sc.makeCommands && sc.makeCommands.build) || '';
       if (build) return build + ' > $(CMD_NULL)';
@@ -1246,15 +1189,6 @@ export function buildOptionsScript(data: BuildOptionsData, embedded: boolean): s
         if (sc.makeCommands.build) sc.makeCommands.silentBuild = sc.makeCommands.build + ' > $(CMD_NULL)';
       });
     }
-    function refreshDerivedSilent() {
-      var sc = current();
-      var build = q('mk-build');
-      if (!sc.makeCommands) sc.makeCommands = {};
-      if (build) sc.makeCommands.build = build.value;
-      applyDerivedSilent();
-      var out = q('mk-silent');
-      if (out) out.value = derivedSilent(sc);
-    }
     function renderMake(el) {
       var sc = current();
       var dis = DATA.makefileIsCustom ? '' : ' disabled';
@@ -1262,26 +1196,19 @@ export function buildOptionsScript(data: BuildOptionsData, embedded: boolean): s
       function row(id, label, val) {
         return '<label for="bo-' + id + '">' + esc(label) + '</label><input type="text" id="bo-' + id + '" value="' + esc(val || '') + '"' + dis + '>';
       }
-      function derivedRow(id, label, val, hint) {
-        return '<label for="bo-' + id + '">' + esc(label) + '</label><input type="text" id="bo-' + id + '" class="bo-derived-input" value="' + esc(val || '') + '" readonly tabindex="-1" aria-readonly="true" title="' + esc(hint) + '">';
-      }
       el.innerHTML = '<div class="bo-red-note" style="margin-top:0">' + esc(L.makeHint) + '</div>' +
         '<section class="bo-card"><div class="bo-card-body">' +
           '<div class="bo-label-grid">' +
             row('mk-build', L.buildTarget, m.build) +
             row('mk-compile', L.compileSingle, m.compileFile) +
             row('mk-clean', L.cleanTarget, m.clean) +
-            row('mk-dist', L.distCleanTarget, m.distClean) +
             row('mk-ask', L.askRebuild, m.askRebuildNeeded) +
-            derivedRow('mk-silent', L.silentBuild, derivedSilent(sc), L.silentBuildHint) +
           '</div>' +
         '</div></section>' +
         '<div class="bo-red-note">' + esc(L.knownVars) + '</div>';
-      ['mk-build', 'mk-compile', 'mk-clean', 'mk-dist', 'mk-ask'].forEach(function (id) {
+      ['mk-build', 'mk-compile', 'mk-clean', 'mk-ask'].forEach(function (id) {
         var x = q(id); if (x) x.addEventListener('change', function () { collectPage(); });
       });
-      var build = q('mk-build');
-      if (build) build.addEventListener('input', function () { refreshDerivedSilent(); });
     }
     function collectPage() {
       if (page === 'compiler') collectCompilerPage();
@@ -1299,28 +1226,9 @@ export function buildOptionsScript(data: BuildOptionsData, embedded: boolean): s
         fill('build', 'mk-build');
         fill('compileFile', 'mk-compile');
         fill('clean', 'mk-clean');
-        fill('distClean', 'mk-dist');
         fill('askRebuildNeeded', 'mk-ask');
         // Silent build 为派生值（对齐 CB 保存规则），不读取输入
         applyDerivedSilent();
-      } else if (page === 'vars') {
-        var cv = q('customvars');
-        if (cv && isProject()) {
-          DATA.customVariables = cv.value.split('\\n').map(function (s) { return s.trim(); }).filter(Boolean).map(function (s) {
-            var i = s.indexOf('=');
-            return i < 0 ? { name: s, value: '' } : { name: s.slice(0, i).trim(), value: s.slice(i + 1).trim() };
-          }).filter(function (v) { return v.name; });
-        }
-      } else if (page === 'extension' && !isProject()) {
-        var de = q('ext-depsout'); if (de) sc.depsOutput = de.value.trim();
-        var ha = q('ext-host'); if (ha) sc.hostApplication = ha.value.trim();
-        var ht = q('ext-hostterm'); if (ht) sc.runHostApplicationInTerminal = ht.checked;
-        var lines = function (id) {
-          var el = q(id);
-          return el ? el.value.split('\\n').map(function (s) { return s.trim(); }).filter(Boolean) : [];
-        };
-        if (q('ext-extdeps')) sc.externalDeps = lines('ext-extdeps');
-        if (q('ext-addout')) sc.additionalOutput = lines('ext-addout');
       }
     }
     function readData() {

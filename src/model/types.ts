@@ -271,6 +271,8 @@ export interface Project {
   makefile: string;
   /** makefile 模式执行目录（<Option execution_dir>，GetMakefileExecutionDir；空 = 项目根） */
   executionDir: string;
+  /** 默认执行目标标题（<Option default_target>，对齐 cbProject::GetDefaultExecuteTarget；空 = 第一个目标） */
+  defaultExecuteTarget: string;
   /** 项目级 make 命令（<MakeCommands>，GetMakeCommandFor） */
   makeCommands: MakeCommandsMap;
   /** 项目自定义变量（<Extensions><codeblocks_project_custom_variables>，宏展开时参与替换） */

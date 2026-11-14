@@ -383,6 +383,7 @@ export function buildProjectFromImport(
     makefileIsCustom: false,
     makefile: '',
     executionDir: '',
+    defaultExecuteTarget: '',
     makeCommands: {},
     customVariables: {},
     files,

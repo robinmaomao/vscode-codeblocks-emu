@@ -171,6 +171,27 @@ function buildSurfaces() {
   if (!optHtml || !optHtml.includes('</html>')) throw new Error('Build options 面板 HTML 生成失败');
   surfaces.push({ id: 'build-options', html: optHtml, width: 1180, height: 940, actions: [] });
 
+  // ---- Set Programs' Arguments 对话框（对齐 CB SelectTargetDlg） ----
+  const { runTargetsPage } = require('../../dist/ui/runTargetsPanel.js');
+  surfaces.push({
+    id: 'run-targets',
+    html: runTargetsPage({
+      projectTitle: project.title,
+      commonTopLevelPath: project.commonTopLevelPath,
+      defaultExecuteTarget: project.buildTargets[0]?.title ?? '',
+      activeTarget: project.buildTargets[0]?.title ?? '',
+      targets: project.buildTargets.map((t) => ({
+        title: t.title,
+        executionParameters: t.executionParameters ?? '',
+        hostApplication: t.hostApplication ?? '',
+        runHostApplicationInTerminal: t.runHostApplicationInTerminal === true,
+      })),
+    }),
+    width: 720,
+    height: 620,
+    actions: [],
+  });
+
   // ---- HTML 构建日志 ----
   surfaces.push({ id: 'buildlog-html', html: buildLogHtml(), width: 1000, height: 620, actions: [] });
 

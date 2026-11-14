@@ -298,14 +298,15 @@ code --extensionDevelopmentPath="." --disable-extensions --new-window
 - Webview 按 Category 分组展示 `options_<id>.xml` 中的 `<Option>`，勾选后写回项目 / 目标编译选项。
 - 「应用」**立即写回 `.cbp`**（Code::Blocks 是"改内存 + 保存工程"，本扩展没有工程"已修改"状态，故直接落盘，重开工程不丢）；
   仅管理 XML 里列出的选项，**手写在工程属性页的自定义选项（如 `-pipe`）会原样保留**；写盘失败会在面板状态区显示原因。
-- 工程属性面板（`Properties…`）版式对齐 CB `ProjectOptionsDlg`：顶部 `目标：` 选择器 + 6 个页签（项目设置 / 构建目标 / 构建脚本 / 备注 / C/C++ 解析器选项 / 调试器），底部左侧为 `保存 | 保存并关闭 | 还原设置`（还原 = 丢弃未保存修改，回到上次保存值）。构建目标页左列是目标列表 + 竖排按钮（添加/重命名/复制/删除/↑/↓，以及虚拟目标…/依赖…/重排…/构建选项…/从目标创建工程…），右列是「所选构建目标选项」表单，其下为「构建目标文件」列表（对齐 CB 右栏上下两个静态框）；项目设置页按 CB 顺序排列 Title / Platforms / Filename / Makefile（含两条红色提示）/ Execution directory，另有预编译头单选组、构建页复选框与右下角「工程的依赖…」「工程的构建选项…」。**两个页面都不再内嵌「高级（扩展）」分组**（CB `project_options.xrc` 没有该容器），扩展字段改到 CB 对应的入口：编译器在 **Build options → Selected compiler**，项目自定义变量在 **Build options → 自定义变量**（工程作用域），目标环境变量在 **Build options → 自定义变量**（目标作用域），目标扩展字段（deps 输出目录 / 宿主程序 / 外部依赖 / 附加输出）在 **Build options → 扩展**（仅目标作用域），目标标题用左栏「重命名」，执行参数用 `Project → Set programs' arguments…`。
+- 工程属性面板（`Properties…`）版式对齐 CB `ProjectOptionsDlg`：顶部 `目标：` 选择器 + 6 个页签（项目设置 / 构建目标 / 构建脚本 / 备注 / C/C++ 解析器选项 / 调试器），底部左侧为 `保存 | 保存并关闭 | 还原设置`（还原 = 丢弃未保存修改，回到上次保存值）。构建目标页左列是目标列表 + 竖排按钮（添加/重命名/复制/删除/↑/↓，以及虚拟目标…/依赖…/重排…/构建选项…/从目标创建工程…），右列是「所选构建目标选项」表单，其下为「构建目标文件」列表（对齐 CB 右栏上下两个静态框）；项目设置页按 CB 顺序排列 Title / Platforms / Filename / Makefile（含两条红色提示）/ Execution directory，另有预编译头单选组、构建页复选框与右下角「工程的依赖…」「工程的构建选项…」。**两个页面都不再内嵌「高级（扩展）」分组**（CB `project_options.xrc` 没有该容器）。外部依赖 / 附加输出用构建目标页的「依赖…」（CB `Dependencies...`）；编译器在 **Build options → Selected compiler**；运行参数、宿主程序与「Run host in terminal」在 `Project → Set Programs' Arguments…`（CB `SelectTargetDlg`）；目标标题用左栏「重命名」。
+- **Set Programs' Arguments…（对齐 CB `SelectTargetDlg`）**：Project 菜单项（位于 `Notes…` 之前），即使只有一个目标也弹窗。对话框按 CB `select_target.xrc` 排列：目标列表 → `此目标提供工程的主可执行文件`（写项目级 `<Option default_target>`，仅非空且不等于第一个目标时落盘）→ `程序参数：` 多行（`<Option parameters>`）→ `宿主程序：` 输入 + 浏览（工程内路径自动转相对，`<Option host_application>`）→ `在终端中运行宿主程序`（`<Option run_host_application_in_terminal>`，CB 默认 **关闭**）→ 确定 / 取消。切换目标时暂存当前编辑值，双击目标等同确定；库 / 仅命令目标运行时若未勾选该项则直接启动宿主程序、不建终端。
 - **CB 默认值**：Project settings 的 `Makefile` 显示 `Makefile`、`执行目录` 显示工程路径；Build targets 的 `导入库文件名` / `定义文件文件名` 显示 `$(TARGET_OUTPUT_DIR)$(TARGET_OUTPUT_BASENAME)`、`执行工作目录` 显示 `.`。这些默认值只是显示，未改动时保存不会写入 `.cbp`。
 - **控件启用状态（对齐 CB `projectoptionsdlg.cpp`）**：禁用时控件与标签都变灰，规则完全照搬 CB ——
   - `Makefile` 文本框始终可编辑；`执行目录` 只有勾选「使用自定义 Makefile」后才可编辑，其余 Makefile 相关项（输出/导入库/定义文件名、对象输出目录、构建目标文件列表与其切换/全选/全不选、构建脚本页）在自定义 Makefile 下全部禁用。
   - `创建导入库` / `创建 .DEF 导出文件` 只在目标类型为 **动态库** 时可勾选；`导入库文件名` / `定义文件文件名` 需「对应复选框已勾选 **且** 动态库」才可编辑。
   - 目标类型切换：**静态库** 清空导入库/定义文件名；**控制台程序** 之外禁用「执行结束后暂停」；**仅命令** 清空并禁用输出文件名 / 导入库 / 定义文件 / 执行工作目录 / 对象输出目录（CB 行为，原值不保留）。
   - `删除` / `↑` / `↓`（重排）在目标数 ≤ 1 时禁用；无目标时禁用重命名 / 复制 / 导出 / 构建选项；无选中文件时禁用「选中文件属性」；预编译头选项按工程编译器是否支持 PCH 禁用。
-- **Build options 页签/按钮联动**（对齐 CB `compileroptionsdlg.cpp`）：自定义 Makefile 工程**隐藏** Compiler settings / Linker settings / Search directories 三页（CB 直接 `RemovePage`），默认停在 Pre/post；「Make」命令页保留，输入仅在自定义 Makefile 下可编辑。**Commands only** 目标下 Compiler / Linker / Search / “Make” 四页灰显不可点，进入该目标自动切到 Pre/post，Pre/post 与 Custom variables 仍可编辑。Link libraries 与 Search directories 支持 **Ctrl/Shift 多选**：Edit 仅在恰好选中 1 项时可用，Delete / Copy 需有选中项，Clear 需列表非空，↑/↓ 以选中集合的最小/最大下标判断边界，`Copy selected to...` 只复制**选中**的库/目录。Make 页固定六行（Build / Compile / Clean / Dist-clean / Ask / Silent），Dist-clean 在自定义 Makefile 下可编辑并写回，Silent 为只读派生值（`Build + " > $(CMD_NULL)"`）。工程/目标声明的编译器未安装时选项页整体禁用并红字提示，改选已安装编译器后恢复；工程作用域的 Linker executable 只读（CB 存为目标级属性）。「扩展」页是扩展字段入口，不参与上述 CB 规则。
+- **Build options 页签/按钮联动**（对齐 CB `compileroptionsdlg.cpp`）：自定义 Makefile 工程**隐藏** Compiler settings / Linker settings / Search directories 三页（CB 直接 `RemovePage`），默认停在 Pre/post；「Make」命令页保留，输入仅在自定义 Makefile 下可编辑。**Commands only** 目标下 Compiler / Linker / Search / “Make” 四页灰显不可点，进入该目标自动切到 Pre/post，Pre/post 与 Custom variables 仍可编辑。Link libraries 与 Search directories 支持 **Ctrl/Shift 多选**：Edit 仅在恰好选中 1 项时可用，Delete / Copy 需有选中项，Clear 需列表非空，↑/↓ 以选中集合的最小/最大下标判断边界，`Copy selected to...` 只复制**选中**的库/目录。Make 页只显示 CB 可见的四行（Build / Compile / Clean / Ask）；`Dist-clean` 与 `Silent build` 在 CB 的 XRC 里是 `<hidden>1</hidden>`，因此不渲染但数据照旧保留（`silentBuild` 保存时按 `Build + " > $(CMD_NULL)"` 派生）。工程/目标声明的编译器未安装时选项页整体禁用并红字提示，改选已安装编译器后恢复；工程作用域的 Linker executable 只读（CB 存为目标级属性）。Build options 与 CB 一致，**不含「Extensions」页与项目自定义变量**。
 - **Build targets 版式**：左列与右列等高、`从目标创建工程…` 贴底；字段顺序为 Output / Import / Definition → `自动生成文件名前缀/扩展名` → 执行工作目录 / 对象输出目录；`构建目标文件` 静态框内列表限高，底部工具栏（切换勾选 / 全部选中 / 全部取消 / 选中文件属性）常驻可见。按钮英文名与 CB 一致（Duplicate / Delete / All? / on / All? / off）。
 - **Debugger 版式**：`附加调试器搜索目录` 大列表 + 右侧竖排按钮；`选择目标` 窄列表 + CB notebook 风格子标签（远程连接 / 附加 GDB 命令 / 附加 shell 命令）；远程连接字段两列（串口 + 波特率、IP 地址 + 端口），波特率为可编辑下拉。
 - 目标列表支持**上移/下移**（调整目标顺序，影响导出与遍历顺序，对齐 CB Re-order）与「**导出为工程**」（把选中目标导出为只包含其文件的独立 `.cbp`，对齐 CB Create project from target；也可从命令面板 / Project 菜单 `Create Project from Target…` 调用）。
@@ -328,7 +329,9 @@ code --extensionDevelopmentPath="." --disable-extensions --new-window
   （`$(port)` 与 `$(PORT)` 等效，对齐 CB `Upper()`）；未命中再回退系统环境变量。
 - **用途二·进程环境**：`Run` 与 `Debug` 启动的程序会注入这些变量（项目级 + 目标级）。
 - 注意：**内置宏优先**于同名环境变量（如 `TARGET_OUTPUT_FILE` 不会被覆盖；保护性差异）；
-  「项目自定义变量」是扩展增强（写入 Extensions 节点，供 `$(name)` 宏），与 CB 的 Custom variables 不是同一机制。
+  「项目自定义变量」是扩展增强（写入 Extensions 节点，供 `$(name)` 宏），与 CB 的 Custom variables 不是同一机制；
+  CB 的构建选项对话框没有对应控件，因此**只保留 .cbp 中的数据、不提供图形入口**（需要修改时直接编辑 `.cbp`）。
+- 同理，目标的 `depsOutput`（`<Option deps_output>`，默认 `.deps`）在 CB 里只有模型与序列化、无对话框控件，本扩展也只保留数据不提供 UI。
 
 ---
 
