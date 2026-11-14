@@ -3592,6 +3592,16 @@ function activateRelativeProject(delta: number): void {
 }
 
 /** Build options 编译器目录（当前工程/目标用到的编译器 + 可选列表） */
+/** 文件是否只读（对齐 CB wxFileName::IsFileWritable） */
+function fileReadOnly(absPath: string): boolean {
+  try {
+    fs.accessSync(absPath, fs.constants.W_OK);
+    return false;
+  } catch {
+    return true;
+  }
+}
+
 function buildOptionsRuntimeFor(project: Project): BuildOptionsRuntime {
   const compilers = listCompilers();
   const ids = new Set<string>(compilers.map((c) => c.id));
@@ -3607,6 +3617,7 @@ function buildOptionsRuntimeFor(project: Project): BuildOptionsRuntime {
   const compilerCatalogs: BuildOptionsRuntime['compilerCatalogs'] = {};
   const compilerBaseCatalogs: BuildOptionsRuntime['compilerBaseCatalogs'] = {};
   const compilerFlags: BuildOptionsRuntime['compilerFlags'] = {};
+  const compilerCommands: NonNullable<BuildOptionsRuntime['compilerCommands']> = {};
   const flagStores = readCompilerFlagStores();
   for (const id of ids) {
     // 用加载器直接取选项目录：避免 getCompiler 触发编译器版本探测（PCH 编译器会 spawn 进程）
@@ -3624,6 +3635,11 @@ function buildOptionsRuntimeFor(project: Project): BuildOptionsRuntime {
       { cOnly: compiler.cOnlyFlags ?? [], cppOnly: compiler.cppOnlyFlags ?? [] },
       flagStores,
     );
+    // 文件属性 Advanced 页「Default:」展示的默认命令（CB GetCommand 取第一条模板）
+    compilerCommands[id] = {
+      compileObject: compiler.commands[CommandType.CompileObjectCmd]?.[0]?.command ?? '',
+      compileResource: compiler.commands[CommandType.CompileResourceCmd]?.[0]?.command ?? '',
+    };
   }
   const projectCompiler = loadCatalog(project.compilerId || 'gcc');
   return {
@@ -3631,6 +3647,9 @@ function buildOptionsRuntimeFor(project: Project): BuildOptionsRuntime {
     compilerCatalogs,
     compilerBaseCatalogs,
     compilerFlags,
+    compilerCommands,
+    objectExtension: projectCompiler.switches.objectExtension || 'o',
+    pchExtension: projectCompiler.switches.PCHExtension || 'gch',
     defaultCompilerId: vscode.workspace.getConfiguration('codeblocks').get<string>('compilerId', 'gcc'),
     supportsPch: projectCompiler.switches.supportsPCH !== false,
     defineSwitch: projectCompiler.switches.defines || '-D',
@@ -5412,27 +5431,35 @@ async function saveProjectProperties(
 
   project.buildTargets = newTargets;
 
-  // 应用文件编辑（编译变量 / 编译 / 链接 / 自定义命令 / 目标归属）
+  // 应用文件编辑（编译变量 / 编译 / 链接 / 自定义命令 / 目标归属 / 只读）
   const fileByRel = new Map(project.files.map((f) => [f.relativeFilename, f]));
   for (const fe of fileEdits) {
     const f = fileByRel.get(fe.relativeFilename);
     if (!f) continue;
 
-    // 编译变量：'' 或 'CPP' 视为默认（不写 compilerVar）
+    // 编译变量：自由文本；CB 在 compile 且为空时补 "CPP"（projectfileoptionsdlg.cpp:EndModal）
     const cv = fe.compilerVar.trim();
-    f.compilerVar = cv === 'CC' || cv === 'WINDRES' ? cv : '';
+    f.compilerVar = cv || (fe.compile ? 'CPP' : '');
     f.compile = fe.compile;
     f.link = fe.link;
     f.weight = fe.weight;
     f.virtualFolder = fe.virtualFolder;
 
-    // 自定义构建命令：只更新项目默认编译器的映射，保留其它编译器
-    const cmp = project.compilerId;
-    const cmd = fe.buildCommand.trim();
-    if (cmd) {
-      f.customBuildCommands[cmp] = { command: cmd, use: true };
-    } else {
-      delete f.customBuildCommands[cmp];
+    // 自定义构建：按编译器映射整体替换（CB 仅保留 buildCommand 非空的条目）
+    const customBuild: Record<string, { command: string; use: boolean }> = {};
+    for (const [id, v] of Object.entries(fe.customBuild ?? {})) {
+      const command = (v.command ?? '').trim();
+      if (command) customBuild[id] = { command, use: v.use === true };
+    }
+    f.customBuildCommands = customBuild;
+
+    // 只读状态变化时改文件权限（CB ToggleFileReadOnly）
+    if (fe.statistics && fe.statistics.readOnly !== fileReadOnly(f.absolutePath)) {
+      try {
+        fs.chmodSync(f.absolutePath, fe.statistics.readOnly ? 0o444 : 0o666);
+      } catch {
+        // 权限不足时忽略（CB 记录调试日志后继续）
+      }
     }
 
     // 目标归属：勾选全部 → 隐式归属所有目标；否则显式

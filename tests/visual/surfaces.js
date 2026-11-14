@@ -90,6 +90,59 @@ function buildSurfaces() {
     });
   }
 
+  // ---- 文件属性对话框（CB ProjectFileOptionsDlg：General / Build / Advanced） ----
+  {
+    const filePropsFixture = path.join(__dirname, 'fixtures', 'fileprops', 'fileprops.cbp');
+    const filePropsProject = new ProjectParser().parse(filePropsFixture);
+    // 固定 mtime：General 页展示文件时间戳，必须与基线渲染一致
+    const fixed = new Date(Date.UTC(2024, 0, 2, 3, 4, 5));
+    for (const f of filePropsProject.files) {
+      try { require('fs').utimesSync(f.absolutePath, fixed, fixed); } catch { /* 缺少夹具文件时忽略 */ }
+    }
+    const filePropsRuntime = {
+      compilers: [
+        { id: 'gcc', name: 'GNU GCC Compiler' },
+        { id: 'msvc', name: 'Microsoft Visual C++ 2010' },
+      ],
+      compilerCatalogs: { gcc: [], msvc: [] },
+      compilerCommands: {
+        gcc: { compileObject: '$compiler $options $includes -c $file -o $object', compileResource: '$rescomp $res_includes -i $file -o $object' },
+        msvc: { compileObject: '$compiler /c $file /Fo$object', compileResource: '$rescomp /i $file /fo$object' },
+      },
+      objectExtension: 'o',
+      pchExtension: 'gch',
+      supportsPch: true,
+      defaultCompilerId: 'gcc',
+      defineSwitch: '-D',
+    };
+    new ProjectPropertiesPanel(filePropsProject, fakeUri, () => undefined, undefined, undefined, filePropsRuntime);
+    const fpHtml = mock.webviews[mock.webviews.length - 1].webview.html;
+    if (!fpHtml || !fpHtml.includes('</html>')) throw new Error('文件属性面板 HTML 生成失败');
+    const openFile = (row) => [
+      { type: 'click', selector: '#tabbtn-targets' },
+      { type: 'click', selector: `#tflist .item[data-i="${row}"]` },
+      { type: 'click', selector: '#fileProps' },
+    ];
+    surfaces.push({ id: 'props-file-general', html: fpHtml, width: 1280, height: 860, actions: openFile(1) });
+    surfaces.push({
+      id: 'props-file-build',
+      html: fpHtml,
+      width: 1280,
+      height: 860,
+      actions: [...openFile(1), { type: 'click', selector: '#ff-tabs [data-ftab="build"]' }],
+    });
+    surfaces.push({
+      id: 'props-file-advanced',
+      html: fpHtml,
+      width: 1280,
+      height: 860,
+      actions: [
+        ...openFile(2),
+        { type: 'click', selector: '#ff-tabs [data-ftab="advanced"]' },
+      ],
+    });
+  }
+
   // ---- 快捷键面板（注入宿主 state） ----
   const hostStub = {
     getState: keybindingState,

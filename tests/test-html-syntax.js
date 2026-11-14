@@ -14,7 +14,19 @@ const { ProjectParser } = require('../dist/model/parser');
 const project = new ProjectParser().parse(path.join(__dirname, '../test-project/hello-cb.cbp'));
 const cmp = project.compilerId;
 const targets = project.buildTargets.map(t => ({ originalTitle: t.title, title: t.title, targetType: t.targetType, outputFilename: t.outputFilename, objectOutput: t.objectOutput, compilerId: t.compilerId }));
-const files = project.files.map(f => ({ relativeFilename: f.relativeFilename, compilerVar: f.compilerVar === 'CPP' ? '' : f.compilerVar, compile: f.compile !== false, link: f.link !== false, buildTargets: [...f.buildTargets], buildCommand: (f.customBuildCommands[cmp]?.command ?? '').replace(/\r?\n/g, '\\n') }));
+const files = project.files.map(f => ({
+  relativeFilename: f.relativeFilename,
+  absolutePath: f.absolutePath,
+  compilerVar: f.compilerVar === 'CPP' ? '' : f.compilerVar,
+  compile: f.compile !== false,
+  link: f.link !== false,
+  buildTargets: [...f.buildTargets],
+  weight: f.weight,
+  virtualFolder: f.virtualFolder,
+  customBuild: Object.fromEntries(Object.entries(f.customBuildCommands ?? {}).map(([id, v]) => [id, { use: v.use === true, command: v.command ?? '' }])),
+  objectName: f.relativeToCommonTopLevelPath,
+  statistics: null,
+}));
 const projectOpts = { compilerOptions: [...project.compilerOptions], linkerOptions: [...project.linkerOptions], linkLibs: [...project.linkLibs] };
 const targetOpts = project.buildTargets.map(t => ({ compilerOptions: [...t.compilerOptions], linkerOptions: [...t.linkerOptions], linkLibs: [...t.linkLibs] }));
 const projectDirs = { includeDirs: [...project.includeDirs], libDirs: [...project.libDirs], resourceDirs: [...project.resourceIncludeDirs] };

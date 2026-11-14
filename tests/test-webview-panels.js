@@ -188,7 +188,7 @@ function fnBody(script, name) {
     /confirmBox\('/.test(fnBody(script, 'restoreSettings') || ''), fnBody(script, 'restoreSettings'));
   // 对齐 CB project_options.xrc：两个页面都没有「高级（扩展）」分组（扩展字段由 CB 对应入口承载）
   check('工程属性：Project settings / Build targets 不再内嵌「高级（扩展）」',
-    !/i18n\.tr\('高级（扩展）'\)/.test(script) && !/set-compiler|set-vfolders|set-vars|f-title|f-params|f-extdeps|f-addout|f-envvars/.test(script), null);
+    !/i18n\.tr\('高级（扩展）'\)/.test(script) && !/id="(?:set-compiler|set-vfolders|set-vars|f-title|f-params|f-extdeps|f-addout|f-envvars)"/.test(script), null);
   check('工程属性：目标表单守卫改用 f-type（重命名改由左栏按钮）',
     /document\.getElementById\('f-type'\)\) return;/.test(fnBody(script, 'collectTargetForm') || ''), null);
   // CB 默认值：未配置时显示默认值，未改动则写回空串（不污染 .cbp）

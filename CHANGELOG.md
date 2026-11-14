@@ -34,6 +34,16 @@
 - 验证：`npm test` **TOTAL=189 FAIL=0 SKIP=1**；`npm run test:contract` 3/3（44 + 6 + 707 断言）；`npm run test:e2e` 6/6；`npm run test:visual` 18/18（基线重生成）；`npm run test:pack` 1/1（15 断言）。
 - 发布说明见 [`docs/release/0.8.151.md`](./docs/release/0.8.151.md)；测试结果见 [`docs/testing/test-report-0.8.151.md`](./docs/testing/test-report-0.8.151.md)。
 
+### main 分支追加（2026-11-14，未单独发版）
+
+> 版本号保持 0.8.151，仅同步到 `main`，不创建 GitHub Release。
+
+- **启用联动**：Properties 的 `执行目录` / 导入库 / 定义文件 / `创建导入库` / `.DEF` / 「执行结束后暂停」按 CB 规则联动；Build options 自定义 Makefile 隐藏三页、**Commands only** 四页灰显、Link libraries 与 Search directories 支持 **Ctrl/Shift 多选**、未安装编译器整体禁用。
+- **Build options 严格对齐**：删除 CB 没有的 `Extensions` 页、Project custom variables 文本域、`Dist-clean` 与 `Silent build`（后两者 XRC 中隐藏，保存时派生）；Make 页只留 Build / Compile / Clean / Ask；`externalDeps` / `additionalOutput` 只在「依赖…」编辑。
+- **Set Programs' Arguments…**：新增 CB `SelectTargetDlg` 同款对话框（目标列表 / 默认执行目标 / 程序参数 / 宿主程序 + 浏览 / 在终端中运行），写回 `default_target` 等字段；库与仅命令目标未勾选终端时直接 `spawn`；`runHostApplicationInTerminal` 默认改为 false。
+- **Selected file properties…**：按 CB `ProjectFileOptionsDlg` 重写为 General / Build / Advanced 三页（统计与对象名对齐 `CountLines`/`SetObjName`、只读切换 `chmod`、按编译器保存自定义构建、自动生成文件禁用后两页），新增 `src/model/fileStats.ts` 与 6 张视觉基线。
+- 验证：`npm test` **TOTAL=193 FAIL=0 SKIP=1**；契约 3/3；E2E 6/6；视觉 **26/26**；打包 15 断言。
+
 ## 0.8.150 — 2026-11-12
 
 > 功能版：工程右键 `Build options…` / `Properties…` 完整移植 Code::Blocks。

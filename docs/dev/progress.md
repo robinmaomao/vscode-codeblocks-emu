@@ -15,20 +15,20 @@
 
 ## 二、P0 工程属性编辑（已完成）
 
-面板 `src/ui/projectPropertiesPanel.ts`，命令 `codeblocks.projectProperties`（**9 个 tab**，左侧竖排导航 + 顶部项目标题栏）：
+面板 `src/ui/projectPropertiesPanel.ts`，命令 `codeblocks.projectProperties`（**6 个 tab**，对齐 CB `ProjectOptionsDlg`；顶部 `目标：` 选择器 + 底部 `保存 / 保存并关闭 / 还原设置`）：
 
-1. **构建目标**：增删改（标题/类型/输出文件/对象目录/编译器 ID/运行参数/依赖与附加输出/环境变量/高级项），add/copy/remove/上移下移
-2. **虚拟目标**：alias + 物理目标多选（All = Debug;Release）
-3. **文件**：compilerVar/compile/link/weight(0-100)/virtualFolder/自定义构建命令/目标归属多选
-4. **构建选项**：编译选项/链接选项/链接库 + 目标级 **OptionsRelation 关系**（5 个下拉：仅父级/仅目标/前置/追加）
-5. **搜索目录**：include/lib/resource 目录（项目级+目标级）
-6. **构建脚本**：`<Script file>` + **pre/post build 命令**（`<ExtraCommands><Add before/after>`）
-7. **项目设置**：标题/默认编译器/虚拟文件夹/自定义变量/环境变量/平台·PCH·扩展对象名/Makefile 模式
-8. **备注**：notes + show_notes（CDATA）
-9. **调试器**：search_path + 每目标 `remote_debugging`（项目级默认 + 目标覆盖）
+1. **项目设置**：标题 / 平台 / 文件名（只读）/ Makefile 与执行目录 / PCH 策略 / 对象文件名生成 / 检查外部修改；右下「工程的依赖…」「工程的构建选项…」
+2. **构建目标**：左栏目标列表 + 添加/重命名/复制/删除/↑↓ + 虚拟目标…/依赖…/重排…/构建选项…/从目标创建工程…；右栏「所选构建目标选项」+「构建目标文件」（切换勾选 / 全部选中 / 全部取消 / 选中文件属性）
+3. **构建脚本**：`<Script file>` + **pre/post build 命令**（`<ExtraCommands><Add before/after>`）+ Squirrel 语法校验
+4. **备注**：notes + show_notes（CDATA）
+5. **C/C++ parser options**：`<code_completion><search_path add>` 读写
+6. **调试器**：search_path + 每目标 `remote_debugging`（项目级默认 + 目标覆盖）
+
+**Selected file properties…** 模态按 CB `ProjectFileOptionsDlg` 三页：General（只读工程/路径 + 行数·大小·时间戳 + 只读切换，统计与 `CountLines`/`AnalyseLine` 同口径）/ Build（编译、链接、归属目标、优先级权重滑块）/ Advanced（编译变量自由文本、对象文件名只读、按编译器保存的自定义构建命令、默认命令提示）。取消丢弃修改，确定才写回；自动生成文件的 Build / Advanced 禁用。统计与对象名逻辑在 `src/model/fileStats.ts`。
 
 要点（0.8.137 起）：保存不要求"先切到各 tab"（收集函数按元素存在性跳过未渲染表单）；收集/写盘异常显示在顶栏状态区；
 目标改名/删除会同步文件归属、虚拟目标与 `remote_debugging`。
+0.8.151 追加：Properties / Build options 的灰显规则按 CB 源码逐条补齐；Build options 删除 CB 没有的 `Extensions` 页、项目自定义变量文本域、`Dist-clean`、`Silent build`；新增 `Set Programs' Arguments…`（CB `SelectTargetDlg`）对话框。
 
 核心文件：`src/model/{types,parser,projectWriter}.ts`（模型 / 解析 / 序列化）、`src/ui/projectPropertiesPanel.ts`（面板）、
 `src/extension.ts` 的 `saveProjectProperties` + `persistProjectAndReload`（写回并重解析刷新）。
@@ -52,7 +52,7 @@
 - `WorkspaceParser` 解析 `<Depends>` 依赖 → DFS 拓扑排序（依赖先编译、环检测）；打开 `.workspace` 自动打开全部项目；reload 后恢复全部项目 + 依赖（`restorePersistedProjects`）。
 
 ### P3 文件级自定义命令 UI ✅
-- 工程树文件节点右键「Edit Custom Build Command...」编辑 `<Option buildCommand>` 写回 `.cbp`（文件属性面板「文件」tab 也支持多行编辑）。
+- 工程树文件节点右键「Edit Custom Build Command...」编辑 `<Option buildCommand>` 写回 `.cbp`；文件属性模态的 **Advanced** 页按编译器编辑（`<Option compiler= use= buildCommand=>` 映射），多行命令推荐在面板内改。
 
 ### P3 性能优化 ✅
 - 大工程三项缓存：include 依赖缓存（buildEngine）、工程树懒加载（projectTreeProvider）、XML 解析缓存（parser）；缓存 key 盘符归一化 + LRU 容量上限（`src/tools/lru.ts`）。
@@ -121,9 +121,9 @@ npm.cmd test
 | [0.8.147](../release/0.8.147.md) | 工程搜索体验：Text 结果排版对齐 VS Code 内置 Search（界面字体 / 22px 行高 / 行号右对齐定宽 / 预览 120 字符）、Files 模式补回 Search 按钮且四个控件同一行、切换 Explorer 后两种模式的搜索记录保持（Provider 回放缓存）、状态行按模式记忆、`Keep history` 开关对齐、Files 模式 `Aa`/`Ab`/`.*` 置灰 |
 | [0.8.148](../release/0.8.148.md) | Build Log 诊断跳转修复：链接期段名伪路径（`src/main.c:(.text+0x9)`）不再误判「无改善」、`.o/.obj` 只作源码线索、无源码位置条目不再显示为可点击；统一清理 ANSI 颜色输出（`-fdiagnostics-color=always`） |
 | [0.8.150](../release/0.8.150.md) | 工程右键 Build options… / Properties… 完整移植 Code::Blocks：共享 Build options 视图（Compiler / Linker / Search directories / Pre-post / Variables / Make）、Compiler Flags 右键菜单（新建/修改/删除/仅 C/仅 C++/展开折叠）+ 覆盖与自定义参数、Silent build 派生与 Dist-clean 只读、Selected compiler 自动匹配工程声明编译器 |
-| [0.8.151](../release/0.8.151.md) | 工程属性 / 构建选项 UI 二次精修：按 CB `project_options.xrc` 重排（Project settings 单张 2 列网格、PCH Strategy radio box、目标文件列表回右栏、脚本页 1:2）；按钮统一复用 Build options `.bo-*`；工程右键菜单按 CB 排序 + 保存/关闭/移除文件/展开折叠命令；Expand All 修复 |
+| [0.8.151](../release/0.8.151.md) | 工程属性 / 构建选项 UI 二次精修：按 CB `project_options.xrc` 重排（Project settings 单张 2 列网格、PCH Strategy radio box、目标文件列表回右栏、脚本页 1:2）；按钮统一复用 Build options `.bo-*`；工程右键菜单按 CB 排序 + 保存/关闭/移除文件/展开折叠命令；Expand All 修复；main 追加：启用联动、Build options 严格对齐（去 Extensions/自定义变量/Dist-clean/Silent）、Set Programs' Arguments 对话框、Selected file properties 三页重写 |
 
-> 当前版本 **0.8.151**（体验版；发布说明见 [release/0.8.151.md](../release/0.8.151.md)，上一版见 [release/0.8.150.md](../release/0.8.150.md)）；测试报告见 [test-report-0.8.151.md](../testing/test-report-0.8.151.md)；无头回归见 `npm test`（`TOTAL=188 FAIL=0 SKIP=1`，另有契约 / E2E / 视觉 / 性能 / 打包 / 宿主分层，见 [测试方案](../testing/strategy.md)）。
+> 当前版本 **0.8.151**（体验版；发布说明见 [release/0.8.151.md](../release/0.8.151.md)，上一版见 [release/0.8.150.md](../release/0.8.150.md)）；测试报告见 [test-report-0.8.151.md](../testing/test-report-0.8.151.md)；无头回归见 `npm test`（`TOTAL=193 FAIL=0 SKIP=1`，另有契约 / E2E / 视觉 / 性能 / 打包 / 宿主分层，见 [测试方案](../testing/strategy.md)）。
 
 ## 文档：GitHub Release 页面格式统一
 
