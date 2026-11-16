@@ -29,8 +29,8 @@
 | [0.8.147.md](./0.8.147.md) | 工程搜索体验：Text 结果排版对齐内置 Search + Files 模式 Search 按钮/同一行布局 + 切视图后两模式搜索记录保持 + 开关与选项置灰 |
 | [0.8.148.md](./0.8.148.md) | Build Log（诊断来源 `build`）错误点击不跳转修复：链接期段名伪路径、`.o/.obj` 对象文件、无源码位置条目与 ANSI 彩色输出 |
 | [0.8.150.md](./0.8.150.md) | 工程右键 `Build options…` / `Properties…` 完整移植 Code::Blocks：共享 Build options 视图、Compiler Flags 右键菜单（新建/修改/删除/仅 C/仅 C++/展开折叠）+ 覆盖与自定义参数、Silent build 派生、Selected compiler 自动匹配 |
-| [0.8.151.md](./0.8.151.md) | 工程属性 / 构建选项 UI 二次精修：按 CB `project_options.xrc` 重排 6 个页签、按钮统一复用 Build options `.bo-*`、还原设置、工程右键菜单排序、Expand All 修复；main 追加：启用联动规则、Build options 严格对齐（去 Extensions/自定义变量/Dist-clean/Silent）、Set Programs' Arguments 对话框、Selected file properties 三页重写、第二轮逐项对齐（additionalLibs→Other linker options、工程级 Linker executable 隐藏、构建脚本红字、变量键值对话框、覆盖层 OK/Cancel、编译器切换询问、目标类型改写扩展名/前缀、目标命名校验、列表点击修复、左对齐与文案；复核后：Import/Definition 占位符、脚本校验 CB 三行文案、类型改写不再受自动前缀/扩展名勾选影响） |
-| [0.8.152.md](./0.8.152.md) | Build options / Properties 第二轮逐项对齐 Code::Blocks：additionalLibs→Other linker options（整串/反向勾选/冲突询问）、构建脚本红字、Linker executable 仅目标作用域、变量键值对话框、覆盖层 OK/Cancel、编译器切换三重询问、类型切换改写扩展名/前缀（含宏名、不受自动勾选影响）、目标命名校验、列表点击修复、Import/Definition 占位符、脚本校验 CB 三行文案、左对齐与文案/tooltip/红字分行/↑↓语义/双击入口 |
+| [0.8.151.md](./0.8.151.md) | 工程属性 / 构建选项 UI 二次精修：按 CB `project_options.xrc` 重排 6 个页签、按钮统一复用 Build options `.bo-*`、还原设置、工程右键菜单排序、Expand All 修复（发布后 main 追加的对齐内容见 [0.8.152.md](./0.8.152.md)） |
+| [0.8.152.md](./0.8.152.md) | Build options / Properties 第二轮逐项对齐 Code::Blocks：启用联动规则、Build options 严格对齐（去 Extensions/自定义变量/Dist-clean/Silent）、additionalLibs→Other linker options（整串/反向勾选/冲突询问）、工程级 Linker executable 隐藏、构建脚本红字、变量键值对话框、覆盖层 OK/Cancel、编译器切换三重询问、Set Programs' Arguments 换行归一、类型切换改写扩展名/前缀（含宏名、不受自动勾选影响）、目标命名校验、列表点击修复、Selected file properties 三页重写与 customBuild 可用、Import/Definition 占位符、脚本校验 CB 三行文案与换行、左对齐与文案/tooltip/红字分行/↑↓语义/双击入口 |
 
 ## 分支预发布版本（branch prerelease）
 
