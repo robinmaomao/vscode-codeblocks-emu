@@ -44,6 +44,7 @@ check('对话框：BOOT 内嵌全部目标与默认目标', /"title":"Debug"/.te
 // ---------- 脚本行为 ----------
 check('脚本：切换目标前暂存当前编辑值（对齐 UpdateSelected）', /function stash\(\)/.test(html) && /if \(last < 0 \|\| !DATA\.targets\[last\]\) return;/.test(html), null);
 check('脚本：默认执行目标互斥（勾选即覆盖、取消即清空）', /DATA\.defaultExecuteTarget = t\.title;/.test(html) && /DATA\.defaultExecuteTarget = '';/.test(html), null);
+check('脚本：程序参数换行替换为空格（TargetListData::SetExecParameters）', /\.replace\(\/\\r\?\\n\/g, ' '\)/.test(html), null);
 check('脚本：双击目标行等同 OK', /addEventListener\('dblclick'/.test(html) && /submit\(\);/.test(html), null);
 check('脚本：浏览结果回填宿主程序', /msg\.type === 'browsed'/.test(html) && /q\('rt-host'\)\.value = msg\.value/.test(html), null);
 check('脚本：初始选中优先活动目标，其次默认执行目标', /DATA\.activeTarget/.test(html) && /DATA\.defaultExecuteTarget\) \{/.test(html), null);

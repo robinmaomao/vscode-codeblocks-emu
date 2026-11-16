@@ -3650,6 +3650,12 @@ function buildOptionsRuntimeFor(project: Project): BuildOptionsRuntime {
     compilerCommands,
     objectExtension: projectCompiler.switches.objectExtension || 'o',
     pchExtension: projectCompiler.switches.PCHExtension || 'gch',
+    libExtension: projectCompiler.switches.libExtension || 'a',
+    libPrefix: projectCompiler.switches.libPrefix || '',
+    // CB FileFilters 的平台相关扩展名
+    exeExtension: process.platform === 'win32' ? 'exe' : '',
+    dynamicLibExtension: process.platform === 'win32' ? 'dll' : (process.platform === 'darwin' ? 'dylib' : 'so'),
+    nativeExtension: process.platform === 'win32' ? 'sys' : '',
     defaultCompilerId: vscode.workspace.getConfiguration('codeblocks').get<string>('compilerId', 'gcc'),
     supportsPch: projectCompiler.switches.supportsPCH !== false,
     defineSwitch: projectCompiler.switches.defines || '-D',
@@ -3735,6 +3741,9 @@ function buildOptionsDataFor(project: Project): BuildOptionsData {
   return {
     projectTitle: project.title,
     makefileIsCustom: project.makefileIsCustom === true,
+    hasBuildScripts:
+      (project.buildScripts ?? []).length > 0 ||
+      project.buildTargets.some((t) => (t.buildScripts ?? []).length > 0),
     defineSwitch: runtime.defineSwitch,
     project: projectScope,
     targets,
@@ -3766,7 +3775,7 @@ function openRunTargetsPanel(project: Project): void {
     for (const s of saved.targets) {
       const t = live.buildTargets.find((x) => x.title === s.title);
       if (!t) throw new Error(i18n.t('Target not found: {0}', s.title));
-      t.executionParameters = String(s.executionParameters ?? '');
+      t.executionParameters = String(s.executionParameters ?? '').replace(/\r?\n/g, ' ');
       t.hostApplication = String(s.hostApplication ?? '');
       t.runHostApplicationInTerminal = s.runHostApplicationInTerminal === true;
     }

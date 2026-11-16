@@ -9,7 +9,7 @@
 
 **Properties 版式（按 CB XRC 重排）**
 
-- **Project settings**：去掉 3 张分组卡片，改为 CB 的单张 2 列 FlexGrid；`执行目录` 回到 Makefile 右列子行；PCH 改为「标签 + 标题为 `策略` 的 radio box」；`对象文件名生成` / `检查外部修改的文件` 改为「左标签 + 右复选框 + 红字」；`工程的依赖… / 工程的构建选项…` 置于右下。
+- **Project settings**：去掉 3 张分组卡片，改为 CB 的单张 2 列 FlexGrid；`执行目录` 回到 Makefile 右列子行；PCH 改为「标签 + 标题为 `策略` 的 radio box」；`对象文件名生成` / `检查外部修改的文件` 改为「左标签 + 右复选框 + 红字」；`工程的依赖… / 工程的构建选项…` 置于左下（CB 在 stretch spacer 之后）。
 - **Build targets**：`Build target files:` 从跨栏移回右栏（`Selected build target options` 下方）；左侧按钮加弹簧分组，↑/↓ 使用 SVG 箭头；标签补冒号与 CB 静态分隔线；列表去掉图标。
 - **Build scripts**：左右 1:2；`校验所有已附加脚本` 移到左栏工程概览树下方；脚本列表右侧上下 spin。
 - **Notes / C/C++ parser**：去卡片、内容撑满；**Debugger** 子标签改用 Build options 同款 `.bo-subtabs`。
@@ -42,7 +42,14 @@
 - **Build options 严格对齐**：删除 CB 没有的 `Extensions` 页、Project custom variables 文本域、`Dist-clean` 与 `Silent build`（后两者 XRC 中隐藏，保存时派生）；Make 页只留 Build / Compile / Clean / Ask；`externalDeps` / `additionalOutput` 只在「依赖…」编辑。
 - **Set Programs' Arguments…**：新增 CB `SelectTargetDlg` 同款对话框（目标列表 / 默认执行目标 / 程序参数 / 宿主程序 + 浏览 / 在终端中运行），写回 `default_target` 等字段；库与仅命令目标未勾选终端时直接 `spawn`；`runHostApplicationInTerminal` 默认改为 false。
 - **Selected file properties…**：按 CB `ProjectFileOptionsDlg` 重写为 General / Build / Advanced 三页（统计与对象名对齐 `CountLines`/`SetObjName`、只读切换 `chmod`、按编译器保存自定义构建、自动生成文件禁用后两页），新增 `src/model/fileStats.ts` 与 6 张视觉基线。
-- 验证：`npm test` **TOTAL=193 FAIL=0 SKIP=1**；契约 3/3；E2E 6/6；视觉 **26/26**；打包 15 断言。
+
+**第二轮 CB 逐项对齐（Build options / Properties）**
+
+- **Compiler Flags ↔ Other linker options**：勾选参数的 `additionalLibs` 改为**整串**写入 `Other linker options`（原先错写进 Link libraries 并按空格拆分）；载入时按整串反向勾选并从文本隐去；取消勾选而文本仍保留时弹 `Enable compiler flags?`（Yes 保留 / No 移除），对齐 `OptionsToText` / `TextToOptions`。
+- **Build options 细节**：补齐工程/目标存在构建脚本时的 `lblBuildScriptsNote` 红字；`Linker executable` 行在工程作用域整行隐藏（CB `Show(m_pTarget != nullptr)`），文案改为 `Auto detect / Use C compiler / Use C++ compiler / Use linker` 并补 tooltip；Custom variables 改为 `EditPairDlg` 式键值对话框（键名正则、目录浏览、含空格询问引号、独立删除/清空确认）；嵌入式覆盖层按钮改为 `确定 | 取消`；编译器切换补三重询问（未保存改动、目标重建提示、工程同步所有目标）。
+- **Properties 细节**：目标类型切换按 `OnProjectTypeChanged` 改写扩展名/前缀（GUI·Console→`exe`、Dynamic→`dll`+`a`+`def`、Static→`libExtension`+`lib` 前缀、Native→`sys`）并对非动态类型清空 Import/Definition（自动扩展名/前缀勾选时交由构建命令生成器处理）；新增/重命名/复制目标都先询问名称并按 `ValidateTargetName` 校验（重名 / 虚拟目标 / 非法字符）；修复「编辑字段后第一次点击另一个目标无效」（`collectTargetForm` 不再重建列表）；`Selected file properties` 在自定义 Makefile 下恢复可用；`工程的依赖… / 工程的构建选项…` 改为左对齐；目标类型 0 文案改 `GUI application`；补「执行结束时暂停」tooltip、红字按 CB 分行、脚本 ↑/↓ 语义与双击目标/文件快捷入口。
+- **Set Programs' Arguments**：保存时把程序参数中的换行替换为空格（`TargetListData::SetExecParameters`）。
+- 验证：`npm test` **TOTAL=195 FAIL=0 SKIP=1**；契约 3/3；E2E 6/6；视觉 **26/26**；打包 15 断言。
 
 ## 0.8.150 — 2026-11-12
 

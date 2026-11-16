@@ -271,7 +271,8 @@ export interface DebuggerSettingsEditData {
 /** 目标类型下拉项（每次渲染取当前语言，勿在模块级固化） */
 function targetTypeNames(): Record<number, string> {
   return {
-    0: i18n.t('Executable'),
+    // 文案对齐 CB 的 chProjectType 选项（GUI application / Console application / ...）
+    0: i18n.t('GUI application'),
     1: i18n.t('Console application'),
     2: i18n.t('Static library'),
     3: i18n.t('Dynamic library'),
@@ -306,6 +307,16 @@ export interface BuildOptionsRuntime {
   objectExtension?: string;
   /** PCH 扩展名（编译器的 PCHExtension，如 gch） */
   pchExtension?: string;
+  /** 静态库扩展名（GetSwitches().libExtension，如 a） */
+  libExtension?: string;
+  /** 静态库前缀（GetSwitches().libPrefix，如 lib） */
+  libPrefix?: string;
+  /** 可执行文件扩展名（FileFilters::EXECUTABLE_EXT，按平台） */
+  exeExtension?: string;
+  /** 动态库扩展名（FileFilters::DYNAMICLIB_EXT，按平台） */
+  dynamicLibExtension?: string;
+  /** 原生扩展名（FileFilters::NATIVE_EXT，按平台） */
+  nativeExtension?: string;
   /** 扩展设置中的默认编译器（工程未声明 compiler 时的回退） */
   defaultCompilerId?: string;
   /** 工程编译器是否支持 PCH（CB rbPCHStrategy->Enable(hasPCH)） */
@@ -588,6 +599,9 @@ export class ProjectPropertiesPanel {
     const initialBoData: BuildOptionsData = {
       projectTitle: this.project.title,
       makefileIsCustom: this.project.makefileIsCustom === true,
+      hasBuildScripts:
+        (this.project.buildScripts ?? []).length > 0 ||
+        this.project.buildTargets.some((t) => (t.buildScripts ?? []).length > 0),
       defineSwitch: boRuntime.defineSwitch,
       project: boProjectScope,
       targets: boTargetScopes,
@@ -837,7 +851,7 @@ export class ProjectPropertiesPanel {
     .cb-props .sub-row > .field-name { font-weight: 400; font-size: 12px; white-space: nowrap; }
     .cb-props .sub-row > input { flex: 1; min-width: 0; }
     .cb-props .static-value { font-size: 12px; line-height: 24px; color: var(--vscode-foreground); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .cb-props .settings-actions { display: flex; justify-content: flex-end; gap: 6px; margin-top: 10px; }
+    .cb-props .settings-actions { display: flex; justify-content: flex-start; gap: 6px; margin-top: 10px; }
     .cb-props .cb-gap8 { height: 8px; }
     .cb-props .form-grid > .hint { padding-left: calc(var(--cb-form-label-w) + 4px); }
     .cb-props .checks label.check { display: inline-flex; align-items: center; gap: 6px; margin: 0; }
@@ -1250,7 +1264,16 @@ export class ProjectPropertiesPanel {
         '<div class="item' + (i === selected ? ' selected' : '') + '" data-i="' + i + '"><span class="item-label">' + esc(t.title) + '</span></div>'
       ).join('');
       el.querySelectorAll('.item').forEach(div => {
-        div.addEventListener('click', () => { selected = +div.dataset.i; renderList(); renderForm(); renderTargetFileList(); });
+        div.addEventListener('click', () => {
+          selected = +div.dataset.i;
+          // 只切换选中样式：重建行会让双击（CB 的 dblclick 快捷入口）失效
+          el.querySelectorAll('.item').forEach(x => x.classList.toggle('selected', x === div));
+          const sel = document.getElementById('targetSwitch');
+          if (sel) sel.value = String(selected);
+          renderForm(); renderTargetFileList();
+        });
+        // CB EVT_LISTBOX_DCLICK(lstBuildTarget)：双击打开该目标的构建选项
+        div.addEventListener('dblclick', () => { openBuildOptions(String(selected)); });
       });
       // D1：工具栏目标下拉同步
       const sel = document.getElementById('targetSwitch');
@@ -1272,7 +1295,7 @@ export class ProjectPropertiesPanel {
           '<span style="display:none"><input type="checkbox" id="f-pwin"' + ((t.platforms & 4) ? ' checked' : '') + '><input type="checkbox" id="f-punix"' + ((t.platforms & 2) ? ' checked' : '') + '><input type="checkbox" id="f-pmac"' + ((t.platforms & 1) ? ' checked' : '') + '></span>' +
           '<label><span class="field-name">${i18n.tr('类型：')}</span><select id="f-type">${typeOptions}</select></label>' +
           '<div class="row"><span class="field-name"></span><div class="sub-block">' +
-            '<label class="check"><input type="checkbox" id="f-console"' + (t.useConsoleRunner !== false ? ' checked' : '') + '> <span>${i18n.tr('执行结束时暂停')}</span></label>' +
+            '<label class="check" title="${i18n.tr('执行结束后暂停（按任意键继续），仅在 Code::Blocks 内部运行时有效')}"><input type="checkbox" id="f-console"' + (t.useConsoleRunner !== false ? ' checked' : '') + '> <span>${i18n.tr('执行结束时暂停')}</span></label>' +
             '<label class="check"><input type="checkbox" id="f-staticchk"' + (t.createStaticLib ? ' checked' : '') + '> <span>${i18n.tr('创建导入库')}</span></label>' +
             '<label class="check"><input type="checkbox" id="f-defchk"' + (t.createDefFile ? ' checked' : '') + '> <span>${i18n.tr('创建 .DEF 导出文件')}</span></label>' +
           '</div></div>' +
@@ -1331,18 +1354,41 @@ export class ProjectPropertiesPanel {
       t.createStaticLib = document.getElementById('f-staticchk').checked;
       t.prefixAuto = document.getElementById('f-prefix').checked;
       t.extensionAuto = document.getElementById('f-ext').checked;
-      renderList();
+      // 不能重建列表：change 事件在 blur 阶段触发，重建行会让紧随其后的 mousedown 命中已脱离的节点，
+      // 导致「改完值后第一次点另一个目标」被吞掉。只同步标题文本与启用状态。
+      updateListLabels();
+    }
+
+    /** 只刷新左栏行文本/工具栏下拉（不重建 DOM） */
+    function updateListLabels() {
+      const el = document.getElementById('list');
+      if (el) {
+        el.querySelectorAll('.item').forEach(div => {
+          const t = targets[+div.dataset.i];
+          const label = div.querySelector('.item-label');
+          if (t && label) label.textContent = t.title;
+        });
+      }
+      const sel = document.getElementById('targetSwitch');
+      if (sel) sel.value = String(selected);
+      syncEnabledStates();
     }
 
     document.getElementById('add').addEventListener('click', () => {
       collectTargetForm();
       const n = targets.length + 1;
-      targets.push({ originalTitle: '', title: 'Target' + n, targetType: 1, outputFilename: 'bin/Target' + n + '/app', objectOutput: 'obj/Target' + n + '/', compilerId: data.compilerId || 'gcc', executionParameters: '', externalDeps: [], additionalOutput: [], envVars: [], workingDir: '', depsOutput: '', platforms: 255, hostApplication: '', runHostApplicationInTerminal: false, useConsoleRunner: true, impLib: '', defFile: '', createDefFile: false, createStaticLib: false, prefixAuto: true, extensionAuto: true });
-      targetOpts.push({ compilerOptions: [], linkerOptions: [], linkLibs: [], resourceCompilerOptions: [], relations: { compiler: 3, linker: 3, include: 3, lib: 3, res: 3 } });
-      targetDirs.push({ includeDirs: [], libDirs: [], resourceDirs: [] });
-      targetScripts.push({ scripts: [], before: [], after: [], always: false });
-      selected = targets.length - 1;
-      renderList(); renderForm(); renderTargetFileList();
+      askText('${i18n.tr('输入新构建目标的名称：')}', 'Target' + n, v => {
+        const title = String(v || '').trim();
+        if (!title) return;
+        // 默认值对齐 CB AddBuildTarget：GUI application + 与工程同名的输出 + .objs/.deps
+        const exeExt = boRuntime.exeExtension !== undefined ? boRuntime.exeExtension : 'exe';
+        targets.push({ originalTitle: '', title, targetType: 0, outputFilename: projSettings.title + (exeExt ? '.' + exeExt : ''), objectOutput: '.objs', compilerId: data.compilerId || 'gcc', executionParameters: '', externalDeps: [], additionalOutput: [], envVars: [], workingDir: '.', depsOutput: '.deps', platforms: 255, hostApplication: '', runHostApplicationInTerminal: false, useConsoleRunner: true, impLib: '', defFile: '', createDefFile: false, createStaticLib: false, prefixAuto: true, extensionAuto: true });
+        targetOpts.push({ compilerOptions: [], linkerOptions: [], linkLibs: [], resourceCompilerOptions: [], relations: { compiler: 3, linker: 3, include: 3, lib: 3, res: 3 } });
+        targetDirs.push({ includeDirs: [], libDirs: [], resourceDirs: [] });
+        targetScripts.push({ scripts: [], before: [], after: [], always: false });
+        selected = targets.length - 1;
+        renderList(); renderForm(); renderTargetFileList();
+      }, v => validateTargetName(v, ''));
     });
 
     // D1：工具栏目标下拉切换
@@ -1355,13 +1401,17 @@ export class ProjectPropertiesPanel {
     document.getElementById('copy').addEventListener('click', () => {
       if (!targets.length) return;
       collectTargetForm();
-      const src = targets[selected];
-      targets.splice(selected + 1, 0, { ...src, originalTitle: '', title: src.title + ' copy', externalDeps: [...(src.externalDeps || [])], additionalOutput: [...(src.additionalOutput || [])], envVars: (src.envVars || []).map(v => ({ ...v })), makeCommands: { ...(src.makeCommands || {}) } });
-      targetOpts.splice(selected + 1, 0, { compilerOptions: [...targetOpts[selected].compilerOptions], linkerOptions: [...targetOpts[selected].linkerOptions], linkLibs: [...targetOpts[selected].linkLibs], resourceCompilerOptions: [...(targetOpts[selected].resourceCompilerOptions || [])], relations: { ...targetOpts[selected].relations } });
-      targetDirs.splice(selected + 1, 0, { includeDirs: [...targetDirs[selected].includeDirs], libDirs: [...targetDirs[selected].libDirs], resourceDirs: [...targetDirs[selected].resourceDirs] });
-      targetScripts.splice(selected + 1, 0, { scripts: [...targetScripts[selected].scripts], before: [...targetScripts[selected].before], after: [...targetScripts[selected].after], always: targetScripts[selected].always === true });
-      selected = selected + 1;
-      renderList(); renderForm(); renderTargetFileList();
+      askText('${i18n.tr('输入复制的构建目标名称：')}', 'Copy of ' + targets[selected].title, v => {
+        const title = String(v || '').trim();
+        if (!title) return;
+        const src = targets[selected];
+        targets.splice(selected + 1, 0, { ...src, originalTitle: '', title, externalDeps: [...(src.externalDeps || [])], additionalOutput: [...(src.additionalOutput || [])], envVars: (src.envVars || []).map(v => ({ ...v })), makeCommands: { ...(src.makeCommands || {}) } });
+        targetOpts.splice(selected + 1, 0, { compilerOptions: [...targetOpts[selected].compilerOptions], linkerOptions: [...targetOpts[selected].linkerOptions], linkLibs: [...targetOpts[selected].linkLibs], resourceCompilerOptions: [...(targetOpts[selected].resourceCompilerOptions || [])], relations: { ...targetOpts[selected].relations } });
+        targetDirs.splice(selected + 1, 0, { includeDirs: [...targetDirs[selected].includeDirs], libDirs: [...targetDirs[selected].libDirs], resourceDirs: [...targetDirs[selected].resourceDirs] });
+        targetScripts.splice(selected + 1, 0, { scripts: [...targetScripts[selected].scripts], before: [...targetScripts[selected].before], after: [...targetScripts[selected].after], always: targetScripts[selected].always === true });
+        selected = selected + 1;
+        renderList(); renderForm(); renderTargetFileList();
+      }, v => validateTargetName(v, ''));
     });
 
     document.getElementById('remove').addEventListener('click', () => {
@@ -1452,7 +1502,15 @@ export class ProjectPropertiesPanel {
       const v = virtualTargets[selectedVT];
       v.alias = aliasEl.value.trim() || v.alias;
       v.targets = [...document.querySelectorAll('#vtform input[data-title]:checked')].map(c => c.dataset.title);
-      renderVTList();
+      // 同 collectTargetForm：只更新行文本，避免重建列表吞掉紧随的点击
+      const el = document.getElementById('vtlist');
+      if (el) {
+        el.querySelectorAll('.item').forEach(div => {
+          const item = virtualTargets[+div.dataset.i];
+          const label = div.querySelector('.item-label');
+          if (item && label) label.textContent = item.alias;
+        });
+      }
     }
 
     document.getElementById('vt-add').addEventListener('click', () => {
@@ -1794,7 +1852,7 @@ export class ProjectPropertiesPanel {
           '<div class="row"><span class="field-name"></span><div class="sub-block">' +
             '<label class="check"><input type="checkbox" id="set-mkcustom"' + (projSettings.makefileIsCustom ? ' checked' : '') + '> <span>${i18n.tr('这是一个自定义 Makefile')}</span></label>' +
             '<div class="hint red">${i18n.tr('文件必须存在，不会自动生成 Makefile！')}</div>' +
-            '<div class="hint red">${i18n.tr('如果在此处修改，工程构建选项里的特殊设置只有在保存工程后才会启用/禁用。')}</div>' +
+            '<div class="hint red">${i18n.tr('如果在此处修改，工程构建选项里的特殊设置')}<br>${i18n.tr('只有在保存工程后才会启用（或禁用）。')}</div>' +
             '<div class="sub-row"><span class="field-name">${i18n.tr('执行目录：')}</span><input id="set-mkdir" value="' + escAttr(projSettings.executionDir || DEFAULT_EXEC_DIR) + '" title="' + escAttr(DEFAULT_EXEC_DIR) + '"><button class="cb-browse" data-browse="folder" data-target="set-mkdir">...</button></div>' +
           '</div></div>' +
           '<div class="row"><span class="field-name">${i18n.tr('预编译头：')}</span><fieldset class="radio-box"><legend>${i18n.tr('策略')}</legend><div class="radio-group">' +
@@ -1804,11 +1862,11 @@ export class ProjectPropertiesPanel {
           '<div class="row cb-gap8"><span class="field-name"></span><span></span></div>' +
           '<div class="row"><span class="field-name">${i18n.tr('对象文件名生成：')}</span><div class="sub-block">' +
             '<label class="check"><input type="checkbox" id="set-extobj"' + (projSettings.extendedObjNames ? ' checked' : '') + '> <span>${i18n.tr('生成扩展对象名（例如 "foo.cpp.o" 而不是 "foo.o"）')}</span></label>' +
-            '<div class="hint red">${i18n.tr('（此设置主要用于包含大量同名但扩展名不同文件的大型工程）')}</div>' +
+            '<div class="hint red">${i18n.tr('（此设置主要用于大型工程：工程内存在大量')}<br>${i18n.tr('同名但扩展名不同的文件）')}</div>' +
           '</div></div>' +
           '<div class="row" style="margin-top:8px"><span class="field-name">${i18n.tr('检查外部修改的文件：')}</span><div class="sub-block">' +
             '<label class="check"><input type="checkbox" id="set-checkfiles"' + (projSettings.checkForExternallyModifiedFiles !== false ? ' checked' : '') + '> <span>${i18n.tr('检查外部修改的文件（大多数情况下应勾选）')}</span></label>' +
-            '<div class="hint red">${i18n.tr('（关闭外部修改检查主要用于慢速网络共享上的工程。注意：外部修改可能静默覆盖文件，如果你没有在 Code::Blocks 内保存它们）')}</div>' +
+            '<div class="hint red">${i18n.tr('（关闭外部修改检查主要用于慢速网络共享上的工程。')}<br>${i18n.tr('注意：外部修改可能静默覆盖文件，如果你没有')}<br>${i18n.tr('在 Code::Blocks 内保存它们）')}</div>' +
           '</div></div>' +
         '</div>' +
         '<div class="settings-actions"><button id="set-project-deps">${i18n.tr('工程的依赖…')}</button><button id="set-project-build-options">${i18n.tr('工程的构建选项…')}</button></div>';
@@ -1896,7 +1954,8 @@ export class ProjectPropertiesPanel {
         setBrowseDisabled('f-object', customMake || commandsOnly);
         document.querySelectorAll('#tflist input[type="checkbox"]').forEach(cb => { cb.disabled = customMake; });
         ['toggleChecks', 'allOn', 'allOff'].forEach(id => setDisabled(id, customMake));
-        setDisabled('fileProps', customMake || !files.length);
+        // CB OnUpdateUI：btnFileOptions 只依赖「文件列表有选中行」，与自定义 Makefile 无关
+        setDisabled('fileProps', !files.length);
         setDisabled('remove', targets.length <= 1);
         setDisabled('reorderTargets', targets.length <= 1);
         setDisabled('renameTarget', !targets.length);
@@ -1907,10 +1966,14 @@ export class ProjectPropertiesPanel {
 
       // Build scripts（CB：自定义 Makefile 时整页只读）
       ['scr-tree', 'scr-list-box', 'scr-add', 'scr-validate'].forEach(id => setDisabled(id, customMake));
-      const scriptSel = !customMake && selectedScript >= 0;
+      const scriptList = scriptScope();
+      const scriptCount = scriptList && scriptList.scripts ? scriptList.scripts.length : 0;
+      const scriptSel = !customMake && selectedScript >= 0 && selectedScript < scriptCount;
       setDisabled('scr-remove', !scriptSel);
-      setDisabled('scr-up', !scriptSel);
-      setDisabled('scr-down', !scriptSel);
+      // CB spnPreScripts：有选中且条目数 > 1 才可移动
+      const canMove = scriptSel && scriptCount > 1;
+      setDisabled('scr-up', !canMove);
+      setDisabled('scr-down', !canMove);
 
       // Parser / Debugger：无选中项时不可编辑
       setDisabled('parser-edit', selectedParser < 0);
@@ -1918,18 +1981,79 @@ export class ProjectPropertiesPanel {
       setDisabled('dbg-path-edit', selectedDbgPath < 0);
       setDisabled('dbg-path-del', selectedDbgPath < 0);
     }
-    /** 目标类型切换：对齐 CB OnProjectTypeChanged 的清空规则 */
+    /**
+     * 目标类型切换：对齐 CB OnProjectTypeChanged 的扩展名/前缀改写与清空规则。
+     * 与 CB 的差异：「自动生成文件名扩展名/前缀」勾选时由构建命令生成器处理，
+     * 这里不改写（否则会与宏/自动策略冲突）。
+     */
     function applyTargetTypeRules() {
       const el = document.getElementById('f-type');
       if (!el) return;
       const type = Number(el.value);
+      const outEl = document.getElementById('f-output');
+      const impEl = document.getElementById('f-implib');
+      const defEl = document.getElementById('f-deffile');
+      const extAuto = !document.getElementById('f-ext') || document.getElementById('f-ext').checked;
+      const prefixAuto = !document.getElementById('f-prefix') || document.getElementById('f-prefix').checked;
+      const libExt = boRuntime.libExtension || 'a';
+      const libPrefix = boRuntime.libPrefix || '';
+      const exeExt = boRuntime.exeExtension !== undefined ? boRuntime.exeExtension : 'exe';
+      const dynExt = boRuntime.dynamicLibExtension || 'dll';
+      const natExt = boRuntime.nativeExtension !== undefined ? boRuntime.nativeExtension : 'sys';
       const clear = (id) => { const f = document.getElementById(id); if (f) f.value = ''; };
-      if (type === 2) {
-        // Static library：CB 清空 Import library / Definition file
-        clear('f-implib');
-        clear('f-deffile');
-      } else if (type === 4) {
-        // Commands only：CB 清空并禁用全部输出/文件名/目录
+
+      // 按 CB 的做法拆出目录/主名/扩展名（保留原分隔符，宏不参与改写）
+      const splitName = (value) => {
+        const s = String(value || '');
+        if (!s || s.includes('$(')) return null;
+        const at = Math.max(s.lastIndexOf('/'), s.lastIndexOf('\\\\'));
+        const dir = at >= 0 ? s.slice(0, at + 1) : '';
+        const name = at >= 0 ? s.slice(at + 1) : s;
+        const dot = name.lastIndexOf('.');
+        if (dot <= 0) return { dir, base: name, ext: '' };
+        return { dir, base: name.slice(0, dot), ext: name.slice(dot + 1) };
+      };
+      const join = (p) => (p ? p.dir + p.base + (p.ext ? '.' + p.ext : '') : '');
+      const setExt = (value, ext) => {
+        const p = splitName(value);
+        if (!p || !ext) return value;
+        if (p.ext === ext) return value;
+        // 自动扩展名：没有显式扩展名时交给生成器
+        if (extAuto && !p.ext) return value;
+        return join({ ...p, ext });
+      };
+      const stripPrefix = (value) => {
+        const p = splitName(value);
+        if (!p || !libPrefix || prefixAuto) return value;
+        if (!p.base.startsWith(libPrefix)) return value;
+        return join({ ...p, base: p.base.slice(libPrefix.length) });
+      };
+      const addPrefix = (value) => {
+        const p = splitName(value);
+        if (!p || !libPrefix || prefixAuto) return value;
+        if (p.base.startsWith(libPrefix)) return value;
+        return join({ ...p, base: libPrefix + p.base });
+      };
+
+      if (type === 0 || type === 1) {
+        // GUI / Console：exe，剥 lib 前缀，清空 Import/Definition
+        if (outEl) outEl.value = setExt(stripPrefix(outEl.value), exeExt);
+        clear('f-implib'); clear('f-deffile');
+      } else if (type === 3) {
+        // Dynamic library：dll + 导入库 libExtension + 定义文件 def，全部剥 lib 前缀
+        if (outEl) outEl.value = setExt(stripPrefix(outEl.value), dynExt);
+        if (impEl) impEl.value = setExt(stripPrefix(impEl.value), libExt);
+        if (defEl) defEl.value = setExt(stripPrefix(defEl.value), 'def');
+      } else if (type === 2) {
+        // Static library：libExtension，必要时补 lib 前缀，清空 Import/Definition
+        if (outEl) outEl.value = addPrefix(setExt(outEl.value, libExt));
+        clear('f-implib'); clear('f-deffile');
+      } else if (type === 5) {
+        // Native：sys，剥 lib 前缀，清空 Import/Definition
+        if (outEl) outEl.value = setExt(stripPrefix(outEl.value), natExt);
+        clear('f-implib'); clear('f-deffile');
+      } else {
+        // Commands only：全部清空（CB 还会禁用相关控件）
         ['f-output', 'f-implib', 'f-deffile', 'f-workdir', 'f-object'].forEach(clear);
       }
       collectTargetForm();
@@ -2220,7 +2344,16 @@ export class ProjectPropertiesPanel {
       el.querySelectorAll('.item').forEach(row => {
         row.addEventListener('click', ev => {
           if (ev.target && ev.target.tagName === 'INPUT') return;
-          selectedTargetFile = Number(row.dataset.i); renderTargetFileList();
+          selectedTargetFile = Number(row.dataset.i);
+          // 只改选中样式，避免重建行吞掉双击
+          el.querySelectorAll('.item').forEach(x => x.classList.toggle('selected', x === row));
+          syncEnabledStates();
+        });
+        // CB EVT_LISTBOX_DCLICK(lstFiles)：双击打开文件属性
+        row.addEventListener('dblclick', ev => {
+          if (ev.target && ev.target.tagName === 'INPUT') return;
+          selectedTargetFile = Number(row.dataset.i);
+          openFileModal(selectedTargetFile);
         });
       });
       el.querySelectorAll('input[data-fi]').forEach(cb => {
@@ -2252,19 +2385,41 @@ export class ProjectPropertiesPanel {
     document.getElementById('allOff').addEventListener('click', () => toggleTargetFileChecks(false));
     document.getElementById('fileProps').addEventListener('click', () => openFileModal(selectedTargetFile));
 
+    // ---- 目标名校验（对齐 CB ProjectOptionsDlg::ValidateTargetName） ----
+    // CB 的非法字符集：; , ! @ # $ % ^ & * " ' 反引号 ~ = ? 反斜杠 > <
+    const TARGET_NAME_FORBIDDEN = String.fromCharCode(59, 44, 33, 64, 35, 36, 37, 94, 38, 42, 34, 39, 96, 126, 61, 63, 92, 62, 60);
+    function validateTargetName(name, exceptTitle) {
+      const title = String(name || '').trim();
+      if (!title) return '';
+      if (targets.some(t => t.title === title && t.title !== exceptTitle)) return '${i18n.tr('工程中已存在同名的构建目标！')}';
+      if (virtualTargets.some(v => v.alias === title)) return '${i18n.tr('工程中已存在同名的虚拟目标！')}';
+      const bad = [...title].filter(ch => TARGET_NAME_FORBIDDEN.includes(ch));
+      if (bad.length) return '${i18n.tr('名称包含非法字符：')}' + TARGET_NAME_FORBIDDEN;
+      return '';
+    }
+
     // ---- 通用输入/确认模态 ----
-    function askText(title, initial, cb) {
+    function askText(title, initial, cb, validate) {
       const wrap = document.createElement('div');
       wrap.className = 'bo-modal';
       wrap.innerHTML = '<div class="bo-modal-box"><div class="bo-modal-title"><span>' + esc(title) + '</span></div>' +
-        '<div class="bo-modal-body"><input id="ask-text-input" type="text" value="' + escAttr(initial || '') + '" style="width:100%"></div>' +
+        '<div class="bo-modal-body"><input id="ask-text-input" type="text" value="' + escAttr(initial || '') + '" style="width:100%">' +
+        '<div class="hint red" id="ask-text-error" style="display:none"></div></div>' +
         '<div class="bo-modal-actions"><button id="ask-cancel">${i18n.t('Cancel')}</button><button id="ask-ok" class="default">${i18n.t('OK')}</button></div></div>';
       document.body.appendChild(wrap);
       const input = wrap.querySelector('#ask-text-input');
+      const errEl = wrap.querySelector('#ask-text-error');
       input.focus(); input.select();
+      const submit = () => {
+        const err = validate ? validate(input.value) : '';
+        if (err) { errEl.textContent = err; errEl.style.display = ''; return; }
+        const v = input.value;
+        wrap.remove();
+        cb(v);
+      };
       wrap.querySelector('#ask-cancel').addEventListener('click', () => wrap.remove());
-      wrap.querySelector('#ask-ok').addEventListener('click', () => { const v = input.value; wrap.remove(); cb(v); });
-      input.addEventListener('keydown', e => { if (e.key === 'Enter') { const v = input.value; wrap.remove(); cb(v); } if (e.key === 'Escape') wrap.remove(); });
+      wrap.querySelector('#ask-ok').addEventListener('click', submit);
+      input.addEventListener('keydown', e => { if (e.key === 'Enter') submit(); if (e.key === 'Escape') wrap.remove(); });
     }
 
     function confirmBox(title, cb) {
@@ -2371,7 +2526,7 @@ export class ProjectPropertiesPanel {
       if (!targets.length) return;
       collectTargetForm();
       const oldTitle = targets[selected].title;
-      askText('${i18n.tr('重命名构建目标')}', oldTitle, v => {
+      askText('${i18n.tr('修改构建目标名称：')}', oldTitle, v => {
         const title = String(v || '').trim();
         if (!title || title === oldTitle) return;
         targets[selected].title = title;
@@ -2379,7 +2534,7 @@ export class ProjectPropertiesPanel {
         virtualTargets.forEach(vt => { vt.targets = vt.targets.map(x => x === oldTitle ? title : x); });
         dbg.remote.forEach(r => { if (r.target === oldTitle) r.target = title; });
         renderList(); renderForm(); renderTargetFileList();
-      });
+      }, v => validateTargetName(v, oldTitle));
     });
 
     // ---- 文件属性模态（CB ProjectFileOptionsDlg） ----
@@ -2435,6 +2590,7 @@ export class ProjectPropertiesPanel {
       return {
         projectTitle: projSettings.title,
         makefileIsCustom: projSettings.makefileIsCustom === true,
+        hasBuildScripts: projScripts.scripts.length > 0 || targetScripts.some(s => s.scripts.length > 0),
         defineSwitch: boRuntime.defineSwitch || '-D',
         project: boScopeFrom(projOpts, projDirs, projScripts, undefined, projSettings, projSettings.title, projSettings.compilerId, 0),
         targets: targets.map((t, i) => boScopeFrom(targetOpts[i], targetDirs[i], targetScripts[i], t, t, t.title, t.compilerId, t.linkerExecutable)),
@@ -2496,7 +2652,8 @@ export class ProjectPropertiesPanel {
     }
     document.getElementById('targetBuildOptions').addEventListener('click', () => { if (targets.length) openBuildOptions(String(selected)); });
     document.getElementById('bo-overlay').addEventListener('click', e => {
-      if (e.target && e.target.id === 'bo-overlay') { window.cbBuildOptions && window.cbBuildOptions.close(); applyBuildOptions(window.cbBuildOptions && window.cbBuildOptions.read()); }
+      // 点击遮罩 = 取消（丢弃本次修改），与 CB 模态一致
+      if (e.target && e.target.id === 'bo-overlay') { window.cbBuildOptions && window.cbBuildOptions.cancel(); }
     });
 
     // ---- 保存 ----
@@ -2625,9 +2782,12 @@ export class ProjectPropertiesPanel {
     // Build options 覆盖层的关闭按钮由共享脚本动态重建：用事件委托保证每次关闭都回写草稿
     document.addEventListener('click', e => {
       const target = e.target;
-      if (target && target.id === 'bo-close') {
+      if (target && target.id === 'bo-ok') {
         const api = window.cbBuildOptions;
         if (api) { api.close(); applyBuildOptions(api.read()); }
+      } else if (target && target.id === 'bo-cancel') {
+        // CB Cancel：丢弃覆盖层里的修改，不回写草稿
+        window.cbBuildOptions && window.cbBuildOptions.cancel();
       }
     }, true);
   </script>
@@ -2677,6 +2837,24 @@ export class ProjectPropertiesPanel {
         cOnly: flags.cOnly,
         cppOnly: flags.cppOnly,
         error,
+      });
+      return;
+    }
+    // 变量对话框的「选择目录」（对齐 CB EditPairDlg 的浏览按钮）
+    if (msg.type === 'browseDirectory') {
+      const cur = String(msg.value ?? '');
+      const base = path.isAbsolute(cur) ? cur : path.join(this.project.basePath, cur || '.');
+      const picked = await vscode.window.showOpenDialog({
+        canSelectMany: false,
+        canSelectFiles: false,
+        canSelectFolders: true,
+        defaultUri: vscode.Uri.file(base),
+        openLabel: i18n.t('Select'),
+      });
+      this.panel.webview.postMessage({
+        type: 'directoryPicked',
+        requestId: msg.requestId,
+        path: picked?.[0]?.fsPath ?? '',
       });
       return;
     }

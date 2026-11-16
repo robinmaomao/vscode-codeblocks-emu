@@ -140,7 +140,8 @@ export function runTargetsPage(data: RunTargetsData): string {
     function stash() {
       if (last < 0 || !DATA.targets[last]) return;
       var t = DATA.targets[last];
-      t.executionParameters = q('rt-params').value;
+      // CB TargetListData::SetExecParameters：换行一律替换为空格（程序参数是单行命令行）
+      t.executionParameters = String(q('rt-params').value || '').replace(/\\r?\\n/g, ' ');
       t.hostApplication = q('rt-host').value;
       t.runHostApplicationInTerminal = q('rt-terminal').checked;
       if (q('rt-default').checked) {
