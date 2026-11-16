@@ -128,6 +128,17 @@ check('对齐：新增/复制/重命名目标都要询问名称',
   /输入新构建目标的名称：/.test(panel) && /Copy of ' \+ targets\[selected\]\.title/.test(panel) && /修改构建目标名称：/.test(panel), null);
 check('对齐：自定义 Makefile 下 Selected file properties 仍可用（CB OnUpdateUI）',
   /setDisabled\('fileProps', !files\.length\);/.test(panel), null);
+// ---- 第二轮确认项（有意差异 #3 / #7 / #8） ----
+check('对齐：导入库/定义文件空值用 placeholder 显示默认宏',
+  /placeholder="' \+ escAttr\(DEFAULT_LIB_EXPR\) \+ '"/.test(panel)
+  && /value="' \+ escAttr\(t\.impLib \|\| ''\) \+ '"/.test(panel), null);
+check('对齐：目标类型改写不再受自动扩展名/前缀勾选影响（CB 始终改写）',
+  /function applyTargetTypeRules\(\)/.test(panel)
+  && !/extAuto && !p\.ext/.test(panel) && !/libPrefix \|\| prefixAuto/.test(panel)
+  && /宏名也按普通名字处理/.test(panel), null);
+check('对齐：构建脚本校验用 CB 三行文案并保留换行',
+  /无效的构建脚本：/.test(panel) && /首次出现在：/.test(panel) && /错误：/.test(panel)
+  && /\.cb-props \.scr-status \{ white-space: pre-line; \}/.test(panel), null);
 
 console.log(`Properties 启用规则回归: ${pass} pass, ${fail} fail`);
 process.exit(fail ? 1 : 0);

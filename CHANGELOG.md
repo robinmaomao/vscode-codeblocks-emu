@@ -3,6 +3,35 @@
 本文件记录**正式版**里程碑；近期 dev 迭代的逐轮发布说明见 [`docs/release/`](./docs/release/)（`0.8.xx-dev.md`），
 `0.8.76`–`0.8.128` 的 dev 说明已合并归档到 [`docs/release/archive/`](./docs/release/archive/)；版本号与维护约定见 [`docs/release/00-index.md`](./docs/release/00-index.md)。
 
+## 0.8.152 — 2026-11-16
+
+> 体验版：Build options / Properties 第二轮逐项对齐 Code::Blocks（源码级复核 + 人工复核调整）。
+
+**Build options**
+
+- **Compiler Flags ↔ Other linker options**：勾选参数的 `additionalLibs` 改为**整串**写入 `Other linker options`（旧实现错写进 Link libraries 且按空格拆分）；载入时按整串反向勾选并从文本隐去；取消勾选而文本仍保留时弹 `Enable compiler flags?`（Yes 保留 / No 移除）。
+- **构建脚本提示**：工程或任一目标存在构建脚本时显示 CB 的 `lblBuildScriptsNote` 红字。
+- **Linker executable**：只在目标作用域渲染（CB `Show(m_pTarget != nullptr)`），工程作用域整行隐藏；文案为 `Auto detect / Use C compiler / Use C++ compiler / Use linker`。
+- **Custom variables**：Add/Edit 改为 `EditPairDlg` 式键值对话框（键名正则、目录浏览、含空格询问引号、独立删除/清空确认）。
+- **覆盖层按钮**：属性面板内的 Build options 覆盖层改为 `确定 | 取消`（取消丢弃本次修改）；独立面板保持 `保存 | 保存并关闭 | 还原设置`。
+- **编译器切换**：未保存改动先问「应用改动后再切换？」（是/否/取消）；目标作用域提示建议完整重建；工程作用域询问是否同步所有目标。
+
+**Properties**
+
+- **目标类型切换**（`OnProjectTypeChanged`）：GUI/Console → `.exe`、Dynamic → `.dll`+`libExtension`+`.def`、Static → `libExtension`+`lib` 前缀、Native → `.sys`，非动态类型清空 Import/Definition；与 CB 一致**不看**自动前缀/扩展名勾选，含 `$(...)` 宏的名字也追加扩展名。
+- **目标命名**（`ValidateTargetName`）：Add / Rename / Duplicate 先询问名称（复制默认 `Copy of <title>`），拒绝空名、重名、与虚拟目标同名、非法字符。
+- **列表点击**：`collectTargetForm` / `collectVTForm` 不再在 `change` 时重建列表，修复「编辑字段后第一次点击另一个目标无效」。
+- **联动与展示**：自定义 Makefile 下 `Selected file properties` 恢复可用；脚本 `↑/↓` 需「有选中且条目数 > 1」；`导入库文件名 / 定义文件文件名` 空值改为灰色占位符（CB 为空，占位符不写盘）。
+- **脚本校验**：按 CB `DoCheckScripts` 三行文案列出全部问题（`Invalid build script:` / `First seen in:` / `Error:`），成功显示 `All scripts seem to be valid!`，并保留多行显示。
+- **视觉/文案**：依赖/构建选项按钮左对齐；类型 0 改 `GUI application`；补「执行结束时暂停」tooltip；红字按 CB 分行；双击目标/文件行的快捷入口。
+
+**Set Programs' Arguments**
+
+- 程序参数换行保存时替换为空格（`TargetListData::SetExecParameters`）。
+
+- 验证：`npm test` **TOTAL=195 FAIL=0 SKIP=1**；契约 3/3；E2E 6/6；视觉 **26/26**；打包 15 断言；VSIX 0.8.152 打包 / 安装通过。
+- 发布说明见 [`docs/release/0.8.152.md`](./docs/release/0.8.152.md)；测试结果见 [`docs/testing/test-report-0.8.152.md`](./docs/testing/test-report-0.8.152.md)。
+
 ## 0.8.151 — 2026-11-12
 
 > 体验版：工程属性 / 构建选项 UI 二次精修（严格对齐 CB `project_options.xrc`），并补齐工程右键菜单与保存/展开能力。
@@ -47,7 +76,7 @@
 
 - **Compiler Flags ↔ Other linker options**：勾选参数的 `additionalLibs` 改为**整串**写入 `Other linker options`（原先错写进 Link libraries 并按空格拆分）；载入时按整串反向勾选并从文本隐去；取消勾选而文本仍保留时弹 `Enable compiler flags?`（Yes 保留 / No 移除），对齐 `OptionsToText` / `TextToOptions`。
 - **Build options 细节**：补齐工程/目标存在构建脚本时的 `lblBuildScriptsNote` 红字；`Linker executable` 行在工程作用域整行隐藏（CB `Show(m_pTarget != nullptr)`），文案改为 `Auto detect / Use C compiler / Use C++ compiler / Use linker` 并补 tooltip；Custom variables 改为 `EditPairDlg` 式键值对话框（键名正则、目录浏览、含空格询问引号、独立删除/清空确认）；嵌入式覆盖层按钮改为 `确定 | 取消`；编译器切换补三重询问（未保存改动、目标重建提示、工程同步所有目标）。
-- **Properties 细节**：目标类型切换按 `OnProjectTypeChanged` 改写扩展名/前缀（GUI·Console→`exe`、Dynamic→`dll`+`a`+`def`、Static→`libExtension`+`lib` 前缀、Native→`sys`）并对非动态类型清空 Import/Definition（自动扩展名/前缀勾选时交由构建命令生成器处理）；新增/重命名/复制目标都先询问名称并按 `ValidateTargetName` 校验（重名 / 虚拟目标 / 非法字符）；修复「编辑字段后第一次点击另一个目标无效」（`collectTargetForm` 不再重建列表）；`Selected file properties` 在自定义 Makefile 下恢复可用；`工程的依赖… / 工程的构建选项…` 改为左对齐；目标类型 0 文案改 `GUI application`；补「执行结束时暂停」tooltip、红字按 CB 分行、脚本 ↑/↓ 语义与双击目标/文件快捷入口。
+- **Properties 细节**：目标类型切换按 `OnProjectTypeChanged` 改写扩展名/前缀（GUI·Console→`exe`、Dynamic→`dll`+`a`+`def`、Static→`libExtension`+`lib` 前缀、Native→`sys`）并对非动态类型清空 Import/Definition（与 CB 一致不受「自动生成文件名前缀/扩展名」勾选影响；含 `$(...)` 宏的文件名也在末尾追加扩展名）；新增/重命名/复制目标都先询问名称并按 `ValidateTargetName` 校验（重名 / 虚拟目标 / 非法字符）；修复「编辑字段后第一次点击另一个目标无效」（`collectTargetForm` 不再重建列表）；`Selected file properties` 在自定义 Makefile 下恢复可用；`导入库文件名 / 定义文件文件名` 的空值改为灰色占位符提示默认宏（CB 为空）；构建脚本校验改用 CB 三行文案并保留多行显示；`工程的依赖… / 工程的构建选项…` 改为左对齐；目标类型 0 文案改 `GUI application`；补「执行结束时暂停」tooltip、红字按 CB 分行、脚本 ↑/↓ 语义与双击目标/文件快捷入口。
 - **Set Programs' Arguments**：保存时把程序参数中的换行替换为空格（`TargetListData::SetExecParameters`）。
 - 验证：`npm test` **TOTAL=195 FAIL=0 SKIP=1**；契约 3/3；E2E 6/6；视觉 **26/26**；打包 15 断言。
 
