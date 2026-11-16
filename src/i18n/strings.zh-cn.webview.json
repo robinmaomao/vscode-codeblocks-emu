@@ -162,7 +162,6 @@
   "生成扩展对象名（例如 \"foo.cpp.o\" 而不是 \"foo.o\"）": "Generate extended object names (i.e. \"foo.cpp.o\" instead of \"foo.o\")",
   "检查外部修改的文件（大多数情况下应勾选）": "Check for externally modified files (should be true in most cases).",
   "从目标创建工程…": "Create project from target...",
-  "所有脚本校验通过 ✔️": "All scripts passed validation ✔️",
   "重命名选中目标": "Rename the selected target",
   "重命名": "Rename",
   "虚拟目标…": "Virtual targets...",
@@ -269,5 +268,9 @@
   "名称包含非法字符：": "The name contains at least one invalid character:",
   "输入新构建目标的名称：": "Enter the new build target name:",
   "修改构建目标名称：": "Change the build target name:",
-  "输入复制的构建目标名称：": "Enter the name of the duplicated build target:"
+  "输入复制的构建目标名称：": "Enter the name of the duplicated build target:",
+  "所有脚本看起来都有效！": "All scripts seem to be valid!",
+  "无效的构建脚本：": "Invalid build script:",
+  "首次出现在：": "First seen in:",
+  "错误：": "Error:"
 }

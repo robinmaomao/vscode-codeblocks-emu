@@ -200,11 +200,14 @@ function fnBody(script, name) {
     /projSettings\.makefile \|\| DEFAULT_MAKEFILE/.test(script) && /projSettings\.executionDir \|\| DEFAULT_EXEC_DIR/.test(script), null);
   check('工程属性：Makefile / 执行目录未改动时写回空串',
     /mk === DEFAULT_MAKEFILE \? '' : mk/.test(script) && /execDir === DEFAULT_EXEC_DIR \? '' : execDir/.test(script), null);
-  check('工程属性：导入库 / 定义文件 / 工作目录按 CB 默认值渲染',
-    /t\.impLib \|\| DEFAULT_LIB_EXPR/.test(script) && /t\.defFile \|\| DEFAULT_LIB_EXPR/.test(script)
+    check('工程属性：导入库 / 定义文件空值用 placeholder 显示默认宏',
+    /placeholder="' \+ escAttr\(DEFAULT_LIB_EXPR\) \+ '"/.test(script)
+    && /value="' \+ escAttr\(t\.impLib \|\| ''\) \+ '"/.test(script)
+    && /value="' \+ escAttr\(t\.defFile \|\| ''\) \+ '"/.test(script)
     && /t\.workingDir \|\| DEFAULT_WORKDIR/.test(script), null);
-  check('工程属性：导入库 / 定义文件 / 工作目录未改动时写回空串',
-    /impLib === DEFAULT_LIB_EXPR \? '' : impLib/.test(script) && /defFile === DEFAULT_LIB_EXPR \? '' : defFile/.test(script)
+    check('工程属性：导入库 / 定义文件按原值写回，工作目录默认值写空串',
+    /t\.impLib = document\.getElementById\('f-implib'\)\.value\.trim\(\)/.test(script)
+    && /t\.defFile = document\.getElementById\('f-deffile'\)\.value\.trim\(\)/.test(script)
     && /workdir === DEFAULT_WORKDIR \? '' : workdir/.test(script), null);
   check('工程属性：payload 带 basePath（执行目录默认值）', /basePath: this\.project\.basePath/.test(propsDist), null);
   // Debugger：CB notebook 页签 + 两列远程字段 + Baud 可编辑下拉

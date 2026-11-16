@@ -858,6 +858,10 @@ export class ProjectPropertiesPanel {
     /* CB 的红色说明文字：位置/换行按 CB，颜色用主题错误色保证可读 */
     .cb-props .hint { font-size: 11px; line-height: 1.35; }
     .cb-props .hint.red { color: var(--vscode-errorForeground, #f48771); max-width: 68%; }
+  /* 构建脚本校验结果：保留换行（CB 的 Error 框是多行） */
+  .cb-props .scr-status { white-space: pre-line; }
+  /* 占位符（默认宏）与真实值区分开 */
+  .cb-props input::placeholder { color: var(--vscode-input-placeholderForeground, var(--vscode-descriptionForeground)); opacity: 1; }
     /* 度量：CB 24px 控件；按钮皮肤来自 .bo-root/.bo-actions/.bo-move-buttons，不在此覆盖 */
     .cb-props input:not([type="checkbox"]):not([type="radio"]),
     .cb-props select { height: 24px; font-size: 12px; padding: 2px 6px; box-sizing: border-box; }
@@ -1301,8 +1305,8 @@ export class ProjectPropertiesPanel {
           '</div></div>' +
           '<div class="cb-gap8"></div>' +
           '<label><span class="field-name">${i18n.tr('输出文件名：')}</span><span class="inline-field"><input id="f-output" value="' + escAttr(t.outputFilename) + '" title="${i18n.tr('相对项目根目录，如 bin/Debug/hello')}"><button class="cb-browse" data-browse="file" data-target="f-output">...</button></span></label>' +
-          '<label><span class="field-name">${i18n.tr('导入库文件名：')}</span><span class="inline-field"><input id="f-implib" value="' + escAttr(t.impLib || DEFAULT_LIB_EXPR) + '" title="' + escAttr(DEFAULT_LIB_EXPR) + '"><button class="cb-browse" data-browse="file" data-target="f-implib">...</button></span></label>' +
-          '<label><span class="field-name">${i18n.tr('定义文件文件名：')}</span><span class="inline-field"><input id="f-deffile" value="' + escAttr(t.defFile || DEFAULT_LIB_EXPR) + '" title="' + escAttr(DEFAULT_LIB_EXPR) + '"><button class="cb-browse" data-browse="file" data-target="f-deffile">...</button></span></label>' +
+          '<label><span class="field-name">${i18n.tr('导入库文件名：')}</span><span class="inline-field"><input id="f-implib" value="' + escAttr(t.impLib || '') + '" placeholder="' + escAttr(DEFAULT_LIB_EXPR) + '" title="' + escAttr(DEFAULT_LIB_EXPR) + '"><button class="cb-browse" data-browse="file" data-target="f-implib">...</button></span></label>' +
+          '<label><span class="field-name">${i18n.tr('定义文件文件名：')}</span><span class="inline-field"><input id="f-deffile" value="' + escAttr(t.defFile || '') + '" placeholder="' + escAttr(DEFAULT_LIB_EXPR) + '" title="' + escAttr(DEFAULT_LIB_EXPR) + '"><button class="cb-browse" data-browse="file" data-target="f-deffile">...</button></span></label>' +
           '<div class="row"><span class="field-name"></span><div class="sub-block">' +
             '<label class="check"><input type="checkbox" id="f-prefix"' + (t.prefixAuto !== false ? ' checked' : '') + '> <span>${i18n.tr('自动生成文件名前缀')}</span></label>' +
             '<label class="check"><input type="checkbox" id="f-ext"' + (t.extensionAuto !== false ? ' checked' : '') + '> <span>${i18n.tr('自动生成文件名扩展名')}</span></label>' +
@@ -1346,10 +1350,9 @@ export class ProjectPropertiesPanel {
       const pm = document.getElementById('f-pmac').checked;
       t.platforms = (pw && pu && pm) ? 255 : ((pw ? 4 : 0) | (pu ? 2 : 0) | (pm ? 1 : 0));
       t.useConsoleRunner = document.getElementById('f-console').checked;
-      const impLib = document.getElementById('f-implib').value.trim();
-      t.impLib = impLib === DEFAULT_LIB_EXPR ? '' : impLib;
-      const defFile = document.getElementById('f-deffile').value.trim();
-      t.defFile = defFile === DEFAULT_LIB_EXPR ? '' : defFile;
+      // 占位符只用于显示默认宏，保存按用户实际输入（对齐 CB：空就是空）
+      t.impLib = document.getElementById('f-implib').value.trim();
+      t.defFile = document.getElementById('f-deffile').value.trim();
       t.createDefFile = document.getElementById('f-defchk').checked;
       t.createStaticLib = document.getElementById('f-staticchk').checked;
       t.prefixAuto = document.getElementById('f-prefix').checked;
@@ -1983,8 +1986,8 @@ export class ProjectPropertiesPanel {
     }
     /**
      * 目标类型切换：对齐 CB OnProjectTypeChanged 的扩展名/前缀改写与清空规则。
-     * 与 CB 的差异：「自动生成文件名扩展名/前缀」勾选时由构建命令生成器处理，
-     * 这里不改写（否则会与宏/自动策略冲突）。
+     * CB 不看「自动生成文件名前缀/扩展名」两个复选框，这里同样始终改写；
+     * 构建命令生成器对已带目标扩展名/前缀的文件名是幂等的，不会重复追加。
      */
     function applyTargetTypeRules() {
       const el = document.getElementById('f-type');
@@ -1993,8 +1996,6 @@ export class ProjectPropertiesPanel {
       const outEl = document.getElementById('f-output');
       const impEl = document.getElementById('f-implib');
       const defEl = document.getElementById('f-deffile');
-      const extAuto = !document.getElementById('f-ext') || document.getElementById('f-ext').checked;
-      const prefixAuto = !document.getElementById('f-prefix') || document.getElementById('f-prefix').checked;
       const libExt = boRuntime.libExtension || 'a';
       const libPrefix = boRuntime.libPrefix || '';
       const exeExt = boRuntime.exeExtension !== undefined ? boRuntime.exeExtension : 'exe';
@@ -2002,10 +2003,10 @@ export class ProjectPropertiesPanel {
       const natExt = boRuntime.nativeExtension !== undefined ? boRuntime.nativeExtension : 'sys';
       const clear = (id) => { const f = document.getElementById(id); if (f) f.value = ''; };
 
-      // 按 CB 的做法拆出目录/主名/扩展名（保留原分隔符，宏不参与改写）
+      // 按 CB（wxFileName::SetExt/SetName）的做法拆目录/主名/扩展名；宏名也按普通名字处理
       const splitName = (value) => {
         const s = String(value || '');
-        if (!s || s.includes('$(')) return null;
+        if (!s) return null;
         const at = Math.max(s.lastIndexOf('/'), s.lastIndexOf('\\\\'));
         const dir = at >= 0 ? s.slice(0, at + 1) : '';
         const name = at >= 0 ? s.slice(at + 1) : s;
@@ -2018,19 +2019,17 @@ export class ProjectPropertiesPanel {
         const p = splitName(value);
         if (!p || !ext) return value;
         if (p.ext === ext) return value;
-        // 自动扩展名：没有显式扩展名时交给生成器
-        if (extAuto && !p.ext) return value;
         return join({ ...p, ext });
       };
       const stripPrefix = (value) => {
         const p = splitName(value);
-        if (!p || !libPrefix || prefixAuto) return value;
+        if (!p || !libPrefix) return value;
         if (!p.base.startsWith(libPrefix)) return value;
         return join({ ...p, base: p.base.slice(libPrefix.length) });
       };
       const addPrefix = (value) => {
         const p = splitName(value);
-        if (!p || !libPrefix || prefixAuto) return value;
+        if (!p || !libPrefix) return value;
         if (p.base.startsWith(libPrefix)) return value;
         return join({ ...p, base: libPrefix + p.base });
       };
@@ -2089,7 +2088,7 @@ export class ProjectPropertiesPanel {
               '<button id="scr-add">${i18n.tr('添加')}</button>' +
               '<button id="scr-remove">${i18n.tr('删除')}</button>' +
             '</div>' +
-            '<div class="hint" id="scr-status"></div>' +
+            '<div class="hint scr-status" id="scr-status"></div>' +
           '</div>' +
         '</div>';
       // 工程概览树（工程 + 各构建目标），点击切换作用域
@@ -2759,9 +2758,18 @@ export class ProjectPropertiesPanel {
         const st = document.getElementById('scr-status');
         const results = e.data.results || [];
         const errors = results.filter(r => !r.ok);
-        if (st) st.textContent = errors.length
-          ? errors.map(r => r.scope + ': ' + r.file + ':' + r.line + ':' + r.column + ' ' + r.message).join('\\n')
-          : '${i18n.tr('所有脚本校验通过 ✔️')}';
+        if (!st) return;
+        if (!errors.length) {
+          st.textContent = '${i18n.tr('所有脚本看起来都有效！')}';
+          return;
+        }
+        // 对齐 CB DoCheckScripts 的三行文案；本扩展一次性列出全部问题（CB 遇错即停）
+        st.textContent = errors.map(r => {
+          const pos = r.line ? ' (' + r.line + ':' + r.column + ')' : '';
+          return '${i18n.tr('无效的构建脚本：')}' + ' ' + r.file + '\\n' +
+            '${i18n.tr('首次出现在：')}' + ' ' + r.scope + '\\n' +
+            '${i18n.tr('错误：')}' + '\\n  ' + r.message + pos;
+        }).join('\\n\\n');
       }
     });
 

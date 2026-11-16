@@ -67,7 +67,7 @@ npm.cmd run compile
 npm.cmd run package
 
 # 安装（版本号以 package.json 为准）
-code --install-extension "codeblocks-vscode-0.8.151.vsix" --force
+code --install-extension "codeblocks-vscode-0.8.152.vsix" --force
 
 # 全量回归测试
 npm.cmd test
@@ -121,9 +121,11 @@ npm.cmd test
 | [0.8.147](../release/0.8.147.md) | 工程搜索体验：Text 结果排版对齐 VS Code 内置 Search（界面字体 / 22px 行高 / 行号右对齐定宽 / 预览 120 字符）、Files 模式补回 Search 按钮且四个控件同一行、切换 Explorer 后两种模式的搜索记录保持（Provider 回放缓存）、状态行按模式记忆、`Keep history` 开关对齐、Files 模式 `Aa`/`Ab`/`.*` 置灰 |
 | [0.8.148](../release/0.8.148.md) | Build Log 诊断跳转修复：链接期段名伪路径（`src/main.c:(.text+0x9)`）不再误判「无改善」、`.o/.obj` 只作源码线索、无源码位置条目不再显示为可点击；统一清理 ANSI 颜色输出（`-fdiagnostics-color=always`） |
 | [0.8.150](../release/0.8.150.md) | 工程右键 Build options… / Properties… 完整移植 Code::Blocks：共享 Build options 视图（Compiler / Linker / Search directories / Pre-post / Variables / Make）、Compiler Flags 右键菜单（新建/修改/删除/仅 C/仅 C++/展开折叠）+ 覆盖与自定义参数、Silent build 派生与 Dist-clean 只读、Selected compiler 自动匹配工程声明编译器 |
-| [0.8.151](../release/0.8.151.md) | 工程属性 / 构建选项 UI 二次精修：按 CB `project_options.xrc` 重排（Project settings 单张 2 列网格、PCH Strategy radio box、目标文件列表回右栏、脚本页 1:2）；按钮统一复用 Build options `.bo-*`；工程右键菜单按 CB 排序 + 保存/关闭/移除文件/展开折叠命令；Expand All 修复；main 追加：启用联动、Build options 严格对齐（去 Extensions/自定义变量/Dist-clean/Silent）、Set Programs' Arguments 对话框、Selected file properties 三页重写、第二轮逐项对齐（additionalLibs 写入 Other linker options、隐藏工程级 Linker executable、构建脚本红字、变量键值对话框、覆盖层 OK/Cancel、编译器切换三重询问、目标类型改写扩展名/前缀、目标命名校验、列表点击修复、左对齐与文案） |
+| [0.8.151](../release/0.8.151.md) | 工程属性 / 构建选项 UI 二次精修：按 CB `project_options.xrc` 重排（Project settings 单张 2 列网格、PCH Strategy radio box、目标文件列表回右栏、脚本页 1:2）；按钮统一复用 Build options `.bo-*`；工程右键菜单按 CB 排序 + 保存/关闭/移除文件/展开折叠命令；Expand All 修复；main 追加：启用联动、Build options 严格对齐（去 Extensions/自定义变量/Dist-clean/Silent）、Set Programs' Arguments 对话框、Selected file properties 三页重写、第二轮逐项对齐（additionalLibs 写入 Other linker options、隐藏工程级 Linker executable、构建脚本红字、变量键值对话框、覆盖层 OK/Cancel、编译器切换三重询问、目标类型改写扩展名/前缀、目标命名校验、列表点击修复、左对齐与文案；复核后：Import/Definition 空值改占位符、脚本校验用 CB 三行文案并保留换行、类型改写不再受自动前缀/扩展名勾选影响且宏名也追加扩展名） |
 
-> 当前版本 **0.8.151**（体验版；发布说明见 [release/0.8.151.md](../release/0.8.151.md)，上一版见 [release/0.8.150.md](../release/0.8.150.md)）；测试报告见 [test-report-0.8.151.md](../testing/test-report-0.8.151.md)；无头回归见 `npm test`（`TOTAL=195 FAIL=0 SKIP=1`，另有契约 / E2E / 视觉 / 性能 / 打包 / 宿主分层，见 [测试方案](../testing/strategy.md)）。
+| [0.8.152](../release/0.8.152.md) | 体验版：Build options / Properties 第二轮逐项对齐 Code::Blocks（additionalLibs 写入 Other linker options + 反向勾选 + 冲突询问、构建脚本红字、Linker executable 仅目标作用域、变量键值对话框、覆盖层 OK/Cancel、编译器切换三重询问、类型切换改写扩展名/前缀（含宏名、不受自动勾选影响）、目标命名校验、列表点击修复、Import/Definition 占位符、脚本校验 CB 三行文案、左对齐与文案/tooltip/红字分行/↑↓语义/双击入口） |
+
+> 当前版本 **0.8.152**（体验版；发布说明见 [release/0.8.152.md](../release/0.8.152.md)，上一版见 [release/0.8.151.md](../release/0.8.151.md)）；测试报告见 [test-report-0.8.152.md](../testing/test-report-0.8.152.md)；无头回归见 `npm test`（`TOTAL=195 FAIL=0 SKIP=1`，另有契约 / E2E / 视觉 / 性能 / 打包 / 宿主分层，见 [测试方案](../testing/strategy.md)）。
 
 ## 文档：GitHub Release 页面格式统一
 

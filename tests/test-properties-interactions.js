@@ -55,6 +55,10 @@ async function withPage(fn) {
 (async () => {
   await withPage(async (page) => {
     check('类型 0 文案 = GUI application', (await page.locator('#f-type option[value="0"]').textContent()).trim() === 'GUI application', await page.locator('#f-type option[value="0"]').textContent());
+    check('导入库/定义文件空值用 placeholder 显示默认宏（CB 为空）',
+      (await page.getAttribute('#f-implib', 'placeholder')) === '$(TARGET_OUTPUT_DIR)$(TARGET_OUTPUT_BASENAME)'
+      && (await page.inputValue('#f-implib')) === ''
+      && (await page.inputValue('#f-deffile')) === '', await page.inputValue('#f-implib'));
 
     // ---- P1-10：编辑后直接点另一个目标 ----
     await page.click('#list .item[data-i="0"]');
@@ -94,6 +98,20 @@ async function withPage(fn) {
     check('Static：清空定义文件', (await page.inputValue('#f-deffile')) === '', await page.inputValue('#f-deffile'));
     await page.selectOption('#f-type', '0');
     check('GUI：输出改 .exe 且剥 lib 前缀', (await page.inputValue('#f-output')) === 'bin/app.exe', await page.inputValue('#f-output'));
+
+    // 自动生成前缀/扩展名勾选时同样改写（CB OnProjectTypeChanged 不看这两个复选框）
+    await page.check('#f-ext');
+    await page.check('#f-prefix');
+    await page.fill('#f-output', 'bin/auto');
+    await page.selectOption('#f-type', '2');
+    check('自动扩展名/前缀勾选时 Static 仍补 lib 前缀与 .a', (await page.inputValue('#f-output')) === 'bin/libauto.a', await page.inputValue('#f-output'));
+    await page.selectOption('#f-type', '0');
+    check('自动扩展名/前缀勾选时 GUI 仍剥前缀并改 .exe', (await page.inputValue('#f-output')) === 'bin/auto.exe', await page.inputValue('#f-output'));
+
+    // 宏名也按 CB 的 wxFileName::SetExt 处理：末尾追加扩展名
+    await page.fill('#f-output', '$(TARGET_OUTPUT_DIR)$(TARGET_OUTPUT_BASENAME)');
+    await page.selectOption('#f-type', '3');
+    check('宏文件名也会追加目标扩展名', (await page.inputValue('#f-output')) === '$(TARGET_OUTPUT_DIR)$(TARGET_OUTPUT_BASENAME).dll', await page.inputValue('#f-output'));
     await page.selectOption('#f-type', '4');
     check('Commands only：清空输出与目录', (await page.inputValue('#f-output')) === '', await page.inputValue('#f-output'));
 
@@ -124,6 +142,27 @@ async function withPage(fn) {
     await page.check('#set-mkcustom');
     await page.click('#tabbtn-targets');
     check('自定义 Makefile 下 Selected file properties 可用', (await page.isDisabled('#fileProps')) === false, null);
+    // ---- 构建脚本校验展示（对齐 CB DoCheckScripts 文案，保留多行） ----
+    await page.click('#tabbtn-scripts');
+    await page.evaluate(() => window.dispatchEvent(new MessageEvent('message', {
+      data: {
+        type: 'scriptValidation',
+        results: [
+          { scope: 'Debug', file: 'a.script', ok: false, line: 3, column: 2, message: 'boom' },
+          { scope: 'Release', file: 'b.script', ok: false, line: 1, column: 1, message: 'bang' },
+        ],
+      },
+    })));
+    const valText = await page.locator('#scr-status').textContent();
+    const whiteSpace = await page.evaluate(() => getComputedStyle(document.getElementById('scr-status')).whiteSpace);
+    check('校验失败按 CB 三行文案（Invalid build script / First seen in / Error）',
+      valText.includes('Invalid build script: a.script') && valText.includes('First seen in: Debug') && valText.includes('Error:'),
+      valText);
+    check('校验结果保留换行', whiteSpace === 'pre-line', whiteSpace);
+    await page.evaluate(() => window.dispatchEvent(new MessageEvent('message', {
+      data: { type: 'scriptValidation', results: [{ scope: 'Debug', file: 'a.script', ok: true, line: 0, column: 0, message: '' }] },
+    })));
+    check('全部通过显示 CB 文案', (await page.locator('#scr-status').textContent()).trim() === 'All scripts seem to be valid!', null);
   });
 
   console.log(`\nproperties-interactions: ${pass} pass, ${fail} fail`);
