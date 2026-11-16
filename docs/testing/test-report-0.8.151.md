@@ -9,7 +9,7 @@
 | 层 | 命令 | 本轮结果 | 说明 |
 |----|------|----------|------|
 | L-1 契约 | `npm run test:contract` | **3/3** | 契约 44 项 + 文档一致性 6 项 + 设置契约 707 断言（覆盖矩阵/性能基准/命令与链接/版本标记） |
-| 无头层（unit） | `npm test` | **TOTAL=193 FAIL=0 SKIP=1** | SKIP=`tests/test-writer.js`；新增 `test-project-context-menu.js`（18 断言）、`test-file-properties.js`（**36 断言**：行数统计 / 对象名 / 三页结构 / 自动生成禁用 / customBuild 往返 / 只读切换）、`test-run-targets-panel.js`（17 断言）、`test-build-options-enable-rules.js`（24）+ `test-properties-enable-rules.js`（29，启用联动）；`test-webview-panels.js` **65 断言** |
+| 无头层（unit） | `npm test` | **TOTAL=195 FAIL=0 SKIP=1** | SKIP=`tests/test-writer.js`；新增 `test-project-context-menu.js`（18 断言）、`test-file-properties.js`（**36 断言**：行数统计 / 对象名 / 三页结构 / 自动生成禁用 / customBuild 往返 / 只读切换）、`test-run-targets-panel.js`（18 断言）、`test-build-options-enable-rules.js`（32）+ `test-properties-enable-rules.js`（39，启用联动 + 第二轮对齐）；第二轮再新增 `test-build-options-interactions.js`（**15 断言**，真实 DOM：additionalLibs 往返 / 构建脚本提示 / Linker executable 作用域 / 变量键值对话框 / 覆盖层 OK·Cancel）与 `test-properties-interactions.js`（**17 断言**，真实 DOM：列表点击、类型改写、命名校验、文件属性可用、GUI application 文案）；`test-webview-panels.js` **65 断言** |
 | L3 视觉 | `npm run test:visual` | **26/26** | 6 个属性页签（settings/targets/scripts/notes/parser/debugger）+ 文件属性三页（`props-file-general/build/advanced`）+ `build-options` + `run-targets` + keybindings + buildlog，dark/light 各一套 |
 | L1 端到端 | `npm run test:e2e` | **6/6** | 边界 38（3 skip）/ 构建矩阵 48 / ccache 21 / 调试 143（1 skip）/ 链接期诊断 9 / 工具链 42（4 skip） |
 | L4 性能 | `npm run test:perf` | 未复跑 | 本版未触碰构建执行路径；沿用 [性能基准](./performance-baseline.md) 的 0.8.148 结论 |
@@ -28,7 +28,8 @@
 | Properties / Build options 启用联动 | `test-properties-enable-rules.js` **29 断言**、`test-build-options-enable-rules.js` **24 断言**（自定义 Makefile / Commands only / 动态库 / 静态库 / 仅命令 / 未安装编译器 / 多选边界） | 逐项切换目标类型与 Makefile 模式核对灰显 |
 | Build options 严格对齐 | `test-webview-panels.js` 断言「无 Extensions 页」「Make 页仅四行」；`test-run-targets-panel.js` **17 断言**（`default_target` 落盘、宿主程序、终端选项、双击确定） | 打开 Build options 逐页核对；Set Programs' Arguments 写回后重开确认 |
 | 文件属性对话框 | 新增 `test-file-properties.js` **36 断言**（`analyzeFile` 统计口径、`objectNameFor` 源文件/资源/PCH、三页结构、自动生成禁用、customBuild 只写非空命令、只读 `chmod`、compilerVar 补 CPP） | Playwright 16/16 交互自检（切页保留、取消还原、按编译器暂存、默认命令、对象文件名）；6 张基线逐页对照 |
-| i18n | `test-i18n-dict.js` **11 断言**（迁移点 1427 / 词条 1299）、`test-i18n-webview.js` **21 断言**（反查表 261 条） | 英文态 6 页签 + 文件属性三页无中文 UI 文案 |
+| 第二轮 CB 逐项对齐 | `test-build-options-enable-rules.js` **32 断言** + `test-properties-enable-rules.js` **39 断言**（源码级）+ 新增两个真实 DOM 交互回归 `test-build-options-interactions.js` **15** / `test-properties-interactions.js` **17** | 逐项对照 `compileroptionsdlg.cpp` / `projectoptionsdlg.cpp` / `editpairdlg.cpp`；「编辑后点另一个目标」缺陷先复现再修 |
+| i18n | `test-i18n-dict.js` **11 断言**（迁移点 1450 / 词条 1321）、`test-i18n-webview.js` **21 断言**（反查表 271 条） | 英文态 6 页签 + 文件属性三页无中文 UI 文案 |
 | 文档与版本标记 | `test-contract.js` G1/G2/G3/G4、`test-doc-consistency.js` D1/D1b/D3/D4/D5；`npm run coverage:matrix` 重新生成 | README / usage / progress / CHANGELOG / release 索引一致 |
 
 ## 2. 覆盖台账
@@ -57,9 +58,10 @@
 | main 追加·启用联动 | Properties / Build options 的灰显规则按 CB 源码逐条补齐（自定义 Makefile、Commands only、动态库、静态库、仅命令、未安装编译器、多选边界） |
 | main 追加·Build options | 删除 CB 没有的 `Extensions` 页、Project custom variables 文本域、`Dist-clean`、`Silent build`；Make 页只留四行；新增 Set Programs' Arguments 对话框并写回 `default_target` / 宿主程序 / 终端选项 |
 | main 追加·文件属性 | 重写为 CB `ProjectFileOptionsDlg` 三页（General / Build / Advanced），新增 `src/model/fileStats.ts`（统计 + 对象名）、6 张视觉基线 |
+| main 追加·第二轮对齐 | Build options：additionalLibs 整串写 `Other linker options` + 反向勾选 + 冲突询问、构建脚本红字、Linker executable 仅目标作用域、变量键值对话框（键名正则/浏览/引号）、覆盖层 `确定·取消`、编译器切换三重询问；Properties：类型切换改写扩展名/前缀并清空 Import/Definition、目标命名询问 + `ValidateTargetName`、列表点击不再被重渲染吞掉、自定义 Makefile 下文件属性可用、左对齐与文案/tooltip/红字分行/↑↓语义/双击入口 |
 | 0.8.151 修复 | Expand All 展不开（VS Code 仅对新元素采用 `collapsibleState`）：清空节点/目录缓存重建实例 + `reveal({expand:true})` 兜底；该请求为一次性，`setProjects`/`setCategorize` 复位，避免重载后把折叠节点重新顶开 |
 | 代码评审批次 | 修复 3 项：Debugger 搜索目录 `window.prompt`、还原设置 `window.confirm`（WebView 沙箱无 `allow-modals`，均静默失效）→ 改用 `askText`/`confirmBox`；Expand All 粘滞 → 一次性复位 |
-| 新增/扩展测试 | `test-project-context-menu.js`（17 断言）；`test-file-properties.js`（36 断言）；`test-run-targets-panel.js`（17 断言）；`test-properties-enable-rules.js`（29）/ `test-build-options-enable-rules.js`（24）；`test-webview-panels.js` 65 断言；i18n 词条表清理 27 条旧 UI 孤儿键并补文件属性词条 |
+| 新增/扩展测试 | `test-project-context-menu.js`（17 断言）；`test-file-properties.js`（36 断言）；`test-run-targets-panel.js`（18 断言）；`test-properties-enable-rules.js`（39）/ `test-build-options-enable-rules.js`（32）；`test-build-options-interactions.js`（15）/ `test-properties-interactions.js`（17）；`test-webview-panels.js` 65 断言；i18n 词条表清理 27 条旧 UI 孤儿键并补文件属性/第二轮词条 |
 | 文档 | 新增 [release/0.8.151.md](../release/0.8.151.md) 与本报告；usage(.en) 更新面板版式与环境变量入口；progress / CHANGELOG / release/00-index 同步；覆盖矩阵重新生成 |
 | 行为边界 | 不改数据模型与保存协议（元素 id/name 全部保留）；保留扩展独有能力（顶部目标选择器、目标 ↑/↓、高级分组）；不执行 Squirrel 构建脚本 |
 
@@ -79,9 +81,12 @@
 | 10 | 单元测试 | 头文件 PCH 对象名在非 extended 模式下被错误替换扩展名（CB 恒追加 `.gch`） | 按 `SetObjName` 改为始终追加 |
 | 11 | 单元测试 | 英文词条含撇号（`File's date/time stamp`）会截断内联脚本字符串 | 改词条为 `File modification time:`；C4 断言防回归 |
 | 12 | 单元测试 | `test-writer-automation.js` 子集断言写死「1 pass」，新增 `tests/visual/fixtures/fileprops/*.cbp` 后失效 | 改为按目录实际 `.cbp` 数量动态计算 |
+| 13 | 交互探针 | 编辑字段后不失焦直接点另一个目标，第一次点击被 `change → collectTargetForm → renderList` 的重渲染吞掉（行在 mouseup 前被替换） | `collectTargetForm` / `collectVTForm` 改为只更新行文本（`updateListLabels`），列表整体重建只留给切换/增删 |
+| 14 | 单元测试 | 目标类型下拉 0 号文案是 `Executable`，CB 为 `GUI application` | 改 `targetTypeNames()` + i18n 词条 |
+| 15 | 交互测试 | `runTargetsPanel` 的 `.replace(/\r?\n/g, ' ')` 写在 TS 模板字符串里，反斜杠被转义成真实 CR/LF → 生成的正则跨行、脚本语法错误 | 源码改成 `\\r?\\n`；`test-run-targets-panel.js` 断言 + `test-i18n-webview.js` C4 双保险 |
 
 ## 5. 结论
 
-- 单元（**193**）/ 契约 / E2E / 视觉（**26**）/ 打包全部通过；三批 main 追加改动（启用联动、Build options 严格对齐、文件属性对话框）共修 5 个缺陷（#8–#12），无遗留。
+- 单元（**195**）/ 契约 / E2E / 视觉（**26**）/ 打包全部通过；四批 main 追加改动（启用联动、Build options 严格对齐、文件属性对话框、第二轮逐项对齐）共修 8 个缺陷（#8–#15），无遗留。
 - 命令缺口保持 2 个（交互式探测与 clangd 重启转发），与 0.8.150 一致。
 - 未运行 `test:perf` / `test:host`：本版未触碰构建执行路径与视图声明，沿用既有基线。

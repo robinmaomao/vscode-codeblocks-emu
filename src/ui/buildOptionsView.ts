@@ -69,6 +69,8 @@ export interface BuildOptionsLanguageFlags {
 export interface BuildOptionsData {
   projectTitle: string;
   makefileIsCustom: boolean;
+  /** 工程或任一目标附加了构建脚本：显示 CB 的 lblBuildScriptsNote 红字提示 */
+  hasBuildScripts?: boolean;
   defineSwitch: string;
   project: BuildOptionsScopeData;
   targets: BuildOptionsScopeData[];
@@ -107,11 +109,11 @@ function labels(): Record<string, string> {
     linkLibraries: i18n.t('Link libraries:'),
     otherLinker: i18n.t('Other linker options:'),
     linkerExecutable: i18n.t('Linker executable:'),
-    linkerExecutableHint: i18n.t('Only used by build targets; Code::Blocks stores it per target (<LinkerExe>), so it is read-only for the project.'),
-    autoDetect: i18n.t('Auto-detect'),
-    cCompiler: i18n.t('C compiler'),
-    cppCompiler: i18n.t('C++ compiler'),
-    linker: i18n.t('Linker'),
+    linkerExeHint: i18n.t('This option controls which executable would be used for linking.'),
+    autoDetect: i18n.t('Auto detect'),
+    cCompiler: i18n.t('Use C compiler'),
+    cppCompiler: i18n.t('Use C++ compiler'),
+    linker: i18n.t('Use linker'),
     compilerDirs: i18n.t('Compiler'),
     linkerDirs: i18n.t('Linker'),
     resDirs: i18n.t('Resource compiler'),
@@ -144,6 +146,27 @@ function labels(): Record<string, string> {
     saveFailed: i18n.t('Save failed:'),
     enterValue: i18n.t('Enter a value'),
     confirmDelete: i18n.t('Delete the selected item?'),
+    buildScriptsNote: i18n.t('NOTE: This project uses build scripts so it may override any options you set here.'),
+    varKey: i18n.t('Key:'),
+    varValue: i18n.t('Value:'),
+    browseDir: i18n.t('Select directory'),
+    varKeyInvalid: i18n.t('The name may only contain letters, digits and underscore.'),
+    varQuoteAdd: i18n.t('Add variable quote string'),
+    varQuoteEdit: i18n.t('Edit variable quote string'),
+    varQuoteQuestion: i18n.t('The value contains spaces or strange characters. Do you want to quote it?'),
+    quote: i18n.t('Quote'),
+    leaveUnquoted: i18n.t('Leave unquoted'),
+    deleteVar: i18n.t('Are you sure you want to delete this variable?'),
+    clearVars: i18n.t('Are you sure you want to clear all variables?'),
+    yes: i18n.t('Yes'),
+    no: i18n.t('No'),
+    unsavedTitle: i18n.t('Unsaved changes'),
+    unsavedQuestion: i18n.t('The compiler has been changed but the changes are not applied yet. Apply the changes before switching the compiler?'),
+    targetCompilerChanged: i18n.t('You changed the compiler used for this target. It is recommended that you fully rebuild this target.'),
+    projectSyncCompiler: i18n.t('Do you want to use the same compiler for all the project build targets too?'),
+    projectCompilerChanged: i18n.t('You changed the compiler used for this project. It is recommended that you fully rebuild it.'),
+    enableFlagsTitle: i18n.t('Enable compiler flags?'),
+    enableFlagsQuestion: i18n.t('This flag is stated in "Other linker options" but unchecked in "Compiler Flags". Do you want to enable it?'),
     selectTargets: i18n.t('Please select which target to copy these entries to:'),
     commandsOnlyPage: i18n.t('This target is "Commands only": compiler, linker, search directories and "Make" commands are disabled.'),
     compilerNotFound: i18n.t('The project/target compiler was not found. Choose an installed compiler to edit the options.'),
@@ -361,6 +384,10 @@ export function buildOptionsCss(): string {
   .bo-flags-text { width: 100%; height: 190px; box-sizing: border-box; resize: vertical; font-family: var(--vscode-editor-font-family); font-size: 12px; line-height: 1.45; background: var(--vscode-input-background); color: var(--vscode-input-foreground); border: 1px solid var(--vscode-input-border, var(--bo-border)); border-radius: var(--bo-control-radius); padding: 6px 8px; }
   .bo-menu-sep { height: 1px; margin: 3px 4px; background: var(--vscode-menu-separatorBackground, var(--bo-border)); }
   .bo-confirm-text { white-space: pre-line; font-size: 12px; line-height: 1.55; }
+  .bo-center { text-align: center; }
+  .bo-pair-row { display: flex; align-items: center; gap: 6px; }
+  .bo-pair-row input[type=text] { flex: 1; min-width: 0; }
+  .bo-pair-row button { flex: none; min-width: 32px; }
   .bo-inline-row { display: flex; align-items: center; gap: 8px; }
   .bo-root .bo-inline-row select:disabled { opacity: .6; cursor: default; }
   .bo-inline-label { font-size: 12px; white-space: nowrap; }
@@ -403,6 +430,7 @@ export function buildOptionsMarkup(embedded = false): string {
   <div class="bo-main">
     <div class="bo-tree" id="bo-tree"></div>
     <div class="bo-content">
+      <div class="bo-red-note bo-center" id="bo-scripts-note" style="display:none"></div>
       <fieldset class="bo-compiler-group">
         <legend id="bo-compiler-legend"></legend>
         <span class="bo-compiler-box" id="bo-compiler-box"></span>
@@ -440,6 +468,8 @@ export function buildOptionsScript(data: BuildOptionsData, embedded: boolean): s
     var selected = { linker: [], dir: [], vars: [] };
     /** 多选锚点：Shift 连选时使用（-1 = 无） */
     var anchor = { linker: -1, dir: -1, vars: -1 };
+    /** 变量对话框「选择目录」的待回填请求 */
+    var pendingPick = null;
     function resetSelection() {
       selected = { linker: [], dir: [], vars: [] };
       anchor = { linker: -1, dir: -1, vars: -1 };
@@ -523,6 +553,12 @@ export function buildOptionsScript(data: BuildOptionsData, embedded: boolean): s
     function render() {
       var sc = current();
       var t = q('title'); if (t) t.textContent = titleText();
+      // CB lblBuildScriptsNote：工程/任一目标有构建脚本时提示命令可能被覆盖
+      var scriptNote = q('scripts-note');
+      if (scriptNote) {
+        scriptNote.style.display = DATA.hasBuildScripts ? '' : 'none';
+        scriptNote.textContent = DATA.hasBuildScripts ? L.buildScriptsNote : '';
+      }
       renderCompilerBox(sc);
       ensurePage();
       renderTree();
@@ -564,18 +600,86 @@ export function buildOptionsScript(data: BuildOptionsData, embedded: boolean): s
       }).join('');
       box.innerHTML = '<select id="bo-compiler-select">' + opts + '</select>';
       var sel = q('compiler-select');
-      if (sel) sel.addEventListener('change', function () {
-        collectPage();
-        sc.compilerId = sel.value;
-        resetSelection();
-        render();
-      });
+      if (sel) sel.addEventListener('change', function () { onCompilerPicked(sel, sc); });
       var note = document.getElementById('bo-compiler-note');
       if (note) {
         var missing = isCompilerMissing();
         note.style.display = missing ? '' : 'none';
         note.textContent = missing ? L.compilerNotFound : '';
       }
+    }
+    /* ---- 编译器切换：对齐 CB OnCompilerChanged / OnTreeSelectionChanging ---- */
+    function catalogFor(compilerId) {
+      return (DATA.compilerCatalogs && DATA.compilerCatalogs[compilerId]) || [];
+    }
+    /**
+     * CB TextToOptions：Other linker options 里存在与某 flag 的 additionalLibs
+     * 完全相同的整串时，视为该 flag 已勾选。
+     */
+    function absorbedLibSet(sc) {
+      var known = {};
+      catalogFor(sc && sc.compilerId).forEach(function (o) { if (o.additionalLibs) known[o.additionalLibs] = true; });
+      var out = {};
+      ((sc && sc.linkerOptions) || []).forEach(function (s) { if (known[s]) out[s] = true; });
+      return out;
+    }
+    /**
+     * CB OptionsToText：已勾选 flag 的 additionalLibs 整串写入 Other linker options
+     * （不是拆开后写进 Link libraries）。
+     */
+    function syncAdditionalLibs(sc) {
+      if (!sc) return;
+      var active = {};
+      (sc.compilerOptions || []).forEach(function (o) { active[o] = true; });
+      var absorbed = absorbedLibSet(sc);
+      catalogFor(sc.compilerId).forEach(function (o) {
+        if (!o.additionalLibs) return;
+        if (!active[o.option] && !absorbed[o.additionalLibs]) return;
+        if (!sc.linkerOptions) sc.linkerOptions = [];
+        if (sc.linkerOptions.indexOf(o.additionalLibs) < 0) sc.linkerOptions.unshift(o.additionalLibs);
+      });
+    }
+    /** 当前作用域相对已保存数据是否有未应用改动（CB m_bDirty） */
+    function isDirty() {
+      return JSON.stringify(readData()) !== JSON.stringify(BASE);
+    }
+    function discardScopeEdits() {
+      if (isProject()) DATA.project = clone(BASE.project);
+      else DATA.targets[Number(scopeKey)] = clone(BASE.targets[Number(scopeKey)]);
+    }
+    function onCompilerPicked(select, sc) {
+      var next = select.value;
+      var prev = sc.compilerId;
+      if (next === prev) return;
+      var apply = function (discard) {
+        if (discard) discardScopeEdits(); else collectPage();
+        var target = isProject() ? DATA.project : DATA.targets[Number(scopeKey)];
+        target.compilerId = next;
+        resetSelection();
+        render();
+        if (isProject()) {
+          // CB：工程改编译器后询问是否同步到所有目标，再提示需要完整重建
+          choiceBox(L.projectSyncCompiler, '', [
+            { label: L.yes, value: 'yes', def: true },
+            { label: L.no, value: 'no' }
+          ], function (v) {
+            if (v === 'yes') DATA.targets.forEach(function (x) { x.compilerId = next; });
+            render();
+            infoBox(L.projectCompilerChanged);
+          });
+        } else {
+          infoBox(L.targetCompilerChanged);
+        }
+      };
+      if (!isDirty()) { apply(false); return; }
+      choiceBox(L.unsavedTitle, '<div class="bo-confirm-text">' + esc(L.unsavedQuestion) + '</div>', [
+        { label: L.yes, value: 'yes', def: true },
+        { label: L.no, value: 'no' },
+        { label: L.cancel, value: 'cancel' }
+      ], function (v) {
+        if (v === 'cancel') { select.value = prev; return; }
+        apply(v === 'no');
+      });
     }
     function renderTree() {
       var html = '<div class="bo-node' + (isProject() ? ' selected' : '') + '" data-scope="project" title="' + esc(DATA.projectTitle) + '">' +
@@ -631,10 +735,12 @@ export function buildOptionsScript(data: BuildOptionsData, embedded: boolean): s
       var el = q('toolbar');
       if (!el) return;
       el.innerHTML = embedded
-        ? '<button id="bo-close" class="default">' + esc(L.close) + '</button>'
+        ? '<button id="bo-ok" class="default">' + esc(L.ok) + '</button><button id="bo-cancel">' + esc(L.cancel) + '</button>'
         : '<button id="bo-save" class="default">' + esc(L.save) + '</button><button id="bo-save-close">' + esc(L.saveClose) + '</button><button id="bo-restore">' + esc(L.restore) + '</button>';
       if (embedded) {
-        q('close').addEventListener('click', function () { collectPage(); hideOverlay(); });
+        // 对齐 CB 模态：OK 应用并关闭，Cancel 丢弃本次修改
+        q('ok').addEventListener('click', function () { collectPage(); hideOverlay(); });
+        q('cancel').addEventListener('click', function () { hideOverlay(); });
       } else {
         q('save').addEventListener('click', function () { submit(false); });
         q('save-close').addEventListener('click', function () { submit(true); });
@@ -724,27 +830,32 @@ export function buildOptionsScript(data: BuildOptionsData, embedded: boolean): s
         (copyLabel ? '<button data-act="copy">' + esc(copyLabel) + '</button>' : '') +
         '</div>';
     }
-    function bindActions(selKey, items, onChange) {
+    function bindActions(selKey, items, onChange, opts) {
+      opts = opts || {};
       var bar = q('page').querySelector('.bo-actions');
       if (!bar) return;
       function act(name) {
         var sels = selectedIndexes(selKey);
-        if (name === 'add') askText(L.add, '', function (v) { if (v) { items.push(v); selected[selKey] = [items.length - 1]; anchor[selKey] = items.length - 1; onChange(); } });
+        if (name === 'add') {
+          if (opts.noAddEdit) return;
+          askText(L.add, '', function (v) { if (v) { items.push(v); selected[selKey] = [items.length - 1]; anchor[selKey] = items.length - 1; onChange(); } });
+        }
         else if (name === 'edit') {
+          if (opts.noAddEdit) return;
           if (sels.length !== 1) return;
           var idx = sels[0];
           askText(L.edit, items[idx], function (v) { if (v !== null && v !== undefined) { items[idx] = v; onChange(); } });
         }
         else if (name === 'del') {
           if (!sels.length) return;
-          confirmBox(L.confirmDelete, function () {
+          confirmBox(opts.deleteTitle || L.confirmDelete, function () {
             for (var i = sels.length - 1; i >= 0; i--) items.splice(sels[i], 1);
             selected[selKey] = [];
             anchor[selKey] = -1;
             onChange();
           });
         }
-        else if (name === 'clear') { if (items.length) confirmBox(L.confirmDelete, function () { items.length = 0; selected[selKey] = []; anchor[selKey] = -1; onChange(); }); }
+        else if (name === 'clear') { if (items.length) confirmBox(opts.clearTitle || L.confirmDelete, function () { items.length = 0; selected[selKey] = []; anchor[selKey] = -1; onChange(); }); }
         else if (name === 'up') {
           if (!sels.length || sels[0] <= 0) return;
           sels.forEach(function (n) { var t = items[n - 1]; items[n - 1] = items[n]; items[n] = t; });
@@ -792,6 +903,75 @@ export function buildOptionsScript(data: BuildOptionsData, embedded: boolean): s
     }
     function confirmBox(title, cb, bodyText) {
       modal(title, bodyText ? '<div class="bo-confirm-text">' + bodyText + '</div>' : '', function () { cb(); });
+    }
+    /** 多按钮询问（CB AnnoyingDialog / wxMessageDialog 的 Yes-No-Cancel 等） */
+    function choiceBox(title, bodyHtml, buttons, onPick) {
+      var wrap = document.createElement('div'); wrap.className = 'bo-modal';
+      wrap.innerHTML = '<div class="bo-modal-box"><div class="bo-modal-title"><span>' + esc(title) + '</span></div>' +
+        (bodyHtml ? '<div class="bo-modal-body">' + bodyHtml + '</div>' : '') +
+        '<div class="bo-modal-actions">' + buttons.map(function (b, i) {
+          return '<button data-pick="' + i + '"' + (b.def ? ' class="default"' : '') + '>' + esc(b.label) + '</button>';
+        }).join('') + '</div></div>';
+      document.body.appendChild(wrap);
+      Array.prototype.forEach.call(wrap.querySelectorAll('[data-pick]'), function (b) {
+        b.addEventListener('click', function () {
+          var value = buttons[Number(b.getAttribute('data-pick'))].value;
+          wrap.remove();
+          onPick(value);
+        });
+      });
+    }
+    /** 单按钮提示（CB cbMessageBox 信息框） */
+    function infoBox(text) {
+      choiceBox(text, '', [{ label: L.ok, value: 'ok', def: true }], function () { /* noop */ });
+    }
+    /** 键值对话框（CB EditPairDlg：Key / Value + 目录浏览 + 键名正则校验） */
+    function pairDialog(title, pair, quoteTitle, onSave) {
+      var wrap = document.createElement('div'); wrap.className = 'bo-modal';
+      wrap.innerHTML = '<div class="bo-modal-box"><div class="bo-modal-title"><span>' + esc(title) + '</span><button class="bo-modal-x" data-act="cancel" aria-label="' + esc(L.close) + '">×</button></div>' +
+        '<div class="bo-modal-body">' +
+          '<label class="bo-field"><span class="bo-label">' + esc(L.varKey) + '</span><input type="text" id="bo-pair-key" spellcheck="false"></label>' +
+          '<label class="bo-field"><span class="bo-label">' + esc(L.varValue) + '</span><span class="bo-pair-row"><input type="text" id="bo-pair-value" spellcheck="false"><button id="bo-pair-browse" title="' + esc(L.browseDir) + '">...</button></span></label>' +
+          '<div class="bo-red-note" id="bo-pair-error" style="display:none">' + esc(L.varKeyInvalid) + '</div>' +
+        '</div>' +
+        '<div class="bo-modal-actions"><button data-act="cancel">' + esc(L.cancel) + '</button><button class="default" data-act="ok">' + esc(L.ok) + '</button></div></div>';
+      document.body.appendChild(wrap);
+      var keyEl = wrap.querySelector('#bo-pair-key');
+      var valEl = wrap.querySelector('#bo-pair-value');
+      var okBtn = wrap.querySelector('[data-act=ok]');
+      var errEl = wrap.querySelector('#bo-pair-error');
+      keyEl.value = pair.key || '';
+      valEl.value = pair.value || '';
+      var valid = function () { return /^[A-Za-z0-9_]+$/.test(keyEl.value.trim()); };
+      var sync = function () { okBtn.disabled = !valid(); errEl.style.display = 'none'; };
+      keyEl.addEventListener('input', sync);
+      sync();
+      var close = function () { wrap.remove(); };
+      Array.prototype.forEach.call(wrap.querySelectorAll('[data-act=cancel]'), function (b) { b.addEventListener('click', close); });
+      wrap.querySelector('#bo-pair-browse').addEventListener('click', function () {
+        var req = 'pair-' + String(Date.now());
+        pendingPick = { req: req, apply: function (p) { valEl.value = p; } };
+        post({ type: 'browseDirectory', requestId: req, value: valEl.value });
+      });
+      okBtn.addEventListener('click', function () {
+        var key = keyEl.value.trim();
+        var value = valEl.value.trim();
+        if (!/^[A-Za-z0-9_]+$/.test(key)) { errEl.style.display = ''; return; }
+        close();
+        if (needsQuotes(value)) {
+          choiceBox(quoteTitle, '<div class="bo-confirm-text">' + esc(L.varQuoteQuestion) + '</div>', [
+            { label: L.quote, value: 'quote', def: true },
+            { label: L.leaveUnquoted, value: 'plain' }
+          ], function (v) { onSave({ name: key, value: v === 'quote' ? '"' + value + '"' : value }); });
+        } else {
+          onSave({ name: key, value: value });
+        }
+      });
+      setTimeout(function () { keyEl.focus(); keyEl.select(); }, 0);
+    }
+    /** CB NeedQuotes：含空格且未加引号 */
+    function needsQuotes(v) {
+      return !!v && v.charAt(0) !== '"' && v.indexOf(' ') >= 0;
     }
     /* ---- Compiler Flags：分类分组 / 折叠 / 右键编辑 ---- */
     function flagGroups() {
@@ -960,6 +1140,7 @@ export function buildOptionsScript(data: BuildOptionsData, embedded: boolean): s
       var sc = current();
       var active = {};
       sc.compilerOptions.forEach(function (o) { active[o] = true; });
+      var absorbed = absorbedLibSet(sc);
       var groups = flagGroups();
       var rows = groups.map(function (g) {
         var hide = !!collapsedFlags[g.category];
@@ -970,7 +1151,8 @@ export function buildOptionsScript(data: BuildOptionsData, embedded: boolean): s
           '</div>';
         return head + g.items.map(function (it) {
           var o = it.entry;
-          var checked = o.option && active[o.option] ? ' checked' : '';
+          // 对齐 CB TextToOptions：Other linker options 里有该 flag 的 additionalLibs 整串即视为勾选
+          var checked = (o.option && active[o.option]) || (o.additionalLibs && absorbed[o.additionalLibs]) ? ' checked' : '';
           var title = o.name + (o.category ? ' — ' + o.category : '');
           return '<div class="bo-flag-row' + (o.custom ? ' custom' : '') + (o.modified ? ' modified' : '') + (hide ? ' collapsed-child' : '') + '" data-index="' + it.index + '" title="' + esc(title) + '">' +
             '<span class="bo-flag-name">' + esc(o.name) + '</span>' +
@@ -1008,7 +1190,23 @@ export function buildOptionsScript(data: BuildOptionsData, embedded: boolean): s
         b.addEventListener('click', function () { collectPage(); compilerTab = b.getAttribute('data-sub'); renderPage(); });
       });
       Array.prototype.forEach.call(el.querySelectorAll('input[data-flag]'), function (c) {
-        c.addEventListener('change', function () { collectCompilerPage(); });
+        c.addEventListener('change', function () {
+          var libs = c.getAttribute('data-libs');
+          collectCompilerPage();
+          // CB：取消勾选但 Other linker options 里仍留有该 flag 的 additionalLibs → 询问是否启用
+          if (!c.checked && libs && (current().linkerOptions || []).indexOf(libs) >= 0) {
+            choiceBox(L.enableFlagsTitle, '<div class="bo-confirm-text">' + esc(L.enableFlagsQuestion) + '</div><div class="bo-confirm-text"><code>' + esc(libs) + '</code></div>', [
+              { label: L.yes, value: 'yes', def: true },
+              { label: L.no, value: 'no' }
+            ], function (v) {
+              if (v === 'no') {
+                var sc2 = current();
+                sc2.linkerOptions = (sc2.linkerOptions || []).filter(function (s) { return s !== libs; });
+              }
+              renderPage();
+            });
+          }
+        });
       });
       ['other-compiler', 'other-resource', 'defines'].forEach(function (id) {
         var x = q(id); if (x) x.addEventListener('change', function () { collectCompilerPage(); });
@@ -1058,19 +1256,15 @@ export function buildOptionsScript(data: BuildOptionsData, embedded: boolean): s
       if (!q('other-compiler')) return false;
       var checks = document.querySelectorAll('#bo-page input[data-flag]');
       var flags = [];
-      var libsToAdd = [];
       Array.prototype.forEach.call(checks, function (c) {
-        if (c.checked) {
-          flags.push(c.getAttribute('data-flag'));
-          var libs = c.getAttribute('data-libs');
-          if (libs) libs.split(' ').forEach(function (x) { if (x) libsToAdd.push(x); });
-        }
+        if (c.checked) flags.push(c.getAttribute('data-flag'));
       });
       var other = (q('other-compiler') ? q('other-compiler').value : '').split('\\n').map(function (s) { return s.trim(); }).filter(Boolean);
       var defs = (q('defines') ? q('defines').value : '').split('\\n').map(function (s) { return s.trim(); }).filter(Boolean).map(function (s) { return (DATA.defineSwitch || '-D') + s; });
       sc.compilerOptions = flags.concat(other, defs);
       sc.resourceCompilerOptions = (q('other-resource') ? q('other-resource').value : '').split('\\n').map(function (s) { return s.trim(); }).filter(Boolean);
-      libsToAdd.forEach(function (l) { if (sc.linkLibs.indexOf(l) < 0) sc.linkLibs.push(l); });
+      // additionalLibs → Other linker options（整串）
+      syncAdditionalLibs(sc);
       return true;
     }
     function renderLinker(el) {
@@ -1078,13 +1272,14 @@ export function buildOptionsScript(data: BuildOptionsData, embedded: boolean): s
       var left = '<div class="bo-list-row">' + moveButtons() + '<div class="bo-list-main">' + listHtml(sc.linkLibs, 'linker') + '</div></div>' +
         actions('linker', '', { hideMove: true }) +
         '<div class="bo-actions"><button data-act="copy">' + esc(L.copySelected) + '</button></div>';
-      var right = '<textarea id="bo-other-linker" class="bo-fixed-text">' + esc(sc.linkerOptions.join('\\n')) + '</textarea>';
-      // Linker executable 是 Code::Blocks 的目标级属性（<Linker><LinkerExe>）：工程作用域下只读展示
-      var exeDisabled = isProject();
-      var exe = '<div class="bo-inline-row span-2"><span class="bo-inline-label">' + esc(L.linkerExecutable) + '</span><select id="bo-linker-exe" class="bo-inline-select"' +
-        (exeDisabled ? ' disabled title="' + esc(L.linkerExecutableHint) + '"' : '') + '>' +
+      // 与 CB TextToOptions 一致：被勾选 flag 吸收的 additionalLibs 不再显示在文本里
+      var absorbed = absorbedLibSet(sc);
+      var otherLines = sc.linkerOptions.filter(function (s) { return !absorbed[s]; });
+      var right = '<textarea id="bo-other-linker" class="bo-fixed-text">' + esc(otherLines.join('\\n')) + '</textarea>';
+      // CB：Linker executable 只对目标作用域显示（工程/全局作用域整行 Show(false)）
+      var exe = isProject() ? '' : '<div class="bo-inline-row span-2"><span class="bo-inline-label">' + esc(L.linkerExecutable) + '</span><select id="bo-linker-exe" class="bo-inline-select" title="' + esc(L.linkerExeHint) + '">' +
         [[0, L.autoDetect], [1, L.cCompiler], [2, L.cppCompiler], [3, L.linker]].map(function (o) { return '<option value="' + o[0] + '"' + (Number(sc.linkerExecutable) === o[0] ? ' selected' : '') + '>' + esc(o[1]) + '</option>'; }).join('') +
-        '</select></div>' + (exeDisabled ? '<div class="bo-hint span-2">' + esc(L.linkerExecutableHint) + '</div>' : '');
+        '</select></div>';
       el.innerHTML = '<section class="bo-card"><div class="bo-card-body">' +
         policyRow('bo-pol-linker', sc.relations.linker, L.policy, isProject()) + '<div class="bo-sep"></div>' +
         pageGrid(card(L.linkLibraries, left) + card(L.otherLinker, right) + exe) +
@@ -1106,7 +1301,7 @@ export function buildOptionsScript(data: BuildOptionsData, embedded: boolean): s
         };
       }
       var le = q('linker-exe');
-      if (le && !exeDisabled) le.addEventListener('change', function () { sc.linkerExecutable = Number(le.value); });
+      if (le && !isProject()) le.addEventListener('change', function () { sc.linkerExecutable = Number(le.value); });
       var x = q('other-linker'); if (x) x.addEventListener('change', function () { collectPage(); });
       refreshActionState('linker', sc.linkLibs);
     }
@@ -1167,12 +1362,35 @@ export function buildOptionsScript(data: BuildOptionsData, embedded: boolean): s
         actions('vars', '', { hideMove: true }) +
         '</div></section>';
       bindList('vars', items);
-      bindActions('vars', items, function () {
+      // 编辑直接用列表当前值：字符串数组只是展示副本
+      var syncItems = function () {
         sc.envVars = items.map(function (s) {
           var i = s.indexOf('=');
           return i < 0 ? { name: s.trim(), value: '' } : { name: s.slice(0, i).trim(), value: s.slice(i + 1).trim() };
         });
+      };
+      bindActions('vars', items, function () {
+        syncItems();
         renderPage();
+      }, { noAddEdit: true, deleteTitle: L.deleteVar, clearTitle: L.clearVars });
+      // CB EditPairDlg：键值两栏 + 目录浏览 + 键名正则校验 + 含空格时询问是否加引号
+      var bar = q('page').querySelector('.bo-actions');
+      bar.querySelector('[data-act=add]').addEventListener('click', function () {
+        pairDialog(L.add, { key: '', value: '' }, L.varQuoteAdd, function (pair) {
+          syncItems();
+          sc.envVars.push(pair);
+          renderPage();
+        });
+      });
+      bar.querySelector('[data-act=edit]').addEventListener('click', function () {
+        var sels = selectedIndexes('vars');
+        if (sels.length !== 1) return;
+        syncItems();
+        var idx = sels[0];
+        pairDialog(L.edit, { key: sc.envVars[idx].name, value: sc.envVars[idx].value }, L.varQuoteEdit, function (pair) {
+          sc.envVars[idx] = pair;
+          renderPage();
+        });
       });
       refreshActionState('vars', items);
     }
@@ -1214,7 +1432,14 @@ export function buildOptionsScript(data: BuildOptionsData, embedded: boolean): s
       if (page === 'compiler') collectCompilerPage();
       var sc = current();
       if (page === 'linker') {
-        var ol = q('other-linker'); if (ol) sc.linkerOptions = ol.value.split('\\n').map(function (s) { return s.trim(); }).filter(Boolean);
+        var ol = q('other-linker');
+        if (ol) {
+          var lines = ol.value.split('\\n').map(function (s) { return s.trim(); }).filter(Boolean);
+          // 被勾选 flag 吸收的 additionalLibs 不在文本框里，收集时补回（顺序：吸收项在前）
+          var absorbed = absorbedLibSet(sc);
+          var keep = (sc.linkerOptions || []).filter(function (s) { return !!absorbed[s]; });
+          sc.linkerOptions = keep.concat(lines.filter(function (s) { return keep.indexOf(s) < 0; }));
+        }
         var le = q('linker-exe'); if (le && !isProject()) sc.linkerExecutable = Number(le.value);
       } else if (page === 'extras') {
         var pre = q('pre'); if (pre) sc.commandsBefore = pre.value.split('\\n').map(function (s) { return s.trim(); }).filter(Boolean);
@@ -1269,6 +1494,8 @@ export function buildOptionsScript(data: BuildOptionsData, embedded: boolean): s
         render(); showOverlay();
       },
       close: function () { collectPage(); hideOverlay(); },
+      /** 取消（丢弃本次修改，仅关闭覆盖层） */
+      cancel: function () { hideOverlay(); },
       read: function () { return readData(); },
       isOpen: function () { var ov = document.getElementById('bo-overlay'); return !!ov && ov.style.display !== 'none'; }
     };
@@ -1279,6 +1506,12 @@ export function buildOptionsScript(data: BuildOptionsData, embedded: boolean): s
         status(L.saved);
       }
       else if (msg.type === 'error') { pendingSave = null; status((L.saveFailed + ' ' + (msg.message || '')), true); }
+      else if (msg.type === 'directoryPicked') {
+        if (pendingPick && msg.requestId === pendingPick.req) {
+          pendingPick.apply(String(msg.path || ''));
+          pendingPick = null;
+        }
+      }
       else if (msg.type === 'compilerFlags') {
         if (msg.compilerId) {
           if (msg.catalog) {

@@ -77,8 +77,34 @@ check('扩展：Make 页四行，Dist-clean / Silent 不渲染但数据保留',
 check('扩展：编译器未安装时禁用页面控件并提示',
   /function isCompilerMissing\(\)/.test(view) && /applyPageDisabled\(el\)/.test(view)
   && /id="bo-compiler-note"/.test(view), null);
-check('扩展：Linker executable 工程作用域保持禁用+提示',
-  /var exeDisabled = isProject\(\);/.test(view) && /disabled title="' \+ esc\(L\.linkerExecutableHint\)/.test(view), null);
+check('扩展：Linker executable 仅在目标作用域显示（CB Show(show)）',
+  /var exe = isProject\(\) \? '' :/.test(view) && /id="bo-linker-exe"/.test(view)
+  && /L\.autoDetect/.test(view) && /L\.cCompiler/.test(view), null);
+// ---- 第二轮 CB 逐项对齐（P1-1/2/5/6/8） ----
+check('对齐：additionalLibs 整串写入 Other linker options（CB OptionsToText）',
+  /function syncAdditionalLibs\(sc\)/.test(view)
+  && /if \(sc\.linkerOptions\.indexOf\(o\.additionalLibs\) < 0\) sc\.linkerOptions\.unshift\(o\.additionalLibs\);/.test(view)
+  && !/libs\.split\(' '\)/.test(view), null);
+check('对齐：载入时按 additionalLibs 反向勾选（CB TextToOptions）',
+  /function absorbedLibSet\(sc\)/.test(view)
+  && /\(o\.additionalLibs && absorbed\[o\.additionalLibs\]\) \? ' checked'/.test(view), null);
+check('对齐：Other linker options 显示时隐藏被吸收的 additionalLibs',
+  /var otherLines = sc\.linkerOptions\.filter\(function \(s\) \{ return !absorbed\[s\]; \}\);/.test(view), null);
+check('对齐：取消勾选时询问「启用编译器参数?」',
+  /L\.enableFlagsTitle/.test(view) && /L\.enableFlagsQuestion/.test(view), null);
+check('对齐：lblBuildScriptsNote 红字提示（工程/目标有构建脚本）',
+  /id="bo-scripts-note"/.test(view) && /L\.buildScriptsNote/.test(view) && /DATA\.hasBuildScripts/.test(view), null);
+check('对齐：嵌入式覆盖层为「确定 / 取消」（CB OK/Cancel）',
+  /'<button id="bo-ok" class="default">' \+ esc\(L\.ok\) \+ '<\/button><button id="bo-cancel">'/.test(view)
+  && /cancel: function \(\) \{ hideOverlay\(\); \}/.test(view), null);
+check('对齐：编译器切换的三重询问（未保存 / 目标重建 / 工程同步所有目标）',
+  /function onCompilerPicked\(select, sc\)/.test(view)
+  && /L\.unsavedQuestion/.test(view) && /L\.targetCompilerChanged/.test(view)
+  && /L\.projectSyncCompiler/.test(view) && /DATA\.targets\.forEach\(function \(x\) \{ x\.compilerId = next; \}\)/.test(view), null);
+check('对齐：变量对话框含键名正则与引号询问（CB EditPairDlg）',
+  /function pairDialog\(title, pair, quoteTitle, onSave\)/.test(view)
+  && /\^\[A-Za-z0-9_\]\+\$/.test(view) && /function needsQuotes\(v\)/.test(view)
+  && /L\.varQuoteQuestion/.test(view), null);
 
 console.log(`\nbuild-options-enable-rules: ${pass} pass, ${fail} fail`);
 process.exit(fail ? 1 : 0);

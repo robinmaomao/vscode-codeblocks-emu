@@ -87,8 +87,8 @@ check('扩展：无目标时 Rename / Duplicate / Export 禁用',
 check('扩展：Commands only 清空 Output/Import/Def/Working/Objects',
   /function applyTargetTypeRules\(\)/.test(panel)
   && /\['f-output', 'f-implib', 'f-deffile', 'f-workdir', 'f-object'\]\.forEach\(clear\)/.test(panel), null);
-check('扩展：Static library 切换清空 Import / Definition',
-  /const type = Number\(el\.value\);[\s\S]{0,400}?clear\('f-implib'\);[\s\S]{0,120}?clear\('f-deffile'\);/.test(panel), null);
+check('扩展：Static library 切换改写扩展名并清空 Import / Definition',
+/type === 2[\s\S]{0,300}?addPrefix\(setExt\(outEl\.value, libExt\)\)[\s\S]{0,140}?clear\('f-implib'\); clear\('f-deffile'\);/.test(panel), null);
 check('扩展：类型/复选框/自定义 Makefile 变更后重新同步',
   /getElementById\('f-type'\)\.addEventListener\('change', applyTargetTypeRules\)/.test(panel)
   && /getElementById\('f-staticchk'\)\.addEventListener\('change', syncEnabledStates\)/.test(panel)
@@ -102,6 +102,32 @@ check('扩展：禁用态样式（input/button opacity）',
   && /\.cb-props button:disabled \{ opacity: \.5;/.test(panel), null);
 check('扩展：payload 传入 supportsPch（编译器 switches）',
   /supportsPch\?: boolean/.test(panel) && /supportsPch: projectCompiler\.switches\.supportsPCH !== false/.test(ext), null);
+// ---- 第二轮 CB 逐项对齐（P1-9/10、P2-1~P2-6） ----
+check('对齐：Project settings 底部按钮左对齐（CB stretch spacer 之后）',
+  /\.cb-props \.settings-actions \{ display: flex; justify-content: flex-start;/.test(panel), null);
+check('对齐：目标类型 0 文案 = GUI application',
+  /0: i18n\.t\('GUI application'\)/.test(panel), null);
+check('对齐：执行结束时暂停带 CB tooltip',
+  /执行结束后暂停（按任意键继续）/.test(panel), null);
+check('对齐：构建脚本 ↑/↓ 仅在「有选中且条目数 > 1」时可用',
+  /const canMove = scriptSel && scriptCount > 1;/.test(panel), null);
+check('对齐：collectTargetForm 只更新行文本，不重建列表（避免吞点击）',
+  /function updateListLabels\(\)/.test(panel)
+  && /t\.extensionAuto = document\.getElementById\('f-ext'\)\.checked;[\s\S]{0,240}?updateListLabels\(\);/.test(panel), null);
+check('对齐：collectVTForm 不重建虚拟目标列表',
+  /同 collectTargetForm：只更新行文本/.test(panel), null);
+check('对齐：双击目标行打开构建选项、双击文件行打开文件属性（CB dblclick）',
+  /addEventListener\('dblclick', \(\) => \{ openBuildOptions\(String\(selected\)\); \}\)/.test(panel)
+  && /addEventListener\('dblclick', ev => \{/.test(panel), null);
+check('对齐：目标命名校验（CB ValidateTargetName：重名 / 虚拟目标 / 非法字符）',
+  /function validateTargetName\(name, exceptTitle\)/.test(panel)
+  && /工程中已存在同名的构建目标！/.test(panel)
+  && /工程中已存在同名的虚拟目标！/.test(panel)
+  && /String\.fromCharCode\(59, 44, 33/.test(panel), null);
+check('对齐：新增/复制/重命名目标都要询问名称',
+  /输入新构建目标的名称：/.test(panel) && /Copy of ' \+ targets\[selected\]\.title/.test(panel) && /修改构建目标名称：/.test(panel), null);
+check('对齐：自定义 Makefile 下 Selected file properties 仍可用（CB OnUpdateUI）',
+  /setDisabled\('fileProps', !files\.length\);/.test(panel), null);
 
 console.log(`Properties 启用规则回归: ${pass} pass, ${fail} fail`);
 process.exit(fail ? 1 : 0);

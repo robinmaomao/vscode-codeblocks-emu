@@ -79,6 +79,22 @@ export class BuildOptionsPanel {
       await this.applyCompilerFlags(msg);
       return;
     }
+    // 变量对话框的「选择目录」（对齐 CB EditPairDlg 的浏览按钮）
+    if (msg?.type === 'browseDirectory') {
+      const picked = await vscode.window.showOpenDialog({
+        canSelectMany: false,
+        canSelectFiles: false,
+        canSelectFolders: true,
+        defaultUri: msg.value ? vscode.Uri.file(String(msg.value)) : undefined,
+        openLabel: i18n.t('Select'),
+      });
+      this.panel.webview.postMessage({
+        type: 'directoryPicked',
+        requestId: msg.requestId,
+        path: picked?.[0]?.fsPath ?? '',
+      });
+      return;
+    }
     if (msg?.type !== 'save') return;
     this.applyQueue = this.applyQueue.then(() => this.apply(msg)).catch(() => undefined);
   }
