@@ -6,50 +6,61 @@ const path = require('path');
 
 const ROOT = path.resolve(__dirname, '..');
 const read = (rel) => fs.readFileSync(path.join(ROOT, rel), 'utf8');
-let pass = 0, fail = 0;
+let pass = 0, fail = 0, skip = 0;
 function check(name, cond, extra) {
   if (cond) { pass++; console.log('OK   ' + name); }
   else { fail++; console.log('FAIL ' + name + (extra !== undefined ? '  got=' + JSON.stringify(extra) : '')); }
 }
 
-const cb = read('codeblocks-src/src/src/projectoptionsdlg.cpp');
+/**
+ * CB 源码事实校验：codeblocks-src/ 是本地只读快照（不入库），
+ * CI 不检出该目录时跳过这些断言；扩展侧断言照常执行。
+ */
+function checkCb(name, cond, extra) {
+  if (!hasCb) { skip++; console.log('SKIP ' + name + '  (codeblocks-src 快照缺失)'); return; }
+  check(name, cond, extra);
+}
+
+const CB_SRC_REL = 'codeblocks-src/src/src/projectoptionsdlg.cpp';
+const hasCb = fs.existsSync(path.join(ROOT, CB_SRC_REL));
+const cb = hasCb ? read(CB_SRC_REL) : '';
 const panel = read('src/ui/projectPropertiesPanel.ts');
 const ext = read('src/extension.ts');
 
 // ---------- Code::Blocks 侧事实 ----------
-check('CB：Execution directory 仅自定义 Makefile 时启用',
+checkCb('CB：Execution directory 仅自定义 Makefile 时启用',
   /txtExecutionDir"[\s\S]{0,80}?Enable\(customMake\)/.test(cb), null);
-check('CB：Makefile 文本框不随自定义 Makefile 禁用',
+checkCb('CB：Makefile 文本框不随自定义 Makefile 禁用',
   !/txtProjectMakefile"[\s\S]{0,100}?Enable\(/.test(cb), null);
-check('CB：Import library 需勾选 Create import library 且为 Dynamic library',
+checkCb('CB：Import library 需勾选 Create import library 且为 Dynamic library',
   /txtI->Enable\(chkSL->IsChecked\(\) && targetType == ttDynamicLib\)/.test(cb)
   && /browseI->Enable\(chkSL->IsChecked\(\) && targetType == ttDynamicLib\)/.test(cb), null);
-check('CB：Definition file 需勾选 Create .DEF 且为 Dynamic library',
+checkCb('CB：Definition file 需勾选 Create .DEF 且为 Dynamic library',
   /txtD->Enable\(chkCD->IsChecked\(\) && targetType == ttDynamicLib\)/.test(cb)
   && /browseD->Enable\(chkCD->IsChecked\(\) && targetType == ttDynamicLib\)/.test(cb), null);
-check('CB：Create import library / .DEF 复选框仅 Dynamic library 可用',
+checkCb('CB：Create import library / .DEF 复选框仅 Dynamic library 可用',
   /chkSL->Enable\(target->GetTargetType\(\) == ttDynamicLib\)/.test(cb)
   && /chkCD->Enable\(target->GetTargetType\(\) == ttDynamicLib\)/.test(cb), null);
-check('CB：Pause when execution ends 仅 Console only 可用',
+checkCb('CB：Pause when execution ends 仅 Console only 可用',
   /chkUseConsoleRunner[\s\S]{0,80}?Enable\(targetType == ttConsoleOnly\)/.test(cb), null);
-check('CB：Working dir 对 Static library / Commands only 禁用',
+checkCb('CB：Working dir 对 Static library / Commands only 禁用',
   /txtW->Enable\(targetType == ttExecutable \|\|[\s\S]{0,80}?targetType == ttDynamicLib\)/.test(cb), null);
-check('CB：Commands only 清空并禁用 Output/Import/Def/Working/Objects',
+checkCb('CB：Commands only 清空并禁用 Output/Import/Def/Working/Objects',
   /case ttCommandsOnly:[\s\S]{0,600}?txt->SetValue\(""\)[\s\S]{0,400}?txtO->SetValue\(""\)/.test(cb)
   && /txtO->Enable\(false\)/.test(cb), null);
-check('CB：Static library 切换时清空 Import library / Definition file',
+checkCb('CB：Static library 切换时清空 Import library / Definition file',
   /txtI->SetValue\(""\);[\s\S]{0,80}?txtD->SetValue\(""\);/.test(cb), null);
-check('CB：自定义 Makefile 禁用 PCH / 对象目录 / 文件列表 / 脚本页',
+checkCb('CB：自定义 Makefile 禁用 PCH / 对象目录 / 文件列表 / 脚本页',
   /rbPCHStrategy",\s*wxRadioBox\)->Enable\(!customMake\)/.test(cb)
   && /txtObjectDir",\s*wxTextCtrl\)->Enable\(!customMake && en\)/.test(cb)
   && /list->Enable\(!customMake\)/.test(cb)
   && /btnCheckScripts",\s*wxButton\)->Enable\(!customMake\)/.test(cb), null);
-check('CB：目标数 ≤ 1 时 Delete / Re-order 禁用',
+checkCb('CB：目标数 ≤ 1 时 Delete / Re-order 禁用',
   /btnBuildOrder",[\s\S]{0,60}?Enable\(lstTargets->GetCount\(\) > 1\)/.test(cb)
   && /btnDelBuildTarget",[\s\S]{0,80}?Enable\(en && lstTargets->GetCount\(\) > 1\)/.test(cb), null);
-check('CB：无选中文件时 Selected file properties 禁用',
+checkCb('CB：无选中文件时 Selected file properties 禁用',
   /btnFileOptions",[\s\S]{0,60}?Enable\(filesEn\)/.test(cb), null);
-check('CB：PCH 策略受编译器 supportsPCH 控制',
+checkCb('CB：PCH 策略受编译器 supportsPCH 控制',
   /hasPCH = compiler && compiler->GetSwitches\(\).supportsPCH/.test(cb)
   && /rbPCHStrategy",[\s\S]{0,60}?Enable\(hasPCH\)/.test(cb), null);
 
@@ -72,7 +83,7 @@ check('扩展：Import / Definition 需复选框 + Dynamic library',
 check('扩展：Working dir 对 Static library / Commands only 禁用',
   /const workdirOn = type === 0 \|\| type === 1 \|\| type === 3 \|\| type === 5/.test(panel)
   && /setDisabled\('f-workdir', !workdirOn \|\| commandsOnly\)/.test(panel), null);
-check('扩展：自定义 Makefile 禁用对象目录 / 文件列表 / 工具栏 / 脚本页',
+checkCb('扩展：自定义 Makefile 禁用对象目录 / 文件列表 / 工具栏 / 脚本页',
   /setDisabled\('f-object', customMake \|\| commandsOnly\)/.test(panel)
   && /querySelectorAll\('#tflist input\[type="checkbox"\]'\)[\s\S]{0,80}?cb\.disabled = customMake/.test(panel)
   && /\['toggleChecks', 'allOn', 'allOff'\]\.forEach\(id => setDisabled\(id, customMake\)\)/.test(panel)
@@ -97,13 +108,13 @@ check('扩展：类型/复选框/自定义 Makefile 变更后重新同步',
 check('扩展：Parser / Debugger 无选中项时禁用编辑删除',
   /setDisabled\('parser-edit', selectedParser < 0\)/.test(panel)
   && /setDisabled\('dbg-path-edit', selectedDbgPath < 0\)/.test(panel), null);
-check('扩展：禁用态样式（input/button opacity）',
+checkCb('扩展：禁用态样式（input/button opacity）',
   /\.cb-props input:disabled, \.cb-props select:disabled, \.cb-props textarea:disabled \{ opacity: \.65; \}/.test(panel)
   && /\.cb-props button:disabled \{ opacity: \.5;/.test(panel), null);
 check('扩展：payload 传入 supportsPch（编译器 switches）',
   /supportsPch\?: boolean/.test(panel) && /supportsPch: projectCompiler\.switches\.supportsPCH !== false/.test(ext), null);
 // ---- 第二轮 CB 逐项对齐（P1-9/10、P2-1~P2-6） ----
-check('对齐：Project settings 底部按钮左对齐（CB stretch spacer 之后）',
+checkCb('对齐：Project settings 底部按钮左对齐（CB stretch spacer 之后）',
   /\.cb-props \.settings-actions \{ display: flex; justify-content: flex-start;/.test(panel), null);
 check('对齐：目标类型 0 文案 = GUI application',
   /0: i18n\.t\('GUI application'\)/.test(panel), null);
@@ -136,9 +147,9 @@ check('对齐：目标类型改写不再受自动扩展名/前缀勾选影响（
   /function applyTargetTypeRules\(\)/.test(panel)
   && !/extAuto && !p\.ext/.test(panel) && !/libPrefix \|\| prefixAuto/.test(panel)
   && /宏名也按普通名字处理/.test(panel), null);
-check('对齐：构建脚本校验用 CB 三行文案并保留换行',
+checkCb('对齐：构建脚本校验用 CB 三行文案并保留换行',
   /无效的构建脚本：/.test(panel) && /首次出现在：/.test(panel) && /错误：/.test(panel)
   && /\.cb-props \.scr-status \{ white-space: pre-line; \}/.test(panel), null);
 
-console.log(`Properties 启用规则回归: ${pass} pass, ${fail} fail`);
+console.log(`Properties 启用规则回归: ${pass} pass, ${fail} fail` + (skip ? `, ${skip} skip（codeblocks-src 快照缺失）` : ''));
 process.exit(fail ? 1 : 0);

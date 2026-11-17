@@ -6,45 +6,56 @@ const path = require('path');
 
 const ROOT = path.resolve(__dirname, '..');
 const read = (rel) => fs.readFileSync(path.join(ROOT, rel), 'utf8');
-let pass = 0, fail = 0;
+let pass = 0, fail = 0, skip = 0;
 function check(name, cond, extra) {
   if (cond) { pass++; console.log('OK   ' + name); }
   else { fail++; console.log('FAIL ' + name + (extra !== undefined ? '  got=' + JSON.stringify(extra) : '')); }
 }
 
-const cb = read('codeblocks-src/src/plugins/compilergcc/compileroptionsdlg.cpp');
+/**
+ * CB 源码事实校验：codeblocks-src/ 是本地只读快照（不入库），
+ * CI 不检出该目录时跳过这些断言；扩展侧断言照常执行。
+ */
+function checkCb(name, cond, extra) {
+  if (!hasCb) { skip++; console.log('SKIP ' + name + '  (codeblocks-src 快照缺失)'); return; }
+  check(name, cond, extra);
+}
+
+const CB_SRC_REL = 'codeblocks-src/src/plugins/compilergcc/compileroptionsdlg.cpp';
+const hasCb = fs.existsSync(path.join(ROOT, CB_SRC_REL));
+const cb = hasCb ? read(CB_SRC_REL) : '';
 const view = read('src/ui/buildOptionsView.ts');
 const ext = read('src/extension.ts');
 const props = read('src/ui/projectPropertiesPanel.ts');
 
 // ---------- Code::Blocks 侧事实 ----------
-check('CB：自定义 Makefile 移除 Compiler / Linker / Search directories 三页',
+checkCb('CB：自定义 Makefile 移除 Compiler / Linker / Search directories 三页',
   /IsMakefileCustom\(\)\)[\s\S]{0,400}?nb->RemovePage\(2\);[\s\S]{0,120}?nb->RemovePage\(1\);[\s\S]{0,120}?nb->RemovePage\(0\);/.test(cb), null);
-check('CB：Commands only 目标禁用 Compiler / Linker / Search / Make 四页并切到 Pre/post',
+checkCb('CB：Commands only 目标禁用 Compiler / Linker / Search / Make 四页并切到 Pre/post',
   /ttCommandsOnly\)[\s\S]{0,400}?nb->GetPage\(0\)->Disable\(\);[\s\S]{0,200}?nb->GetPage\(5\)->Disable\(\);[\s\S]{0,120}?nb->SetSelection\(3\);/.test(cb), null);
-check('CB：切换作用域时按 Commands only 重新禁用页',
+checkCb('CB：切换作用域时按 Commands only 重新禁用页',
   /const bool cmd = \(m_pTarget && m_pTarget->GetTargetType\(\) == ttCommandsOnly\)/.test(cb)
   && /nb->GetPage\(0\)->Enable\(!cmd\)/.test(cb)
   && /nb->GetPage\(pageOffset \+ 2\)->Enable\(!cmd\)/.test(cb), null);
-check('CB：自定义 Makefile 时 Make 页下标前移（pageOffset）',
+checkCb('CB：自定义 Makefile 时 Make 页下标前移（pageOffset）',
   /if \(!m_pProject->IsMakefileCustom\(\)\)[\s\S]{0,300}?pageOffset = 3;[\s\S]{0,80}?else\s+pageOffset = 0;/.test(cb), null);
-check('CB：Linker executable 仅目标作用域显示',
+checkCb('CB：Linker executable 仅目标作用域显示',
   /const bool show = \(m_pTarget != nullptr\);[\s\S]{0,260}?cmbLinkerExe->Show\(show\);/.test(cb), null);
-check('CB：Policy 下拉仅目标作用域启用',
+checkCb('CB：Policy 下拉仅目标作用域启用',
   /en = \(data && data->GetTarget\(\)\);[\s\S]{0,260}?cmbCompilerPolicy[\s\S]{0,60}?Enable\(en\)/.test(cb), null);
-check('CB：Edit 需恰好 1 项、Delete/Copy 需选中、Clear 需非空',
+checkCb('CB：Edit 需恰好 1 项、Delete/Copy 需选中、Clear 需非空',
   /edit\.Enable\(num == 1\);/.test(cb) && /del\.Enable\(en\);/.test(cb)
   && /clear\.Enable\(itemCount != 0\);/.test(cb) && /copy\.Enable\(en && hasProject\);/.test(cb), null);
-check('CB：上移看最小下标、下移看最大下标',
+checkCb('CB：上移看最小下标、下移看最大下标',
   /up\.Enable\(minIndex > 0\);/.test(cb) && /down\.Enable\(maxIndex < itemCount - 1\);/.test(cb), null);
-check('CB：Copy 只复制选中条目',
+checkCb('CB：Copy 只复制选中条目',
   /if \(lstLibs->IsSelected\(i\)\)[\s\S]{0,80}?AddLinkLib/.test(cb), null);
-check('CB：Make 命令输入随自定义 Makefile 启用',
+checkCb('CB：Make 命令输入随自定义 Makefile 启用',
   /bool en = project->IsMakefileCustom\(\);[\s\S]{0,500}?txtMakeCmd_SilentBuild[\s\S]{0,60}?Enable\(en\);/.test(cb), null);
-check('CB：Dist-clean 可编辑并保存，Silent build 由 Build 派生',
+checkCb('CB：Dist-clean 可编辑并保存，Silent build 由 Build 派生',
   /SetMakeCommandFor\(mcDistClean,[\s\S]{0,140}?txtMakeCmd_DistClean",\s*wxTextCtrl\)->GetValue\(\)\)/.test(cb)
   && /mcSilentBuild, XRCCTRL\(\*this, "txtMakeCmd_Build",\s*wxTextCtrl\)->GetValue\(\) \+ _T\(" > \$\(CMD_NULL\)"\)/.test(cb), null);
-check('CB：编译器未安装时禁用整本 notebook',
+checkCb('CB：编译器未安装时禁用整本 notebook',
   /compilerIdx == -1\)[\s\S]{0,2000}?nb->Disable\(\);/.test(cb), null);
 
 // ---------- 扩展侧实现 ----------
@@ -106,5 +117,5 @@ check('对齐：变量对话框含键名正则与引号询问（CB EditPairDlg�
   && /\^\[A-Za-z0-9_\]\+\$/.test(view) && /function needsQuotes\(v\)/.test(view)
   && /L\.varQuoteQuestion/.test(view), null);
 
-console.log(`\nbuild-options-enable-rules: ${pass} pass, ${fail} fail`);
+console.log(`\nbuild-options-enable-rules: ${pass} pass, ${fail} fail` + (skip ? `, ${skip} skip（codeblocks-src 快照缺失）` : ''));
 process.exit(fail ? 1 : 0);

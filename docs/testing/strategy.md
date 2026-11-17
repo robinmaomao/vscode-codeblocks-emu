@@ -226,5 +226,6 @@ node tests/run-all.js --group all --json out.json
   `tests/contract/test-doc-consistency.js` 会校验「覆盖矩阵汇总 == 明细 == 贡献面」与「测试报告 §2 台账 == 覆盖矩阵汇总」，
   漂移会**直接失败**（不只是告警；CI 的 job summary 另有一份漂移提示）。
 - **不要用绝对行号做断言**：无关代码增删会让断言误报（曾因 `gdbDebugAdapter.ts` 增行 44 行使 main CI 变红）。静态读点断言请用「语义/同语句特征」判定（例：`tests/test-settings-coverage.js` 断言键所在行是一次真实 `.get(...)` 取值）。
+- **不要依赖未入库的本地快照**：`codeblocks-src/`（Code::Blocks 源码）被 `.gitignore` 排除，CI 不检出。凡是拿它做事实校验的断言一律走 `checkCb()`（`tests/test-build-options-enable-rules.js`、`tests/test-properties-enable-rules.js`），快照缺失时输出 `SKIP …（codeblocks-src 快照缺失）` 并计为跳过；直接 `readFileSync` 会因 `ENOENT` 让 CI 变红（0.8.152 后的回归即此原因）。
 - **不要用固定 `sleep` 等异步就绪**：一律轮询「条件成立」（带超时），并给 `spawnSync` 显式 `timeout`；真实进程类用例在失败路径上清理长驻进程（`taskkill`），必要时「清理半成品 + 重试 1 次」（例：`tests/test-debug-detach-symbol.js`、`tests/test-makefile-export.js`）。
 - **能力缺口不伪造断言**：宿主/GDB 能力缺失时用 `ctx.skip` / `skipCheck` 记录现状与原因（例：调试 E2E 中 GDB 8.1 全量寄存器读取、工具链矩阵里缺失的 MSP430/SDCC），并登记到 [遗留问题决策清单](../dev/decisions.md)。
