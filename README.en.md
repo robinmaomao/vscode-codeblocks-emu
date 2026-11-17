@@ -12,7 +12,7 @@ Open a `.cbp` / `.workspace` project directly in VS Code and get a build, debug,
 
 > **License note**: The TypeScript code of this extension is an independent rewrite (it does not copy GPL sources); however, the error regular-expression table (`resources/compilers/options_common_re.xml`) and the command templates (`resources/compilers/options_gcc.xml`) are derived from the GPL v3 Code::Blocks `compilergcc` resources, so the extension as a whole is released under GPL v3. See [LICENSE.md](./LICENSE.md) for details.
 
-> 📖 For a detailed feature tour, usage instructions, and a **complete RISC-V cross-compilation example**, see [Usage guide](./docs/guide/usage.md) (English: [Usage guide (EN)](./docs/guide/usage.en.md)); for item-by-item alignment evidence, see [Code::Blocks alignment reference](./docs/guide/alignment.md).
+> 📖 For a detailed feature tour, usage instructions, and a **complete RISC-V cross-compilation example**, see [Usage guide](./docs/guide/usage.md) (English: [Usage guide (EN)](./docs/guide/usage.en.md)); for item-by-item alignment evidence, see [Code::Blocks alignment reference](./docs/guide/alignment.md); for how Code::Blocks dialogs are ported (methods, pitfalls, checklist), see [Code::Blocks porting lessons](./docs/dev/cb-porting-lessons.md).
 
 > **Unofficial notice**: This extension is an **independent rewrite and port** of Code::Blocks features by an individual community developer based on public information. It has **no affiliation, cooperation, or endorsement relationship** with the official Code::Blocks project or its authors / team, and does not represent their positions. The "Code::Blocks" name and logo are copyright their original authors; they are used here only to describe the feature set and compatibility target being modelled. Please report issues to [this repository](https://github.com/robinmaomao/vscode-codeblocks-emu/issues), **not** to the Code::Blocks team.
 >
@@ -210,7 +210,7 @@ Project tree operations (multi-project drag ordering / per-file compile·link to
 | `codeblocks.clangd.queryDriver` | `false` | When enabled, warns in the Output channel if `clangd.arguments` lacks `--query-driver` (the `Configure clangd --query-driver` command writes it in one click) |
 | `codeblocks.clangd.extraConfig` | `""` | Free-form YAML injected as a **trailing** fragment in the same scope (can override any key written by the extension; the extension adds `If.PathMatch` automatically) |
 
-> The complete set of 83 settings (9 sections, bilingual descriptions) is in [Settings reference](./docs/guide/settings.en.md) (Chinese [settings.md](./docs/guide/settings.md)). There are also two clangd commands: `Code::Blocks: Clean Stale clangd Config Fragments` (cleans stale fragments + orphan cache directories, with a preview before confirming) and `Code::Blocks: Configure clangd --query-driver` (cross-compiler fidelity).
+> The complete set of 88 settings (9 sections, bilingual descriptions) is in [Settings reference](./docs/guide/settings.en.md) (Chinese [settings.md](./docs/guide/settings.md)). There are also two clangd commands: `Code::Blocks: Clean Stale clangd Config Fragments` (cleans stale fragments + orphan cache directories, with a preview before confirming) and `Code::Blocks: Configure clangd --query-driver` (cross-compiler fidelity).
 
 ## Architecture
 

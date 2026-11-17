@@ -90,6 +90,8 @@ npm.cmd test
 6. **Code::Blocks 25.03 已无 priority 字段**（projectfile.h 只有 weight）。
 7. **日志输出超 20KB 会写文件**，用 read_file 读取。
 
+> **Code::Blocks 对话框移植专题**：Build options / Properties 的源码地图、已确认的 CB 语义（`additionalLibs` 整串、`Linker executable` 作用域、`OnProjectTypeChanged` 无条件改写、`ValidateTargetName`、`DoCheckScripts` 文案等）、有意保留差异、实现踩坑与对齐清单，见 [cb-porting-lessons.md](./cb-porting-lessons.md)。
+
 ## 九、版本历史
 
 > 逐版本明细见 [`release/`](../release/)：正式版说明 + 最近两份 dev 说明；0.8.76–0.8.128 的逐版说明已合并归档到
@@ -121,9 +123,8 @@ npm.cmd test
 | [0.8.147](../release/0.8.147.md) | 工程搜索体验：Text 结果排版对齐 VS Code 内置 Search（界面字体 / 22px 行高 / 行号右对齐定宽 / 预览 120 字符）、Files 模式补回 Search 按钮且四个控件同一行、切换 Explorer 后两种模式的搜索记录保持（Provider 回放缓存）、状态行按模式记忆、`Keep history` 开关对齐、Files 模式 `Aa`/`Ab`/`.*` 置灰 |
 | [0.8.148](../release/0.8.148.md) | Build Log 诊断跳转修复：链接期段名伪路径（`src/main.c:(.text+0x9)`）不再误判「无改善」、`.o/.obj` 只作源码线索、无源码位置条目不再显示为可点击；统一清理 ANSI 颜色输出（`-fdiagnostics-color=always`） |
 | [0.8.150](../release/0.8.150.md) | 工程右键 Build options… / Properties… 完整移植 Code::Blocks：共享 Build options 视图（Compiler / Linker / Search directories / Pre-post / Variables / Make）、Compiler Flags 右键菜单（新建/修改/删除/仅 C/仅 C++/展开折叠）+ 覆盖与自定义参数、Silent build 派生与 Dist-clean 只读、Selected compiler 自动匹配工程声明编译器 |
-| [0.8.151](../release/0.8.151.md) | 工程属性 / 构建选项 UI 二次精修：按 CB `project_options.xrc` 重排（Project settings 单张 2 列网格、PCH Strategy radio box、目标文件列表回右栏、脚本页 1:2）；按钮统一复用 Build options `.bo-*`；工程右键菜单按 CB 排序 + 保存/关闭/移除文件/展开折叠命令；Expand All 修复；main 追加：启用联动、Build options 严格对齐（去 Extensions/自定义变量/Dist-clean/Silent）、Set Programs' Arguments 对话框、Selected file properties 三页重写、第二轮逐项对齐（additionalLibs 写入 Other linker options、隐藏工程级 Linker executable、构建脚本红字、变量键值对话框、覆盖层 OK/Cancel、编译器切换三重询问、目标类型改写扩展名/前缀、目标命名校验、列表点击修复、左对齐与文案；复核后：Import/Definition 空值改占位符、脚本校验用 CB 三行文案并保留换行、类型改写不再受自动前缀/扩展名勾选影响且宏名也追加扩展名） |
-
-| [0.8.152](../release/0.8.152.md) | 体验版：Build options / Properties 第二轮逐项对齐 Code::Blocks（additionalLibs 写入 Other linker options + 反向勾选 + 冲突询问、构建脚本红字、Linker executable 仅目标作用域、变量键值对话框、覆盖层 OK/Cancel、编译器切换三重询问、类型切换改写扩展名/前缀（含宏名、不受自动勾选影响）、目标命名校验、列表点击修复、Import/Definition 占位符、脚本校验 CB 三行文案、左对齐与文案/tooltip/红字分行/↑↓语义/双击入口） |
+| [0.8.151](../release/0.8.151.md) | 工程属性 / 构建选项 UI 二次精修：按 CB `project_options.xrc` 重排（Project settings 单张 2 列网格、PCH Strategy radio box、目标文件列表回右栏、脚本页 1:2）；按钮统一复用 Build options `.bo-*`；工程右键菜单按 CB 排序 + 保存/关闭/移除文件/展开折叠命令；Expand All 修复（发布后 main 追加的对齐内容随 0.8.152 发布） |
+| [0.8.152](../release/0.8.152.md) | 体验版：Build options / Properties 第二轮逐项对齐 Code::Blocks —— 启用联动规则、Build options 严格对齐（去 Extensions/自定义变量/Dist-clean/Silent）、additionalLibs 写入 Other linker options（整串 + 反向勾选 + 冲突询问）、工程级 Linker executable 隐藏、构建脚本红字、变量键值对话框、覆盖层 OK/Cancel、编译器切换三重询问、Set Programs' Arguments 换行归一、Selected file properties 三页重写与 customBuild 可用、类型切换改写扩展名/前缀（含宏名、不受自动勾选影响）、目标命名校验、列表点击修复、Import/Definition 占位符、脚本校验 CB 三行文案与换行、左对齐与文案/tooltip/红字分行/↑↓语义/双击入口 |
 
 > 当前版本 **0.8.152**（体验版；发布说明见 [release/0.8.152.md](../release/0.8.152.md)，上一版见 [release/0.8.151.md](../release/0.8.151.md)）；测试报告见 [test-report-0.8.152.md](../testing/test-report-0.8.152.md)；无头回归见 `npm test`（`TOTAL=195 FAIL=0 SKIP=1`，另有契约 / E2E / 视觉 / 性能 / 打包 / 宿主分层，见 [测试方案](../testing/strategy.md)）。
 
@@ -131,6 +132,6 @@ npm.cmd test
 
 - **背景**：Release 页面标题漂移成「`0.8.NNN — 中文主题 / English theme`」，正文也从 0.8.133 起逐步变成英文 / 中英混排，与 `0.8.127`–`0.8.131` 的发布页格式不一致。
 - **统一后的格式**：标题 = **纯版本号**；正文 = `# Code::Blocks for VS Code <ver>` + `> 发布日期…｜ 正式版（上一版 → 本版 里程碑汇总）` + `## 概述`（要点 + 规模）+ 主题分节 + `## ✅ 验证` / `## ⚠️ 行为变化与升级提示` / `## 📦 安装` / `## 📬 完整变更`；链接一律绝对 URL。
-- **落地**：新增 [`release/pages/`](../release/pages/)（12 条发布页，文件名 = tag）与生成器/守卫 `tests/contract/gen-release-notes.js`（`--check` / `--emit` / `--all`）；`docs/release/*.md` 的 H1 统一为 `# <ver>`，原副标题保留为 `> **主题**：…`；`0.8.136`–`0.8.141` 的发布日期行补齐「里程碑汇总」；12 条 GitHub Release 已按新格式更新（`Latest` 仅 0.8.141），原正文已备份到 `.cb-tools/releases-backup.json`。
+- **落地**：新增 [`release/pages/`](../release/pages/)（发布页，文件名 = tag；当前 19 条）与生成器/守卫 `tests/contract/gen-release-notes.js`（`--check` / `--emit` / `--all`）；`docs/release/*.md` 的 H1 统一为 `# <ver>`，原副标题保留为 `> **主题**：…`；`0.8.136`–`0.8.141` 的发布日期行补齐「里程碑汇总」；历史 GitHub Release 已按新格式更新（`Latest` 仅最新一版），原正文已备份到 `.cb-tools/releases-backup.json`。
 - **约定**：见 [release/00-index.md](../release/00-index.md#github-release-页面pages)（模板 + `gh` 发布步骤）与 [docs/README.md](../README.md) 维护约定。
-- **回归**：`npm run test:contract` 全绿（文档一致性 D3/D4/D5 覆盖 `release/pages/**` 的命令、链接与版本标记）；`node tests/contract/gen-release-notes.js --check` 12/12 通过。
+- **回归**：`npm run test:contract` 全绿（文档一致性 D3/D4/D5 覆盖 `release/pages/**` 的命令、链接与版本标记）；`node tests/contract/gen-release-notes.js --check` 19/19 通过。
