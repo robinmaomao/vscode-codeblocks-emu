@@ -103,6 +103,8 @@ Select-String -Path codeblocks-src/src/src/projectoptionsdlg.cpp -Pattern 'wxStr
 
 断言写法约定：源码级断言报错信息里带上「CB 函数名」，让后来人知道为什么必须这样写（例：`CB TextToOptions: additionalLibs 必须整串匹配`）。
 
+**CB 源码断言必须可跳过**：`codeblocks-src/` 是本地快照（`.gitignore` 排除），CI 不检出。凡引用 CB 源码的断言统一用 `checkCb()`，快照缺失时输出 `SKIP` 并计入跳过数（见 `tests/test-build-options-enable-rules.js`、`tests/test-properties-enable-rules.js`）；直接读取会导致 CI `ENOENT`。
+
 ## 7. 对齐一个新对话框的清单
 
 1. 在 `codeblocks-src/` 里找到 XRC 与 `*dlg.cpp`，确认这是**当前版本**的源码（不被 `codeblocks-src/` 里的构建产物误导）。
