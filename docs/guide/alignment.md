@@ -2,7 +2,7 @@
 
 > 本扩展**原生移植 Code::Blocks 的构建/调试内核**：直接解析 `.cbp` / `.workspace`、内置其命令模板与宏展开引擎、直接派生进程执行编译/链接/调试，**不是** `.cbp → tasks.json/launch.json` 桥接。
 > 本文档记录逐项对齐依据（对应 `codeblocks-src/` 源码位置）、扩展实现与有意保留的差异。
-> 最后更新：0.8.137（2026-11-04）。功能级剩余项与不移植清单见 [未实现功能待办](../dev/backlog.md)。
+> 最后更新：0.8.152（2026-11-16）。功能级剩余项与不移植清单见 [未实现功能待办](../dev/backlog.md)；Build options / Properties 的移植方法与已确认语义见 [Code::Blocks 对话框移植经验](../dev/cb-porting-lessons.md)。
 
 ## 1. 构建链路对齐
 
@@ -129,3 +129,22 @@
 
 - 全量回归（`npm test`）与分层测试（契约 / 无头 / E2E / 视觉 / 性能 / 打包 / 宿主）覆盖解析/序列化、选项关系、对象命名、权重排序、响应文件、静态库、生成文件、取消源、外部依赖、自定义变量、宏展开、模板、菜单结构、工程导入、Makefile 导出（含 mingw32-make 真机构建）、工作区依赖、头文件保护、注释整理、自定义工具等。分层与环境约束见 [测试方案](../testing/strategy.md)，逐项覆盖见 [测试覆盖矩阵](../testing/coverage-matrix.md)。
 - 无头真实构建校验（`test-project/headless-build-check.js`）：真实 GCC 编译/链接静态库→可执行链路、外部依赖 touch 强制重链、双目标脚本执行次数与顺序。
+
+## 7. Build options / Properties（0.8.150 → 0.8.152）
+
+工程右键的 `Build options…` / `Properties…` / `Set Programs' Arguments…` / `Selected file properties…` 按 CB 源码逐项对齐，方法、已确认语义与踩坑见 [Code::Blocks 对话框移植经验](../dev/cb-porting-lessons.md)。
+
+| 项 | Code::Blocks 依据 | 扩展实现 |
+|---|---|---|
+| Build options 页签与几何 | `plugins/compilergcc/resources/compiler_options.xrc` | 编译器 / 链接器 / 搜索目录 / 构建前后 / 自定义变量 / `"Make" commands` 六页；工程作用域隐藏 `Linker executable`（CB `Show(m_pTarget != nullptr)`） |
+| 编译器标志 ↔ 链接器选项 | `compileroptionsdlg.cpp` `OptionsToText` / `TextToOptions` | 勾选 flag 的 `additionalLibs` **整串**写入 `Other linker options`，载入时反向勾选并从文本隐去；文本残留时询问 `Enable compiler flags?` |
+| 编译器切换 | `compileroptionsdlg.cpp` `OnCompilerChanged` | 未保存改动先问是否应用（是/否/取消）；工程作用域再问是否同步到所有目标；随后提示需要完整重建 |
+| Properties 页签与几何 | `src/src/resources/project_options.xrc` | Project settings / Build targets / Build scripts / Notes / C/C++ parser / Debugger 六页（CB 的插件页合并为固定页签） |
+| 目标类型切换 | `projectoptionsdlg.cpp` `OnProjectTypeChanged` | GUI/Console → `.exe`、Dynamic → `.dll` + `libExtension` + `.def`、Static → `libExtension` + `lib` 前缀、Native → `.sys`；**不看**「自动生成前缀/扩展名」勾选，宏名同样追加（写入幂等） |
+| 目标命名 | `projectoptionsdlg.cpp` `ValidateTargetName` | 新增/复制/重命名先询问名称；拒绝空名、重名、虚拟目标同名与 `; , ! @ # $ % ^ & * " ' ~ = ? \ > <`、反引号 |
+| 导入库 / 定义文件 | `projectoptionsdlg.cpp` `DoTargetChange` | CB 未设置时为空、无默认宏；扩展用灰色占位符提示 `$(TARGET_OUTPUT_DIR)$(TARGET_OUTPUT_BASENAME)`，不落盘 |
+| 构建脚本校验 | `projectoptionsdlg.cpp` `DoCheckScripts` | 三行文案（`Invalid build script:` / `First seen in:` / `Error:`）保留换行；全通过 `All scripts seem to be valid!` |
+| 程序参数 | `sdk/selecttargetdlg.cpp` `SetExecParameters` | 保存时把参数中的换行替换为空格 |
+| 文件属性 | `sdk/projectfileoptionsdlg.cpp` | 三页完整移植；CB 隐藏的 `Included files` 与仅 glob 工程可见的行不显示 |
+
+有意保留的差异（按钮语义、固定 6 页签、未安装编译器的红字提示、不复刻 `use_console_runner` 丢数据缺陷、脚本校验一次列全）见 [移植经验 §4](../dev/cb-porting-lessons.md#4-有意保留的差异改回去之前先读这节)。

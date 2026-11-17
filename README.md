@@ -12,7 +12,7 @@
 
 > **许可证说明**：本扩展的 TypeScript 代码为独立重写（非复制 GPL 源码）；其中错误正则表（`resources/compilers/options_common_re.xml`）与命令模板（`resources/compilers/options_gcc.xml`）源自 GPL v3 的 Code::Blocks `compilergcc` 资源，因此整体按 GPL v3 发布，详见 [LICENSE.md](./LICENSE.md)。
 
-> 📖 详细的功能介绍、使用说明与 **RISC-V 交叉编译完整示例**见 [docs/guide/usage.md](./docs/guide/usage.md)（英文版 [docs/guide/usage.en.md](./docs/guide/usage.en.md)）；逐项对齐依据见 [docs/guide/alignment.md](./docs/guide/alignment.md)。
+> 📖 详细的功能介绍、使用说明与 **RISC-V 交叉编译完整示例**见 [docs/guide/usage.md](./docs/guide/usage.md)（英文版 [docs/guide/usage.en.md](./docs/guide/usage.en.md)）；逐项对齐依据见 [docs/guide/alignment.md](./docs/guide/alignment.md)；Code::Blocks 对话框移植方法与踩坑见 [docs/dev/cb-porting-lessons.md](./docs/dev/cb-porting-lessons.md)。
 
 > **非官方声明**：本扩展是社区个人开发者基于公开资料对 Code::Blocks 功能的**独立重写与移植**，与 Code::Blocks 官方项目及其作者 / 团队**无任何隶属、合作或背书关系**，也不代表其立场；「Code::Blocks」名称与标识版权归其原作者所有，此处仅用于说明所对标的功能与兼容目标。问题反馈请提交到 [本仓库 Issues](https://github.com/robinmaomao/vscode-codeblocks-emu/issues)，**不要**提交给 Code::Blocks 官方。
 >
@@ -213,7 +213,7 @@ code --extensionDevelopmentPath="." --disable-extensions --new-window
 | `codeblocks.clangd.queryDriver` | `false` | 开启后若 `clangd.arguments` 缺 `--query-driver` 则在输出通道提示（命令 `Configure clangd --query-driver` 可一键写入） |
 | `codeblocks.clangd.extraConfig` | `""` | 自由 YAML，作为同作用域**后置**片段注入（可覆盖扩展写入的任意键；扩展自动补 `If.PathMatch`） |
 
-> 完整 83 项设置（9 个分区，中英双语描述）见 [docs/guide/settings.md](./docs/guide/settings.md)（英文版 [settings.en.md](./docs/guide/settings.en.md)）。另有两条 clangd 命令：`Code::Blocks: Clean Stale clangd Config Fragments`（清理失效片段 + 孤儿缓存目录，预览后确认）与 `Code::Blocks: Configure clangd --query-driver`（交叉编译器保真）。
+> 完整 88 项设置（9 个分区，中英双语描述）见 [docs/guide/settings.md](./docs/guide/settings.md)（英文版 [settings.en.md](./docs/guide/settings.en.md)）。另有两条 clangd 命令：`Code::Blocks: Clean Stale clangd Config Fragments`（清理失效片段 + 孤儿缓存目录，预览后确认）与 `Code::Blocks: Configure clangd --query-driver`（交叉编译器保真）。
 
 ## 架构
 
