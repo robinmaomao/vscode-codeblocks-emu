@@ -50,7 +50,7 @@ flowchart LR
 3. 纯逻辑放 `src/tools/` / `src/model/`，feature 模块只做 vscode 接线；
 4. 每个 feature 至少一个无头测试（纯逻辑）或宿主测试（命令注册/交互）。
 
-已迁移示例：[toolCommands.ts](../../src/features/toolCommands.ts)（Copy Strings / Backtick Cache）。
+已迁移示例：[toolCommands.ts](../../src/features/toolCommands.ts)（Copy Strings / Backtick Cache）、[workspaceCommands.ts](../../src/features/workspaceCommands.ts)（Save Project As / Workspace 生命周期）、[newProjectCommands.ts](../../src/features/newProjectCommands.ts)（New Build Target / New File）。
 
 ## 4. 拆分路线（P3-1）
 
@@ -58,7 +58,7 @@ flowchart LR
 |---|---|---|
 | 1 | 纯逻辑模块：atomicWrite / xml / workspaceSerializer / noProjectCompile / memoryDump / copyStrings / profiler / symtab | ✅ 0.8.154 |
 | 2 | 工具类命令拆到 `src/features/toolCommands.ts` | ✅ 0.8.155 |
-| 3 | 工程生命周期（open/close/reload/workspace/recent/status bar）→ `features/projectManager.ts` | ☐ 待排期 |
+| 3 | 工程生命周期（open/close/reload/workspace/recent/status bar）→ `features/projectManager.ts` | ◐ 0.8.155：workspace 生命周期 + New 命令已拆出；open/close/reload/recent/status bar 待拆 |
 | 4 | 构建/运行/清理/编译命令 → `features/buildCommands.ts` | ☐ 待排期 |
 | 5 | 调试辅助命令/寄存器/内存 → `features/debugCommands.ts` | ☐ 待排期 |
 | 6 | 菜单/面板/设置入口 → `features/uiCommands.ts` | ☐ 待排期 |

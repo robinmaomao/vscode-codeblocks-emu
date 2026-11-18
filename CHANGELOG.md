@@ -10,7 +10,7 @@
 - **WebView CSP nonce**：五个面板内联脚本改用 nonce，新增 `src/ui/webview/common.ts` 公共运行时。
 - **`.cbp` 未知节点透传**：Project / Target / Unit 插件自定义 XML 与 Unit 未知 Option 属性保存不丢。
 - **激活扫描优化**：`detect.autoOpen=off` 跳过激活期全量扫描；新增激活耗时日志。
-- **首批拆分**：`src/features/toolCommands.ts`（Copy Strings / Backtick Cache）；新增 [架构与模块地图](docs/dev/architecture.md)。
+- **Feature 拆分**：`src/features/toolCommands.ts` / `workspaceCommands.ts` / `newProjectCommands.ts`；新增 [架构与模块地图](docs/dev/architecture.md)。
 - 测试：无头 207、契约 / WebView / 未知 XML / 项目检测全绿。
 
 ## 0.8.154 — 2026-11-18
