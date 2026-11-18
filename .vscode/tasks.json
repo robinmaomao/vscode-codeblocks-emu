@@ -16,11 +16,53 @@
       "label": "npm: bundle"
     },
     {
+      "type": "npm",
+      "script": "bundle:search",
+      "group": "build",
+      "problemMatcher": [],
+      "label": "npm: bundle:search"
+    },
+    {
       "label": "build-extension",
-      "dependsOn": ["npm: compile", "npm: bundle"],
+      "dependsOn": ["npm: compile", "npm: bundle", "npm: bundle:search"],
       "dependsOrder": "sequence",
       "group": { "kind": "build", "isDefault": true },
       "problemMatcher": []
+    },
+    {
+      "type": "npm",
+      "script": "test",
+      "group": { "kind": "test", "isDefault": true },
+      "problemMatcher": [],
+      "label": "npm: test"
+    },
+    {
+      "type": "npm",
+      "script": "test:contract",
+      "group": "test",
+      "problemMatcher": [],
+      "label": "npm: test:contract"
+    },
+    {
+      "type": "npm",
+      "script": "test:e2e",
+      "group": "test",
+      "problemMatcher": [],
+      "label": "npm: test:e2e"
+    },
+    {
+      "type": "npm",
+      "script": "test:pack",
+      "group": "test",
+      "problemMatcher": [],
+      "label": "npm: test:pack"
+    },
+    {
+      "type": "npm",
+      "script": "test:host",
+      "group": "test",
+      "problemMatcher": [],
+      "label": "npm: test:host"
     }
   ]
 }

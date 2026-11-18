@@ -136,7 +136,13 @@ code --install-extension codeblocks-vscode-0.8.152.vsix --force
 
 ### Development and debugging
 
+See [docs/dev/setup.en.md](./docs/dev/setup.en.md) for the development environment (Node 24 LTS, w64devkit/gcc/gdb, dependency installation, and layered tests).
+
 ```powershell
+npm ci
+npm run compile
+npm run bundle
+npm run bundle:search
 code --extensionDevelopmentPath="." --disable-extensions --new-window
 ```
 

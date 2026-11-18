@@ -21,7 +21,7 @@ const { suite } = require('./framework');
 const U = require('./hostUtil');
 
 const KB_PANEL = 'codeblocks.keybindings';
-const OPT_PANEL = 'codeblocks.compilerOptions';
+const OPT_PANEL = 'codeblocks.buildOptions';
 const PROP_PANEL = 'codeblocks.projectProperties';
 const WEBVIEW_PROJ_TITLE = 'cb-host-webview-proj'; // 唯一标题：便于从输出日志中无歧义识别本用例打开/构建的工程
 
@@ -109,11 +109,11 @@ suite('宿主集成 · WebView 面板（真实宿主内创建与消息协议边�
     const opened = await U.waitForLogLine(`已打开项目: ${WEBVIEW_PROJ_TITLE}`, off, 20000);
     assert.ok(opened, `工程未打开（观测手段：输出通道落盘日志 ${U.extensionLogPath() || '未找到扩展日志'}）`);
 
-    // 2) 编译选项面板（依赖活动工程；工程仅一个目标时 selectTarget 不弹 QuickPick）
+    // 2) 构建选项面板（依赖活动工程；工程仅一个目标时 selectTarget 不弹 QuickPick）
     await vscode.commands.executeCommand('codeblocks.compilerOptions');
     const optTab = await U.waitForWebviewTab(OPT_PANEL, 15000);
     assert.ok(optTab, `未创建 ${OPT_PANEL} WebView 标签页`);
-    assert.ok(String(optTab.label).startsWith('编译选项:'), `标签标题异常：${optTab.label}`);
+    assert.ok(String(optTab.label).startsWith('工程构建选项'), `标签标题异常：${optTab.label}`);
 
     // 3) 工程属性面板（右键入口以工程节点调用；宿主内传入等价节点对象 { project: { filename } }，
     //    与 src/extension.ts 的 resolveProjectFilename() 约定一致）
@@ -143,9 +143,9 @@ suite('宿主集成 · WebView 面板（真实宿主内创建与消息协议边�
       `期望 ≥2 个 WebView 面板共存，实际：${JSON.stringify(all)}`);
 
     // 5) 关闭再打开（DOM 不可观测，故以「标签页消失 → 命令重建后再次出现」作为面板生命周期观测点）
-    assert.ok(await U.closeWebviewTab(OPT_PANEL), '编译选项面板未能关闭');
+    assert.ok(await U.closeWebviewTab(OPT_PANEL), '构建选项面板未能关闭');
     await vscode.commands.executeCommand('codeblocks.compilerOptions');
-    assert.ok(await U.waitForWebviewTab(OPT_PANEL, 15000), '编译选项面板关闭后无法重新打开');
+    assert.ok(await U.waitForWebviewTab(OPT_PANEL, 15000), '构建选项面板关闭后无法重新打开');
 
     // 清理：关闭本用例打开的两个面板，避免影响后续用例
     await U.closeWebviewTab(OPT_PANEL);

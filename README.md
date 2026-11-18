@@ -139,7 +139,13 @@ code --install-extension codeblocks-vscode-0.8.152.vsix --force
 
 ### 开发调试
 
+开发环境（Node 24 LTS、w64devkit/gcc/gdb、依赖安装与分层测试）见 [docs/dev/setup.md](./docs/dev/setup.md)。
+
 ```powershell
+npm ci
+npm run compile
+npm run bundle
+npm run bundle:search
 code --extensionDevelopmentPath="." --disable-extensions --new-window
 ```
 
