@@ -1,7 +1,7 @@
 # 架构与模块地图
 
 > 目的：给后续功能开发一个稳定的落点说明。本文只描述**当前实现**与**已规划的拆分边界**，不重复用户文档。
-> 基线：0.8.157（AutoVersioning/Profiler 正确性 + 编译器元数据批次后）。
+> 基线：0.8.158（Profiler 命令拆分后）。
 
 ## 1. 数据流
 
@@ -50,7 +50,7 @@ flowchart LR
 3. 纯逻辑放 `src/tools/` / `src/model/`，feature 模块只做 vscode 接线；
 4. 每个 feature 至少一个无头测试（纯逻辑）或宿主测试（命令注册/交互）。
 
-已迁移示例：[toolCommands.ts](../../src/features/toolCommands.ts)（Copy Strings / Backtick Cache）、[workspaceCommands.ts](../../src/features/workspaceCommands.ts)（Save Project As / Workspace 生命周期）、[newProjectCommands.ts](../../src/features/newProjectCommands.ts)（New Build Target / New File）、[debugCommands.ts](../../src/features/debugCommands.ts)（Next Instruction / Examine Memory）、[autoVersioningCommands.ts](../../src/features/autoVersioningCommands.ts)（AutoVersioning 命令 + 构建钩子）。
+已迁移示例：[toolCommands.ts](../../src/features/toolCommands.ts)（Copy Strings / Backtick Cache）、[workspaceCommands.ts](../../src/features/workspaceCommands.ts)（Save Project As / Workspace 生命周期）、[newProjectCommands.ts](../../src/features/newProjectCommands.ts)（New Build Target / New File）、[debugCommands.ts](../../src/features/debugCommands.ts)（Next Instruction / Examine Memory）、[autoVersioningCommands.ts](../../src/features/autoVersioningCommands.ts)（AutoVersioning 命令 + 构建钩子）、[profilerCommands.ts](../../src/features/profilerCommands.ts)（Profiler 运行/报告导出）。
 
 ## 4. 拆分路线（P3-1）
 
@@ -58,6 +58,7 @@ flowchart LR
 |---|---|---|
 | 1 | 纯逻辑模块：atomicWrite / xml / workspaceSerializer / noProjectCompile / memoryDump / copyStrings / profiler / symtab | ✅ 0.8.154 |
 | 2 | 工具类命令拆到 `src/features/toolCommands.ts` | ✅ 0.8.155 |
+| 2b | Profiler 命令编排拆到 `src/features/profilerCommands.ts` | ✅ 0.8.158 |
 | 3 | 工程生命周期（open/close/reload/workspace/recent/status bar）→ `features/projectManager.ts` | ◐ 0.8.155：workspace 生命周期 + New 命令已拆出；open/close/reload/recent/status bar 待拆 |
 | 4 | 构建/运行/清理/编译命令 → `features/buildCommands.ts` | ☐ 待排期 |
 | 5 | 调试辅助命令/寄存器/内存 → `features/debugCommands.ts` | ◐ 0.8.155：指令级步进 / Examine memory 已拆出；寄存器/attach/detach 等待拆 |

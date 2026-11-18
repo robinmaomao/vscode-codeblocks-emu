@@ -1,4 +1,4 @@
-﻿/**
+/**
  * 扩展入口 —— 注册命令、管理项目/构建生命周期
  *
  * 对应 Code::Blocks 的 pluginmanager / compilergcc 插件入口角色。
@@ -106,18 +106,7 @@ import { applyHeaderGuard } from './tools/headerGuard';
 import { tidyCommentBlock } from './tools/tidyComments';
 import { registerToolCommands } from './features/toolCommands';
 import { registerDebugInstructionCommands } from './features/debugCommands';
-import {
-  formatProfilerCallGraph,
-  formatProfilerTable,
-  isFreshGmon,
-  parseGprofCallGraph,
-  parseGprofFlatProfile,
-  profilerReportHtml,
-  profilerRowsToCsv,
-  runCapture,
-  type GprofCallGraphEntry,
-  type GprofRow,
-} from './tools/profiler';
+import { runCapture } from './tools/profiler';
 import { filterSymbols, parseNmOutput, SymbolRow } from './tools/symtab';
 import { parseToolsSetting, buildToolInvocation, ToolContext } from './tools/toolRunner';
 import { applyCustomVariables } from './model/customVariables';
@@ -130,6 +119,7 @@ import {
   prepareAutoVersioningBuild,
   registerAutoVersioningCommands,
 } from './features/autoVersioningCommands';
+import { registerProfilerCommands } from './features/profilerCommands';
 import { PathOwnerIndex, buildPathOwnerIndex, findSoleOwner, normFilePath } from './model/pathOwnerIndex';
 import { generateMakefile } from './build/makefileExporter';
 import { buildProjectFromImport, importDevProject, importDspProject, importVcxproj } from './project/projectImporter';
@@ -2185,12 +2175,22 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   // AStyle 格式化
   context.subscriptions.push(
-    vscode.commands.registerCommand('codeblocks.profileTarget', () => profileTarget()),
-    vscode.commands.registerCommand('codeblocks.findSymbolInLibraries', () => findSymbolInLibraries()),
     vscode.commands.registerCommand('codeblocks.format', async () => {
       await formatActiveDocument();
     }),
+    vscode.commands.registerCommand('codeblocks.findSymbolInLibraries', () => findSymbolInLibraries()),
   );
+
+  // Profiler 命令（gprof 运行/导出）—— 已拆到 features/profilerCommands.ts
+  registerProfilerCommands(context, {
+    getProject: () => requireProject(),
+    getSelectedTarget: (p) => getSelectedTarget(p),
+    getCompiler: (id) => getCompiler(id),
+    runWorkingDir: (p, t, vars) => runWorkingDir(p, t, vars),
+    splitCommandLine: (s) => splitCommandLine(s),
+    profilerChannel: () => profilerOutputChannel(),
+    annotatedChannel: () => annotatedSourceOutputChannel(),
+  });
 
   // 头文件保护（D1：headerguard 对齐）+ 新建空头文件自动插入（codeblocks.editor.autoHeaderGuard）
   context.subscriptions.push(
@@ -9434,187 +9434,6 @@ async function findSymbolInLibraries(): Promise<void> {
   if (!pick) return;
   await vscode.env.clipboard.writeText(pick.symbol.name);
   vscode.window.setStatusBarMessage(i18n.t('Symbol copied: {0}', pick.symbol.name), 3000);
-}
-
-/** Profile target（gprof）—— 对齐 CB Tools → Profiler（cbprofiler.cpp:83-255） */
-async function profileTarget(): Promise<void> {
-  const project = requireProject();
-  if (!project) return;
-  const target = project.buildTargets.find((t) => t.title === getSelectedTarget(project))
-    ?? project.buildTargets.find((t) => supportsCurrentPlatform(t.platforms) && isExecutableTargetType(t.targetType));
-  if (!target) {
-    vscode.window.showWarningMessage(i18n.t('No executable build target is available for profiling'));
-    return;
-  }
-  if (!isExecutableTargetType(target.targetType)) {
-    vscode.window.showWarningMessage(i18n.t('Only executable targets can be profiled'));
-    return;
-  }
-  const vars = { ...envVarMap(project.envVars, target.envVars), ...cbBuiltinVars(project.basePath, target.outputFilename, target.title, target.objectOutput, project.title, project.filename, getCompiler(target.compilerId || project.compilerId)?.masterPath ?? '') };
-  const expandedOut = replaceCbMacros(target.outputFilename, { vars, customVars: project.customVariables ?? {}, basePath: project.basePath });
-  const exePath = resolveExecutablePath(project.basePath, expandedOut, process.platform, true);
-  if (!fs.existsSync(exePath)) {
-    vscode.window.showErrorMessage(i18n.t('The executable does not exist — build first ({0})', path.relative(project.basePath, exePath)));
-    return;
-  }
-  const flags = [...(target.compilerOptions ?? []), ...(project.compilerOptions ?? []), ...(target.linkerOptions ?? []), ...(project.linkerOptions ?? [])].join(' ');
-  if (!/(^|\s)-pg(\s|$)/.test(flags)) {
-    const proceed = i18n.t('Profile Anyway');
-    const answer = await vscode.window.showWarningMessage(
-      i18n.t('The target does not appear to be built with -pg; gmon.out may not be produced. Continue?'),
-      { modal: true },
-      proceed,
-    );
-    if (answer !== proceed) return;
-  }
-  const cwd = runWorkingDir(project, target, vars);
-  const env: Record<string, string> = { ...(process.env as Record<string, string>) };
-  for (const ev of [...project.envVars, ...target.envVars]) env[ev.name] = ev.value;
-  const args = splitCommandLine(target.executionParameters ?? '');
-  const gmonCandidates = [path.join(path.dirname(exePath), 'gmon.out'), path.join(cwd, 'gmon.out')];
-  const gmonBefore = new Map<string, { mtimeMs: number; size: number }>();
-  for (const candidate of gmonCandidates) {
-    try {
-      const st = fs.statSync(candidate);
-      gmonBefore.set(candidate, { mtimeMs: st.mtimeMs, size: st.size });
-    } catch {
-      // 不存在即为旧数据；运行后出现即视为本次生成
-    }
-  }
-  const ch = profilerOutputChannel();
-  ch.appendLine(i18n.t('Profiling target: {0}', target.title));
-  ch.appendLine(`> "${exePath}" ${args.join(' ')}`);
-  ch.show(true);
-
-  const runResult = await vscode.window.withProgress(
-    { location: vscode.ProgressLocation.Notification, title: i18n.t('Running {0} for profiling…', target.title), cancellable: false },
-    () => runCapture(exePath, args, { cwd, env, timeoutMs: 5 * 60 * 1000 }, (line) => ch.appendLine(line)),
-  );
-  if (runResult.code !== 0) {
-    ch.appendLine(i18n.t('The profiled program exited with code {0}; profiling continues if gmon.out exists.', runResult.code ?? '?'));
-  }
-
-  const gmon = gmonCandidates.find((p) => {
-    try {
-      const st = fs.statSync(p);
-      return isFreshGmon(gmonBefore.get(p), { mtimeMs: st.mtimeMs, size: st.size });
-    } catch {
-      return false;
-    }
-  });
-  if (!gmon) {
-    vscode.window.showErrorMessage(i18n.t('A fresh gmon.out was not found — rebuild the target with -pg and run it again'));
-    return;
-  }
-  const gprof = vscode.workspace.getConfiguration('codeblocks').get<string>('profiler.gprofPath', '').trim() || 'gprof';
-  ch.appendLine(i18n.t('Running gprof: {0} "{1}" "{2}"', gprof, exePath, gmon));
-  try {
-    const gprofResult = await runCapture(gprof, [exePath, gmon], { cwd: path.dirname(exePath), timeoutMs: 2 * 60 * 1000 }, (line, stream) => {
-      if (stream === 'stderr') ch.appendLine(line);
-    });
-    if (gprofResult.code !== 0) {
-      vscode.window.showErrorMessage(i18n.t('gprof failed (exit code {0}) — see the Code::Blocks Profiler output', gprofResult.code ?? '?'));
-      return;
-    }
-    const rows = parseGprofFlatProfile(gprofResult.stdout);
-    if (!rows.length) {
-      vscode.window.showWarningMessage(i18n.t('gprof produced no flat-profile rows'));
-      ch.appendLine(gprofResult.stdout);
-      return;
-    }
-    const callGraph = parseGprofCallGraph(gprofResult.stdout);
-    ch.appendLine('');
-    ch.appendLine(formatProfilerTable(rows));
-    ch.appendLine('');
-    ch.appendLine(i18n.t('Flat profile: {0} function(s)', rows.length));
-    if (callGraph.length) {
-      ch.appendLine('');
-      ch.appendLine(i18n.t('Call graph: {0} function(s)', callGraph.length));
-      ch.appendLine(formatProfilerCallGraph(callGraph));
-    }
-
-    if (vscode.workspace.getConfiguration('codeblocks').get<boolean>('profiler.annotatedSource', true)) {
-      try {
-        const annotatedDir = path.dirname(exePath);
-        const annotatedBefore = new Set(
-          fs.readdirSync(annotatedDir).filter((name) => name.endsWith('.annotated')),
-        );
-        let annotated = await runCapture(gprof, ['-A', '-l', exePath, gmon], { cwd: annotatedDir, timeoutMs: 2 * 60 * 1000 });
-        let annotatedText = annotated.stdout;
-        if (annotated.code === 0 && !annotatedText.trim()) {
-          // GNU gprof 在部分工具链上把注解写入单独文件；再试一次 --separate-files。
-          const separate = await runCapture(gprof, ['-A', '-l', '--separate-files', exePath, gmon], { cwd: annotatedDir, timeoutMs: 2 * 60 * 1000 });
-          const created = fs.readdirSync(annotatedDir)
-            .filter((name) => name.endsWith('.annotated') && !annotatedBefore.has(name));
-          if (created.length) {
-            annotatedText = created.map((name) => `--- ${name} ---\n${fs.readFileSync(path.join(annotatedDir, name), 'utf-8')}`).join('\n');
-          } else if (separate.stdout.trim()) {
-            annotatedText = separate.stdout;
-          }
-        }
-        if (annotated.code === 0 && annotatedText.trim()) {
-          const sourceChannel = annotatedSourceOutputChannel();
-          sourceChannel.appendLine(i18n.t('Annotated source for {0}', target.title));
-          sourceChannel.appendLine(annotatedText);
-          sourceChannel.show(true);
-        } else if (annotated.stderr.trim()) {
-          ch.appendLine(annotated.stderr);
-        } else {
-          ch.appendLine(i18n.t('gprof -A produced no annotated source (build with debug information and check the source paths)'));
-        }
-      } catch (err) {
-        ch.appendLine(i18n.t('Failed to run gprof -A: {0}', (err as Error).message));
-      }
-    }
-
-    const exportCsv = i18n.t('Export CSV…');
-    const exportHtml = i18n.t('Export HTML…');
-    const showCallGraph = i18n.t('Show Call Graph');
-    const action = await vscode.window.showQuickPick(
-      [showCallGraph, exportCsv, exportHtml],
-      { placeHolder: i18n.t('Profiling finished: {0} function(s)', rows.length) },
-    );
-    if (action === showCallGraph) {
-      if (!callGraph.length) {
-        vscode.window.showWarningMessage(i18n.t('gprof produced no call-graph entries'));
-      } else {
-        ch.appendLine('');
-        ch.appendLine(formatProfilerCallGraph(callGraph));
-        ch.show(true);
-      }
-    } else if (action === exportCsv || action === exportHtml) {
-      await exportProfilerReport(target.title, exePath, rows, callGraph, action === exportCsv ? 'csv' : 'html');
-    }
-  } catch (err) {
-    vscode.window.showErrorMessage(i18n.t('Failed to run gprof: {0}', (err as Error).message));
-  }
-}
-
-/** 导出 Profiler 报告（CSV / 自包含 HTML）。 */
-async function exportProfilerReport(
-  targetName: string,
-  exePath: string,
-  rows: GprofRow[],
-  callGraph: GprofCallGraphEntry[],
-  format: 'csv' | 'html',
-): Promise<void> {
-  const safeName = targetName.replace(/[^\w.-]+/g, '-') || 'target';
-  const baseDir = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? path.dirname(exePath);
-  const defaultUri = vscode.Uri.file(path.join(baseDir, `gprof-${safeName}.${format}`));
-  const picked = await vscode.window.showSaveDialog({
-    defaultUri,
-    filters: format === 'csv' ? { CSV: ['csv'] } : { HTML: ['html', 'htm'] },
-  });
-  if (!picked) return;
-  const content = format === 'csv'
-    ? profilerRowsToCsv(rows)
-    : profilerReportHtml({ target: targetName, executable: exePath, rows, callGraph });
-  try {
-    writeFileAtomicSync(picked.fsPath, content, 'utf-8');
-    vscode.window.showInformationMessage(i18n.t('Profiler report saved: {0}', picked.fsPath));
-  } catch (err) {
-    vscode.window.showErrorMessage(i18n.t('Failed to save profiler report: {0}', (err as Error).message));
-  }
 }
 
 async function run(): Promise<void> {

@@ -2,7 +2,7 @@
 
 > 语言：**中文** ｜ [English](./usage.en.md)
 >
-> 版本：0.8.157 ｜ 本扩展为 Code::Blocks 核心功能的原生移植，直接驱动 GCC / GDB，**不依赖** `tasks.json` / `launch.json`。
+> 版本：0.8.158 ｜ 本扩展为 Code::Blocks 核心功能的原生移植，直接驱动 GCC / GDB，**不依赖** `tasks.json` / `launch.json`。
 
 ---
 
@@ -51,7 +51,7 @@ Code::Blocks for VS Code 是一个「迷你 IDE 内核」：直接解析 `.cbp` 
 ### 2.1 从 VSIX 安装
 
 ```powershell
-code --install-extension codeblocks-vscode-0.8.157.vsix --force
+code --install-extension codeblocks-vscode-0.8.158.vsix --force
 ```
 
 ### 2.2 从源码构建
@@ -59,7 +59,7 @@ code --install-extension codeblocks-vscode-0.8.157.vsix --force
 ```powershell
 npm install
 npm run package
-code --install-extension codeblocks-vscode-0.8.157.vsix --force
+code --install-extension codeblocks-vscode-0.8.158.vsix --force
 ```
 
 > `npm run package` = `vsce package`（打包前自动执行 `vscode:prepublish` 钩子 = `tsc` 编译（`dist/`，本地测试用）+ **esbuild 单文件打包**（`bundle/extension.js`，发布入口））；
@@ -1021,14 +1021,20 @@ A：**已全覆盖**（0.8.132 批次 2，2026-11 菜单优化后同步）。构
 > 详情与决策见 [未实现功能待办](../dev/backlog.md) §2（明确不移植清单）。
 > 提醒：以上扩展为社区/厂商产品，请自行评估安装；本扩展不内置或捆绑它们。
 
-## 17. 0.8.157 新增与行为变更
+## 17. 0.8.158 新增与行为变更
+
+- **Profiler 命令拆分**：`profileTarget` 与报告导出从 `extension.ts` 移至 `src/features/profilerCommands.ts`，通过 `ProfilerCommandDeps` 注入工程、编译器、工作目录和输出通道；行为不变。
+- **架构**：`extension.ts` 继续按 Strangler 模式收缩；新增 `test-profiler-commands.js` 防止命令双注册/回退到巨型模块。
+- **无功能/设置变更**：命令 136 / 设置 91 / 视图 6 保持不变。
+
+## 18. 0.8.157 新增与行为变更
 
 - **AutoVersioning 正确性**：`version.h` 内容不变时不再重写（避免 mtime 抖动触发全量重编译）；构建会话去重，一次构建只递增一次 `BUILDS_COUNT`；`do_auto_increment` / `ask_to_increment` 真正生效；Bump/Generate 统一更新 `manifest.xml`；新增 SVN 字段、Changes Log 入口和“将 version.h 加入工程”。
 - **Profiler 运行时**：运行前记录 `gmon.out` 时间戳，只分析本次新生成文件；`gprof -A` 无 stdout 时回退 `--separate-files` 并收集 `.annotated`；CSV/HTML 导出改为原子写。
 - **编译器元数据/资源**：读取 `compiler_*.xml` 的真实显示名与 master 路径；补齐 Code::Blocks 全量 `options_*.xml` / `compiler_*.xml`；修正 `extends` 继承；新增 OpenWatcom、Cygwin、MSYS2 MinGW64、TDM64、LCC、DMD、GDC、gfortran 的保守探测。
 - **行为提示**：`do_auto_increment` 默认关闭；开启后构建前可能弹版本递增确认。依赖“每次构建刷新日期常量”的脚本需显式执行 Generate Version Header。
 
-## 18. 0.8.156 新增与行为变更
+## 19. 0.8.156 新增与行为变更
 
 - **Profiler 完整化**：gprof **call graph** 解析与输出；`gprof -A` 源码注解写入独立输出通道（设置 `codeblocks.profiler.annotatedSource`，默认开启）；分析完成后可 **导出 CSV / HTML** 报告。
 - **AutoVersioning**：读写 `.cbp` 的 `<Extensions><AutoVersioning>`；命令 **AutoVersioning…**（配置/编辑版本/切换自动递增/设置头文件路径）、**Bump Version**、**Generate Version Header**。配置存在时构建前生成 `version.h`，构建成功后递增 `BUILDS_COUNT` 并原子写回。
@@ -1036,7 +1042,7 @@ A：**已全覆盖**（0.8.132 批次 2，2026-11 菜单优化后同步）。构
 - **推荐扩展**：新增 [推荐扩展](./recommended-extensions.md)：Doxygen、打印、Modern Fortran、环境变量、单库 nm、Valgrind/Callgrind；这些能力不再由本扩展重复实现。
 - **行为提示**：AutoVersioning 构建前会重写 `version.h`，手工维护该文件时请先备份或关闭工程配置；`gprof -A` 在大工程上可能较慢，可关闭。
 
-## 19. 0.8.155 新增与行为变更
+## 20. 0.8.155 新增与行为变更
 
 - **Workspace 生命周期**：File → Save Project As… / Save Workspace / Save Workspace As… / Close Workspace / Open default workspace；关闭最后一个工程会清理工作区状态，保存工作区会写回工程顺序、`active` 与 `<Depends>`。
 - **`.workspace` 外部修改检测**：外部修改工程列表/依赖/active 后，窗口焦点或文件事件会提示 Reload / Ignore；重载只刷新磁盘签名变化的工程。
