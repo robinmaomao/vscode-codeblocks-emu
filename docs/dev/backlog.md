@@ -27,7 +27,7 @@
 | N2 | `.cbp` 原子写盘 | ✔ 0.8.154 | 同目录临时文件 + rename；失败保留原文件 |
 | N3 | `package.json` 硬编码中文 | ✔ 0.8.154 | 调试属性/寄存器视图标题/工具项说明全部 nls；`test-i18n-nls` 增加无 CJK 守卫 |
 | N4 | Makefile 项目 CompileFile/DistClean | ✔ 0.8.154 | `makeCommands.compileFile` / `distClean` 接入；Build → Dist Clean |
-| N5 | WebView CSP / 巨型模块拆分 | ◐ 0.8.155 | WebView 已改 nonce CSP + 公共运行时；`extension.ts` 已拆出 `features/{toolCommands,workspaceCommands,newProjectCommands,debugCommands}.ts`，其余域按 [architecture.md](./architecture.md) §4 分批 |
+| N5 | WebView CSP / 巨型模块拆分 | ◐ 0.8.159 | WebView 已改 nonce CSP + 公共运行时；`extension.ts` 已拆出 tool/workspace/newProject/debug/autoVersioning/profiler/projectManager 七批；buildCommands、debug 剩余、uiCommands 按 [architecture.md](./architecture.md) §4 继续按需拆分 |
 
 > 盘点时的 UI 落位与编译/链接影响结论：可实施项中 19 项零影响、6 项轻度（只写 `.cbp`/`.workspace`/`default.conf`，经既有读取路径生效）、1 项需改造构建状态机（B5 Squirrel，未实施）。
 
