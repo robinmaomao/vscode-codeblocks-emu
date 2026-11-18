@@ -18,6 +18,8 @@ docs/
     backlog.md             未实现功能与决策
     decisions.md           遗留问题决策清单
     cb-porting-lessons.md  Code::Blocks 对话框移植经验（方法/事实/踩坑/清单）
+    setup.md               开发环境配置（Windows/Node/MinGW/测试）
+    setup.en.md            开发环境配置（英文）
     i18n.md                国际化约定与实现
     i18n.en.md             国际化（英文）
   testing/                 测试与验收
@@ -43,6 +45,7 @@ docs/
 | [dev/backlog.md](./dev/backlog.md) | 功能对齐现状：剩余缺口、明确不移植清单、A–E 组完成摘要 |
 | [dev/decisions.md](./dev/decisions.md) | 历次核查待确认项的处置结论（状态表 + 缺陷一览 + 决策记录） |
 | [dev/cb-porting-lessons.md](./dev/cb-porting-lessons.md) | **Code::Blocks 对话框移植经验**：源码地图、已确认的 CB 语义（Build options / Properties / 通用控件）、有意保留差异、实现踩坑、测试分层与对齐清单 |
+| [dev/setup.md](./dev/setup.md) | **开发环境配置**：Node 24 LTS、w64devkit（gcc/g++/gdb）、依赖构建、分层测试、VS Code 调试与排错｜英文版 [dev/setup.en.md](./dev/setup.en.md) |
 | [dev/i18n.md](./dev/i18n.md) | 中英双语约定与实现：nls 静态贡献 / `ui.language` 运行时、`i18n.t()` 用法、批次台账、已知限制｜英文版 [dev/i18n.en.md](./dev/i18n.en.md) |
 
 ## 测试与验收

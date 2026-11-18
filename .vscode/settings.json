@@ -1,0 +1,22 @@
+{
+  "typescript.tsdk": "node_modules/typescript/lib",
+  "typescript.enablePromptUseWorkspaceTsdk": true,
+  "search.exclude": {
+    "**/node_modules": true,
+    "**/dist": true,
+    "**/bundle": true,
+    "**/codeblocks-src": true,
+    "**/.cb-tools": true,
+    "**/.vscode-test": true,
+    "**/release": true
+  },
+  "files.watcherExclude": {
+    "**/node_modules/**": true,
+    "**/dist/**": true,
+    "**/bundle/**": true,
+    "**/codeblocks-src/**": true,
+    "**/.cb-tools/**": true,
+    "**/.vscode-test/**": true,
+    "**/release/**": true
+  }
+}
