@@ -5,7 +5,11 @@
       "name": "运行扩展 (Extension Development Host)",
       "type": "extensionHost",
       "request": "launch",
-      "args": ["--extensionDevelopmentPath=${workspaceFolder}"],
+      "args": [
+        "--extensionDevelopmentPath=${workspaceFolder}",
+        "--disable-extensions",
+        "--new-window"
+      ],
       "outFiles": ["${workspaceFolder}/dist/**/*.js", "${workspaceFolder}/bundle/**/*.js"],
       "preLaunchTask": "build-extension"
     }

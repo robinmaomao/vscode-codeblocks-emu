@@ -2356,6 +2356,7 @@
     "vscode:prepublish": "npm run compile && npm run bundle && npm run bundle:search",
     "test": "node tests/run-all.js",
     "pretest": "npm run compile",
+    "pretest:host": "npm run bundle && npm run bundle:search",
     "test:contract": "node tests/run-all.js --group contract",
     "test:e2e": "node tests/run-all.js --group e2e",
     "test:visual": "node tests/run-all.js --group visual",

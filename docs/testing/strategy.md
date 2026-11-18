@@ -73,12 +73,14 @@ node tests/run-all.js --group all --json out.json
 
 | 依赖 | 用途 | 说明 |
 |------|------|------|
-| Node ≥ 18 | 全部无头层 | 本机实测 v24.19.0 |
-| MinGW-w64（gcc/g++/gdb/ar/make） | L1/L4 真实构建与调试 | 本机 `D:\Program Files\mingw64\bin` |
+| Node ≥ 22 | 全部无头层 | 本机实测 v24.22.3（Node 24 LTS） |
+| MinGW-w64（gcc/g++/gdb/ar/make） | L1/L4 真实构建与调试 | w64devkit 2.11.0 解压目录的 `bin` 加入用户 PATH；或设置 `CB_TOOLCHAIN_ROOT` |
 | `playwright` + 系统 Edge | L3 视觉渲染 | 无需下载 Chromium |
 | `pixelmatch` + `pngjs` | L3 像素判定 | — |
 | `@vscode/test-electron` | L2 宿主集成 | 默认下载 engines 最低版本 VS Code 到 `.vscode-test/`（首次联网）；`CB_VSCODE_PATH` 可复用本机安装 |
 | clang/LLVM、AVR/RISC-V/MSP430 GCC、SDCC、TCC | L1 工具链矩阵 | 未安装时对应场景跳过并打印安装指引（见 §5.5） |
+
+> Windows 开发环境的完整安装、构建与排错步骤见 [dev/setup.md](../dev/setup.md)（英文版 [dev/setup.en.md](../dev/setup.en.md)）。
 
 ### 5.0 工具链安装（W6，可选）
 
