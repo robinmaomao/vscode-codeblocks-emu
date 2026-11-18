@@ -191,10 +191,18 @@ Manual smoke test:
 ## 8. Optional components
 
 - **ccache / sccache**: w64devkit 2.11.0 already bundles **ccache 4.14.1**; no separate installation is needed. It is used by `codeblocks.build.compilerCache` and the ccache E2E test.
+- **clangd**: the repository's `.cb-tools/toolchains/llvm/bin` already contains **clangd 23.1.3**; that directory is on the user PATH, so the host D-10 case no longer skips.
 - **Playwright Chromium**: visual regression uses system Edge by default; for a pinned Chromium, run `npx playwright install chromium` and set `CB_VISUAL_BROWSER=chromium`.
-- **Cross toolchains**: AVR / RISC-V / LLVM / TCC can be extracted to `.cb-tools/toolchains/<name>/` (gitignored); tests detect them automatically without changing the system PATH.
+- **Cross toolchains**: AVR / RISC-V / LLVM / TCC / MSP430 / SDCC are extracted under `.cb-tools/toolchains/<name>/` (gitignored) and detected automatically. MSP430 is **4.6.3** (PlatformIO `toolchain-timsp430`); SDCC is **4.6.4 #17226** (SourceForge nightly). No system PATH changes are required.
 
-## 9. Version baseline
+## 9. Dependency security (npm audit)
+
+- `fast-xml-parser` upgraded to **5.12.1**, fixing low-severity `GHSA-474x-hrwr-fgx4`.
+- `@vscode/vsce` upgraded to **4.1.1**; `overrides.minimatch` pins **11.0.9**, fixing moderate `GHSA-g3hv-75wg-m249`.
+- The remaining **4 high** advisories all come from the development-time packaging toolchain `@vscode/vsce → tinyglobby → fdir/picomatch`; no fixed versions are available yet (`picomatch <=4.0.7`, `fdir >=5.2.1`, `tinyglobby *`). They do **not** ship in the extension runtime. `npm audit fix --force` would downgrade vsce to 3.9.1 (pulling in the native `keytar` dependency), which is not recommended.
+- `npm audit --omit=dev` reports 0: every remaining item is a transitive `devDependencies` entry.
+
+## 10. Version baseline
 
 | Component | Version |
 |-----------|---------|
@@ -204,5 +212,10 @@ Manual smoke test:
 | VS Code | `>= 1.85` (local: 1.140.0) |
 | TypeScript | 5.9.3 (lock) |
 | esbuild | 0.28.2 (lock) |
+| fast-xml-parser | 5.12.1 (lock) |
+| @vscode/vsce | 4.1.1 (dev) |
+| clangd | 23.1.3 (`.cb-tools/toolchains/llvm/bin`) |
+| MSP430 GCC | 4.6.3 (`.cb-tools/toolchains/msp430`) |
+| SDCC | 4.6.4 #17226 (`.cb-tools/toolchains/sdcc`) |
 
 Related configuration: [.vscode/settings.json](../../.vscode/settings.json), [.vscode/tasks.json](../../.vscode/tasks.json), [.vscode/launch.json](../../.vscode/launch.json).
