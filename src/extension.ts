@@ -106,7 +106,17 @@ import { applyHeaderGuard } from './tools/headerGuard';
 import { tidyCommentBlock } from './tools/tidyComments';
 import { registerToolCommands } from './features/toolCommands';
 import { registerDebugInstructionCommands } from './features/debugCommands';
-import { formatProfilerTable, parseGprofFlatProfile, runCapture } from './tools/profiler';
+import {
+  formatProfilerCallGraph,
+  formatProfilerTable,
+  parseGprofCallGraph,
+  parseGprofFlatProfile,
+  profilerReportHtml,
+  profilerRowsToCsv,
+  runCapture,
+  type GprofCallGraphEntry,
+  type GprofRow,
+} from './tools/profiler';
 import { filterSymbols, parseNmOutput, SymbolRow } from './tools/symtab';
 import { parseToolsSetting, buildToolInvocation, ToolContext } from './tools/toolRunner';
 import { applyCustomVariables } from './model/customVariables';
@@ -114,6 +124,11 @@ import { parseProjectDebuggerConfig, mergeRemoteOptions, applyProjectDebuggerCon
 import { setProjectDependencies, wouldCreateCycle } from './model/workspaceWriter';
 import { registerWorkspaceCommands } from './features/workspaceCommands';
 import { registerNewProjectCommands } from './features/newProjectCommands';
+import {
+  completeAutoVersioningBuild,
+  prepareAutoVersioningBuild,
+  registerAutoVersioningCommands,
+} from './features/autoVersioningCommands';
 import { PathOwnerIndex, buildPathOwnerIndex, findSoleOwner, normFilePath } from './model/pathOwnerIndex';
 import { generateMakefile } from './build/makefileExporter';
 import { buildProjectFromImport, importDevProject, importDspProject, importVcxproj } from './project/projectImporter';
@@ -154,6 +169,7 @@ let outputChannel: CbOutput;
 let diagnosticCollection: vscode.DiagnosticCollection;
 let memoryChannel: vscode.OutputChannel | undefined;
 let profilerChannel: vscode.OutputChannel | undefined;
+let annotatedSourceChannel: vscode.OutputChannel | undefined;
 
 /** 惰性创建 Profiler 输出通道（gprof 结果；与构建日志分开） */
 function profilerOutputChannel(): vscode.OutputChannel {
@@ -162,6 +178,15 @@ function profilerOutputChannel(): vscode.OutputChannel {
     extContext?.subscriptions.push(profilerChannel);
   }
   return profilerChannel;
+}
+
+/** gprof -A 源码注解输出通道（内容可能较大，与摘要分开） */
+function annotatedSourceOutputChannel(): vscode.OutputChannel {
+  if (!annotatedSourceChannel) {
+    annotatedSourceChannel = vscode.window.createOutputChannel('Code::Blocks Profiler (Annotated Source)');
+    extContext?.subscriptions.push(annotatedSourceChannel);
+  }
+  return annotatedSourceChannel;
 }
 
 /** 惰性创建 Memory 输出通道（Examine memory 结果；与构建日志分开） */
@@ -1299,6 +1324,15 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     writeUnitsToCbp: (cbpPath, units) => writeUnitsToCbp(cbpPath, units),
     reloadProjectFromDisk: (f) => reloadProjectFromDisk(f),
     output: { info: (line) => outputChannel.info(line) },
+  });
+  registerAutoVersioningCommands(context, {
+    getProject: () => requireProject(),
+    saveProject: (p) => {
+      writeCbpAndRemember(p.filename, serializeProject(p));
+      projectTreeProvider?.setProjects(openProjects);
+      projectTreeProvider?.setActiveProject(activeProject);
+    },
+    output: (line) => outputChannel.info(line),
   });
 
   // 从工程移除文件（对齐 CB Project → Remove files...，磁盘文件保留）
@@ -7880,6 +7914,7 @@ async function buildOneProject(project: Project, targetTitle: string, rebuild: b
     outputChannel.warn(logT('[Code::Blocks] Project "{0}" has no target "{1}" (or does not support the current platform), skipped', project.title, targetTitle));
     return true;
   }
+  prepareAutoVersioningBuild(project, (line) => outputChannel.info(line));
 
   // makefile 项目模式（对齐 UseMake：Build/Rebuild 走 make 命令而非内部引擎，GetMakeCommandFor:2178-2197）
   if (project.makefileIsCustom) {
@@ -7909,9 +7944,15 @@ async function buildOneProject(project: Project, targetTitle: string, rebuild: b
     }
     if (mkCompiler.switches.logging !== 'full') {
       const silentCmd = getMakeCommand(project, target, 'silentBuild');
-      if (silentCmd) return await runMakeBuild(project, silentCmd, targetTitle);
+      if (silentCmd) {
+        const makeOk = await runMakeBuild(project, silentCmd, targetTitle);
+        if (makeOk) completeAutoVersioningBuild(project, (line) => outputChannel.info(line));
+        return makeOk;
+      }
     }
-    return await runMakeBuild(project, buildCmd, targetTitle);
+    const makeOk = await runMakeBuild(project, buildCmd, targetTitle);
+    if (makeOk) completeAutoVersioningBuild(project, (line) => outputChannel.info(line));
+    return makeOk;
   }
 
   const compiler = getCompiler(target.compilerId || project.compilerId);
@@ -7989,6 +8030,7 @@ async function buildOneProject(project: Project, targetTitle: string, rebuild: b
   const stats = engine.lastStats ?? { success: ok, compiledCount: 0, skippedCount: 0, failedCount: 0, linkSuccess: ok, linkSkipped: true, hadCommands: false, outputFilename: undefined };
   // 取消判定：引擎统计标记或取消源已置位（用户中途停止）
   const cancelled = !!stats.cancelled || !!cancel?.isCancelled();
+  if (ok && !cancelled) completeAutoVersioningBuild(project, (line) => outputChannel.info(line));
   const projectName = path.basename(path.dirname(project.filename));
 
   // 输出顺序调整：构建完成汇总块不再在此输出，统一由 printBuildSummaryBlocks()
@@ -9463,13 +9505,82 @@ async function profileTarget(): Promise<void> {
       ch.appendLine(gprofResult.stdout);
       return;
     }
+    const callGraph = parseGprofCallGraph(gprofResult.stdout);
     ch.appendLine('');
     ch.appendLine(formatProfilerTable(rows));
     ch.appendLine('');
     ch.appendLine(i18n.t('Flat profile: {0} function(s)', rows.length));
-    vscode.window.showInformationMessage(i18n.t('Profiling finished: {0} function(s)', rows.length));
+    if (callGraph.length) {
+      ch.appendLine('');
+      ch.appendLine(i18n.t('Call graph: {0} function(s)', callGraph.length));
+      ch.appendLine(formatProfilerCallGraph(callGraph));
+    }
+
+    if (vscode.workspace.getConfiguration('codeblocks').get<boolean>('profiler.annotatedSource', true)) {
+      try {
+        const annotated = await runCapture(gprof, ['-A', '-l', exePath, gmon], { cwd: path.dirname(exePath), timeoutMs: 2 * 60 * 1000 });
+        if (annotated.code === 0 && annotated.stdout.trim()) {
+          const sourceChannel = annotatedSourceOutputChannel();
+          sourceChannel.appendLine(i18n.t('Annotated source for {0}', target.title));
+          sourceChannel.appendLine(annotated.stdout);
+          sourceChannel.show(true);
+        } else if (annotated.stderr.trim()) {
+          ch.appendLine(annotated.stderr);
+        } else {
+          ch.appendLine(i18n.t('gprof -A produced no annotated source (build with debug information and check the source paths)'));
+        }
+      } catch (err) {
+        ch.appendLine(i18n.t('Failed to run gprof -A: {0}', (err as Error).message));
+      }
+    }
+
+    const exportCsv = i18n.t('Export CSV…');
+    const exportHtml = i18n.t('Export HTML…');
+    const showCallGraph = i18n.t('Show Call Graph');
+    const action = await vscode.window.showQuickPick(
+      [showCallGraph, exportCsv, exportHtml],
+      { placeHolder: i18n.t('Profiling finished: {0} function(s)', rows.length) },
+    );
+    if (action === showCallGraph) {
+      if (!callGraph.length) {
+        vscode.window.showWarningMessage(i18n.t('gprof produced no call-graph entries'));
+      } else {
+        ch.appendLine('');
+        ch.appendLine(formatProfilerCallGraph(callGraph));
+        ch.show(true);
+      }
+    } else if (action === exportCsv || action === exportHtml) {
+      await exportProfilerReport(target.title, exePath, rows, callGraph, action === exportCsv ? 'csv' : 'html');
+    }
   } catch (err) {
     vscode.window.showErrorMessage(i18n.t('Failed to run gprof: {0}', (err as Error).message));
+  }
+}
+
+/** 导出 Profiler 报告（CSV / 自包含 HTML）。 */
+async function exportProfilerReport(
+  targetName: string,
+  exePath: string,
+  rows: GprofRow[],
+  callGraph: GprofCallGraphEntry[],
+  format: 'csv' | 'html',
+): Promise<void> {
+  const safeName = targetName.replace(/[^\w.-]+/g, '-') || 'target';
+  const baseDir = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? path.dirname(exePath);
+  const defaultUri = vscode.Uri.file(path.join(baseDir, `gprof-${safeName}.${format}`));
+  const picked = await vscode.window.showSaveDialog({
+    defaultUri,
+    filters: format === 'csv' ? { CSV: ['csv'] } : { HTML: ['html', 'htm'] },
+  });
+  if (!picked) return;
+  const content = format === 'csv'
+    ? profilerRowsToCsv(rows)
+    : profilerReportHtml({ target: targetName, executable: exePath, rows, callGraph });
+  try {
+    fs.writeFileSync(picked.fsPath, content, 'utf8');
+    vscode.window.showInformationMessage(i18n.t('Profiler report saved: {0}', picked.fsPath));
+  } catch (err) {
+    vscode.window.showErrorMessage(i18n.t('Failed to save profiler report: {0}', (err as Error).message));
   }
 }
 

@@ -109,6 +109,7 @@
 |--------|------|--------|--------|------|
 | `codeblocks.gdbTimeoutMs` | number | `30000` |  | GDB MI 单条命令超时（≥1000 ms）。 |
 | `codeblocks.profiler.gprofPath` | string | `""` |  | `gprof` 可执行文件路径（空 = 从 PATH 查找）。 |
+| `codeblocks.profiler.annotatedSource` | boolean | `true` |  | 性能分析后运行 `gprof -A`，在独立输出通道显示源码注解。 |
 | `codeblocks.debug.initCommands` | array | `[]` |  | 调试会话启动后逐条注入的 GDB 命令（如 `set pagination off`）。 |
 | `codeblocks.debug.userArguments` | string | `""` |  | 附加到 GDB 命令行的参数（引号感知分词）。 |
 | `codeblocks.debug.disableInit` | boolean | `true` |  | 启动 GDB 时传 `-nx`，不执行 `.gdbinit` / `gdb.ini`。 |

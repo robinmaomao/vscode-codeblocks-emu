@@ -12,9 +12,11 @@
 |---|---|---|---|
 | G1 | `.workspace` 外部修改检测 | ✔ 0.8.154 | 独立 tracker + `**/*.workspace` watcher + 焦点兜底；改 `<Depends>`/active 后提示 Reload/Ignore；重载只刷新变化工程 |
 | G2 | `Compile File (Without Project)` 输出编码 | ✔ 0.8.154 | 默认改扩展自管进程 + `OutputLineDecoder`（UTF-8/GBK 逐行）；`noProjectCompile.useTaskTerminal` 可回退旧任务终端 |
-| T2 | Profiler（gprof） | ✔ 0.8.154（子集） | 运行目标 → 定位 `gmon.out` → `gprof` → flat profile 表格；call graph 交互树/源码注解后续 |
+| T2 | Profiler（gprof） | ✔ 0.8.156 | 运行目标 → 定位 `gmon.out` → `gprof` → flat profile + call graph；`gprof -A` 源码注解独立输出通道；CSV/HTML 导出 |
 | T3 | Copy strings to clipboard | ✔ 0.8.154 | Tools → Copy Strings；状态机移植（忽略注释/单引号、去重排序） |
 | T5 | 跨库符号搜索 | ✔ 0.8.154 | Tools → Find Symbol in Libraries…；收集工程链接库，`nm -C -A` 并行解析 |
+| T6 | AutoVersioning | ✔ 0.8.156 | `.cbp <Extensions><AutoVersioning>` 读写；AutoVersioning… / Bump Version / Generate Version Header；构建前生成 `version.h`、成功后递增 `BUILDS_COUNT` |
+| T7 | 更多编译器资源 | ✔ 0.8.156 | TCC / Borland C++ / Digital Mars / ARM ELF GCC / PowerPC EABI GCC 的 `options_*.xml` + `compiler_*.xml` + 探测 |
 | M2 | File 菜单剩余项 | ◐ 0.8.154 | Save Project As / Save·Close Workspace / Open default workspace 已完成；Print 仍不移植 |
 | M3 | File → New 子菜单 | ◐ 0.8.154 | New Build Target… / New File… 已完成；Custom… 仍不做 |
 | M4 | Edit 菜单剩余项 | ✖ 维持 | Clear changes history / Toggle all folds / Movement·Zoom 等无稳定 VS Code 等价命令；Stream/Box comment 用内置注释命令 |
@@ -44,6 +46,7 @@
 | CppCheck 集成（第五轮 T1） | 不自行实施（2026-09-28）：用市场扩展替代（`cppchecksolutionsab.cppcheck-official` / `jbenden.c-cpp-flylint` / `emielestivenartentity.cppcheck-turbo`），配合本扩展 `Export compile_commands.json…`；已写入 [使用说明](../guide/usage.md) §16.1 |
 | Regex testbed（第五轮 T4） | 不自行实施：用市场扩展替代（`chrmarti.regex` / `louiswt.regexp-preview` / RegExp Preview and Editor） |
 | 符号表 nm 单库查看（第五轮 T5 部分） | 不自行实施：用市场扩展替代（`wibren-wiersma.nm-tool` / `sqlpassion.vscode-binutils`） |
+| DoxyBlocks / Print / Modern Fortran / 环境变量 / Valgrind | 不自行实施：已有成熟 VS Code 扩展，统一记录在 [推荐扩展](../guide/recommended-extensions.md)（扩展 ID、安装与配置边界） |
 
 ## 3. 已完成项摘要（A–E 组 33 项）
 
@@ -72,3 +75,5 @@
 | 2026-11-04 | 0.8.137 | 复核：新增 G1/G2 两项已知缺口；其余结论不变 |
 | 2026-11-18 | 0.8.153 | 状态栏 Menu 显示优化 + 逐项排查：M1（Export Makefile 入 Build）完成；新增 M2–M7 菜单缺口（CB 有、扩展无对应命令，本次只登记不实施） |
 | 2026-11-18 | 0.8.154 | P0/P1/P2 批次实施：G1/G2/T2/T3/T5 完成；M2/M3/M6/M7 子集完成；新增原子写、单元路径 XML 转义、package.json i18n、Makefile CompileFile·DistClean；N5（WebView CSP/模块拆分）仍待 P3 |
+| 2026-11-18 | 0.8.155 | P3 第一批：WebView nonce CSP、`.cbp` 未知节点透传、激活扫描优化、Feature 拆分与架构文档 |
+| 2026-11-19 | 0.8.156 | T2 Profiler 完整化（call graph / -A / 导出）、T6 AutoVersioning、T7 编译器资源（TCC/BCC/DMC/ARM/PowerPC）；DoxyBlocks/Print/Fortran/Env/Valgrind 统一转推荐扩展文档 |

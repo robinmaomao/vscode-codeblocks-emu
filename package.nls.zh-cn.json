@@ -298,8 +298,12 @@
   "command.codeblocks.debug.examineMemory.title": "Code::Blocks: 查看内存...",
   "command.codeblocks.backtickCache.title": "Code::Blocks: 反引号缓存...",
   "command.codeblocks.copyStrings.title": "Code::Blocks: 复制字符串字面量",
+  "command.codeblocks.autoVersioning.title": "Code::Blocks: 自动版本管理...",
+  "command.codeblocks.bumpVersion.title": "Code::Blocks: 递增版本",
+  "command.codeblocks.generateVersionHeader.title": "Code::Blocks: 生成版本头文件",
   "command.codeblocks.profileTarget.title": "Code::Blocks: 性能分析目标 (gprof)",
   "configuration.codeblocks.profiler.gprofPath.description": "gprof 可执行文件路径（空 = 从 PATH 查找）",
+  "configuration.codeblocks.profiler.annotatedSource.description": "性能分析后运行 gprof -A，并在独立输出通道显示源码注解",
   "command.codeblocks.findSymbolInLibraries.title": "Code::Blocks: 在库中查找符号...",
   "command.codeblocks.distClean.title": "Code::Blocks: 彻底清理 (Dist Clean)"
 }

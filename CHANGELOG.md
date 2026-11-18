@@ -3,6 +3,16 @@
 本文件记录**正式版**里程碑；近期 dev 迭代的逐轮发布说明见 [`docs/release/`](./docs/release/)（`0.8.xx-dev.md`），
 `0.8.76`–`0.8.128` 的 dev 说明已合并归档到 [`docs/release/archive/`](./docs/release/archive/)；版本号与维护约定见 [`docs/release/00-index.md`](./docs/release/00-index.md)。
 
+## 0.8.156 — 2026-11-19
+
+> 体验版：Profiler 完整化 / AutoVersioning / 编译器资源扩展 / 推荐扩展文档。
+
+- **Profiler**：gprof call graph 解析与输出、`gprof -A` 源码注解独立输出通道、CSV/HTML 报告导出、完成后 QuickPick。
+- **AutoVersioning**：`.cbp <Extensions><AutoVersioning>` 读写；AutoVersioning… / Bump Version / Generate Version Header 命令；构建前生成 `version.h`，成功后递增 `BUILDS_COUNT`；支持 C/C++、前缀、命名空间、`#define`、manifest 同步。
+- **编译器资源**：新增 TCC、Borland C++ 5.5/5.82、Digital Mars、ARM ELF GCC、PowerPC EABI GCC 的选项/探测资源。
+- **推荐扩展**：新增 Doxygen / 打印 / Fortran / 环境变量 / 单库 nm / Valgrind 配套扩展文档（不重复实现）。
+- 规模：命令 136 / 设置 91 / 视图 6 / 快捷键 34；无头测试 210。
+
 ## 0.8.155 — 2026-11-18
 
 > 体验版：P3 架构与健壮性批次。

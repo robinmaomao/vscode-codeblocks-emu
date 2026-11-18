@@ -379,11 +379,14 @@ function detectToolchain(
   let exePath = findInPath(exe, process.env.PATH ?? '');
   let master = '';
   if (exePath) {
-    master = path.dirname(path.dirname(exePath));
+    const dir = path.dirname(exePath);
+    master = path.basename(dir).toLowerCase() === 'bin' ? path.dirname(dir) : dir;
   } else {
     const masters = [...(wildcard ? scanDirsByPrefix(wildcard.root, wildcard.prefix) : []), ...masterFallbacks];
     for (const m of masters) {
+      const direct = path.join(m, exe);
       const b = path.join(m, 'bin', exe);
+      if (fs.existsSync(direct)) { exePath = direct; master = m; break; }
       if (fs.existsSync(b)) { exePath = b; master = m; break; }
     }
   }
@@ -417,6 +420,41 @@ export function detectSdcc(): DetectedCompiler | null {
     win ? [path.join(process.env['ProgramFiles'] ?? 'C:\\Program Files', 'sdcc')] : ['/usr/local/share/sdcc']);
 }
 
+/** 探测 Tiny C Compiler（对齐 compiler_tcc.xml：PATH + C:\tcc / /usr）。 */
+export function detectTcc(): DetectedCompiler | null {
+  const win = process.platform === 'win32';
+  return detectToolchain('tcc', 'Tiny C Compiler', 'tcc', win ? ['C:\\tcc'] : ['/usr']);
+}
+
+/** 探测 Borland C++ 5.5/5.82（对齐 compiler_bcc.xml；仅 Windows）。 */
+export function detectBcc(): DetectedCompiler | null {
+  if (process.platform !== 'win32') return null;
+  return detectToolchain('bcc', 'Borland C++ Compiler (5.5, 5.82)', 'bcc32',
+    ['C:\\Borland\\BCC55', path.join(process.env['ProgramFiles'] ?? 'C:\\Program Files', 'Borland', 'BDS', '4.0')]);
+}
+
+/** 探测 Digital Mars Compiler（对齐 compiler_dmc.xml；仅 Windows）。 */
+export function detectDmc(): DetectedCompiler | null {
+  if (process.platform !== 'win32') return null;
+  return detectToolchain('dmc', 'Digital Mars Compiler', 'dmc', ['C:\\dm']);
+}
+
+/** 探测 ARM ELF GCC（对齐 options_arm-elf-gcc.xml）。 */
+export function detectArmElf(): DetectedCompiler | null {
+  const win = process.platform === 'win32';
+  return detectToolchain('arm-elf-gcc', 'GNU GCC Compiler for ARM', 'arm-elf-gcc',
+    win ? ['C:\\Program Files\\GNUARM'] : ['/usr', '/usr/local']);
+}
+
+/** 探测 PowerPC EABI GCC（对齐 compiler_powerpc-eabi.xml）。 */
+export function detectPowerpcEabi(): DetectedCompiler | null {
+  const win = process.platform === 'win32';
+  return detectToolchain('powerpc-eabi', 'GNU GCC Compiler for PowerPC EABI', 'powerpc-eabi-gcc',
+    win
+      ? ['C:\\SysGCC\\powerpc-eabi', path.join(process.env['ProgramFiles'] ?? 'C:\\Program Files', 'ronetix', 'powerpc-eabi')]
+      : ['/usr/local/powerpc-eabi']);
+}
+
 /** 统一探测所有可用编译器 */
 export function detectAllCompilers(masterPath = ''): DetectedCompiler[] {
   const result: DetectedCompiler[] = [];
@@ -427,12 +465,9 @@ export function detectAllCompilers(masterPath = ''): DetectedCompiler[] {
   const msvc = detectMsvc();
   if (msvc) result.push(msvc);
   result.push(...detectRiscv());
-  const avr = detectAvr();
-  if (avr) result.push(avr);
-  const msp430 = detectMsp430();
-  if (msp430) result.push(msp430);
-  const sdcc = detectSdcc();
-  if (sdcc) result.push(sdcc);
+  for (const c of [detectAvr(), detectMsp430(), detectSdcc(), detectTcc(), detectBcc(), detectDmc(), detectArmElf(), detectPowerpcEabi()]) {
+    if (c) result.push(c);
+  }
   return result;
 }
 
@@ -679,11 +714,14 @@ async function detectToolchainAsync(
   let exePath = findInPath(exe, process.env.PATH ?? '');
   let master = '';
   if (exePath) {
-    master = path.dirname(path.dirname(exePath));
+    const dir = path.dirname(exePath);
+    master = path.basename(dir).toLowerCase() === 'bin' ? path.dirname(dir) : dir;
   } else {
     const masters = [...(wildcard ? scanDirsByPrefix(wildcard.root, wildcard.prefix) : []), ...masterFallbacks];
     for (const m of masters) {
+      const direct = path.join(m, exe);
       const b = path.join(m, 'bin', exe);
+      if (fs.existsSync(direct)) { exePath = direct; master = m; break; }
       if (fs.existsSync(b)) { exePath = b; master = m; break; }
     }
   }
@@ -711,9 +749,39 @@ async function detectSdccAsync(): Promise<DetectedCompiler | null> {
     win ? [path.join(process.env['ProgramFiles'] ?? 'C:\\Program Files', 'sdcc')] : ['/usr/local/share/sdcc']);
 }
 
+async function detectTccAsync(): Promise<DetectedCompiler | null> {
+  const win = process.platform === 'win32';
+  return detectToolchainAsync('tcc', 'Tiny C Compiler', 'tcc', win ? ['C:\\tcc'] : ['/usr']);
+}
+
+async function detectBccAsync(): Promise<DetectedCompiler | null> {
+  if (process.platform !== 'win32') return null;
+  return detectToolchainAsync('bcc', 'Borland C++ Compiler (5.5, 5.82)', 'bcc32',
+    ['C:\\Borland\\BCC55', path.join(process.env['ProgramFiles'] ?? 'C:\\Program Files', 'Borland', 'BDS', '4.0')]);
+}
+
+async function detectDmcAsync(): Promise<DetectedCompiler | null> {
+  if (process.platform !== 'win32') return null;
+  return detectToolchainAsync('dmc', 'Digital Mars Compiler', 'dmc', ['C:\\dm']);
+}
+
+async function detectArmElfAsync(): Promise<DetectedCompiler | null> {
+  const win = process.platform === 'win32';
+  return detectToolchainAsync('arm-elf-gcc', 'GNU GCC Compiler for ARM', 'arm-elf-gcc',
+    win ? ['C:\\Program Files\\GNUARM'] : ['/usr', '/usr/local']);
+}
+
+async function detectPowerpcEabiAsync(): Promise<DetectedCompiler | null> {
+  const win = process.platform === 'win32';
+  return detectToolchainAsync('powerpc-eabi', 'GNU GCC Compiler for PowerPC EABI', 'powerpc-eabi-gcc',
+    win
+      ? ['C:\\SysGCC\\powerpc-eabi', path.join(process.env['ProgramFiles'] ?? 'C:\\Program Files', 'ronetix', 'powerpc-eabi')]
+      : ['/usr/local/powerpc-eabi']);
+}
+
 /** 统一探测所有可用编译器（异步并行版；弹窗后台探测用，不阻塞 UI） */
 export async function detectAllCompilersAsync(masterPath = ''): Promise<DetectedCompiler[]> {
-  const [gcc, clang, msvc, riscv, avr, msp430, sdcc] = await Promise.all([
+  const [gcc, clang, msvc, riscv, avr, msp430, sdcc, tcc, bcc, dmc, arm, powerpc] = await Promise.all([
     detectGccAsync(masterPath),
     detectClangAsync(),
     detectMsvcAsync(),
@@ -721,14 +789,19 @@ export async function detectAllCompilersAsync(masterPath = ''): Promise<Detected
     detectAvrAsync(),
     detectMsp430Async(),
     detectSdccAsync(),
+    detectTccAsync(),
+    detectBccAsync(),
+    detectDmcAsync(),
+    detectArmElfAsync(),
+    detectPowerpcEabiAsync(),
   ]);
   const result: DetectedCompiler[] = [];
   if (gcc) result.push(gcc);
   if (clang) result.push(clang);
   if (msvc) result.push(msvc);
   result.push(...riscv);
-  if (avr) result.push(avr);
-  if (msp430) result.push(msp430);
-  if (sdcc) result.push(sdcc);
+  for (const c of [avr, msp430, sdcc, tcc, bcc, dmc, arm, powerpc]) {
+    if (c) result.push(c);
+  }
   return result;
 }

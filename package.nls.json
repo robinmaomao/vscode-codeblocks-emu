@@ -298,8 +298,12 @@
   "command.codeblocks.debug.examineMemory.title": "Code::Blocks: Examine Memory...",
   "command.codeblocks.backtickCache.title": "Code::Blocks: Backtick Cache...",
   "command.codeblocks.copyStrings.title": "Code::Blocks: Copy Strings",
+  "command.codeblocks.autoVersioning.title": "Code::Blocks: AutoVersioning...",
+  "command.codeblocks.bumpVersion.title": "Code::Blocks: Bump Version",
+  "command.codeblocks.generateVersionHeader.title": "Code::Blocks: Generate Version Header",
   "command.codeblocks.profileTarget.title": "Code::Blocks: Profile Target (gprof)",
   "configuration.codeblocks.profiler.gprofPath.description": "Path to the gprof executable (empty = search PATH)",
+  "configuration.codeblocks.profiler.annotatedSource.description": "Run gprof -A after profiling and show annotated source in a separate output channel",
   "command.codeblocks.findSymbolInLibraries.title": "Code::Blocks: Find Symbol in Libraries...",
   "command.codeblocks.distClean.title": "Code::Blocks: Dist Clean"
 }

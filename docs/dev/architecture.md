@@ -50,7 +50,7 @@ flowchart LR
 3. 纯逻辑放 `src/tools/` / `src/model/`，feature 模块只做 vscode 接线；
 4. 每个 feature 至少一个无头测试（纯逻辑）或宿主测试（命令注册/交互）。
 
-已迁移示例：[toolCommands.ts](../../src/features/toolCommands.ts)（Copy Strings / Backtick Cache）、[workspaceCommands.ts](../../src/features/workspaceCommands.ts)（Save Project As / Workspace 生命周期）、[newProjectCommands.ts](../../src/features/newProjectCommands.ts)（New Build Target / New File）、[debugCommands.ts](../../src/features/debugCommands.ts)（Next Instruction / Examine Memory）。
+已迁移示例：[toolCommands.ts](../../src/features/toolCommands.ts)（Copy Strings / Backtick Cache）、[workspaceCommands.ts](../../src/features/workspaceCommands.ts)（Save Project As / Workspace 生命周期）、[newProjectCommands.ts](../../src/features/newProjectCommands.ts)（New Build Target / New File）、[debugCommands.ts](../../src/features/debugCommands.ts)（Next Instruction / Examine Memory）、[autoVersioningCommands.ts](../../src/features/autoVersioningCommands.ts)（AutoVersioning 命令 + 构建钩子）。
 
 ## 4. 拆分路线（P3-1）
 
