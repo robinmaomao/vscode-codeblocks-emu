@@ -6,7 +6,7 @@
 
 直接在 VS Code 中打开 `.cbp` / `.workspace` 工程，即可获得与 Code::Blocks 对齐的构建、调试与工程浏览体验。
 
-> **作者**：Robinmaomao ｜ **版本**：0.8.153
+> **作者**：Robinmaomao ｜ **版本**：0.8.154
 
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](./LICENSE.md)
 
@@ -90,7 +90,7 @@
 
 ### 工具
 
-- 📊 **辅助工具**：代码统计、TODO 扫描、AStyle 格式化、**Tidy 注释**、**头文件保护**（含新建自动插入）、**Swap Header / Source**、**自定义工具**（Configure tools：`codeblocks.tools` + Tools 菜单动态条目）、**编译器命令查看**（Show Compiler Commands）、**Makefile 导出**（Export Makefile）、**工程导入**（Dev-C++ / VC6 / VS2010+ → `.cbp`）、**工作区依赖编辑**（含环路检测）、**打开 default.conf**（全局设置手工编辑入口）。
+- 📊 **辅助工具**：代码统计、TODO 扫描、AStyle 格式化、**Tidy 注释**、**头文件保护**（含新建自动插入）、**Swap Header / Source**、**Copy Strings**、**Profiler (gprof)**、**跨库符号搜索 (SymTab)**、**自定义工具**（Configure tools：`codeblocks.tools` + Tools 菜单动态条目）、**编译器命令查看**（Show Compiler Commands）、**Makefile 导出**（Export Makefile）、**工程导入**（Dev-C++ / VC6 / VS2010+ → `.cbp`）、**工作区依赖编辑**（含环路检测）、**打开 default.conf**（全局设置手工编辑入口）。
 
 ## ⚠️ 已知限制（不支持的功能）
 
@@ -99,7 +99,8 @@
 | 功能 | 说明 |
 |------|------|
 | **Squirrel 构建脚本**（`<Script file="*.script"/>`） | Squirrel 脚本引擎未移植，构建时输出警告并跳过 |
-| **makefile 项目模式（部分）** | Build / Rebuild / Clean 已按 `<MakeCommands>` 子集执行（含 `execution_dir`）；DistClean 与单文件编译未接入 |
+| **makefile 项目模式（部分）** | Build / Rebuild / Clean / CompileFile / DistClean 已按 `<MakeCommands>` 执行（含 `execution_dir`）；其余 Make 子命令未单独暴露 |
+| **Profiler / SymTab 子集** | gprof flat profile 与工程链接库符号搜索已支持；call graph 交互树、源码注解、任意目录批量扫描未实现 |
 | **编译器 XML 的 `<if exec>` 条件** | 运行外部程序判定未实现（简化返回 default；内置 gcc / clang XML 未使用该分支） |
 | **console runner** | Code::Blocks 的 cb_console_runner 未移植（集成终端等价） |
 | **default.conf 全局设置编辑**（B1/B2/C4） | 评估后不做：default.conf 为 Code::Blocks 本体私有配置（CB 退出/打开设置时整文件覆写，写入竞态无法消除）；全局目录/选项/库/变量已被完整读取生效。替代：`Settings → Default Config…` 打开文件手工编辑 |
@@ -121,10 +122,10 @@ code --install-extension robinmaomao.codeblocks-vscode
 
 ### 方式二：从 GitHub Releases 安装
 
-从 [Releases](https://github.com/robinmaomao/vscode-codeblocks-emu/releases) 下载 `codeblocks-vscode-0.8.153.vsix`：
+从 [Releases](https://github.com/robinmaomao/vscode-codeblocks-emu/releases) 下载 `codeblocks-vscode-0.8.154.vsix`：
 
 ```powershell
-code --install-extension codeblocks-vscode-0.8.153.vsix --force
+code --install-extension codeblocks-vscode-0.8.154.vsix --force
 ```
 
 ### 方式三：从源码构建
@@ -132,7 +133,7 @@ code --install-extension codeblocks-vscode-0.8.153.vsix --force
 ```powershell
 npm install
 npm run package
-code --install-extension codeblocks-vscode-0.8.153.vsix --force
+code --install-extension codeblocks-vscode-0.8.154.vsix --force
 ```
 
 > `npm run package` = `vsce package`（打包前会自动执行 `vscode:prepublish` 钩子 = `tsc` 编译（`dist/`，本地测试用）+ esbuild 单文件打包（`bundle/extension.js`，发布入口））；直接运行 `npx vsce package` / `npx vsce publish` 同样会自动构建，不会打进过期或缺失的 `bundle/`；Windows 下建议使用 `npm.cmd` / `npx.cmd`（PSReadLine 执行策略）。

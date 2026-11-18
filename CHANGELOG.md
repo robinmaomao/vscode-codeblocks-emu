@@ -3,6 +3,17 @@
 本文件记录**正式版**里程碑；近期 dev 迭代的逐轮发布说明见 [`docs/release/`](./docs/release/)（`0.8.xx-dev.md`），
 `0.8.76`–`0.8.128` 的 dev 说明已合并归档到 [`docs/release/archive/`](./docs/release/archive/)；版本号与维护约定见 [`docs/release/00-index.md`](./docs/release/00-index.md)。
 
+## 0.8.154 — 2026-11-18
+
+> 体验版：Code::Blocks 剩余功能缺口 + 健壮性收口。
+
+- **Workspace 生命周期**：Save Project As…、Save/Save As/Close Workspace、Open default workspace；关闭最后一个工程清理工作区状态。
+- **`.workspace` 外部修改检测**：watcher + 焦点兜底，Reload/Ignore；只重载变化工程。
+- **无工程编译编码**：默认扩展自管进程 + UTF-8/GBK 逐行解码；`noProjectCompile.useTaskTerminal` 可回退。
+- **健壮性**：`.cbp`/`.workspace` 原子写；单元路径 XML 转义（`&` 等）；`package.json` 调试属性/工具说明 nls。
+- **New / Debug / Tools**：New Build Target/File；Next Instruction / Step Into Instruction / Examine Memory；Backtick Cache、Copy Strings、Profiler (gprof)、SymTab 跨库符号；Makefile CompileFile/DistClean。
+- 规模：命令 133 / 设置 90 / 视图 6 / 快捷键 34；无头测试 205。
+
 ## 0.8.153 — 2026-11-18
 
 > 体验版：状态栏 Menu 显示优化 + 168 项逐项对齐 Code::Blocks。

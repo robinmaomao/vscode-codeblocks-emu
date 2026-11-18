@@ -229,7 +229,7 @@ const expectCommands = [
   'codeblocks.compileCurrentFile', 'codeblocks.clearErrors', 'codeblocks.activatePriorProject',
   'codeblocks.activateNextProject', 'codeblocks.toggleCategorize',
   'codeblocks.projectNotes', 'codeblocks.setProgramArguments', 'codeblocks.showGlobalVariables',
-  'codeblocks.clearBacktickCache', 'codeblocks.buildWorkspace', 'codeblocks.cleanWorkspace',
+  'codeblocks.backtickCache', 'codeblocks.buildWorkspace', 'codeblocks.cleanWorkspace',
   'codeblocks.rebuildWorkspace', 'codeblocks.build.stop', 'codeblocks.generateCompileCommands',
   'codeblocks.swapHeaderSource', 'codeblocks.insertHeaderGuard', 'codeblocks.tidyComments',
   'codeblocks.configureTools', 'codeblocks.showCompilerCommands', 'codeblocks.exportMakefile',
@@ -242,6 +242,10 @@ const expectCommands = [
   'codeblocks.newVirtualFolder',
   'codeblocks.debug.detach', 'codeblocks.debug.addSymbolFile',
   'codeblocks.debug.setNextStatement', 'codeblocks.debug.attachToProcess', 'codeblocks.debug.sendGdbCommand',
+  'codeblocks.saveProjectAs', 'codeblocks.saveWorkspace', 'codeblocks.closeWorkspace',
+  'codeblocks.newBuildTarget', 'codeblocks.newFile',
+  'codeblocks.debug.nextInstruction', 'codeblocks.debug.stepIntoInstruction', 'codeblocks.debug.examineMemory',
+  'codeblocks.copyStrings', 'codeblocks.profileTarget', 'codeblocks.findSymbolInLibraries',
 ];
 const missing = expectCommands.filter((c) => !all.some((it) => it.command === c));
 check('第四十四轮关键命令均在菜单中', missing.length === 0, missing, '无缺失');

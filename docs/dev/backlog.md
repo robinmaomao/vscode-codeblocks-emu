@@ -1,26 +1,31 @@
 # 未实现功能待办（功能对齐现状）
 
 > 对照 Code::Blocks 25.03（`codeblocks-src/`）的功能盘点结论与剩余事项。
-> 首轮盘点：2026-09-26（基线 0.8.74-dev，A–E 组 33 项）；最近复核：2026-11-04（0.8.137）。
+> 首轮盘点：2026-09-26（基线 0.8.74-dev，A–E 组 33 项）；最近复核：2026-11-18（0.8.154，P0/P1/P2 批次实施后）。
 > 状态约定：`☐ 待确认` ｜ `◐ 已确认待实施` ｜ `✔ 已实施` ｜ `✖ 不实施` ｜ `▣ 记录`。
 > 已实施项的逐项取证与实施方案见归档 [0.8.76-0.8.99-dev](../release/archive/0.8.76-0.8.99-dev.md)、
 > [0.8.100-0.8.128-dev](../release/archive/0.8.100-0.8.128-dev.md)。
 
-## 1. 剩余缺口（记录待办，暂不实施）
+## 1. 缺口状态（2026-11-18 更新）
 
-| 编号 | 缺口 | 现状/影响 | 依据与建议 |
+| 编号 | 缺口 | 状态 | 说明 |
 |---|---|---|---|
-| G1 | `.workspace` 外部修改检测 | 只对已打开工程的 `.cbp` 检测（change 事件 + 焦点兜底）；`.workspace` 被外部修改不提示，`<Depends>` 改动需重新打开工作区 | 引用关系变化影响构建拓扑，误重载风险高于 `.cbp`；需先定「重载是否重建全部工程」策略 |
-| G2 | `Compile File (Without Project)` 输出编码 | 走 VS Code 任务终端（固定 UTF-8），编译器 GBK 输出乱码 | 仅影响无工程单文件编译；需改用扩展输出通道或自建终端（牵动执行模型）；已在 [使用说明](../guide/usage.md) §16 标注 |
-| T2 | Profiler（gprof） | 未实现；市场无 gprof 前端（`blacksmith` 属 valgrind/callgrind 换后端） | CB `profiler/cbprofiler.cpp:83-255`、`cbprofilerexec.cpp:44-426`；需目标带 `-pg`，Windows 下 gprof 输出编码/路径需处理；建议 S→M（目标选择 + `gmon.out` 校验 + `gprof` 运行 + 输出查看） |
-| T3 | Copy strings to clipboard | 未实现；无等效扩展 | CB `copystrings/copystrings.cpp:67-183`；XS |
-| T5 | 跨库符号搜索 | 单库查看可用市场扩展（`nm-tool` / `vscode-binutils`），跨库批量搜索无替代 | CB `symtab/symtabexec.cpp:64-542`、`symtabconfig.cpp:188-343`；S（选目录 → 枚举库 → 逐个 `nm`） |
-| M2 | File 菜单剩余项 | Open default workspace / Save project as… / Save workspace / Save workspace as… / Close workspace / Print 未移植 | CB `main_menu.xrc:4-120`；VS Code 原生菜单承担部分；需先确认 workspace 保存语义 |
-| M3 | File → New 子菜单 | CB 还有 Build target… / File… / Custom… 三个向导入口；扩展目前只有 Empty File / Project / From Template | CB `main_menu.xrc:5-30`；Build target 可复用属性面板 targets 页，File/Custom 需新向导 |
-| M4 | Edit 菜单剩余项 | Clear changes history、Toggle all folds、Special commands 的 Movement/Zoom/Stream·Box comment 未移植 | CB `main_menu.xrc:140-500`；多数无 VS Code 等价命令 |
-| M5 | Project 菜单剩余项 | Automatic source paths… / Edit file types && categories… / Display folders as on disk / Hide folder name / Sort alphabetically 未移植 | CB `projectmanagerui.cpp:864-909`；globs 编辑已在 §2 决策不实施，其余需工程树设置项 |
-| M6 | Debug 菜单剩余项 | Active debuggers、Next instruction / Step into instruction 独立菜单项、Memory 视图入口未单列 | DAP 已支持 `supportsSteppingGranularity`/`readMemory`；VS Code 没有稳定的独立命令（见 `debugger_menu.xrc`） |
-| M7 | Settings 菜单剩余项 | Global variables 只读（CB 可编辑）、Backtick Cache 直接清空（CB 为对话框） | 已在 §2/§3 记录为替代入口；如要做需完整编辑/对话框，影响面较大 |
+| G1 | `.workspace` 外部修改检测 | ✔ 0.8.154 | 独立 tracker + `**/*.workspace` watcher + 焦点兜底；改 `<Depends>`/active 后提示 Reload/Ignore；重载只刷新变化工程 |
+| G2 | `Compile File (Without Project)` 输出编码 | ✔ 0.8.154 | 默认改扩展自管进程 + `OutputLineDecoder`（UTF-8/GBK 逐行）；`noProjectCompile.useTaskTerminal` 可回退旧任务终端 |
+| T2 | Profiler（gprof） | ✔ 0.8.154（子集） | 运行目标 → 定位 `gmon.out` → `gprof` → flat profile 表格；call graph 交互树/源码注解后续 |
+| T3 | Copy strings to clipboard | ✔ 0.8.154 | Tools → Copy Strings；状态机移植（忽略注释/单引号、去重排序） |
+| T5 | 跨库符号搜索 | ✔ 0.8.154 | Tools → Find Symbol in Libraries…；收集工程链接库，`nm -C -A` 并行解析 |
+| M2 | File 菜单剩余项 | ◐ 0.8.154 | Save Project As / Save·Close Workspace / Open default workspace 已完成；Print 仍不移植 |
+| M3 | File → New 子菜单 | ◐ 0.8.154 | New Build Target… / New File… 已完成；Custom… 仍不做 |
+| M4 | Edit 菜单剩余项 | ✖ 维持 | Clear changes history / Toggle all folds / Movement·Zoom 等无稳定 VS Code 等价命令；Stream/Box comment 用内置注释命令 |
+| M5 | Project 菜单剩余项 | ✖ 维持 | F4/F7/C7 决策（2026-10-08）不实施 |
+| M6 | Debug 菜单剩余项 | ◐ 0.8.154 | Next instruction / Step into instruction / Examine Memory… 已完成；Active debuggers 由 VS Code 会话下拉承担 |
+| M7 | Settings 菜单剩余项 | ◐ 0.8.154 | Backtick Cache 管理器已完成；Global variables 仍只读（default.conf 写回竞态，B1/B2/C4 决策） |
+| N1 | `.cbp` 单元路径 XML 转义 | ✔ 0.8.154 | 添加/移除/改名/切换 compile·link 对含 `&`/`<`/`>`/`"` 的路径安全 |
+| N2 | `.cbp` 原子写盘 | ✔ 0.8.154 | 同目录临时文件 + rename；失败保留原文件 |
+| N3 | `package.json` 硬编码中文 | ✔ 0.8.154 | 调试属性/寄存器视图标题/工具项说明全部 nls；`test-i18n-nls` 增加无 CJK 守卫 |
+| N4 | Makefile 项目 CompileFile/DistClean | ✔ 0.8.154 | `makeCommands.compileFile` / `distClean` 接入；Build → Dist Clean |
+| N5 | WebView CSP / 巨型模块拆分 | ☐ 待排期 | P3：nonce CSP + 公共运行时；`extension.ts` 按域拆分（审计 3.2） |
 
 > 盘点时的 UI 落位与编译/链接影响结论：可实施项中 19 项零影响、6 项轻度（只写 `.cbp`/`.workspace`/`default.conf`，经既有读取路径生效）、1 项需改造构建状态机（B5 Squirrel，未实施）。
 
@@ -66,3 +71,4 @@
 | 2026-10-22 | 0.8.132 | 界面语言（i18n）批次 2 全部完成，细则见 [国际化](./i18n.md) §4 |
 | 2026-11-04 | 0.8.137 | 复核：新增 G1/G2 两项已知缺口；其余结论不变 |
 | 2026-11-18 | 0.8.153 | 状态栏 Menu 显示优化 + 逐项排查：M1（Export Makefile 入 Build）完成；新增 M2–M7 菜单缺口（CB 有、扩展无对应命令，本次只登记不实施） |
+| 2026-11-18 | 0.8.154 | P0/P1/P2 批次实施：G1/G2/T2/T3/T5 完成；M2/M3/M6/M7 子集完成；新增原子写、单元路径 XML 转义、package.json i18n、Makefile CompileFile·DistClean；N5（WebView CSP/模块拆分）仍待 P3 |

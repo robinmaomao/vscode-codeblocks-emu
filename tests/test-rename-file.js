@@ -52,11 +52,12 @@ check('未命中：replaced=false 且文本不变', r6.replaced === false && r6.
 check('引用计数（重复单元检测）', countUnitReferences(multi, 'a.c') === 1 && countUnitReferences(multi, 'a.c'.replace('a', 'b')) === 1, 'ok', 1);
 check('escapeRegExp 覆盖正则元字符', escapeRegExp('a+b(c)[d].e$f') === 'a\\+b\\(c\\)\\[d\\]\\.e\\$f', escapeRegExp('a+b(c)[d].e$f'), 'escaped');
 
-// 文件名含 &（XML 转义存储为 &amp;）时的边界：当前实现按字面匹配（记录行为）
+// 文件名含 &（XML 转义存储为 &amp;）：模型传入解码路径，文本手术内部转义后匹配
 {
   const raw = '\t\t<Unit filename="a&amp;b.c" />';
-  const r = renameUnitInCbpText(raw, 'a&amp;b.c', 'c.c');
-  check('边界：XML 转义文件名按 .cbp 字面量传入可命中（relativeFilename 语义）', r.replaced && r.text.includes('filename="c.c"'), r.replaced, true);
+  const r = renameUnitInCbpText(raw, 'a&b.c', 'c&d.c');
+  check('边界：解码文件名命中 XML 转义文本', r.replaced, r.replaced, true);
+  check('边界：新文件名写回 XML 转义形式', r.text.includes('filename="c&amp;d.c"') && !r.text.includes('&amp;amp;'), r.text, 'c&amp;d.c');
 }
 
 // ---- 2. 端到端：真实 .cbp 副本改名 → 重解析选项保留 ----

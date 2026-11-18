@@ -40,7 +40,7 @@ for (const s of sections) {
     byKey[k] = v;
   }
 }
-check('设置项总数 = 88', keys.length === 88, keys.length);
+check('设置项总数 = 90', keys.length === 90, keys.length);
 check('设置键唯一', new Set(keys).size === keys.length, keys.length - new Set(keys).size);
 check('已移除 clangd.queryDriver', !Object.prototype.hasOwnProperty.call(byKey, 'codeblocks.clangd.queryDriver'), keys.filter((k) => /queryDriver$/.test(k)));
 
@@ -109,6 +109,20 @@ for (const s of sections) {
       const nk = nlsOf(v);
       if (nk) referenced.add(nk);
     }
+    // 嵌套对象（数组 items / additionalProperties）的属性说明同样引用 nls
+    const walk = (node) => {
+      if (!node || typeof node !== 'object') return;
+      for (const [k, v] of Object.entries(node)) {
+        if (k === 'description' || k === 'markdownDescription') {
+          const nk = nlsOf(v);
+          if (nk) referenced.add(nk);
+        } else if (v && typeof v === 'object') {
+          walk(v);
+        }
+      }
+    };
+    walk(p.items);
+    walk(p.additionalProperties);
   }
 }
 const staleEn = Object.keys(en).filter((k) => k.startsWith('configuration.') && !referenced.has(k));

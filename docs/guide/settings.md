@@ -50,6 +50,7 @@
 | 设置项 | 类型 | 默认值 | 作用域 | 说明 |
 |--------|------|--------|--------|------|
 | `codeblocks.saveBeforeBuild` | boolean | `true` |  | 构建 / 运行 / 清理前自动保存所有脏文件。 |
+| `codeblocks.noProjectCompile.useTaskTerminal` | boolean | `false` |  | 「编译文件（无工程）」使用 VS Code 任务终端（旧行为）。关闭后由扩展按 UTF-8/GBK 逐行解码编译器输出，避免中文 Windows 乱码。 |
 | `codeblocks.parallelJobs` | number | `8` | resource | 并行编译任务数。`1` = 串行；`2`–`32` = 显式并发；`0` = 自动（当前主机逻辑核数，上限 32）。实际并发还受进程预算上限 `max(8, 逻辑核数)` 约束，被收敛时构建开始会输出说明。支持文件夹级覆盖，下一次构建生效。 |
 | `codeblocks.build.compilerCache` | string | `none` | machine-overridable | 编译缓存：`none` / `ccache` / `sccache`。仅标准编译命令前置缓存程序；未找到工具时回退原编译器并告警。ccache 只接受 UTF-8 预处理输出：工程路径含非 ASCII 字符时编译单元改用工程相对源路径并追加 `-fno-working-directory`（否则每次编译都被判不可缓存），源文件/包含目录非 ASCII 仍无法缓存（构建开始告警）。 |
 | `codeblocks.build.compilerCachePath` | string | `""` | machine-overridable | 缓存工具显式路径；留空自动探测（PATH / WinGet / Scoop / cargo / Chocolatey / Program Files）。路径无效等同未找到，仅缓存非 `none` 时生效。 |
@@ -107,6 +108,7 @@
 | 设置项 | 类型 | 默认值 | 作用域 | 说明 |
 |--------|------|--------|--------|------|
 | `codeblocks.gdbTimeoutMs` | number | `30000` |  | GDB MI 单条命令超时（≥1000 ms）。 |
+| `codeblocks.profiler.gprofPath` | string | `""` |  | `gprof` 可执行文件路径（空 = 从 PATH 查找）。 |
 | `codeblocks.debug.initCommands` | array | `[]` |  | 调试会话启动后逐条注入的 GDB 命令（如 `set pagination off`）。 |
 | `codeblocks.debug.userArguments` | string | `""` |  | 附加到 GDB 命令行的参数（引号感知分词）。 |
 | `codeblocks.debug.disableInit` | boolean | `true` |  | 启动 GDB 时传 `-nx`，不执行 `.gdbinit` / `gdb.ini`。 |
