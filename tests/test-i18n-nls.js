@@ -32,7 +32,10 @@ push('displayName', pkg.displayName, 'extension.displayName');
 push('description', pkg.description, 'extension.description');
 (pkg.contributes.commands || []).forEach((c, i) => push(`contributes.commands[${i}].title`, c.title, `command.${c.command}.title`));
 for (const [container, list] of Object.entries(pkg.contributes.views || {})) {
-  list.forEach((v, i) => push(`contributes.views.${container}[${i}].name`, v.name, `view.${v.id}.name`));
+  list.forEach((v, i) => {
+    push(`contributes.views.${container}[${i}].name`, v.name, `view.${v.id}.name`);
+    if (v.contextualTitle !== undefined) push(`contributes.views.${container}[${i}].contextualTitle`, v.contextualTitle, null);
+  });
 }
 for (const [loc, list] of Object.entries(pkg.contributes.viewsContainers || {})) {
   list.forEach((v, i) => push(`contributes.viewsContainers.${loc}[${i}].title`, v.title, `viewsContainer.${v.id}.title`));
@@ -45,11 +48,33 @@ for (const block of cfgBlocks) {
       if (def[field] !== undefined) push(`configuration.${settingKey}.${field}`, def[field], `configuration.${settingKey}.${field}`);
     }
     (def.enumDescriptions || []).forEach((d, i) => push(`configuration.${settingKey}.enumDescriptions[${i}]`, d, `configuration.${settingKey}.enumDescription.${i}`));
+    // 嵌套对象（items / additionalProperties）里的属性说明同样是用户可见文案
+    const walk = (node, jsonPath) => {
+      if (!node || typeof node !== 'object') return;
+      for (const [k, v] of Object.entries(node)) {
+        if (k === 'description' || k === 'markdownDescription') {
+          if (v !== undefined) push(`${jsonPath}.${k}`, v, null);
+        } else if (v && typeof v === 'object') {
+          walk(v, `${jsonPath}.${k}`);
+        }
+      }
+    };
+    walk(def.items, `configuration.${settingKey}.items`);
+    walk(def.additionalProperties, `configuration.${settingKey}.additionalProperties`);
   }
   if (block.title !== undefined) push(`configuration.${block.order}.title`, block.title, null);
 }
 (pkg.contributes.debuggers || []).forEach((d, di) => {
   (d.configurationSnippets || []).forEach((s, si) => push(`contributes.debuggers[${di}].configurationSnippets[${si}].description`, s.description, `debugger.snippet.${si}.description`));
+  // launch/attach 配置属性说明（launch.json 智能提示，直接面向用户）
+  const walkDebugger = (node, jsonPath) => {
+    if (!node || typeof node !== 'object') return;
+    for (const [k, v] of Object.entries(node)) {
+      if ((k === 'description' || k === 'markdownDescription') && v !== undefined) push(`${jsonPath}.${k}`, v, null);
+      else if (v && typeof v === 'object') walkDebugger(v, `${jsonPath}.${k}`);
+    }
+  };
+  walkDebugger(d.configurationAttributes, `contributes.debuggers[${di}].configurationAttributes`);
 });
 
 check('A1 收集到用户可见文案（>150 项）', targets.length > 150, targets.length);
@@ -101,6 +126,8 @@ check('C1 命令标题全部走 nls（命令数 == 占位符键数）',
   (pkg.contributes.commands || []).length);
 const settingDescTargets = targets.filter((t) => /^configuration\./.test(String(t.key || '')) && !/\.title$/.test(String(t.key)));
 check('C2 设置描述/枚举说明全部走 nls（>60 项）', settingDescTargets.length > 60, settingDescTargets.length);
+const rawPkg = fs.readFileSync(path.join(ROOT, 'package.json'), 'utf-8');
+check('C4 package.json 不含直接中文（必须走 %key%）', !/[\u4e00-\u9fff]/.test(rawPkg), rawPkg.match(/[\u4e00-\u9fff]+/g)?.slice(0, 5));
 check('C3 视图名与容器标题全部走 nls',
   targets.filter((t) => /^(view|viewsContainer)\./.test(String(t.key || ''))).length ===
     Object.values(pkg.contributes.views || {}).flat().length + Object.values(pkg.contributes.viewsContainers || {}).flat().length,

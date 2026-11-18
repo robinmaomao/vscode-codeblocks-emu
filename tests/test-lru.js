@@ -32,6 +32,12 @@ check('delete 不存在 key 返回 false', c.delete('zzz') === false);
 c.clear();
 check('clear 后 size=0', c.size === 0);
 
+// entries：最旧 → 最新，且不改变 LRU 顺序
+const c2 = new LruCache(3);
+c2.set('x', 1); c2.set('y', 2); c2.set('z', 3); c2.get('x');
+check('entries 返回全部条目（最旧→最新）', JSON.stringify(c2.entries()) === JSON.stringify([['y', 2], ['z', 3], ['x', 1]]), c2.entries(), [['y', 2], ['z', 3], ['x', 1]]);
+check('entries 不改变 size', c2.size === 3, c2.size, 3);
+
 // 容量校验
 let threw = false;
 try { new LruCache(0); } catch { threw = true; }

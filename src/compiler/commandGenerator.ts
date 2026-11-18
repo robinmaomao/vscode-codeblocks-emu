@@ -220,6 +220,11 @@ export function clearBackticksCache(): void {
   backticksCache.clear();
 }
 
+/** 反引号缓存快照（对齐 CB Settings → Backtick Cache 列表；最旧 → 最新） */
+export function getBackticksCacheEntries(): Array<{ expression: string; value: string }> {
+  return backticksCache.entries().map(([expression, value]) => ({ expression, value }));
+}
+
 export class CommandGenerator {
   private project: Project;
   private compiler: Compiler;

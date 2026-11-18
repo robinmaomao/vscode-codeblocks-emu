@@ -50,4 +50,9 @@ export class LruCache<K, V> {
   get size(): number {
     return this.map.size;
   }
+
+  /** 当前条目快照（最旧 → 最新；不改变 LRU 顺序） */
+  entries(): Array<[K, V]> {
+    return [...this.map.entries()];
+  }
 }

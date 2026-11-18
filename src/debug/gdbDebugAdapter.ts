@@ -320,6 +320,33 @@ export class GdbDebugAdapter implements vscode.DebugAdapter {
     return r.raw;
   }
 
+  /**
+   * 指令级步进（对齐 CB Debug → Next instruction / Step into instruction）。
+   * 与 DAP `granularity=instruction` 走同一条 GDB 命令（-exec-nexti / -exec-stepi）。
+   */
+  async stepInstruction(kind: 'next' | 'into'): Promise<void> {
+    if (!this.session) throw new Error(i18n.t('Debug session not started'));
+    if (!this.stoppedState) throw new Error(i18n.t('Pause the program first (instruction stepping is only available while stopped)'));
+    await this.session.send(kind === 'next' ? '-exec-nexti' : '-exec-stepi');
+    this.targetRunning = true;
+  }
+
+  /**
+   * Examine memory（对齐 CB Debug → Examine memory）：表达式求地址后读取字节。
+   * 返回原始 Buffer，格式化由命令层负责（hex/ASCII 双列）。
+   */
+  async readMemoryDump(expression: string, count: number): Promise<{ address: number; data: Buffer }> {
+    if (!this.session) throw new Error(i18n.t('Debug session not started'));
+    if (!this.stoppedState) throw new Error(i18n.t('Pause the program first (memory examination is only available while stopped)'));
+    const addr = await this.evalAddress(expression);
+    if (addr === null) throw new Error(i18n.t('Invalid memory reference: {0}', expression));
+    const length = Math.max(0, Math.min(65536, Math.floor(count) || 0));
+    if (!length) throw new Error(i18n.t('The byte count must be greater than 0'));
+    const r = await this.session.sendExact(`-data-read-memory-bytes ${GdbDebugAdapter.hex(addr)} ${length}`);
+    const hexStr = parseReadMemory(r.attrs['memory'] ?? '');
+    return { address: addr, data: Buffer.from(hexStr, 'hex') };
+  }
+
   // ---- 响应/事件辅助 ----
   private sendResponse(req: DapRequest, success: boolean, body: any, message?: string): void {
     // D-05：会话销毁后不再推送任何 DAP 消息（VS Code 已释放该会话）

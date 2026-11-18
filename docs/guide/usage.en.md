@@ -1,7 +1,7 @@
 # Code::Blocks for VS Code — Usage Guide
 
 > Language: **English** ｜ [中文](./usage.md)
-> Version: 0.8.153 ｜ Native port of Code::Blocks core features to VS Code, driving GCC / GDB directly, **without** `tasks.json` / `launch.json`.
+> Version: 0.8.154 ｜ Native port of Code::Blocks core features to VS Code, driving GCC / GDB directly, **without** `tasks.json` / `launch.json`.
 
 ---
 
@@ -50,7 +50,7 @@ Code::Blocks for VS Code is a "mini IDE kernel": it parses `.cbp` / `.workspace`
 ### 2.1 Install from VSIX
 
 ```powershell
-code --install-extension codeblocks-vscode-0.8.153.vsix --force
+code --install-extension codeblocks-vscode-0.8.154.vsix --force
 ```
 
 ### 2.2 Build from source
@@ -58,7 +58,7 @@ code --install-extension codeblocks-vscode-0.8.153.vsix --force
 ```powershell
 npm install
 npm run package
-code --install-extension codeblocks-vscode-0.8.153.vsix --force
+code --install-extension codeblocks-vscode-0.8.154.vsix --force
 ```
 
 > `npm run package` = `vsce package` (before packaging, the `vscode:prepublish` hook runs `tsc` compilation (`dist/`, for local testing) + the **esbuild single-file bundle** (`bundle/extension.js`, the release entry));
@@ -248,6 +248,16 @@ Template directory: `<globalStorage>/templates/<id>/` (`template.json` manifest 
 | Build File (compile a single file) | — | Right-click a file in the project tree → `Build File` |
 | Compile File (no project) | — | `Code::Blocks: Compile File (Without Project)` |
 | Clean File (clean a single file) | — | Right-click a file in the project tree → `Clean File` |
+| Dist Clean (custom Makefile) | — | Build → Dist Clean / `Code::Blocks: Dist Clean` |
+| Save Project As… | — | File → Save Project As… |
+| Save / Save As / Close Workspace | — | File → Save Workspace / Save Workspace As… / Close Workspace |
+| Open default workspace | — | File → Open default workspace |
+| New Build Target… / New File… | — | File → New → Build Target… / File… |
+| Copy Strings | — | Tools → Copy Strings |
+| Profile Target (gprof) | — | Tools → Profile Target |
+| Find Symbol in Libraries… | — | Tools → Find Symbol in Libraries… |
+| Next Instruction / Step Into Instruction | — | Debug → Next Instruction / Step Into Instruction |
+| Examine Memory… | — | Debug → Examine Memory… |
 
 - **Incremental builds**: source files and `#include` headers are compared by mtime, so updating a header also triggers recompilation.
 - **Rebuild** is aligned with Code::Blocks: it cleans the object directory first, then recompiles everything; **a modal confirmation dialog appears before it starts** (a normal Build does not prompt).
@@ -984,12 +994,15 @@ The following Code::Blocks features have not been ported yet; when you hit the r
 | Feature | Description |
 |------|------|
 | **Squirrel build scripts** | `<Script file="*.script"/>` is not supported; the build prints the warning "Squirrel build scripts are not supported yet; skipped" (decision taken: keep as is, no port) |
-| **makefile project mode (partial)** | Build/Rebuild/Clean through the `<MakeCommands>` subset are supported; DistClean / single-file compile are not wired up |
+| **makefile project mode (partial)** | Build/Rebuild/Clean/CompileFile/DistClean through `<MakeCommands>` are supported; other CB Make subcommands are not exposed separately |
 | **console runner** | Code::Blocks' cb_console_runner is not ported |
 | **EvalXMLCondition exec branch** | Evaluating compiler XML conditions `<if exec="program">` by actually running the external program is not implemented (simplified to returning default; the gcc/clang XMLs do not use it) |
 | **`stopOnEntry` launch parameter** | Supported (0.8.129-dev): for launch, the entry symbol is chosen in the order `main` → `WinMain` → `wWinMain` (excluding the CRT `main` stub of GUI programs), a temporary breakpoint performs the initial stop and reports `reason=entry`, and when none is available it falls back to the program entry address (no source line; relocatable images excepted); if the launch is aborted by the entry breakpoint, the breakpoint is removed and the launch retried; attach/remote show a "not applicable" hint (see §8) |
 | **Extension-less executables (Windows)** | Run/Debug need an artifact with an executable extension (a requirement of `cmd.exe` / `CreateProcess`, aligned with upstream Code::Blocks). With toolchains such as TCC where "`-o` does not append `.exe`", write the full `.exe` in the target's output file name |
-| **Output encoding of Compile File (Without Project)** | `Compile File (Without Project)` runs through a VS Code task terminal (`ShellExecution`) which always interprets output as UTF-8, so GBK text printed by a compiler (possible on Chinese Windows) is shown garbled; in-project builds and Build File go through the extension output channel where encoding is decoded per line. Use a project build when full encoding support is required |
+| **Profiler subset** | gprof flat profile is supported; the call-graph tree, source annotation (`gprof -A`) and export are not implemented |
+| **SymTab scope** | Searches only libraries linked by the active project/target; arbitrary-directory scans and dynamic-library runtime symbols are not implemented |
+| **Print** | VS Code has no native print; use a marketplace print extension |
+| **Global variables editing** | Read-only (default.conf write-back race; see `docs/dev/decisions.md`) |
 
 ### 16.1 Prefer a VS Code extension instead (not implemented here)
 
@@ -999,12 +1012,24 @@ The following Code::Blocks features (round 5 batch 3 T1/T4/T5) were assessed as 
 |---|---|---|
 | CppCheck / Vera++ analysis (T1) | **Cppcheck Official** (`cppchecksolutionsab.cppcheck-official`, supported by the Cppcheck team) · **C/C++ Advanced Lint** (`jbenden.c-cpp-flylint`) · **Cppcheck Turbo** (`emielestivenartentity.cppcheck-turbo`) | Runs cppcheck on C/C++ on save or manually, with results in the Problems panel; you can first export the compilation database with this extension's `Code::Blocks: Export compile_commands.json…` (Build menu) so cppcheck analyzes with the **project's settings** (each target's `-I`/`-D`) |
 | Regex test bench (T4) | **Regex Previewer** (`chrmarti.regex`, for JS/TS/PHP/Haxe) · **Regexp Explain** (`louiswt.regexp-preview`) · RegExp Preview and Editor | General regex validation; the regex mode of the VS Code search box also does basic validation |
-| Symbol table nm viewer (T5, single library/file) | **Nm tool** (`wibren-wiersma.nm-tool`) · **vscode-binutils** (`sqlpassion.vscode-binutils`) | nm / objdump for a single library; **"bulk symbol search across multiple libraries" has no extension alternative yet** and is recorded as a todo (not implemented for now) |
+| Symbol table nm viewer (single library/file) | **Nm tool** (`wibren-wiersma.nm-tool`) · **vscode-binutils** (`sqlpassion.vscode-binutils`) | nm / objdump for a single library; cross-library symbol search is provided by this extension's **Tools → Find Symbol in Libraries…** |
 
-> **Remaining round-5 batch-3 items (decision on 2026-09-28: record as todos, do not implement for now)**: Profiler (gprof), Copy strings to clipboard,
+> Profiler (gprof), Copy Strings and cross-library symbol search are now implemented (0.8.154, see “What’s new” below).
 > T5 cross-library symbol search. Export Makefile now lives in the Build menu (matching CB `compiler_menu.xrc`).
 > For details and the decision record, see the [unimplemented-feature backlog](../dev/backlog.md) §2 (not-ported list).
 > Reminder: the extensions above are community/vendor products; evaluate them before installing. This extension neither bundles nor ships them.
+
+## 17. What's new in 0.8.154
+
+- **Workspace lifecycle**: File → Save Project As… / Save Workspace / Save Workspace As… / Close Workspace / Open default workspace; closing the last project clears workspace state, saving writes project order, `active` and `<Depends>`.
+- **`.workspace` external change detection**: external edits to the project list/dependencies/active project prompt Reload / Ignore; only projects whose disk signature changed are reloaded.
+- **No-project compile encoding**: extension-managed process + UTF-8/GBK line decoder by default; `codeblocks.noProjectCompile.useTaskTerminal` restores the legacy task terminal.
+- **Robustness**: atomic `.cbp`/`.workspace` writes (temp file + rename); unit paths containing `&`/`<`/`>`/`"` now work for add/rename/toggle compile/link.
+- **New submenu**: New Build Target… (GUI/Console/Static/Dynamic/CommandsOnly) and New File… (C/C++/Header/Empty templates).
+- **Debug**: Next Instruction / Step Into Instruction; Examine Memory… prints 16 bytes per line as hex + ASCII.
+- **Tools**: Backtick Cache… (Expression/Value list, copy value, clear and close); Copy Strings; Profile Target (gprof flat profile); Find Symbol in Libraries… (`nm -C -A` over the project's linked libraries).
+- **Makefile projects**: CompileFile and Dist Clean wired through `<MakeCommands>`.
+- **i18n**: launch.json debug attributes, the Registers view title and custom-tool setting descriptions now use `package.nls.*`; English UI no longer shows Chinese static text.
 
 ## License
 

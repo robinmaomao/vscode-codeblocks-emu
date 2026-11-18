@@ -6,7 +6,7 @@ An extension that natively ports the Code::Blocks core features to VS Code — a
 
 Open a `.cbp` / `.workspace` project directly in VS Code and get a build, debug, and project browsing experience aligned with Code::Blocks.
 
-> **Author**: Robinmaomao ｜ **Version**: 0.8.153
+> **Author**: Robinmaomao ｜ **Version**: 0.8.154
 
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](./LICENSE.md)
 
@@ -87,7 +87,7 @@ Open a `.cbp` / `.workspace` project directly in VS Code and get a build, debug,
 
 ### Tools
 
-- 📊 **Helper tools**: code statistics, TODO scan, AStyle formatting, **Tidy comments**, **header guards** (including auto-insert for new files), **Swap Header / Source**, **custom tools** (Configure tools: `codeblocks.tools` + dynamic Tools menu entries), **show compiler commands**, **Makefile export**, **project import** (Dev-C++ / VC6 / VS2010+ → `.cbp`), **workspace dependency editing** (with cycle detection), **Open default.conf** (entry point for editing global settings by hand).
+- 📊 **Helper tools**: code statistics, TODO scan, AStyle formatting, **Tidy comments**, **header guards** (including auto-insert for new files), **Swap Header / Source**, **Copy Strings**, **Profiler (gprof)**, **cross-library symbol search (SymTab)**, **custom tools** (Configure tools: `codeblocks.tools` + dynamic Tools menu entries), **show compiler commands**, **Makefile export**, **project import** (Dev-C++ / VC6 / VS2010+ → `.cbp`), **workspace dependency editing** (with cycle detection), **Open default.conf** (entry point for editing global settings by hand).
 
 ## ⚠️ Known limitations (unsupported features)
 
@@ -96,7 +96,8 @@ The following Code::Blocks features have not been ported yet; the extension warn
 | Feature | Description |
 |------|------|
 | **Squirrel build scripts** (`<Script file="*.script"/>`) | The Squirrel script engine is not ported; the build prints a warning and skips them |
-| **makefile project mode (partial)** | Build / Rebuild / Clean run a subset of `<MakeCommands>` (including `execution_dir`); DistClean and single-file builds are not wired up |
+| **makefile project mode (partial)** | Build / Rebuild / Clean / CompileFile / DistClean run `<MakeCommands>` (including `execution_dir`); other Make subcommands are not exposed separately |
+| **Profiler / SymTab subset** | gprof flat profile and project-linked library symbol search are supported; call-graph tree, source annotation and arbitrary-directory scans are not implemented |
 | **`<if exec>` conditions in compiler XML** | Evaluation by running an external program is not implemented (simplified to return default; the built-in gcc / clang XML do not use this branch) |
 | **console runner** | The Code::Blocks cb_console_runner is not ported (the integrated terminal is equivalent) |
 | **default.conf global settings editing** (B1/B2/C4) | Decided against after evaluation: default.conf is Code::Blocks' own private configuration (CB rewrites the whole file on exit/when opening settings, so write races cannot be eliminated); global directories/options/libraries/variables are already read and applied in full. Alternative: `Settings → Default Config…` to open the file and edit it by hand |
@@ -118,10 +119,10 @@ code --install-extension robinmaomao.codeblocks-vscode
 
 ### Option 2: install from GitHub Releases
 
-Download `codeblocks-vscode-0.8.153.vsix` from [Releases](https://github.com/robinmaomao/vscode-codeblocks-emu/releases):
+Download `codeblocks-vscode-0.8.154.vsix` from [Releases](https://github.com/robinmaomao/vscode-codeblocks-emu/releases):
 
 ```powershell
-code --install-extension codeblocks-vscode-0.8.153.vsix --force
+code --install-extension codeblocks-vscode-0.8.154.vsix --force
 ```
 
 ### Option 3: build from source
@@ -129,7 +130,7 @@ code --install-extension codeblocks-vscode-0.8.153.vsix --force
 ```powershell
 npm install
 npm run package
-code --install-extension codeblocks-vscode-0.8.153.vsix --force
+code --install-extension codeblocks-vscode-0.8.154.vsix --force
 ```
 
 > `npm run package` = `vsce package` (packaging runs the `vscode:prepublish` hook automatically = `tsc` compile (`dist/`, for local tests) + esbuild single-file bundle (`bundle/extension.js`, the release entry)); running `npx vsce package` / `npx vsce publish` directly also builds automatically and never packs a stale or missing `bundle/`; on Windows, prefer `npm.cmd` / `npx.cmd` (PSReadLine execution policy).

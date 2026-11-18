@@ -2,7 +2,7 @@
 
 > 语言：**中文** ｜ [English](./usage.en.md)
 >
-> 版本：0.8.153 ｜ 本扩展为 Code::Blocks 核心功能的原生移植，直接驱动 GCC / GDB，**不依赖** `tasks.json` / `launch.json`。
+> 版本：0.8.154 ｜ 本扩展为 Code::Blocks 核心功能的原生移植，直接驱动 GCC / GDB，**不依赖** `tasks.json` / `launch.json`。
 
 ---
 
@@ -51,7 +51,7 @@ Code::Blocks for VS Code 是一个「迷你 IDE 内核」：直接解析 `.cbp` 
 ### 2.1 从 VSIX 安装
 
 ```powershell
-code --install-extension codeblocks-vscode-0.8.153.vsix --force
+code --install-extension codeblocks-vscode-0.8.154.vsix --force
 ```
 
 ### 2.2 从源码构建
@@ -59,7 +59,7 @@ code --install-extension codeblocks-vscode-0.8.153.vsix --force
 ```powershell
 npm install
 npm run package
-code --install-extension codeblocks-vscode-0.8.153.vsix --force
+code --install-extension codeblocks-vscode-0.8.154.vsix --force
 ```
 
 > `npm run package` = `vsce package`（打包前自动执行 `vscode:prepublish` 钩子 = `tsc` 编译（`dist/`，本地测试用）+ **esbuild 单文件打包**（`bundle/extension.js`，发布入口））；
@@ -249,6 +249,16 @@ code --extensionDevelopmentPath="." --disable-extensions --new-window
 | Build File（单文件编译） | — | 工程树右键文件 → `Build File` |
 | Compile File（无项目） | — | `Code::Blocks: Compile File (Without Project)` |
 | Clean File（单文件清理） | — | 工程树右键文件 → `Clean File` |
+| Dist Clean（自定义 Makefile） | — | Menu Build → Dist Clean ／ `Code::Blocks: Dist Clean` |
+| Save Project As… | — | Menu File → Save Project As… |
+| Save / Save As / Close Workspace | — | Menu File → Save Workspace / Save Workspace As… / Close Workspace |
+| Open default workspace | — | Menu File → Open default workspace |
+| New Build Target… / New File… | — | Menu File → New → Build Target… / File… |
+| Copy Strings | — | Menu Tools → Copy Strings ／ `Code::Blocks: Copy Strings` |
+| Profile Target（gprof） | — | Menu Tools → Profile Target ／ `Code::Blocks: Profile Target (gprof)` |
+| Find Symbol in Libraries… | — | Menu Tools → Find Symbol in Libraries… |
+| Next Instruction / Step Into Instruction | — | Menu Debug → Next Instruction / Step Into Instruction |
+| Examine Memory… | — | Menu Debug → Examine Memory… |
 
 - **增量编译**：源文件与 `#include` 头文件按 mtime 比对，头文件更新也触发重编译。
 - **Rebuild** 对齐 Code::Blocks：先清理对象目录，再全量重编译；**触发前弹模态确认框**（普通 Build 不弹窗）。
@@ -985,12 +995,16 @@ A：**已全覆盖**（0.8.132 批次 2，2026-11 菜单优化后同步）。构
 | 功能 | 说明 |
 |------|------|
 | **Squirrel 构建脚本** | `<Script file="*.script"/>` 未支持，构建时输出「暂不支持 Squirrel 构建脚本，已跳过」警告（已决策维持现状，不移植） |
-| **makefile 项目模式（部分）** | Build/Rebuild/Clean 走 `<MakeCommands>` 子集已支持；DistClean / 单文件编译未接入 |
+| **makefile 项目模式（部分）** | Build/Rebuild/Clean/CompileFile/DistClean 已接入 `<MakeCommands>`；其余 CB Make 子命令未单独暴露 |
 | **console runner** | Code::Blocks 的 cb_console_runner 未移植 |
 | **EvalXMLCondition exec 分支** | 编译器 XML 条件 `<if exec="程序">` 实际运行外部程序判定未实现（简化返回 default；gcc/clang XML 未使用） |
 | **`stopOnEntry` 启动参数** | 已支持（0.8.129-dev）：launch 下按 `main` → `WinMain` → `wWinMain` 选入口符号（排除 GUI 程序的 CRT `main` 桩）插临时断点实现首停并上报 `reason=entry`，均不可用时兜底到程序入口地址（无源码行；可重定位镜像除外）；启动被入口断点中止时自动撤断点重试；attach/远程给出「不适用」提示（详见 §8） |
 | **无扩展名的可执行产物（Windows）** | Run/Debug 需要一个带可执行扩展名的产物（`cmd.exe` / `CreateProcess` 的要求，对齐上游 Code::Blocks）。用 TCC 等「`-o` 不补 `.exe`」的工具链时，请在目标「输出文件名」里写全 `.exe` |
-| **单文件编译（无工程）的输出编码** | `Compile File (Without Project)` 走 VS Code 任务终端（`ShellExecution`），终端固定按 UTF-8 解释输出，编译器若输出 GBK 中文（中文 Windows 下可能）会显示为乱码；工程内构建 / 单文件编译（Build File）走扩展输出通道，编码已按行正确解码。需要完整编码支持时请使用工程构建 |
+| **Profiler 子集** | 已支持 gprof flat profile；call graph 交互树、源码注解（`gprof -A`）与导出未实现 |
+| **SymTab 范围** | 只搜索当前工程/目标链接的库；任意目录批量扫描、动态库运行时符号未实现 |
+| **Print** | VS Code 无原生打印；建议使用市场打印扩展 |
+| **Global variables 编辑** | 只读查看（default.conf 写回竞态，见 [决策](../dev/decisions.md)） |
+| **WebView CSP / 模块拆分** | 仍使用 `script-src 'unsafe-inline'` 与巨型 `extension.ts`；P3 架构批次处理（不影响用户功能） |
 
 ### 16.1 建议用 VS Code 扩展替代（本扩展不另行实现）
 
@@ -1000,12 +1014,24 @@ A：**已全覆盖**（0.8.132 批次 2，2026-11 菜单优化后同步）。构
 |---|---|---|
 | CppCheck / Vera++ 分析（T1） | **Cppcheck Official**（`cppchecksolutionsab.cppcheck-official`，Cppcheck 团队支持）· **C/C++ Advanced Lint**（`jbenden.c-cpp-flylint`）· **Cppcheck Turbo**（`emielestivenartentity.cppcheck-turbo`） | 保存时/手动对 C/C++ 运行 cppcheck，结果进「问题」面板；可先用本扩展 `Code::Blocks: Export compile_commands.json…`（Build 菜单）导出编译数据库，让 cppcheck 按**工程口径**（各目标 `-I`/`-D`）分析 |
 | 正则测试台（T4） | **Regex Previewer**（`chrmarti.regex`，面向 JS/TS/PHP/Haxe）· **Regexp Explain**（`louiswt.regexp-preview`）· RegExp Preview and Editor | 通用正则验证；VS Code 搜索框的正则模式也可做基础验证 |
-| 符号表 nm 查看（T5，单库/单文件） | **Nm tool**（`wibren-wiersma.nm-tool`）· **vscode-binutils**（`sqlpassion.vscode-binutils`） | 单库 nm / objdump 查看；**「跨多个库批量搜索符号」暂无扩展替代**，已记录待办（暂不实施） |
+| 符号表 nm 查看（单库/单文件） | **Nm tool**（`wibren-wiersma.nm-tool`）· **vscode-binutils**（`sqlpassion.vscode-binutils`） | 单库 nm / objdump 查看；跨多个链接库的符号搜索已由本扩展 **Tools → Find Symbol in Libraries…** 提供 |
 
-> **其余批次三项目（2026-09-28 决策：记录待办、暂不实施）**：Profiler（gprof）、Copy strings to clipboard、
-> T5 跨库符号搜索。Export Makefile 已移入 Build 菜单（对齐 CB `compiler_menu.xrc`）。
+> Profiler（gprof）、Copy strings、跨库符号搜索已在本扩展实现（0.8.154，见 §17）；
+> Export Makefile 已移入 Build 菜单（对齐 CB `compiler_menu.xrc`）。
 > 详情与决策见 [未实现功能待办](../dev/backlog.md) §2（明确不移植清单）。
 > 提醒：以上扩展为社区/厂商产品，请自行评估安装；本扩展不内置或捆绑它们。
+
+## 17. 0.8.154 新增与行为变更
+
+- **Workspace 生命周期**：File → Save Project As… / Save Workspace / Save Workspace As… / Close Workspace / Open default workspace；关闭最后一个工程会清理工作区状态，保存工作区会写回工程顺序、`active` 与 `<Depends>`。
+- **`.workspace` 外部修改检测**：外部修改工程列表/依赖/active 后，窗口焦点或文件事件会提示 Reload / Ignore；重载只刷新磁盘签名变化的工程。
+- **无工程编译编码**：默认改用扩展自管进程 + UTF-8/GBK 逐行解码；设置 `codeblocks.noProjectCompile.useTaskTerminal` 可回退旧任务终端。
+- **健壮性**：`.cbp`/`.workspace` 改为原子写（临时文件 + rename）；含 `&`/`<`/`>`/`"` 的单元路径可正常添加、改名、切换 compile/link。
+- **New 子菜单**：New Build Target…（GUI/Console/Static/Dynamic/CommandsOnly）与 New File…（C/C++/Header/Empty 模板）。
+- **调试**：Next Instruction / Step Into Instruction；Examine Memory… 输出 16 字节/行 hex + ASCII。
+- **工具**：Backtick Cache…（Expression/Value 列表、复制值、清空并关闭）；Copy Strings；Profile Target（gprof flat profile）；Find Symbol in Libraries…（工程链接库 `nm -C -A`）。
+- **Makefile 项目**：CompileFile 与 Dist Clean 接入 `<MakeCommands>`。
+- **i18n**：launch.json 调试属性、寄存器视图标题、自定义工具设置说明全部走 `package.nls.*`，英文界面不再出现中文静态文案。
 
 ## 许可证
 

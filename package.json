@@ -2,7 +2,7 @@
   "name": "codeblocks-vscode",
   "displayName": "%extension.displayName%",
   "description": "%extension.description%",
-  "version": "0.8.153",
+  "version": "0.8.154",
   "icon": "resources/icon.png",
   "publisher": "robinmaomao",
   "author": {
@@ -58,6 +58,14 @@
         "command": "codeblocks.newProjectFromTemplate",
         "title": "%command.codeblocks.newProjectFromTemplate.title%",
         "icon": "$(library)"
+      },
+      {
+        "command": "codeblocks.newBuildTarget",
+        "title": "%command.codeblocks.newBuildTarget.title%"
+      },
+      {
+        "command": "codeblocks.newFile",
+        "title": "%command.codeblocks.newFile.title%"
       },
       {
         "command": "codeblocks.saveProjectAsTemplate",
@@ -153,6 +161,10 @@
         "icon": "$(trash)"
       },
       {
+        "command": "codeblocks.distClean",
+        "title": "%command.codeblocks.distClean.title%"
+      },
+      {
         "command": "codeblocks.cleanWorkspace",
         "title": "%command.codeblocks.cleanWorkspace.title%",
         "icon": "$(trash)"
@@ -235,6 +247,18 @@
         "command": "codeblocks.codeStats",
         "title": "%command.codeblocks.codeStats.title%",
         "icon": "$(graph)"
+      },
+      {
+        "command": "codeblocks.copyStrings",
+        "title": "%command.codeblocks.copyStrings.title%"
+      },
+      {
+        "command": "codeblocks.profileTarget",
+        "title": "%command.codeblocks.profileTarget.title%"
+      },
+      {
+        "command": "codeblocks.findSymbolInLibraries",
+        "title": "%command.codeblocks.findSymbolInLibraries.title%"
       },
       {
         "command": "codeblocks.todoList",
@@ -340,6 +364,26 @@
         "command": "codeblocks.saveProject",
         "title": "%command.codeblocks.saveProject.title%",
         "icon": "$(save)"
+      },
+      {
+        "command": "codeblocks.saveProjectAs",
+        "title": "%command.codeblocks.saveProjectAs.title%"
+      },
+      {
+        "command": "codeblocks.saveWorkspace",
+        "title": "%command.codeblocks.saveWorkspace.title%"
+      },
+      {
+        "command": "codeblocks.saveWorkspaceAs",
+        "title": "%command.codeblocks.saveWorkspaceAs.title%"
+      },
+      {
+        "command": "codeblocks.closeWorkspace",
+        "title": "%command.codeblocks.closeWorkspace.title%"
+      },
+      {
+        "command": "codeblocks.openDefaultWorkspace",
+        "title": "%command.codeblocks.openDefaultWorkspace.title%"
       },
       {
         "command": "codeblocks.removeFiles",
@@ -502,6 +546,10 @@
         "title": "%command.codeblocks.showGlobalVariables.title%"
       },
       {
+        "command": "codeblocks.backtickCache",
+        "title": "%command.codeblocks.backtickCache.title%"
+      },
+      {
         "command": "codeblocks.clearBacktickCache",
         "title": "%command.codeblocks.clearBacktickCache.title%"
       },
@@ -550,6 +598,18 @@
         "command": "codeblocks.debug.setNextStatement",
         "title": "%command.codeblocks.debug.setNextStatement.title%",
         "icon": "$(debug-step-over)"
+      },
+      {
+        "command": "codeblocks.debug.nextInstruction",
+        "title": "%command.codeblocks.debug.nextInstruction.title%"
+      },
+      {
+        "command": "codeblocks.debug.stepIntoInstruction",
+        "title": "%command.codeblocks.debug.stepIntoInstruction.title%"
+      },
+      {
+        "command": "codeblocks.debug.examineMemory",
+        "title": "%command.codeblocks.debug.examineMemory.title%"
       },
       {
         "command": "codeblocks.debug.attachToProcess",
@@ -670,15 +730,15 @@
                 "properties": {
                   "name": {
                     "type": "string",
-                    "description": "显示名称，例如 Enable C++20"
+                    "description": "%configuration.codeblocks.compiler.customFlags.item.name.description%"
                   },
                   "option": {
                     "type": "string",
-                    "description": "传给编译器的参数，例如 -std=c++20"
+                    "description": "%configuration.codeblocks.compiler.customFlags.item.option.description%"
                   },
                   "category": {
                     "type": "string",
-                    "description": "分类（可选），默认为 Custom flags"
+                    "description": "%configuration.codeblocks.compiler.customFlags.item.category.description%"
                   }
                 }
               }
@@ -694,7 +754,7 @@
               "properties": {
                 "modified": {
                   "type": "object",
-                  "description": "原始参数 → 覆盖后的名称/参数/分类",
+                  "description": "%configuration.codeblocks.compiler.flagOverrides.modified.description%",
                   "additionalProperties": {
                     "type": "object",
                     "required": [
@@ -716,7 +776,7 @@
                 },
                 "removed": {
                   "type": "array",
-                  "description": "被删除的内置参数（原始 option）",
+                  "description": "%configuration.codeblocks.compiler.flagOverrides.removed.description%",
                   "items": {
                     "type": "string"
                   }
@@ -734,14 +794,14 @@
               "properties": {
                 "cOnly": {
                   "type": "array",
-                  "description": "仅 C 编译时使用的参数（覆盖编译器 XML 的 <Sort CFlags>）",
+                  "description": "%configuration.codeblocks.compiler.languageFlags.cOnly.description%",
                   "items": {
                     "type": "string"
                   }
                 },
                 "cppOnly": {
                   "type": "array",
-                  "description": "仅 C++ 编译时使用的参数（覆盖编译器 XML 的 <Sort CPPFlags>）",
+                  "description": "%configuration.codeblocks.compiler.languageFlags.cppOnly.description%",
                   "items": {
                     "type": "string"
                   }
@@ -785,7 +845,7 @@
             },
             "additionalProperties": {
               "type": "object",
-              "description": "编译器 id → 该家族的程序路径表",
+              "description": "%configuration.codeblocks.compilerPrograms.description%",
               "additionalProperties": {
                 "type": "string"
               }
@@ -801,6 +861,16 @@
             "type": "boolean",
             "default": true,
             "description": "%configuration.codeblocks.saveBeforeBuild.description%"
+          },
+          "codeblocks.noProjectCompile.useTaskTerminal": {
+            "type": "boolean",
+            "default": false,
+            "description": "%configuration.codeblocks.noProjectCompile.useTaskTerminal.description%"
+          },
+          "codeblocks.profiler.gprofPath": {
+            "type": "string",
+            "default": "",
+            "description": "%configuration.codeblocks.profiler.gprofPath.description%"
           },
           "codeblocks.parallelJobs": {
             "type": "number",
@@ -1444,26 +1514,26 @@
               "properties": {
                 "name": {
                   "type": "string",
-                  "description": "工具名称（Tools 菜单与状态栏菜单中的显示名）"
+                  "description": "%configuration.codeblocks.tools.item.name.description%"
                 },
                 "command": {
                   "type": "string",
-                  "description": "可执行文件路径或命令（支持别名宏与 Code::Blocks 宏）"
+                  "description": "%configuration.codeblocks.tools.item.command.description%"
                 },
                 "arguments": {
                   "type": "string",
-                  "description": "参数字符串（引号感知分词；支持别名宏与 CB 宏）"
+                  "description": "%configuration.codeblocks.tools.item.arguments.description%"
                 },
                 "workingDirectory": {
                   "type": "string",
-                  "description": "工作目录（缺省 = 活动工程目录；支持宏）"
+                  "description": "%configuration.codeblocks.tools.item.workingDirectory.description%"
                 },
                 "env": {
                   "type": "object",
                   "additionalProperties": {
                     "type": "string"
                   },
-                  "description": "附加环境变量"
+                  "description": "%configuration.codeblocks.tools.item.env.description%"
                 },
                 "output": {
                   "type": "string",
@@ -1473,7 +1543,7 @@
                     "silent"
                   ],
                   "default": "output",
-                  "description": "输出模式：output = 专用输出通道；terminal = 集成终端；silent = 无输出"
+                  "description": "%configuration.codeblocks.tools.item.output.description%"
                 }
               }
             },
@@ -1556,7 +1626,7 @@
         {
           "id": "codeblocks.debug.registers",
           "name": "%view.codeblocks.debug.registers.name%",
-          "contextualTitle": "Code::Blocks 寄存器",
+          "contextualTitle": "%view.codeblocks.debug.registers.contextualTitle%",
           "when": "inDebugMode"
         }
       ]
@@ -1583,12 +1653,12 @@
             "properties": {
               "program": {
                 "type": "string",
-                "description": "要调试的可执行文件路径（对齐 Code::Blocks 目标输出；Windows 无扩展名输出会自动回退 .exe）",
+                "description": "%debugger.codeblocks.launch.program.description%",
                 "default": "${workspaceFolder}/bin/Debug/app"
               },
               "cwd": {
                 "type": "string",
-                "description": "调试工作目录（对齐目标的运行工作目录）",
+                "description": "%debugger.codeblocks.launch.cwd.description%",
                 "default": "${workspaceFolder}"
               },
               "args": {
@@ -1596,12 +1666,12 @@
                 "items": {
                   "type": "string"
                 },
-                "description": "传给程序的命令行参数（引号感知分词对齐 CB）",
+                "description": "%debugger.codeblocks.launch.args.description%",
                 "default": []
               },
               "stopOnEntry": {
                 "type": "boolean",
-                "description": "启动后立即暂停在程序入口并上报 stopped(reason=entry)。按 main → WinMain → wWinMain 依次选取入口符号（GUI 程序的 CRT main 桩不误用），均不可用时回退到程序入口地址（可重定位镜像除外，入口地址停点无源码行）",
+                "description": "%debugger.codeblocks.launch.stopOnEntry.description%",
                 "default": false
               },
               "environment": {
@@ -1609,12 +1679,12 @@
                 "additionalProperties": {
                   "type": "string"
                 },
-                "description": "附加环境变量（与宿主环境合并）",
+                "description": "%debugger.codeblocks.launch.environment.description%",
                 "default": {}
               },
               "gdbPath": {
                 "type": "string",
-                "description": "GDB 可执行文件路径（缺省：codeblocks.debug.gdbPath → masterPath/bin → PATH）",
+                "description": "%debugger.codeblocks.launch.gdbPath.description%",
                 "default": ""
               },
               "searchDirs": {
@@ -1622,16 +1692,16 @@
                 "items": {
                   "type": "string"
                 },
-                "description": "额外调试器源搜索目录（GDB directory）",
+                "description": "%debugger.codeblocks.launch.searchDirs.description%",
                 "default": []
               },
               "remoteDebugging": {
                 "type": "object",
-                "description": "远程目标（对齐 Code::Blocks remote_debugging；通常由工程属性面板配置）",
+                "description": "%debugger.codeblocks.launch.remoteDebugging.description%",
                 "properties": {
                   "target": {
                     "type": "string",
-                    "description": "目标标题（空 = 项目级默认）"
+                    "description": "%debugger.codeblocks.launch.remoteDebugging.target.description%"
                   },
                   "connType": {
                     "type": "number",
@@ -1640,47 +1710,47 @@
                       1,
                       2
                     ],
-                    "description": "连接类型：0=TCP 1=UDP 2=Serial"
+                    "description": "%debugger.codeblocks.launch.remoteDebugging.connType.description%"
                   },
                   "serialPort": {
                     "type": "string",
-                    "description": "串口端口（Serial）"
+                    "description": "%debugger.codeblocks.launch.remoteDebugging.serialPort.description%"
                   },
                   "serialBaud": {
                     "type": "string",
-                    "description": "串口波特率（Serial，默认 115200）"
+                    "description": "%debugger.codeblocks.launch.remoteDebugging.serialBaud.description%"
                   },
                   "ip": {
                     "type": "string",
-                    "description": "IP 地址（TCP/UDP）"
+                    "description": "%debugger.codeblocks.launch.remoteDebugging.ip.description%"
                   },
                   "ipPort": {
                     "type": "string",
-                    "description": "IP 端口（TCP/UDP）"
+                    "description": "%debugger.codeblocks.launch.remoteDebugging.ipPort.description%"
                   },
                   "additionalCmds": {
                     "type": "string",
-                    "description": "连接后 GDB 命令（多行）"
+                    "description": "%debugger.codeblocks.launch.remoteDebugging.additionalCmds.description%"
                   },
                   "additionalCmdsBefore": {
                     "type": "string",
-                    "description": "连接前 GDB 命令（多行）"
+                    "description": "%debugger.codeblocks.launch.remoteDebugging.additionalCmdsBefore.description%"
                   },
                   "additionalShellCmdsAfter": {
                     "type": "string",
-                    "description": "连接后 shell 命令（多行）"
+                    "description": "%debugger.codeblocks.launch.remoteDebugging.additionalShellCmdsAfter.description%"
                   },
                   "additionalShellCmdsBefore": {
                     "type": "string",
-                    "description": "连接前 shell 命令（多行）"
+                    "description": "%debugger.codeblocks.launch.remoteDebugging.additionalShellCmdsBefore.description%"
                   },
                   "skipLDpath": {
                     "type": "boolean",
-                    "description": "跳过 LD_LIBRARY_PATH（Windows 为 PATH）注入"
+                    "description": "%debugger.codeblocks.launch.remoteDebugging.skipLDpath.description%"
                   },
                   "extendedRemote": {
                     "type": "boolean",
-                    "description": "使用 target extended-remote（默认 target remote）"
+                    "description": "%debugger.codeblocks.launch.remoteDebugging.extendedRemote.description%"
                   }
                 }
               }
@@ -1693,21 +1763,21 @@
             "properties": {
               "pid": {
                 "type": "number",
-                "description": "要附加的进程号（对齐 Code::Blocks Attach to process）"
+                "description": "%debugger.codeblocks.attach.pid.description%"
               },
               "program": {
                 "type": "string",
-                "description": "可选符号文件（附加前加载，失败不阻断；可用 Send GDB Command 手动 add-symbol-file）",
+                "description": "%debugger.codeblocks.attach.program.description%",
                 "default": ""
               },
               "cwd": {
                 "type": "string",
-                "description": "调试工作目录",
+                "description": "%debugger.codeblocks.attach.cwd.description%",
                 "default": "${workspaceFolder}"
               },
               "gdbPath": {
                 "type": "string",
-                "description": "GDB 可执行文件路径（缺省：codeblocks.debug.gdbPath → masterPath/bin → PATH）",
+                "description": "%debugger.codeblocks.attach.gdbPath.description%",
                 "default": ""
               },
               "searchDirs": {
@@ -1715,7 +1785,7 @@
                 "items": {
                   "type": "string"
                 },
-                "description": "额外调试器源搜索目录（GDB directory）",
+                "description": "%debugger.codeblocks.attach.searchDirs.description%",
                 "default": []
               },
               "environment": {
@@ -1723,7 +1793,7 @@
                 "additionalProperties": {
                   "type": "string"
                 },
-                "description": "附加环境变量（与宿主环境合并）",
+                "description": "%debugger.codeblocks.attach.environment.description%",
                 "default": {}
               }
             }

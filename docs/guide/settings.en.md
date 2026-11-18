@@ -50,6 +50,7 @@ Example:
 | Setting | Type | Default | Scope | Description |
 |---------|------|---------|-------|-------------|
 | `codeblocks.saveBeforeBuild` | boolean | `true` |  | Save all dirty files before build / run / clean. |
+| `codeblocks.noProjectCompile.useTaskTerminal` | boolean | `false` |  | Use the VS Code task terminal for Compile File (Without Project) (legacy behavior). Disable to decode compiler output with the extension's UTF-8/GBK line decoder. |
 | `codeblocks.parallelJobs` | number | `8` | resource | Parallel compile jobs. `1` = serial; `2`–`32` = explicit concurrency; `0` = auto (the host's logical core count, capped at 32). The effective concurrency is also bounded by the process budget `max(8, logical cores)`; when capped, the build prints a one-line note. Folder-level overrides are supported; applies to the next build. |
 | `codeblocks.build.compilerCache` | string | `none` | machine-overridable | Compiler cache: `none` / `ccache` / `sccache`. Only standard compile commands are prefixed; missing tools fall back to the original compiler with a warning. ccache only accepts UTF-8 preprocessed output: when the project path contains non-ASCII characters, compile units switch to project-relative source paths and get `-fno-working-directory` (otherwise every compilation is uncacheable); non-ASCII source files or include directories stay uncacheable (a warning is printed at build start). |
 | `codeblocks.build.compilerCachePath` | string | `""` | machine-overridable | Explicit cache tool path; empty = auto-detect (PATH / WinGet / Scoop / cargo / Chocolatey / Program Files). An invalid path counts as not found; only used when the cache is not `none`. |
@@ -107,6 +108,7 @@ Example:
 | Setting | Type | Default | Scope | Description |
 |---------|------|---------|-------|-------------|
 | `codeblocks.gdbTimeoutMs` | number | `30000` |  | GDB MI command timeout (≥1000 ms). |
+| `codeblocks.profiler.gprofPath` | string | `""` |  | Path to the `gprof` executable (empty = search PATH). |
 | `codeblocks.debug.initCommands` | array | `[]` |  | GDB commands executed after the debug session starts (e.g. `set pagination off`). |
 | `codeblocks.debug.userArguments` | string | `""` |  | Extra arguments appended to the GDB command line (quote-aware splitting). |
 | `codeblocks.debug.disableInit` | boolean | `true` |  | Pass `-nx` to GDB so `.gdbinit` / `gdb.ini` are not executed. |

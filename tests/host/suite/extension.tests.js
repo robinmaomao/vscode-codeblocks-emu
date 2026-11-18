@@ -129,6 +129,13 @@ suite('宿主集成 · 无工程时的优雅降级', (t) => {
       await vscode.commands.executeCommand(cmd);
     }
   });
+
+  t.test('编译器检测 / clangd 重启命令可执行', async () => {
+    // 检测命令会打开 QuickPick：触发后关闭，避免阻塞后续用例
+    const state = await fireUiCommand('codeblocks.detectCompilers', { settleMs: 1500 });
+    assert.ok(state === 'ok' || state === 'pending', `detectCompilers 异常：${state}`);
+    await vscode.commands.executeCommand('codeblocks.restartClangd');
+  });
 });
 
 suite('宿主集成 · keybindings 托管写入（隔离 user-data-dir）', (t) => {

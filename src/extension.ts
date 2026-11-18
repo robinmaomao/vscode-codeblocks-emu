@@ -13,7 +13,7 @@ import { isExecutableTargetType, resolveExecutablePath, requiresExecutableExtens
 import { ProjectParser, WorkspaceParser } from './model/parser';
 import { Project, BuildTarget, ProjectFile, TargetType, CommandType, Workspace, OptionsRelation, OptionsRelationType, LinkerExecutableOption, supportsCurrentPlatform, PLATFORM_ALL, MakeCommandsMap } from './model/types';
 import { serializeProject } from './model/projectWriter';
-import { createProjectFromTemplate, PROJECT_TEMPLATES } from './project/newProject';
+import { createProjectFromTemplate, makeTarget, PROJECT_TEMPLATES } from './project/newProject';
 import { instantiateUserTemplate, listUserTemplates, saveAsUserTemplate } from './project/userTemplates';
 import { Compiler } from './compiler/compiler';
 import { queryCompilerVersionString } from './compiler/compilerVersion';
@@ -70,7 +70,7 @@ import { buildLogPrefs, logT, msg, quietSuccess, resetBuildLogPrefsCache } from 
 import { decodeText, decodeTextWithEncoding, encodeText, OutputLineDecoder, TextEncoding } from './tools/encoding';
 import { ASM_HASH_COMMENT_SETTING, ASM_LANGUAGE_ID, asmCommentsRule } from './tools/asmCommentConfig';
 import * as i18n from './i18n';
-import { clearBackticksCache, CommandGenerator } from './compiler/commandGenerator';
+import { clearBackticksCache, getBackticksCacheEntries, CommandGenerator } from './compiler/commandGenerator';
 import { OutputParser } from './build/outputParser';
 import { isCompilerUsable, renderInvalidCompilerMessage, renderTriedCompilerPaths, triedCompilerPaths } from './build/invalidCompiler';
 import { collectClangdEntries, writeClangdDatabase, CompileCommandEntry } from './build/compileCommands';
@@ -104,17 +104,25 @@ import {
 } from './settings/migration';
 import { applyHeaderGuard } from './tools/headerGuard';
 import { tidyCommentBlock } from './tools/tidyComments';
+import { extractStringLiterals } from './tools/copyStrings';
+import { formatProfilerTable, parseGprofFlatProfile, runCapture } from './tools/profiler';
+import { filterSymbols, parseNmOutput, SymbolRow } from './tools/symtab';
 import { parseToolsSetting, buildToolInvocation, ToolContext } from './tools/toolRunner';
 import { applyCustomVariables } from './model/customVariables';
 import { parseProjectDebuggerConfig, mergeRemoteOptions, applyProjectDebuggerConfig, RemoteDebuggingOptions } from './model/projectDebuggerExtensions';
 import { setProjectDependencies, wouldCreateCycle } from './model/workspaceWriter';
+import { buildWorkspaceEntries, serializeWorkspace } from './model/workspaceSerializer';
 import { PathOwnerIndex, buildPathOwnerIndex, findSoleOwner, normFilePath } from './model/pathOwnerIndex';
 import { generateMakefile } from './build/makefileExporter';
 import { buildProjectFromImport, importDevProject, importDspProject, importVcxproj } from './project/projectImporter';
-import { projectChangeTracker } from './project/projectChangeTracker';
+import { projectChangeTracker, ProjectChangeTracker } from './project/projectChangeTracker';
 import { buildTargetExportProject } from './project/exportTarget';
 import { enumerateRecursiveSourceFiles, buildUnitXmlForTargets } from './project/recursiveAdd';
 import { renameUnitInCbpText } from './project/unitText';
+import { escapeXmlAttr } from './model/xml';
+import { writeFileAtomicSync } from './model/atomicWrite';
+import { buildNoProjectCompilePlan, runNoProjectCompile } from './build/noProjectCompile';
+import { formatMemoryDump } from './debug/memoryDump';
 import {
   addVirtualFolder,
   renameVirtualFolder,
@@ -137,10 +145,33 @@ let openProjects: Project[] = [];
 let workspaceDeps: Record<string, string[]> = {};
 /** 当前打开的 .workspace 文件（C1 依赖编辑用；仅打开 .cbp 时为 undefined） */
 let openedWorkspaceFile: string | undefined;
+/** `.workspace` 外部修改跟踪（独立于 .cbp，语义同 ProjectChangeTracker） */
+const workspaceChangeTracker = new ProjectChangeTracker();
 /** 当前活动项目（状态栏 Target/Compiler 针对的对象） */
 let activeProject: Project | undefined;
 let outputChannel: CbOutput;
 let diagnosticCollection: vscode.DiagnosticCollection;
+let memoryChannel: vscode.OutputChannel | undefined;
+let profilerChannel: vscode.OutputChannel | undefined;
+
+/** 惰性创建 Profiler 输出通道（gprof 结果；与构建日志分开） */
+function profilerOutputChannel(): vscode.OutputChannel {
+  if (!profilerChannel) {
+    profilerChannel = vscode.window.createOutputChannel('Code::Blocks Profiler');
+    extContext?.subscriptions.push(profilerChannel);
+  }
+  return profilerChannel;
+}
+
+/** 惰性创建 Memory 输出通道（Examine memory 结果；与构建日志分开） */
+function memoryOutputChannel(): vscode.OutputChannel {
+  if (!memoryChannel) {
+    memoryChannel = vscode.window.createOutputChannel('Code::Blocks Memory');
+    extContext?.subscriptions.push(memoryChannel);
+  }
+  return memoryChannel;
+}
+
 let compilerLoader: CompilerOptionsLoader | undefined;
 let compilerResourcesDir = '';
 let codeBlocksConfig: CodeBlocksConfig | undefined;
@@ -704,6 +735,61 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     });
   }));
 
+  // 指令级步进 / Examine memory（对齐 CB debugger_menu.xrc:51-57 与 Examine memory 对话框）
+  context.subscriptions.push(
+    vscode.commands.registerCommand('codeblocks.debug.nextInstruction', async () => {
+      const adapter = getActiveAdapter();
+      if (!adapter || !adapter.isActive()) { vscode.window.showWarningMessage(i18n.t('No active Code::Blocks debug session')); return; }
+      if (!adapter.isStopped()) { vscode.window.showWarningMessage(i18n.t('Pause the program first (instruction stepping is only available while stopped)')); return; }
+      try {
+        await adapter.stepInstruction('next');
+      } catch (err) {
+        vscode.window.showErrorMessage(i18n.t('Instruction step failed: {0}', (err as Error).message));
+      }
+    }),
+    vscode.commands.registerCommand('codeblocks.debug.stepIntoInstruction', async () => {
+      const adapter = getActiveAdapter();
+      if (!adapter || !adapter.isActive()) { vscode.window.showWarningMessage(i18n.t('No active Code::Blocks debug session')); return; }
+      if (!adapter.isStopped()) { vscode.window.showWarningMessage(i18n.t('Pause the program first (instruction stepping is only available while stopped)')); return; }
+      try {
+        await adapter.stepInstruction('into');
+      } catch (err) {
+        vscode.window.showErrorMessage(i18n.t('Instruction step failed: {0}', (err as Error).message));
+      }
+    }),
+    vscode.commands.registerCommand('codeblocks.debug.examineMemory', async () => {
+      const adapter = getActiveAdapter();
+      if (!adapter || !adapter.isActive()) { vscode.window.showWarningMessage(i18n.t('No active Code::Blocks debug session')); return; }
+      if (!adapter.isStopped()) { vscode.window.showWarningMessage(i18n.t('Pause the program first (memory examination is only available while stopped)')); return; }
+      const expr = await vscode.window.showInputBox({
+        prompt: i18n.t('Address or expression to examine (for example &buf or 0x1000)'),
+        placeHolder: '&buf',
+        validateInput: (v) => (v.trim() ? undefined : i18n.t('The expression must not be empty')),
+      });
+      if (!expr?.trim()) return;
+      const countText = await vscode.window.showInputBox({
+        prompt: i18n.t('Number of bytes to read (1-65536)'),
+        value: '64',
+        validateInput: (v) => {
+          const n = Number(v);
+          if (!Number.isInteger(n) || n <= 0) return i18n.t('Enter a positive integer');
+          if (n > 65536) return i18n.t('At most 65536 bytes per read');
+          return undefined;
+        },
+      });
+      if (!countText) return;
+      try {
+        const dump = await adapter.readMemoryDump(expr.trim(), Number(countText));
+        const ch = memoryOutputChannel();
+        ch.appendLine(i18n.t('Examine memory: {0} ({1} byte(s))', expr.trim(), dump.data.length));
+        ch.appendLine(formatMemoryDump(dump.address, dump.data));
+        ch.show(true);
+      } catch (err) {
+        vscode.window.showErrorMessage(i18n.t('Memory read failed: {0}', (err as Error).message));
+      }
+    }),
+  );
+
   /** 列举本机进程（附加调试用；Windows tasklist / POSIX ps） */
   function listProcesses(): Promise<ProcessInfo[]> {
     return new Promise((resolve) => {
@@ -1213,6 +1299,17 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     }),
   );
 
+  // File 菜单：Save project as… / Save·Close·Open default workspace（对齐 CB main.cpp:2988-3089）
+  context.subscriptions.push(
+    vscode.commands.registerCommand('codeblocks.saveProjectAs', () => saveProjectAs()),
+    vscode.commands.registerCommand('codeblocks.saveWorkspace', () => saveWorkspace(false)),
+    vscode.commands.registerCommand('codeblocks.saveWorkspaceAs', () => saveWorkspace(true)),
+    vscode.commands.registerCommand('codeblocks.closeWorkspace', () => closeWorkspace()),
+    vscode.commands.registerCommand('codeblocks.openDefaultWorkspace', () => openDefaultWorkspace()),
+    vscode.commands.registerCommand('codeblocks.newBuildTarget', () => newBuildTarget()),
+    vscode.commands.registerCommand('codeblocks.newFile', () => newProjectFile()),
+  );
+
   // 从工程移除文件（对齐 CB Project → Remove files...，磁盘文件保留）
   context.subscriptions.push(
     vscode.commands.registerCommand('codeblocks.removeFiles', async (node?: any) => {
@@ -1625,6 +1722,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     vscode.commands.registerCommand('codeblocks.clean', async () => {
       await clean();
     }),
+    vscode.commands.registerCommand('codeblocks.distClean', async () => {
+      await distClean();
+    }),
   );
 
   // 清理工作区（全部工程选中目标）
@@ -1834,8 +1934,38 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     }),
   );
 
-  // 清空反引号缓存（对齐 Settings → Backtick Cache…）
+  // 反引号缓存管理器（对齐 CB Settings → Backtick Cache：Expression/Value 列表 + Clear and close）
   context.subscriptions.push(
+    vscode.commands.registerCommand('codeblocks.backtickCache', async () => {
+      const entries = getBackticksCacheEntries();
+      const clearLabel = i18n.t('Clear and close');
+      const items: Array<vscode.QuickPickItem & { expression?: string; value?: string; clear?: boolean }> = [];
+      for (const e of entries) {
+        items.push({
+          label: e.expression,
+          description: e.value.length > 160 ? `${e.value.slice(0, 157)}...` : e.value,
+          expression: e.expression,
+          value: e.value,
+        });
+      }
+      if (entries.length) items.push({ label: '', kind: vscode.QuickPickItemKind.Separator });
+      items.push({ label: clearLabel, iconPath: new vscode.ThemeIcon('trash'), clear: true });
+      const pick = await vscode.window.showQuickPick(items, {
+        title: i18n.t('Backtick Cache'),
+        placeHolder: entries.length ? i18n.t('Cached backtick commands — select one to copy its value') : i18n.t('The backtick cache is empty'),
+        matchOnDescription: true,
+      });
+      if (!pick) return;
+      if (pick.clear) {
+        clearBackticksCache();
+        vscode.window.setStatusBarMessage(i18n.t('Backtick cache cleared (backtick commands run again on the next build)'), 3000);
+        return;
+      }
+      if (pick.value !== undefined) {
+        await vscode.env.clipboard.writeText(pick.value);
+        vscode.window.setStatusBarMessage(i18n.t('Backtick value copied: {0}', pick.expression ?? ''), 3000);
+      }
+    }),
     vscode.commands.registerCommand('codeblocks.clearBacktickCache', () => {
       clearBackticksCache();
       vscode.window.setStatusBarMessage(i18n.t('Backtick cache cleared (backtick commands run again on the next build)'), 3000);
@@ -2060,6 +2190,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   // AStyle 格式化
   context.subscriptions.push(
+    vscode.commands.registerCommand('codeblocks.profileTarget', () => profileTarget()),
+    vscode.commands.registerCommand('codeblocks.findSymbolInLibraries', () => findSymbolInLibraries()),
     vscode.commands.registerCommand('codeblocks.format', async () => {
       await formatActiveDocument();
     }),
@@ -2077,6 +2209,20 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   // Tidy 注释（D3：tidycmt 对齐）
   context.subscriptions.push(
+    vscode.commands.registerCommand('codeblocks.copyStrings', async () => {
+      const editor = vscode.window.activeTextEditor;
+      if (!editor) { vscode.window.showWarningMessage(i18n.t('No file is open')); return; }
+      const selection = editor.selection;
+      const text = selection.isEmpty ? editor.document.getText() : editor.document.getText(selection);
+      const strings = extractStringLiterals(text);
+      if (!strings.length) {
+        vscode.window.showInformationMessage(i18n.t('No double-quoted string literals found'));
+        return;
+      }
+      const eol = process.platform === 'win32' ? '\r\n' : '\n';
+      await vscode.env.clipboard.writeText(strings.join(eol));
+      vscode.window.showInformationMessage(i18n.t('{0} literal string(s) copied to the clipboard', strings.length));
+    }),
     vscode.commands.registerCommand('codeblocks.tidyComments', async () => {
       await tidyCommentsInActiveEditor();
     }),
@@ -2192,11 +2338,30 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   cbpWatcher.onDidChange((uri) => handleProjectFileChanged(uri));
   context.subscriptions.push(cbpWatcher);
 
+  // G1：.workspace 外部修改（工程列表/依赖/active 变化）→ 询问是否重载工作区
+  const workspaceWatcher = vscode.workspace.createFileSystemWatcher('**/*.workspace');
+  workspaceWatcher.onDidChange((uri) => scheduleWorkspaceChangeCheck(uri.fsPath));
+  workspaceWatcher.onDidCreate((uri) => {
+    // 原子保存（临时文件 rename）只产生 create：已打开的工作区按“外部修改”处理
+    if (openedWorkspaceFile && normPath(uri.fsPath) === normPath(openedWorkspaceFile)) {
+      scheduleWorkspaceChangeCheck(uri.fsPath);
+    }
+  });
+  workspaceWatcher.onDidDelete((uri) => {
+    if (!openedWorkspaceFile || normPath(uri.fsPath) !== normPath(openedWorkspaceFile)) return;
+    if (!fs.existsSync(uri.fsPath)) {
+      outputChannel.info(logT('[Code::Blocks] Workspace file deleted: {0} (the opened projects stay in the list)', uri.fsPath));
+    }
+  });
+  context.subscriptions.push(workspaceWatcher);
+
   // 窗口重新获得焦点时再检查一次：`**/*.cbp` 只覆盖工作区内文件，网络盘/被 watcherExclude 的目录
   // 以及部分编辑器的原子保存都可能漏事件 —— 这正是 Code::Blocks 在应用激活时检查的场景。
   context.subscriptions.push(
     vscode.window.onDidChangeWindowState((state) => {
-      if (state.focused) checkExternallyModifiedProjects();
+      if (!state.focused) return;
+      checkExternallyModifiedProjects();
+      checkExternallyModifiedWorkspace();
     }),
   );
 
@@ -3102,6 +3267,147 @@ function drainExternalChanges(): void {
   })();
 }
 
+// ———— `.workspace` 外部修改检测（G1，对齐 CB CheckForExternallyModifiedProjects 的工作区侧） ————
+
+/** 等待用户决定的工作区（当前只可能有一个打开的 .workspace） */
+const pendingWorkspaceChanges = new Set<string>();
+/** 工作区去抖计时器 */
+const workspaceChangeTimers = new Map<string, ReturnType<typeof setTimeout>>();
+let workspaceChangeRunning = false;
+
+/** 工作区文件事件 → 去抖后检查 */
+function scheduleWorkspaceChangeCheck(file: string, delayMs = 200): void {
+  const key = normPath(file);
+  const prev = workspaceChangeTimers.get(key);
+  if (prev) clearTimeout(prev);
+  const timer = setTimeout(() => {
+    workspaceChangeTimers.delete(key);
+    queueWorkspaceChange(file);
+  }, delayMs);
+  timer.unref?.();
+  workspaceChangeTimers.set(key, timer);
+}
+
+/** 把一个确实被外部改过、且仍是当前工作区的文件放进待询问队列 */
+function queueWorkspaceChange(file: string): void {
+  if (detectExternalChangeMode() === 'off') return;
+  if (!openedWorkspaceFile || normPath(file) !== normPath(openedWorkspaceFile)) return;
+  if (!workspaceChangeTracker.hasChanged(file)) return;
+  pendingWorkspaceChanges.add(normPath(file));
+  drainWorkspaceChanges();
+}
+
+/** 窗口重新获得焦点：检查当前工作区（对齐 CB 的应用激活时检查） */
+function checkExternallyModifiedWorkspace(): void {
+  if (detectExternalChangeMode() === 'off' || !openedWorkspaceFile) return;
+  if (!workspaceChangeTracker.hasChanged(openedWorkspaceFile)) return;
+  pendingWorkspaceChanges.add(normPath(openedWorkspaceFile));
+  drainWorkspaceChanges();
+}
+
+/** 清空工作区状态（关闭工作区 / 最后一个工程关闭） */
+function clearWorkspaceState(): void {
+  openedWorkspaceFile = undefined;
+  workspaceDeps = {};
+  workspaceChangeTracker.clear();
+  pendingWorkspaceChanges.clear();
+  for (const timer of workspaceChangeTimers.values()) clearTimeout(timer);
+  workspaceChangeTimers.clear();
+  void extContext?.workspaceState.update('codeblocks.openedWorkspace', undefined);
+}
+
+/**
+ * 从磁盘重新解析工作区并刷新依赖/工程集合。
+ * 只重载磁盘签名变化的工程；未变化的保留当前模型与目标选择。
+ */
+async function reloadWorkspaceFromDisk(filename: string): Promise<boolean> {
+  try {
+    const ws = new WorkspaceParser().parse(filename);
+    const nextDeps: Record<string, string[]> = {};
+    for (const [proj, deps] of Object.entries(ws.dependencies)) {
+      nextDeps[path.join(ws.basePath, proj)] = deps.map((d) => path.join(ws.basePath, d));
+    }
+    workspaceDeps = nextDeps;
+
+    for (const rel of ws.projectPaths) {
+      const abs = path.join(ws.basePath, rel);
+      const open = openProjects.find((p) => normPath(p.filename) === normPath(abs));
+      try {
+        if (!open) await openProject(abs);
+        else if (projectChangeTracker.hasChanged(abs)) await reloadProjectFromDisk(abs);
+      } catch (err) {
+        outputChannel.warn(logT('[Code::Blocks] Failed to reload workspace project {0}: {1}', abs, (err as Error).message));
+      }
+    }
+
+    if (ws.activeProject) {
+      const activeAbs = path.join(ws.basePath, ws.activeProject);
+      const nextActive = openProjects.find((p) => normPath(p.filename) === normPath(activeAbs));
+      if (nextActive) setActiveProject(nextActive, { persist: true });
+    }
+
+    workspaceChangeTracker.remember(filename);
+    projectTreeProvider?.setProjects(openProjects);
+    projectTreeProvider?.setActiveProject(activeProject);
+    analysisTreeProvider?.refresh();
+    markFallbackIndexDirty();
+    refreshStatusBars();
+    projectSearch?.provider.notifyContextChanged();
+    outputChannel.info(logT('[Code::Blocks] Workspace reloaded from disk: {0}', path.basename(filename)));
+    return true;
+  } catch (err) {
+    // 外部工具写到一半/XML 损坏：保留旧状态，并把当前磁盘状态记为基准，避免焦点切换反复报错
+    workspaceChangeTracker.remember(filename);
+    vscode.window.showErrorMessage(i18n.t('Failed to reload the workspace from disk: {0}', (err as Error).message));
+    return false;
+  }
+}
+
+/** 串行处理工作区询问；构建中不打扰（下次获得焦点时再问） */
+function drainWorkspaceChanges(): void {
+  if (workspaceChangeRunning) return;
+  workspaceChangeRunning = true;
+  void (async () => {
+    try {
+      while (pendingWorkspaceChanges.size) {
+        if (buildInProgress) return;
+        const key = [...pendingWorkspaceChanges][0];
+        pendingWorkspaceChanges.delete(key);
+        const file = openedWorkspaceFile;
+        if (!file || normPath(file) !== key || !workspaceChangeTracker.hasChanged(file)) continue;
+        const mode = detectExternalChangeMode();
+        if (mode === 'off') return;
+        if (mode === 'auto') {
+          await reloadWorkspaceFromDisk(file);
+          continue;
+        }
+        const reload = i18n.t('Reload');
+        const ignore = i18n.t('Ignore');
+        const answer = await vscode.window.showWarningMessage(
+          i18n.t('Workspace "{0}" was modified on disk. Reload it? (project list and dependencies are re-read)', path.basename(file)),
+          { modal: true },
+          reload,
+          ignore,
+        );
+        if (answer === reload) {
+          await reloadWorkspaceFromDisk(file);
+        } else if (answer === ignore) {
+          workspaceChangeTracker.remember(file);
+          outputChannel.info(logT('[Code::Blocks] Ignored external changes to the workspace file: {0}', file));
+        } else {
+          // 关闭/ESC：本轮不再打扰，签名保留 ⇒ 下次获得焦点时重新询问
+          pendingWorkspaceChanges.clear();
+          return;
+        }
+      }
+    } catch (e) {
+      outputChannel.warn(`[Code::Blocks] ${(e as Error)?.message ?? String(e)}`);
+    } finally {
+      workspaceChangeRunning = false;
+    }
+  })();
+}
+
 /**
  * 从磁盘重新解析并替换已打开的工程 —— 对齐 ProjectManager::ReloadProject（projectmanager.cpp:301）：
  * 保持工程在列表中的位置、活动工程与选中目标；工程属性面板若开着则关闭（避免旧模型保存覆盖外部改动）。
@@ -3266,11 +3572,11 @@ async function createNewProject(): Promise<void> {
     fs.mkdirSync(projectDir, { recursive: true });
     // 骨架源文件
     for (const f of tpl.skeleton) {
-      fs.writeFileSync(path.join(projectDir, f.name), f.content, 'utf-8');
+      writeFileAtomicSync(path.join(projectDir, f.name), f.content, 'utf-8');
     }
     // .cbp
     const xml = serializeProject(project);
-    fs.writeFileSync(project.filename, xml, 'utf-8');
+    writeFileAtomicSync(project.filename, xml, 'utf-8');
     outputChannel.info(logT('[Code::Blocks] Project created: {0} ({1})', project.title, tpl.label));
   } catch (err) {
     vscode.window.showErrorMessage(i18n.t('Failed to create the project: {0}', (err as Error).message));
@@ -3409,6 +3715,7 @@ async function openProject(filename: string): Promise<void> {
     // P3：工程集合/文件列表即将变化 → 失效属主索引（所有重解析路径均经由此处）
     invalidateOwnerIndex();
     if (filename.endsWith('.workspace')) {
+      if (openedWorkspaceFile && normPath(openedWorkspaceFile) !== normPath(filename)) clearWorkspaceState();
       openedWorkspaceFile = filename;
       const ws = new WorkspaceParser().parse(filename);
       // 依赖解析为绝对路径（相对 .workspace 目录），供构建时拓扑排序
@@ -3429,6 +3736,7 @@ async function openProject(filename: string): Promise<void> {
       }
       // 记住 .workspace 路径，reload 后恢复（重新打开全部项目 + 依赖）
       await extContext?.workspaceState.update('codeblocks.openedWorkspace', filename);
+      workspaceChangeTracker.remember(filename);
       return;
     }
 
@@ -3856,7 +4164,7 @@ function showProjectPropertiesPanel(
 
 /** 写回 .cbp 并立即刷新外部改动检测基准（扩展自写盘不应触发"文件已被修改"提示） */
 function writeCbpAndRemember(cbpPath: string, content: string): void {
-  fs.writeFileSync(cbpPath, content, 'utf-8');
+  writeFileAtomicSync(cbpPath, content, 'utf-8');
   projectChangeTracker.remember(cbpPath);
 }
 
@@ -3867,7 +4175,7 @@ function readProjectText(file: string): { text: string; encoding: TextEncoding }
 
 /** 按原编码写回工程文本（避免把旧 ANSI 工程静默转成 UTF-8 后声明与内容不一致） */
 function writeProjectText(file: string, text: string, encoding: TextEncoding): void {
-  fs.writeFileSync(file, encodeText(text, encoding));
+  writeFileAtomicSync(file, encodeText(text, encoding));
   projectChangeTracker.remember(file);
 }
 
@@ -3922,7 +4230,7 @@ async function exportTargetAsProject(targetTitleArg?: unknown, projectFilenameAr
   });
   if (!save) return;
   const exported = buildTargetExportProject(project, targetTitle);
-  fs.writeFileSync(save.fsPath, serializeProject(exported), 'utf-8');
+  writeFileAtomicSync(save.fsPath, serializeProject(exported), 'utf-8');
   outputChannel.info(logT('[Code::Blocks] Exported the project from the target: {0} (target {1}, {2} file(s))', save.fsPath, targetTitle, exported.files.length));
   const pick = await vscode.window.showInformationMessage(i18n.t('Project exported ({0} file(s))', exported.files.length), i18n.t('Open'), i18n.t('Later'));
   if (pick === i18n.t('Open')) {
@@ -5572,6 +5880,12 @@ function removeProject(filename: string): void {
   if (idx === -1) return;
   const [removed] = openProjects.splice(idx, 1);
   projectChangeTracker.forget(filename);
+  // G1：工作区依赖里移除该工程的出边/入边；最后一个工程关闭时清空工作区状态
+  const key = normPath(filename);
+  for (const [proj, deps] of Object.entries(workspaceDeps)) {
+    if (normPath(proj) === key) delete workspaceDeps[proj];
+    else workspaceDeps[proj] = deps.filter((d) => normPath(d) !== key);
+  }
   invalidateOwnerIndex(); // P3：工程集合变化 → 属主索引失效
   if (activeProject?.filename === filename) {
     setActiveProject(openProjects[0], { persist: true });
@@ -5582,6 +5896,7 @@ function removeProject(filename: string): void {
   markFallbackIndexDirty(); // P2：懒构建
   analysisTreeProvider?.refresh();
   projectSearch?.provider.notifyContextChanged();
+  if (openProjects.length === 0) clearWorkspaceState();
   outputChannel.info(logT('[Code::Blocks] Project removed: {0}', removed.title));
 }
 
@@ -5599,6 +5914,317 @@ async function saveProjectToDisk(filename: string): Promise<void> {
     vscode.window.showInformationMessage(i18n.t('Project saved: {0}', path.basename(project.filename)));
   } catch (err) {
     vscode.window.showErrorMessage(i18n.t('Failed to save the project: {0}', (err as Error).message));
+  }
+}
+
+/**
+ * 另存工程（对齐 CB File → Save project as… / cbProject::SaveAs）：
+ * 只改工程文件路径并保存副本，单元相对路径保持不变；随后按新路径重新解析。
+ */
+async function saveProjectAs(): Promise<void> {
+  const project = requireProject();
+  if (!project) return;
+  const save = await vscode.window.showSaveDialog({
+    defaultUri: vscode.Uri.file(path.join(project.basePath, path.basename(project.filename))),
+    filters: { [i18n.t('Code::Blocks project')]: ['cbp'], [i18n.t('All files')]: ['*'] },
+    saveLabel: i18n.t('Save Project As'),
+    title: i18n.t('Save Project As'),
+  });
+  if (!save) return;
+  const target = /\.cbp$/i.test(save.fsPath) ? save.fsPath : `${save.fsPath}.cbp`;
+  if (normPath(target) === normPath(project.filename)) {
+    await saveProjectToDisk(project.filename);
+    return;
+  }
+  if (openProjects.some((p) => normPath(p.filename) === normPath(target))) {
+    vscode.window.showErrorMessage(i18n.t('Another open project already uses this file: {0}', target));
+    return;
+  }
+  if (fs.existsSync(target)) {
+    const overwrite = await vscode.window.showWarningMessage(
+      i18n.t('"{0}" already exists. Overwrite it?', path.basename(target)),
+      { modal: true },
+      i18n.t('Overwrite'),
+    );
+    if (overwrite !== i18n.t('Overwrite')) return;
+  }
+
+  const oldFilename = project.filename;
+  const oldIndex = openProjects.findIndex((p) => normPath(p.filename) === normPath(oldFilename));
+  const previousTarget = getSelectedTarget(project);
+  const wasActive = normPath(activeProject?.filename ?? '') === normPath(oldFilename);
+  try {
+    const exported: Project = { ...project, filename: target, basePath: path.dirname(target) };
+    writeFileAtomicSync(target, serializeProject(exported), 'utf-8');
+    ProjectPropertiesPanel.closeFor(project);
+    BuildOptionsPanel.closeFor(project);
+    projectChangeTracker.forget(oldFilename);
+    openProjects = openProjects.filter((p) => normPath(p.filename) !== normPath(oldFilename));
+    await openProject(target);
+    const opened = openProjects.find((p) => normPath(p.filename) === normPath(target));
+    if (!opened) throw new Error(i18n.t('Failed to open the saved project: {0}', target));
+    if (oldIndex >= 0 && openProjects[openProjects.length - 1]?.filename === opened.filename) {
+      openProjects.pop();
+      openProjects.splice(Math.min(oldIndex, openProjects.length), 0, opened);
+    }
+    selectedTargets.delete(oldFilename);
+    if (previousTarget) setSelectedTarget(opened, previousTarget);
+    if (wasActive) setActiveProject(opened, { persist: true });
+    replaceRecentProject(oldFilename, target);
+    remapWorkspaceAfterProjectSaveAs(oldFilename, target);
+    projectTreeProvider?.setProjects(openProjects);
+    projectTreeProvider?.setActiveProject(activeProject);
+    analysisTreeProvider?.refresh();
+    markFallbackIndexDirty();
+    refreshStatusBars();
+    updateCbpStatusBar();
+    projectSearch?.provider.notifyContextChanged();
+    outputChannel.info(logT('[Code::Blocks] Project saved as: {0}', target));
+    vscode.window.showInformationMessage(i18n.t('Project saved as: {0}', path.basename(target)));
+  } catch (err) {
+    vscode.window.showErrorMessage(i18n.t('Failed to save the project as: {0}', (err as Error).message));
+  }
+}
+
+/** 最近工程列表里把旧路径替换为新路径（另存工程后避免重复项） */
+function replaceRecentProject(oldFile: string, newFile: string): void {
+  const list = extContext?.globalState.get<string[]>('codeblocks.recentProjects', []) ?? [];
+  const next = list.map((f) => (normPath(f) === normPath(oldFile) ? newFile : f));
+  void extContext?.globalState.update('codeblocks.recentProjects', next);
+  recordRecentProject(newFile);
+}
+
+/** 另存工程后同步工作区依赖图（内存；磁盘上的 .workspace 需 Save Workspace 才写回） */
+function remapWorkspaceAfterProjectSaveAs(oldFile: string, newFile: string): void {
+  if (!openedWorkspaceFile) return;
+  const oldKey = normPath(oldFile);
+  const next: Record<string, string[]> = {};
+  for (const [proj, deps] of Object.entries(workspaceDeps)) {
+    const key = normPath(proj) === oldKey ? newFile : proj;
+    next[key] = deps
+      .map((d) => (normPath(d) === oldKey ? newFile : d))
+      .filter((d) => normPath(d) !== normPath(key));
+  }
+  workspaceDeps = next;
+}
+
+/** 默认工作区路径（对齐 CB ConfigManager::GetConfigFolder()/default.workspace） */
+function defaultWorkspacePath(): string {
+  if (process.platform === 'win32') {
+    const appData = process.env.APPDATA;
+    if (appData) return path.join(appData, 'CodeBlocks', 'default.workspace');
+  }
+  return path.join(process.env.HOME ?? process.env.USERPROFILE ?? '', '.codeblocks', 'default.workspace');
+}
+
+/** 保存工作区（对齐 CB File → Save workspace / Save workspace as…） */
+async function saveWorkspace(saveAs = false): Promise<void> {
+  if (!openProjects.length) {
+    vscode.window.showWarningMessage(i18n.t('No open projects — open or create a project first'));
+    return;
+  }
+  let file = saveAs ? undefined : openedWorkspaceFile;
+  if (!file) {
+    const base = openedWorkspaceFile ? path.dirname(openedWorkspaceFile) : openProjects[0].basePath;
+    const defaultName = openedWorkspaceFile
+      ? path.basename(openedWorkspaceFile)
+      : `${openProjects[0].title}.workspace`;
+    const save = await vscode.window.showSaveDialog({
+      defaultUri: vscode.Uri.file(path.join(base, defaultName)),
+      filters: { [i18n.t('Code::Blocks workspace')]: ['workspace'], [i18n.t('All files')]: ['*'] },
+      saveLabel: i18n.t('Save Workspace'),
+      title: saveAs ? i18n.t('Save Workspace As') : i18n.t('Save Workspace'),
+    });
+    if (!save) return;
+    file = /\.workspace$/i.test(save.fsPath) ? save.fsPath : `${save.fsPath}.workspace`;
+  }
+
+  let title = path.basename(file, '.workspace');
+  if (!saveAs && openedWorkspaceFile) {
+    try {
+      title = new WorkspaceParser().parse(openedWorkspaceFile).title || title;
+    } catch {
+      /* 解析失败时用文件名作为标题 */
+    }
+  }
+  try {
+    const base = path.dirname(file);
+    const entries = buildWorkspaceEntries(base, openProjects, workspaceDeps, activeProject?.filename);
+    writeFileAtomicSync(file, serializeWorkspace(title, entries), 'utf-8');
+    openedWorkspaceFile = file;
+    workspaceChangeTracker.remember(file);
+    await extContext?.workspaceState.update('codeblocks.openedWorkspace', file);
+    refreshStatusBars();
+    updateCbpStatusBar();
+    outputChannel.info(logT('[Code::Blocks] Workspace saved: {0} ({1} project(s))', file, entries.length));
+    vscode.window.showInformationMessage(i18n.t('Workspace saved: {0}', path.basename(file)));
+  } catch (err) {
+    vscode.window.showErrorMessage(i18n.t('Failed to save the workspace: {0}', (err as Error).message));
+  }
+}
+
+/** 关闭工作区（关闭全部工程，磁盘文件保留） */
+async function closeWorkspace(): Promise<void> {
+  if (!openedWorkspaceFile) {
+    vscode.window.showWarningMessage(i18n.t('No workspace is open'));
+    return;
+  }
+  const close = i18n.t('Close Workspace');
+  const answer = await vscode.window.showWarningMessage(
+    i18n.t('Close workspace "{0}" and all projects? (files on disk are kept)', path.basename(openedWorkspaceFile)),
+    { modal: true },
+    close,
+  );
+  if (answer !== close) return;
+  for (const p of [...openProjects]) {
+    ProjectPropertiesPanel.closeFor(p);
+    BuildOptionsPanel.closeFor(p);
+    projectChangeTracker.forget(p.filename);
+  }
+  openProjects = [];
+  activeProject = undefined;
+  selectedTargets.clear();
+  persistSelectedTargets();
+  clearWorkspaceState();
+  void persistProjectOrder();
+  void extContext?.workspaceState.update('codeblocks.activeProject', undefined);
+  projectTreeProvider?.setProjects(openProjects);
+  projectTreeProvider?.setActiveProject(undefined);
+  analysisTreeProvider?.refresh();
+  markFallbackIndexDirty();
+  refreshStatusBars();
+  updateCbpStatusBar();
+  projectSearch?.provider.notifyContextChanged();
+  outputChannel.info(logT('[Code::Blocks] Workspace closed'));
+}
+
+/** 打开默认工作区；不存在时按 CB 语义提供创建入口 */
+async function openDefaultWorkspace(): Promise<void> {
+  const file = defaultWorkspacePath();
+  if (!fs.existsSync(file)) {
+    const create = i18n.t('Create');
+    const answer = await vscode.window.showWarningMessage(
+      i18n.t('Default workspace not found: {0}', file),
+      { modal: true },
+      create,
+    );
+    if (answer !== create) return;
+    try {
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      writeFileAtomicSync(file, serializeWorkspace('Default workspace', []), 'utf-8');
+    } catch (err) {
+      vscode.window.showErrorMessage(i18n.t('Failed to create the default workspace: {0}', (err as Error).message));
+      return;
+    }
+  }
+  await openProject(file);
+  vscode.window.showInformationMessage(i18n.t('Default workspace opened: {0}', file));
+}
+
+/** 目标名校验（对齐 CB ProjectOptionsDlg::ValidateTargetName 的服务端等价实现） */
+function validateBuildTargetName(project: Project, name: string, exceptTitle?: string): string | undefined {
+  const value = name.trim();
+  if (!value) return i18n.t('The target name must not be empty');
+  if (value !== exceptTitle && (project.buildTargets.some((t) => t.title === value) || project.virtualTargets.some((v) => v.title === value))) {
+    return i18n.t('A target with this name already exists');
+  }
+  if (/[;,!@#$%^&*"'~=?\\><`]/.test(value)) {
+    return i18n.t('The target name contains an invalid character (; , ! @ # $ % ^ & * " \' ~ = ? \\ > < `)');
+  }
+  return undefined;
+}
+
+/** File → New → Build Target…（对齐 CB main_menu.xrc idFileNewTarget） */
+async function newBuildTarget(): Promise<void> {
+  const project = requireProject();
+  if (!project) return;
+  const title = await vscode.window.showInputBox({
+    prompt: i18n.t('New build target name'),
+    value: '',
+    validateInput: (v) => validateBuildTargetName(project, v),
+  });
+  if (title === undefined || !title.trim()) return;
+
+  const types: Array<{ label: string; description: string; type: TargetType }> = [
+    { label: i18n.t('GUI application'), description: 'ttExecutable', type: TargetType.Executable },
+    { label: i18n.t('Console application'), description: 'ttConsoleOnly', type: TargetType.ConsoleOnly },
+    { label: i18n.t('Static library'), description: 'ttStaticLib', type: TargetType.StaticLib },
+    { label: i18n.t('Dynamic library'), description: 'ttDynamicLib', type: TargetType.DynamicLib },
+    { label: i18n.t('Commands only'), description: 'ttCommandsOnly', type: TargetType.CommandsOnly },
+  ];
+  const pick = await vscode.window.showQuickPick(types, {
+    placeHolder: i18n.t('Build target type'),
+    matchOnDescription: true,
+  });
+  if (!pick) return;
+
+  try {
+    const target = makeTarget(project.title, title.trim(), pick.type, [], project.compilerId || 'gcc');
+    project.buildTargets.push(target);
+    await persistProjectAndReload(project);
+    const reloaded = openProjects.find((p) => normPath(p.filename) === normPath(project.filename));
+    if (reloaded) {
+      setSelectedTarget(reloaded, title.trim());
+      setActiveProject(reloaded, { persist: true });
+      projectTreeProvider?.setActiveProject(reloaded);
+    }
+    outputChannel.info(logT('[Code::Blocks] Build target added: {0} ({1})', title.trim(), pick.description));
+    vscode.window.showInformationMessage(i18n.t('Build target "{0}" created', title.trim()));
+  } catch (err) {
+    vscode.window.showErrorMessage(i18n.t('Failed to create the build target: {0}', (err as Error).message));
+  }
+}
+
+/** File → New → File…（对齐 CB main_menu.xrc idFileNewFile 的轻量模板入口） */
+async function newProjectFile(): Promise<void> {
+  const project = requireProject();
+  if (!project) return;
+  const rel = await vscode.window.showInputBox({
+    prompt: i18n.t('New file path (relative to the project directory)'),
+    value: 'main.c',
+    validateInput: (v) => {
+      const value = v.trim().replace(/\\/g, '/');
+      if (!value) return i18n.t('The file path must not be empty');
+      if (path.isAbsolute(value) || value.startsWith('../') || value.includes('/../') || value === '..') {
+        return i18n.t('The file path must stay inside the project directory');
+      }
+      if (project.files.some((f) => f.relativeFilename.replace(/\\/g, '/').toLowerCase() === value.toLowerCase())) {
+        return i18n.t('This file is already part of the project');
+      }
+      return undefined;
+    },
+  });
+  if (rel === undefined || !rel.trim()) return;
+  const relative = rel.trim().replace(/\\/g, '/').replace(/^\.\//, '');
+
+  const templates: Array<{ label: string; description: string; content: string }> = [
+    { label: i18n.t('C source'), description: '.c', content: '#include <stdio.h>\n\nint main(void)\n{\n    printf("Hello, world!\\n");\n    return 0;\n}\n' },
+    { label: i18n.t('C++ source'), description: '.cpp', content: '#include <iostream>\n\nint main()\n{\n    std::cout << "Hello, world!" << std::endl;\n    return 0;\n}\n' },
+    { label: i18n.t('Header file'), description: '.h', content: '#pragma once\n\n' },
+    { label: i18n.t('Empty file'), description: '', content: '' },
+  ];
+  const pick = await vscode.window.showQuickPick(templates, { placeHolder: i18n.t('File template') });
+  if (!pick) return;
+
+  const abs = path.join(project.basePath, relative);
+  if (fs.existsSync(abs)) {
+    const overwrite = await vscode.window.showWarningMessage(
+      i18n.t('"{0}" already exists. Overwrite it?', relative),
+      { modal: true },
+      i18n.t('Overwrite'),
+    );
+    if (overwrite !== i18n.t('Overwrite')) return;
+  }
+  try {
+    fs.mkdirSync(path.dirname(abs), { recursive: true });
+    writeFileAtomicSync(abs, pick.content, 'utf-8');
+    const unit = buildUnitXmlForTargets(relative, path.extname(relative).toLowerCase(), null);
+    writeUnitsToCbp(project.filename, [unit]);
+    await reloadProjectFromDisk(project.filename);
+    await vscode.window.showTextDocument(vscode.Uri.file(abs), { preview: false });
+    outputChannel.info(logT('[Code::Blocks] File created and added to the project: {0}', relative));
+  } catch (err) {
+    vscode.window.showErrorMessage(i18n.t('Failed to create the file: {0}', (err as Error).message));
   }
 }
 
@@ -5737,7 +6363,8 @@ async function editFileBuildCommand(project: Project, file: ProjectFile): Promis
 function removeUnitFromCbp(cbpPath: string, relativeFilename: string): void {
   const src = readProjectText(cbpPath);
   const raw = src.text;
-  const escaped = relativeFilename.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  // 原始 .cbp 文本中的属性值是 XML 转义形式（路径 & → &amp;）
+  const escaped = escapeXmlAttr(relativeFilename).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   // 匹配自闭合 <Unit filename="..." /> 或成对 <Unit filename="...">...</Unit>
   const selfClose = new RegExp(`<Unit filename="${escaped}"\\s*/>`, 'g');
   const paired = new RegExp(`<Unit filename="${escaped}"\\s*>[\\s\\S]*?</Unit>`, 'g');
@@ -5750,7 +6377,9 @@ function removeUnitFromCbp(cbpPath: string, relativeFilename: string): void {
 function setUnitOptionInCbp(cbpPath: string, relativeFilename: string, opt: 'compile' | 'link', enable: boolean): void {
   const src = readProjectText(cbpPath);
   const raw = src.text;
-  const escaped = relativeFilename.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  // 原始 .cbp 文本中的属性值是 XML 转义形式（路径 & → &amp;）
+  const xmlRel = escapeXmlAttr(relativeFilename);
+  const escaped = xmlRel.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const optPat = `<Option ${opt}="[01]"\\s*/>`;
 
   // 定位该 <Unit> 节点（自闭合或成对）
@@ -5773,8 +6402,8 @@ function setUnitOptionInCbp(cbpPath: string, relativeFilename: string, opt: 'com
     }
     // 无其它子选项时收回自闭合写法（与 writer 的序列化形式一致）
     const newUnit = newInner.trim()
-      ? `<Unit filename="${relativeFilename}">${newInner}</Unit>`
-      : `<Unit filename="${relativeFilename}" />`;
+      ? `<Unit filename="${xmlRel}">${newInner}</Unit>`
+      : `<Unit filename="${xmlRel}" />`;
     const out = raw.replace(pairedRe, newUnit);
     if (out === raw && newInner !== inner) throw new Error(i18n.t('File "{0}" not found in the .cbp', relativeFilename));
     if (out !== raw) writeProjectText(cbpPath, out, src.encoding);
@@ -5785,7 +6414,7 @@ function setUnitOptionInCbp(cbpPath: string, relativeFilename: string, opt: 'com
   selfCloseRe.lastIndex = 0;
   if (selfCloseRe.test(raw)) {
     if (enable) return;
-    const newUnit = `<Unit filename="${relativeFilename}">\n\t\t\t<Option ${opt}="0" />\n\t\t</Unit>`;
+    const newUnit = `<Unit filename="${xmlRel}">\n\t\t\t<Option ${opt}="0" />\n\t\t</Unit>`;
     const out = raw.replace(selfCloseRe, newUnit);
     writeProjectText(cbpPath, out, src.encoding);
     return;
@@ -5868,15 +6497,8 @@ async function addFilesToProject(filename: string): Promise<void> {
  *    - 其余（.cpp/.cc/.cxx/.h/.hpp/.s/.S 等）→ 默认 CPP，保存时省略 compilerVar 属性
  */
 function buildUnitXml(rel: string, ext: string): string {
-  let compilerVar = 'CPP';
-  if (ext === '.c') compilerVar = 'CC';
-  else if (ext === '.rc' && process.platform === 'win32') compilerVar = 'WINDRES';
-
-  if (compilerVar === 'CPP') {
-    // 默认 CPP 不写 compilerVar（Code::Blocks 对默认情况省略，自闭合）
-    return `\t\t<Unit filename="${rel}" />`;
-  }
-  return `\t\t<Unit filename="${rel}">\n\t\t\t<Option compilerVar="${compilerVar}" />\n\t\t</Unit>`;
+  // 统一走 recursiveAdd 的实现：XML 转义、compilerVar 判定与 Code::Blocks 一致
+  return buildUnitXmlForTargets(rel, ext, null);
 }
 
 /**
@@ -7511,6 +8133,22 @@ async function buildSingleFileLocked(project: Project, file: ProjectFile): Promi
   }
   const target = project.buildTargets.find((t) => t.title === targetTitle);
   if (!target) return;
+
+  // Makefile 项目：单文件编译走 <MakeCommands><CompileFile>（对齐 CB GetMakeCommandFor）
+  if (project.makefileIsCustom) {
+    const cmd = getMakeCommand(project, target, 'compileFile');
+    if (!cmd) {
+      vscode.window.showInformationMessage(
+        i18n.t('This project uses a custom Makefile but has no CompileFile command; configure it in Build options or use Build'),
+      );
+      return;
+    }
+    outputChannel.clear();
+    outputChannel.show(true);
+    await runMakeBuild(project, cmd, target.title);
+    return;
+  }
+
   const compiler = getCompiler(target.compilerId || project.compilerId);
 
   // 输出清理核查 C：单文件编译开头清空输出（与整目标构建一致）
@@ -8194,7 +8832,7 @@ async function exportProjectMakefile(): Promise<void> {
   });
   if (!uri) return;
   try {
-    fs.writeFileSync(uri.fsPath, content, 'utf-8');
+    writeFileAtomicSync(uri.fsPath, content, 'utf-8');
   } catch (err) {
     vscode.window.showErrorMessage(i18n.t('Write failed: {0}', (err as Error).message));
     return;
@@ -8326,7 +8964,7 @@ async function importExternalProject(): Promise<void> {
     return;
   }
   try {
-    fs.writeFileSync(cbpPath, serializeProject(project), 'utf-8');
+    writeFileAtomicSync(cbpPath, serializeProject(project), 'utf-8');
   } catch (err) {
     vscode.window.showErrorMessage(i18n.t('Failed to write the .cbp: {0}', (err as Error).message));
     return;
@@ -8567,9 +9205,36 @@ function saveHtmlBuildLog(buildStartMs: number, scope: 'project' | 'workspace', 
       })),
     });
     const file = path.join(dir, `${base}_build_log.html`);
-    fs.writeFileSync(file, html, 'utf-8');
+    writeFileAtomicSync(file, html, 'utf-8');
     outputChannel.info(logT('[Code::Blocks] Build log saved as: file:///{0}', file.replace(/\\/g, '/')));
   } catch { /* 非致命：日志导出失败不影响构建 */ }
+}
+
+/** Dist Clean（仅自定义 Makefile 项目；对齐 CB MakeCommands.DistClean） */
+async function distClean(): Promise<void> {
+  const project = requireProject();
+  if (!project) return;
+  if (!project.makefileIsCustom) {
+    vscode.window.showInformationMessage(i18n.t('Dist Clean is only available for projects with a custom Makefile'));
+    return;
+  }
+  const targetTitle = getSelectedTarget(project) ?? project.buildTargets.find((t) => supportsCurrentPlatform(t.platforms))?.title;
+  const target = project.buildTargets.find((t) => t.title === targetTitle);
+  const cmd = getMakeCommand(project, target, 'distClean');
+  if (!cmd) {
+    vscode.window.showWarningMessage(i18n.t('No DistClean command is configured in the project Make commands'));
+    return;
+  }
+  if (!claimBuildMutex()) return;
+  try {
+    outputChannel.clear();
+    outputChannel.show(true);
+    await runMakeBuild(project, cmd, targetTitle ?? '');
+  } finally {
+    buildInProgress = false;
+    currentBuildCancel = undefined;
+    flushPendingClangdRestart();
+  }
 }
 
 async function clean(): Promise<void> {
@@ -8843,10 +9508,93 @@ function runWorkingDir(project: Project, target: BuildTarget, vars: Record<strin
 }
 
 /**
- * 无项目单文件编译 —— 对齐 CB CompileFileWithoutProject（compilergcc.cpp:3174-3191：默认编译器 + 控制台模板 + 编译后询问运行），
- * 改用 VS Code 任务系统执行（ShellExecution + $gcc 问题匹配器，集成终端展示）。
+ * 无项目单文件编译（默认路径）—— 对齐 CB CompileFileWithoutProject
+ * （compilergcc.cpp:3174-3191：默认编译器 + 控制台模板 + 编译后询问运行）。
+ *
+ * 用扩展自管进程 + `OutputLineDecoder` 逐行解码（UTF-8 优先、GBK 回退），
+ * 解决任务终端固定 UTF-8 导致中文 Windows 下 GCC 输出乱码的问题。
  */
 async function compileFileWithoutProject(): Promise<void> {
+  const cfg = vscode.workspace.getConfiguration('codeblocks');
+  if (cfg.get<boolean>('noProjectCompile.useTaskTerminal', false)) {
+    await compileFileWithoutProjectViaTask();
+    return;
+  }
+
+  const editor = vscode.window.activeTextEditor;
+  if (!editor) {
+    vscode.window.showWarningMessage(i18n.t('No file is open'));
+    return;
+  }
+  const filePath = editor.document.uri.fsPath;
+  const ext = path.extname(filePath).toLowerCase();
+  if (!['.c', '.cpp', '.cc', '.cxx'].includes(ext)) {
+    vscode.window.showWarningMessage(i18n.t('Only C/C++ sources (.c/.cpp/.cc/.cxx) can be built'));
+    return;
+  }
+  const compiler = getCompiler(cfg.get<string>('compilerId', 'gcc'));
+  const prog = ext === '.c' ? compiler.programs.C : compiler.programs.CPP;
+  if (!prog) {
+    vscode.window.showErrorMessage(i18n.t('The default compiler is unavailable — detect or configure a compiler first'));
+    return;
+  }
+  await saveAllBeforeBuild();
+  const cc = compiler.masterPath ? path.join(compiler.masterPath, 'bin', prog) : prog;
+  const plan = buildNoProjectCompilePlan(filePath, cc);
+  const controller = new AbortController();
+  outputChannel.info(logT('[Code::Blocks] Compile file without project: {0} {1}', plan.program, plan.args.join(' ')));
+  outputChannel.show(true);
+
+  const result = await vscode.window.withProgress(
+    {
+      location: vscode.ProgressLocation.Notification,
+      title: i18n.t('Compiling {0} (without project)', path.basename(filePath)),
+      cancellable: true,
+    },
+    async (_progress, token) => {
+      token.onCancellationRequested(() => controller.abort());
+      try {
+        return await runNoProjectCompile(
+          plan,
+          (line, stream) => {
+            if (stream === 'stderr') outputChannel.error(line);
+            else outputChannel.appendLine(line);
+          },
+          controller.signal,
+        );
+      } catch (err) {
+        outputChannel.error(logT('[Code::Blocks] Failed to start the compiler: {0}', (err as Error).message));
+        return { code: -1, signal: null, cancelled: false };
+      }
+    },
+  );
+
+  if (result.cancelled) {
+    vscode.window.setStatusBarMessage(i18n.t('Compile cancelled'), 3000);
+    return;
+  }
+  if (result.code !== 0) {
+    vscode.window.showErrorMessage(i18n.t('Compile failed (exit code {0}) — see the Code::Blocks output for details', result.code ?? '?'));
+    return;
+  }
+
+  // 编译成功后询问运行（对齐 CB GetCompileSingleFileCommand 流程）
+  const pick = await vscode.window.showInformationMessage(
+    i18n.t('Build succeeded — run the produced executable?'),
+    i18n.t('Run'),
+  );
+  if (pick === i18n.t('Run')) {
+    const t = createRunTerminal('Run (no project)', { cwd: plan.cwd });
+    t.show();
+    t.sendText(`"${plan.output}"`);
+  }
+}
+
+/**
+ * 旧路径：用 VS Code 任务系统执行（ShellExecution + $gcc 问题匹配器，集成终端展示）。
+ * 受 `codeblocks.noProjectCompile.useTaskTerminal` 控制，保留用于回退。
+ */
+async function compileFileWithoutProjectViaTask(): Promise<void> {
   const editor = vscode.window.activeTextEditor;
   if (!editor) {
     vscode.window.showWarningMessage(i18n.t('No file is open'));
@@ -8898,6 +9646,193 @@ async function compileFileWithoutProject(): Promise<void> {
     }
   });
   await vscode.tasks.executeTask(task);
+}
+
+/** 收集工程/目标链接的静态库（绝对路径；去重） */
+function collectProjectLibraries(project: Project, target: BuildTarget | undefined): string[] {
+  const libDirs = [...(project.libDirs ?? []), ...(target?.libDirs ?? [])]
+    .map((d) => path.resolve(project.basePath, d));
+  const names = [...(project.linkLibs ?? []), ...(target?.linkLibs ?? [])];
+  const out = new Set<string>();
+  for (const name of names) {
+    const direct = path.isAbsolute(name) ? name : path.resolve(project.basePath, name);
+    if (/\.(a|lib)$/i.test(direct) && fs.existsSync(direct)) { out.add(direct); continue; }
+    const base = path.basename(name);
+    for (const dir of libDirs) {
+      for (const candidate of [path.join(dir, `lib${base}.a`), path.join(dir, `${base}.lib`), path.join(dir, base)]) {
+        if (fs.existsSync(candidate)) { out.add(candidate); break; }
+      }
+    }
+  }
+  // 工程没有显式链接库时，退化为 libDirs 下的全部 .a/.lib
+  if (!out.size) {
+    for (const dir of libDirs) {
+      try {
+        for (const f of fs.readdirSync(dir)) {
+          if (/\.(a|lib)$/i.test(f)) out.add(path.join(dir, f));
+        }
+      } catch { /* 目录不存在/无权限 */ }
+    }
+  }
+  return [...out];
+}
+
+/** Tools → Find Symbol in Libraries…（对齐 CB SymTab 的跨库符号搜索） */
+async function findSymbolInLibraries(): Promise<void> {
+  const project = requireProject();
+  if (!project) return;
+  const target = project.buildTargets.find((t) => t.title === getSelectedTarget(project))
+    ?? project.buildTargets.find((t) => supportsCurrentPlatform(t.platforms));
+  let libraries = collectProjectLibraries(project, target);
+  if (!libraries.length) {
+    const uris = await vscode.window.showOpenDialog({
+      canSelectFiles: true,
+      canSelectMany: true,
+      canSelectFolders: false,
+      openLabel: i18n.t('Select libraries'),
+      filters: { [i18n.t('Static libraries')]: ['a', 'lib'], [i18n.t('All files')]: ['*'] },
+    });
+    if (!uris?.length) {
+      vscode.window.showWarningMessage(i18n.t('No link libraries found in the active project'));
+      return;
+    }
+    libraries = uris.map((u) => u.fsPath);
+  }
+
+  const query = await vscode.window.showInputBox({
+    prompt: i18n.t('Symbol name filter (leave empty to list all symbols)'),
+    placeHolder: 'main',
+  });
+  if (query === undefined) return;
+
+  const compiler = getCompiler(target?.compilerId || project.compilerId);
+  const nmCandidate = compiler.masterPath
+    ? path.join(compiler.masterPath, 'bin', process.platform === 'win32' ? 'nm.exe' : 'nm')
+    : (process.platform === 'win32' ? 'nm.exe' : 'nm');
+  const nm = fs.existsSync(nmCandidate) ? nmCandidate : (process.platform === 'win32' ? 'nm.exe' : 'nm');
+
+  const rows: SymbolRow[] = [];
+  const failures: string[] = [];
+  await vscode.window.withProgress(
+    { location: vscode.ProgressLocation.Notification, title: i18n.t('Searching {0} library(ies)…', libraries.length), cancellable: false },
+    async (progress) => {
+      for (let i = 0; i < libraries.length; i++) {
+        const lib = libraries[i];
+        progress.report({ message: path.basename(lib), increment: 100 / libraries.length });
+        try {
+          const r = await runCapture(nm, ['-C', '-A', lib], { timeoutMs: 60_000 });
+          if (r.code === 0) rows.push(...parseNmOutput(r.stdout, lib));
+          else failures.push(`${path.basename(lib)} (exit ${r.code ?? '?'})`);
+        } catch (err) {
+          failures.push(`${path.basename(lib)} (${(err as Error).message})`);
+        }
+      }
+    },
+  );
+
+  if (failures.length) {
+    outputChannel.warn(logT('[Code::Blocks] SymTab: failed to read {0} library(ies): {1}', failures.length, failures.join(', ')));
+  }
+  const filtered = filterSymbols(rows, query);
+  if (!filtered.length) {
+    vscode.window.showInformationMessage(i18n.t('No matching symbols found ({0} symbol(s) scanned)', rows.length));
+    return;
+  }
+  const items = filtered.slice(0, 2000).map((r) => ({
+    label: r.name,
+    description: `${r.type}${r.address ? ` · ${r.address}` : ''}`,
+    detail: r.library,
+    symbol: r,
+  }));
+  const pick = await vscode.window.showQuickPick(items, {
+    title: i18n.t('Symbols in libraries ({0} match(es))', filtered.length),
+    placeHolder: i18n.t('Select a symbol to copy its name'),
+    matchOnDescription: true,
+    matchOnDetail: true,
+  });
+  if (!pick) return;
+  await vscode.env.clipboard.writeText(pick.symbol.name);
+  vscode.window.setStatusBarMessage(i18n.t('Symbol copied: {0}', pick.symbol.name), 3000);
+}
+
+/** Profile target（gprof）—— 对齐 CB Tools → Profiler（cbprofiler.cpp:83-255） */
+async function profileTarget(): Promise<void> {
+  const project = requireProject();
+  if (!project) return;
+  const target = project.buildTargets.find((t) => t.title === getSelectedTarget(project))
+    ?? project.buildTargets.find((t) => supportsCurrentPlatform(t.platforms) && isExecutableTargetType(t.targetType));
+  if (!target) {
+    vscode.window.showWarningMessage(i18n.t('No executable build target is available for profiling'));
+    return;
+  }
+  if (!isExecutableTargetType(target.targetType)) {
+    vscode.window.showWarningMessage(i18n.t('Only executable targets can be profiled'));
+    return;
+  }
+  const vars = { ...envVarMap(project.envVars, target.envVars), ...cbBuiltinVars(project.basePath, target.outputFilename, target.title, target.objectOutput, project.title, project.filename, getCompiler(target.compilerId || project.compilerId)?.masterPath ?? '') };
+  const expandedOut = replaceCbMacros(target.outputFilename, { vars, customVars: project.customVariables ?? {}, basePath: project.basePath });
+  const exePath = resolveExecutablePath(project.basePath, expandedOut, process.platform, true);
+  if (!fs.existsSync(exePath)) {
+    vscode.window.showErrorMessage(i18n.t('The executable does not exist — build first ({0})', path.relative(project.basePath, exePath)));
+    return;
+  }
+  const flags = [...(target.compilerOptions ?? []), ...(project.compilerOptions ?? []), ...(target.linkerOptions ?? []), ...(project.linkerOptions ?? [])].join(' ');
+  if (!/(^|\s)-pg(\s|$)/.test(flags)) {
+    const proceed = i18n.t('Profile Anyway');
+    const answer = await vscode.window.showWarningMessage(
+      i18n.t('The target does not appear to be built with -pg; gmon.out may not be produced. Continue?'),
+      { modal: true },
+      proceed,
+    );
+    if (answer !== proceed) return;
+  }
+  const cwd = runWorkingDir(project, target, vars);
+  const env: Record<string, string> = { ...(process.env as Record<string, string>) };
+  for (const ev of [...project.envVars, ...target.envVars]) env[ev.name] = ev.value;
+  const args = splitCommandLine(target.executionParameters ?? '');
+  const ch = profilerOutputChannel();
+  ch.appendLine(i18n.t('Profiling target: {0}', target.title));
+  ch.appendLine(`> "${exePath}" ${args.join(' ')}`);
+  ch.show(true);
+
+  const runResult = await vscode.window.withProgress(
+    { location: vscode.ProgressLocation.Notification, title: i18n.t('Running {0} for profiling…', target.title), cancellable: false },
+    () => runCapture(exePath, args, { cwd, env, timeoutMs: 5 * 60 * 1000 }, (line) => ch.appendLine(line)),
+  );
+  if (runResult.code !== 0) {
+    ch.appendLine(i18n.t('The profiled program exited with code {0}; profiling continues if gmon.out exists.', runResult.code ?? '?'));
+  }
+
+  const gmonCandidates = [path.join(path.dirname(exePath), 'gmon.out'), path.join(cwd, 'gmon.out')];
+  const gmon = gmonCandidates.find((p) => fs.existsSync(p));
+  if (!gmon) {
+    vscode.window.showErrorMessage(i18n.t('gmon.out was not found — rebuild the target with -pg and run it again'));
+    return;
+  }
+  const gprof = vscode.workspace.getConfiguration('codeblocks').get<string>('profiler.gprofPath', '').trim() || 'gprof';
+  ch.appendLine(i18n.t('Running gprof: {0} "{1}" "{2}"', gprof, exePath, gmon));
+  try {
+    const gprofResult = await runCapture(gprof, [exePath, gmon], { cwd: path.dirname(exePath), timeoutMs: 2 * 60 * 1000 }, (line, stream) => {
+      if (stream === 'stderr') ch.appendLine(line);
+    });
+    if (gprofResult.code !== 0) {
+      vscode.window.showErrorMessage(i18n.t('gprof failed (exit code {0}) — see the Code::Blocks Profiler output', gprofResult.code ?? '?'));
+      return;
+    }
+    const rows = parseGprofFlatProfile(gprofResult.stdout);
+    if (!rows.length) {
+      vscode.window.showWarningMessage(i18n.t('gprof produced no flat-profile rows'));
+      ch.appendLine(gprofResult.stdout);
+      return;
+    }
+    ch.appendLine('');
+    ch.appendLine(formatProfilerTable(rows));
+    ch.appendLine('');
+    ch.appendLine(i18n.t('Flat profile: {0} function(s)', rows.length));
+    vscode.window.showInformationMessage(i18n.t('Profiling finished: {0} function(s)', rows.length));
+  } catch (err) {
+    vscode.window.showErrorMessage(i18n.t('Failed to run gprof: {0}', (err as Error).message));
+  }
 }
 
 async function run(): Promise<void> {

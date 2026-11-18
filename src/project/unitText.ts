@@ -7,6 +7,8 @@
  * 保证 `<Option>` 子节点、属性顺序、缩进等原样保留。
  */
 
+import { escapeXmlAttr } from '../model/xml';
+
 /** 正则转义 */
 export function escapeRegExp(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -19,20 +21,21 @@ export function escapeRegExp(s: string): string {
  * @returns replaced = 是否命中并替换
  */
 export function renameUnitInCbpText(raw: string, oldRel: string, newRel: string): { text: string; replaced: boolean } {
-  const esc = escapeRegExp(oldRel);
+  // 原始文本中的属性值是 XML 转义后的形式（路径里的 & 写作 &amp;）
+  const esc = escapeRegExp(escapeXmlAttr(oldRel));
   // 开标签内 filename 之前可能还有其它属性：`<Unit abc="1" filename="old"`
   const re = new RegExp(`<Unit([^>]*?)filename="${esc}"`, 'g');
   let replaced = false;
   const text = raw.replace(re, (_m, pre: string) => {
     replaced = true;
-    return `<Unit${pre}filename="${newRel}"`;
+    return `<Unit${pre}filename="${escapeXmlAttr(newRel)}"`;
   });
   return { text, replaced };
 }
 
 /** 统计某 relativeFilename 在 .cbp 中的 `<Unit>` 引用次数（重复参考防护） */
 export function countUnitReferences(raw: string, rel: string): number {
-  const esc = escapeRegExp(rel);
+  const esc = escapeRegExp(escapeXmlAttr(rel));
   const re = new RegExp(`<Unit([^>]*?)filename="${esc}"`, 'g');
   let n = 0;
   while (re.exec(raw)) n++;
