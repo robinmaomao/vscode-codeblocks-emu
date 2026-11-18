@@ -138,6 +138,7 @@ npm.cmd run test:host       # L2 真实 VS Code 宿主
 - `test:host` 默认复用 `.vscode-test/` 中缓存的 VS Code；首次运行或缓存损坏时会重新下载。
 - `test:host` 会先通过 `pretest:host` 构建 `bundle/extension.js` 与 `bundle/search-worker.js`，干净检出后可直接运行，不依赖先前的手工构建。
 - 视觉/性能层不在默认开发流程内；需要时使用 `npm run test:visual` / `npm run test:perf`，并参考 [分层测试方案](../testing/strategy.md)。
+- **视觉基线跨机**：`tests/visual/baselines` 中的基线来自另一台机器，本机指纹不同 → 自动走**跨环境容差**分支并逐条标注 `OK(P)`，属预期。确认界面真变了才刷新基线：`npm run visual:baseline`（指纹不匹配时只写 `.cb-tools/visual/<指纹>/`，需 `--canonical` 才改入库基线）。
 
 ## 6. VS Code 开发与调试
 
@@ -155,6 +156,17 @@ code.cmd --extensionDevelopmentPath="." --disable-extensions --new-window
 1. 在扩展开发宿主中打开 `test-project/hello-cb.cbp`。
 2. 状态栏确认检测到 GCC/MinGW 编译器。
 3. `Ctrl+F9` 构建，`F9` 运行，`F5` 启动 GDB 调试并验证断点/变量。
+
+### 6.1 打包与安装（VSIX）
+
+```powershell
+npm.cmd run package                                   # = vsce package（自动 compile + bundle + bundle:search）
+code.cmd --install-extension codeblocks-vscode-0.8.152.vsix --force
+code.cmd --list-extensions --show-versions | Select-String codeblocks
+```
+
+- `.vscodeignore` 已排除 `src/`、`tests/`、`test-project/`、`docs/`、`.github/`、`.vscode/`、`.nvmrc`、`*.map`、`package-lock.json`；VSIX 入口只有 `bundle/extension.js`。
+- 安装后**重载窗口**生效；重复安装同版本需带 `--force`。
 
 ## 7. 常见问题
 

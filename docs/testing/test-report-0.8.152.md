@@ -1,6 +1,6 @@
 # 测试执行报告（0.8.152 · 滚动更新）
 
-> 生成时间：2026-11-16 ｜ 执行环境：Windows 10 x64 ｜ Node v24.19.0 ｜ CPU i3-10105 ×8 ｜ 15.8GB
+> 生成时间：2026-11-16（2026-11-18 在新开发机复跑七层并更新 §1 / §5）｜ 执行环境：Windows 11 x64 ｜ Node v24.22.3 ｜ CPU Ryzen 7 7840U ×16 ｜ 31.3GB ｜ w64devkit GCC 16.2 / GDB 18.1
 > 方案见 [测试方案](./strategy.md)；覆盖台账见 [测试覆盖矩阵](./coverage-matrix.md)；性能数据见 [性能基准](./performance-baseline.md)。
 > 上一版权威复核见 [0.8.139 完整报告](./test-report-0.8.139-full.md)；本版发布说明见 [release/0.8.152.md](../release/0.8.152.md)；上一版发布说明见 [release/0.8.151.md](../release/0.8.151.md)。
 
@@ -10,12 +10,12 @@
 |----|------|----------|------|
 | L-1 契约 | `npm run test:contract` | **3/3** | 契约 44 项 + 文档一致性 6 项 + 设置契约 707 断言（覆盖矩阵/性能基准/命令与链接/版本标记） |
 | 无头层（unit） | `npm test` | **TOTAL=195 FAIL=0 SKIP=1** | SKIP=`tests/test-writer.js`；新增 `test-project-context-menu.js`（18 断言）、`test-file-properties.js`（**36 断言**：行数统计 / 对象名 / 三页结构 / 自动生成禁用 / customBuild 往返 / 只读切换）、`test-run-targets-panel.js`（18 断言）、`test-build-options-enable-rules.js`（32）+ `test-properties-enable-rules.js`（42，启用联动 + 第二轮对齐）；第二轮再新增 `test-build-options-interactions.js`（**15 断言**，真实 DOM：additionalLibs 往返 / 构建脚本提示 / Linker executable 作用域 / 变量键值对话框 / 覆盖层 OK·Cancel）与 `test-properties-interactions.js`（**24 断言**，真实 DOM：列表点击、类型改写（含自动前缀/扩展名与宏名）、占位符、命名校验、文件属性可用、脚本校验文案与换行）；`test-webview-panels.js` **65 断言** |
-| L3 视觉 | `npm run test:visual` | **26/26** | 6 个属性页签（settings/targets/scripts/notes/parser/debugger）+ 文件属性三页（`props-file-general/build/advanced`）+ `build-options` + `run-targets` + keybindings + buildlog，dark/light 各一套 |
-| L1 端到端 | `npm run test:e2e` | **6/6** | 边界 38（3 skip）/ 构建矩阵 48 / ccache 21 / 调试 143（1 skip）/ 链接期诊断 9 / 工具链 42（4 skip） |
-| L4 性能 | `npm run test:perf` | 未复跑 | 本版未触碰构建执行路径；沿用 [性能基准](./performance-baseline.md) 的 0.8.148 结论 |
+| L3 视觉 | `npm run test:visual` | **26/26** | 6 个属性页签（settings/targets/scripts/notes/parser/debugger）+ 文件属性三页（`props-file-general/build/advanced`）+ `build-options` + `run-targets` + keybindings + buildlog，dark/light 各一套；本机指纹与入库基线不同 → 走跨环境容差分支，逐条标注 `OK(P)` |
+| L1 端到端 | `npm run test:e2e` | **6/6** | 边界 39（2 skip）/ 构建矩阵 48 / ccache 21 / 调试 141（1 skip；可重定位镜像分支，见 §5.4）/ 链接期诊断 9 / 工具链 44 总（**42 pass / 2 skip**：clang 官方构建未含 AVR/MSP430 后端） |
+| L4 性能 | `npm run test:perf` | **13/13** | 13 项微基准 + 真实构建；0 warn / 0 fail，预算门禁按 `min` 判定 |
 | L5 打包 | `npm run test:pack` | **1/1（15 断言）** | VSIX 0.8.152 打包 / 安装冒烟通过，含 `bundle/search-worker.js` 检查 |
 | 产物 | `npm run bundle` + `npm run bundle:search` | 通过 | esbuild 无告警；worker 单独产物已生成 |
-| L2 宿主 | `npm run test:host` | 未复跑 | 沿用 0.8.140 复核；本版未改动视图声明 |
+| L2 宿主 | `npm run test:host` | **1/1（24 用例）** | 真实 VS Code 1.85.0 宿主；**24 pass / 0 fail / 0 skip**（clangd 23.1.3 已就位，D-10 由 SKIP 转为实跑） |
 
 ### 1.1 本轮验证要点
 
@@ -90,6 +90,6 @@
 
 ## 5. 结论
 
-- 单元（**195**）/ 契约 / E2E / 视觉（**26**）/ 打包全部通过；四批 main 追加改动（启用联动、Build options 严格对齐、文件属性对话框、第二轮逐项对齐）共修 11 个缺陷（#8–#18），无遗留。
+- 单元（**195**）/ 契约 / E2E / 视觉（**26**）/ 性能（**13**）/ 打包 / 宿主（**24**）**七层全部通过**；四批 main 追加改动（启用联动、Build options 严格对齐、文件属性对话框、第二轮逐项对齐）共修 11 个缺陷（#8–#18），无遗留。
 - 命令缺口保持 2 个（交互式探测与 clangd 重启转发），与 0.8.150 一致。
-- 未运行 `test:perf` / `test:host`：本版未触碰构建执行路径与视图声明，沿用既有基线。
+- **2026-11-18 环境复核**：在新的 Windows 11 开发机（Node v24.22.3 / w64devkit GCC 16.2 / GDB 18.1 / clangd 23.1.3）上重跑七层，全部 0 fail；`test:perf` 与 `test:host` 从此前的「未复跑」转为实跑。工具链矩阵因补齐 MSP430 4.6.3 与 SDCC 4.6.4，S8 由 SKIP 转为实际执行。

@@ -78,7 +78,7 @@ node tests/run-all.js --group all --json out.json
 | `playwright` + 系统 Edge | L3 视觉渲染 | 无需下载 Chromium |
 | `pixelmatch` + `pngjs` | L3 像素判定 | — |
 | `@vscode/test-electron` | L2 宿主集成 | 默认下载 engines 最低版本 VS Code 到 `.vscode-test/`（首次联网）；`CB_VSCODE_PATH` 可复用本机安装 |
-| clang/LLVM、AVR/RISC-V/MSP430 GCC、SDCC、TCC | L1 工具链矩阵 | 未安装时对应场景跳过并打印安装指引（见 §5.5） |
+| clang/LLVM、AVR/RISC-V/MSP430 GCC、SDCC、TCC | L1 工具链矩阵 | 本机均已解包到 `.cb-tools/toolchains/`；未安装时对应场景跳过并打印安装指引（见 §5.5） |
 
 > Windows 开发环境的完整安装、构建与排错步骤见 [dev/setup.md](../dev/setup.md)（英文版 [dev/setup.en.md](../dev/setup.en.md)）。
 
@@ -144,7 +144,7 @@ node tests/run-all.js --group all --json out.json
 
 ## 5.2 L5 打包与安装（`tests/pack/test-pack.js`）
 
-- P1 `vsce ls` 内容核对：包含 `bundle/extension.js`、语法/语言配置、资源 XML、NLS、README/LICENSE/CHANGELOG；**不含** `tests/`、`test-project/`、`src/`、`dist/`、`*.map`
+- P1 `vsce ls` 内容核对：包含 `bundle/extension.js`、语法/语言配置、资源 XML、NLS、README/LICENSE/CHANGELOG；**不含** `tests/`、`test-project/`、`src/`、`dist/`、`docs/`、`.github/`、`.nvmrc`、`*.map`、`package-lock.json`
 - P2 真实打包（`vsce package --no-dependencies`）→ 产物落 `.cb-tools/pack/`，体积合理性检查
 - P3 隔离 `--user-data-dir`/`--extensions-dir` 安装 → `--list-extensions` 校验版本 → 卸载
 - 无 `code` CLI 时 P3 自动 SKIP（可用 `CB_CODE_CLI` 指定）
@@ -178,12 +178,13 @@ node tests/run-all.js --group all --json out.json
 
 ## 5.4 L1 调试 E2E（DAP 协议级，`tests/e2e/test-e2e-debug.js`）
 
-直接以 DAP 客户端驱动扩展的 gdb 适配器（真实 gdb 8.1 + MI），覆盖 **143 条断言**：
+直接以 DAP 客户端驱动扩展的 gdb 适配器（真实 GDB + MI），覆盖 **143 条断言**：
 断点四类型（普通/条件/命中次数/日志断点）、单步四类（含指令级）、线程与栈、变量嵌套与 `setVariable`、表达式求值、反汇编、内存读写、数据断点、指令断点、运行到光标、SetNextStatement、异常断点、用户命令（MI/CLI）、多会话路由、terminate、能力请求（`modules`/`loadedSources`/`pause` 能力探测）、**attach / Detach（目标进程仍存活）**、**多线程切帧**、**运行中请求防护**（未停止时 `threads` 回缓存、其余请求快速失败并附中文说明，替代 30s MI 超时）、**`stopOnEntry` 入口首停**（S10b：入口临时断点 → `stopped(reason=entry)`；含 `stopOnEntry:false` 对照、GUI `-mwindows`/`-municode` 入口符号候选（`WinMain`/`wWinMain`，排除 CRT 的 `main` 桩）与 `strip -s` 无符号表用例）。
 
 > 本机 GDB 8.1 限制（已实测并据实断言）：被调试进程内函数求值 `-data-evaluate-expression "add(2,3)"` 与全量寄存器读取会触发 GDB 崩溃（0xC0000005），故寄存器全量读取由 `codeblocks.debug.registers`（默认关）门控（本层唯一 SKIP）；`jump file:line` 语义为「从新地址继续执行」；运行中（未停止）同步 MI 不回应任何命令，Windows 原生 GDB 下 `-exec-interrupt` 既不产生 `*stopped` 又让 GDB 永久失去回执（`mi-async` 无效）——`stopOnEntry` 因此用**入口临时断点**而非中断实现。
+> 现行开发机使用 w64devkit **GDB 18.1**（GCC 16.2）：上述 8.1 崩溃不再复现，寄存器视图可正常读取；`stopOnEntry` 仍按入口临时断点实现，行为一致。
 > `stopOnEntry` 的入口选取（C-01）：`-break-insert -t main` 对 `-mwindows` GUI 程序的 CRT `main` 桩返回 `^done` 但**无 `func`/`file`/`line`**（`at="<main+9>"`）且永不命中 ⇒ 只接受**带源码位置**的解析结果，按 `main` → `WinMain` → `wWinMain` 依次尝试；均不可用（如 `strip -s` ⇒ "No symbol table is loaded"）时用 `info files` 的 `Entry point` 作地址断点兜底（该停点无源码行，帧名 `??`，符合 DAP「入口」语义）。
-> **可重定位镜像分支**（跨环境差异，用例按产物属性分支断言，两个环境各真实执行一条）：PE 置了 `DYNAMICBASE`（新 binutils 默认 `--dynamicbase`）时加载器可能重定位映像 ⇒ 文件内入口地址运行前不可知，地址断点会在 `-exec-run` 时插入失败并**中止整个启动**（CI runner GDB 17.1 实测：`Cannot insert breakpoint 1. Cannot access memory at address 0x1400013f0` → `Command aborted.`）。适配器改为：`src/debug/peImage.ts` 解析 PE 标志 → 可重定位镜像**跳过**地址兜底并给出精确原因；同时 `-exec-run` 失败且存在入口断点时**撤断点重试一次**（stopOnEntry 失效可以接受，程序起不来不可以）。用例断言「程序不被中止 + 正常跑完 + 说明可读」（`tests/test-pe-image.js` 16 断言 + `tests/test-debug-entry-failsafe.js` 9 断言覆盖判定与重试逻辑）。两条分支各 4/6 条断言 ⇒ 本机固定基址共 **143** 条、CI runner 可重定位共 **141** 条，均为 0 fail。
+> **可重定位镜像分支**（跨环境差异，用例按产物属性分支断言，两个环境各真实执行一条）：PE 置了 `DYNAMICBASE`（新 binutils 默认 `--dynamicbase`）时加载器可能重定位映像 ⇒ 文件内入口地址运行前不可知，地址断点会在 `-exec-run` 时插入失败并**中止整个启动**（CI runner GDB 17.1 实测：`Cannot insert breakpoint 1. Cannot access memory at address 0x1400013f0` → `Command aborted.`）。适配器改为：`src/debug/peImage.ts` 解析 PE 标志 → 可重定位镜像**跳过**地址兜底并给出精确原因；同时 `-exec-run` 失败且存在入口断点时**撤断点重试一次**（stopOnEntry 失效可以接受，程序起不来不可以）。用例断言「程序不被中止 + 正常跑完 + 说明可读」（`tests/test-pe-image.js` 16 断言 + `tests/test-debug-entry-failsafe.js` 9 断言覆盖判定与重试逻辑）。两条分支各 4/6 条断言 ⇒ 旧机固定基址共 **143** 条、可重定位（GCC 16.2/w64devkit 默认 `--dynamicbase`，本机与 CI runner）共 **141** 条，均为 0 fail。
 
 ## 5.5 L1 工具链矩阵（`tests/e2e/test-e2e-toolchains.js`）
 
