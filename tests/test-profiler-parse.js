@@ -1,5 +1,5 @@
 // P2-1?gprof flat profile ???????
-const { parseGprofFlatProfile, formatProfilerTable, parseGprofCallGraph, formatProfilerCallGraph, profilerRowsToCsv, profilerReportHtml } = require('../dist/tools/profiler.js');
+const { parseGprofFlatProfile, formatProfilerTable, parseGprofCallGraph, formatProfilerCallGraph, profilerRowsToCsv, profilerReportHtml, isFreshGmon } = require('../dist/tools/profiler.js');
 
 let pass = 0, fail = 0;
 function check(name, cond, got, want) {
@@ -54,6 +54,9 @@ const html = profilerReportHtml({ target: 'demo<x>', executable: 'C:\\demo\\app.
 check('html self-contained', html.startsWith('<!DOCTYPE html>') && html.includes('<style>'), html.slice(0, 30), 'html');
 check('html escapes target and names', html.includes('demo&lt;x&gt;') && html.includes('<td>foo</td>'), html, 'escaped');
 check('html includes call graph', html.includes('Call graph') && html.includes('main [1]'), html, 'graph');
+check('missing gmon.out is fresh', isFreshGmon(undefined, { mtimeMs: 1, size: 10 }), true, true);
+check('unchanged gmon.out is stale', !isFreshGmon({ mtimeMs: 1, size: 10 }, { mtimeMs: 1, size: 10 }), false, false);
+check('updated gmon.out is fresh', isFreshGmon({ mtimeMs: 1, size: 10 }, { mtimeMs: 2, size: 10 }), true, true);
 
 console.log('profiler-parse: ' + pass + ' pass, ' + fail + ' fail');
 process.exit(fail ? 1 : 0);

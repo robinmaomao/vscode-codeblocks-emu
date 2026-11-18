@@ -3,6 +3,15 @@
 本文件记录**正式版**里程碑；近期 dev 迭代的逐轮发布说明见 [`docs/release/`](./docs/release/)（`0.8.xx-dev.md`），
 `0.8.76`–`0.8.128` 的 dev 说明已合并归档到 [`docs/release/archive/`](./docs/release/archive/)；版本号与维护约定见 [`docs/release/00-index.md`](./docs/release/00-index.md)。
 
+## 0.8.157 — 2026-11-19
+
+> 体验版：AutoVersioning/Profiler 正确性 + 编译器元数据与全量资源。
+
+- **AutoVersioning**：内容不变不重写 `version.h`；构建会话去重；`do_auto_increment`/`ask_to_increment` 生效；Bump/Generate 更新 manifest；SVN 字段、Changes Log、version.h 加入工程。
+- **Profiler**：拒绝旧 `gmon.out`；`gprof -A --separate-files` 回退；CSV/HTML 原子写。
+- **编译器**：`compiler_*.xml` 显示名/路径元数据；补齐 CB options/metadata；修正 `extends`；新增 OpenWatcom/Cygwin/MSYS2/TDM/LCC/DMD/GDC/gfortran 探测。
+- 规模不变：命令 136 / 设置 91；无头测试 210。
+
 ## 0.8.156 — 2026-11-19
 
 > 体验版：Profiler 完整化 / AutoVersioning / 编译器资源扩展 / 推荐扩展文档。

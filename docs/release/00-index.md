@@ -35,6 +35,7 @@
 | [0.8.154.md](./0.8.154.md) | 功能/健壮性批次：Workspace 生命周期、`.workspace` 外部修改检测、无工程编译 GBK 编码、原子写、单元路径 XML 转义、package.json i18n、New Build Target/File、指令级步进/Examine Memory、Backtick Cache、Copy Strings、Profiler、SymTab、Makefile CompileFile/DistClean |
 | [0.8.155.md](./0.8.155.md) | P3 架构批次：WebView nonce CSP + 公共运行时、`.cbp` 未知节点透传、`detect.autoOpen=off` 跳过激活扫描 + 激活耗时日志、`features/toolCommands` 首拆、架构文档 |
 | [0.8.156.md](./0.8.156.md) | Profiler 完整化（call graph / `gprof -A` / CSV·HTML 导出）、AutoVersioning（`.cbp` 配置 + `version.h` 构建钩子）、TCC/BCC/DMC/ARM/PowerPC 编译器资源、推荐扩展双语文档 |
+| [0.8.157.md](./0.8.157.md) | AutoVersioning/Profiler 正确性、编译器元数据加载与 CB 全量 XML、OpenWatcom/Cygwin/MSYS2/TDM/D/Fortran 探测 |
 
 ## 分支预发布版本（branch prerelease）
 

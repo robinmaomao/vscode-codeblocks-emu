@@ -18,6 +18,7 @@ import {
 } from './compiler';
 import { CommandType } from '../model/types';
 import { convertPosixRegex } from './posixRegex';
+import { CompilerMetadata, CompilerMetadataIndex } from './compilerMetadata';
 
 /** 带名字的子节点 */
 interface NamedNode {
@@ -41,9 +42,11 @@ function currentPlatform(): string {
 export class CompilerOptionsLoader {
   private resourcesDir: string;
   private parser: XMLParser;
+  private metadata: CompilerMetadataIndex;
 
   constructor(resourcesDir: string) {
     this.resourcesDir = resourcesDir;
+    this.metadata = new CompilerMetadataIndex(resourcesDir);
     this.parser = new XMLParser({
       ignoreAttributes: false,
       attributeNamePrefix: '@_',
@@ -56,7 +59,7 @@ export class CompilerOptionsLoader {
   load(compilerId: string): Compiler {
     const compiler: Compiler = {
       id: compilerId,
-      name: compilerId,
+      name: this.metadata.get(compilerId)?.name ?? compilerId,
       masterPath: '',
       programs: { C: '', CPP: '', LD: '', LIB: '', WINDRES: '', MAKE: '', DBGconfig: '' },
       switches: this.defaultSwitches(),
@@ -95,6 +98,11 @@ export class CompilerOptionsLoader {
     return compiler;
   }
 
+  /** 编译器元数据（显示名/master 路径）；无 `compiler_<id>.xml` 时返回 null。 */
+  metadataFor(compilerId: string): CompilerMetadata | null {
+    return this.metadata.get(compilerId);
+  }
+
   private defaultSwitches(): CompilerSwitches {
     return {
       includeDirs: '-I', libDirs: '-L', linkLibs: '-l', defines: '-D', genericSwitch: '-',
@@ -123,9 +131,12 @@ export class CompilerOptionsLoader {
     const root = this.parser.parse(raw)?.CodeBlocks_compiler_options;
     if (!root) return;
 
-    // extends 继承（先加载父级）
+    // extends 继承（先加载父级）；CB 的 extends 值是不带 options_ 前缀的 ID
     const extendsName = root['@_extends'];
-    if (extendsName) this.loadFile(extendsName, compiler, visited);
+    if (extendsName) {
+      const parent = String(extendsName).startsWith('options_') ? String(extendsName) : `options_${extendsName}`;
+      this.loadFile(parent, compiler, visited);
+    }
 
     const nodes = this.toNamedChildren(root);
     this.processNodes(nodes, compiler, '', false);

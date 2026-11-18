@@ -25,6 +25,7 @@
 | 选项关系合并 | `GetOrderedOptions`（5 种关系，项目/目标合并顺序） | `combineOptions` + `OptionsRelation` |
 | 链接库构造 | `FixupLinkLibraries`/`SetupLinkLibraries`：项目+目标库 + 全局库；含路径库原样；剥前缀后才剥扩展；needsPathResolved；逐库引号 | `setupLinkLibraries`/`fixupLinkLibrary`/`pathSearchLibrary` |
 | 编译器开关 | `forceFwdSlashes`；`Use83Paths` 短路径；`UseFullSourcePaths=false` 时 `$file` 相对 | `fixSep` / `shortPathWin` / `relativeFilename`；输出文件名 Quote 后 fixSep |
+| 编译器资源/元数据 | `compilergcc/resources/compilers/options_*.xml` + `compiler_*.xml`（`extends`、`<if>`、显示名、master 路径） | 全量 options/metadata 随包；`compilerMetadata.ts` 读取显示名/master 路径；`extends` 修正为 `options_<parent>`；保守探测 OpenWatcom/Cygwin/MSYS2/TDM/LCC/DMD/GDC/gfortran |
 | `$objects_output_dir` | `GetObjectOutput()` + `FixPathSeparators` | `fixSep(target.objectOutput)` |
 | 绝对路径 Unit 规范化 | `cbProject::AddFile`（cbproject.cpp:880-904）：同盘 `MakeRelativeTo`，跨盘/UNC 保留；Windows 不展开 `~`，Linux 展开 | `parseUnits` 同款（盘符不敏感）；前导 `~` 展开为家目录（保护性增强，等价 CB-Linux；`~user` 不展开）；方案 A 经用户确认 |
 | makefile 项目模式子集 | `<Option makefile_is_custom>`：Build/Rebuild/Clean 走 `<MakeCommands>`（GetMakeCommandFor:2178-2197）；CompileFile/DistClean 未接 | `getMakeCommand` + `runMakeBuild`（$make/$makefile/$target 替换 + 宏展开，execution_dir） |

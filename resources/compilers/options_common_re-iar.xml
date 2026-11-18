@@ -1,0 +1,52 @@
+<?xml version="1.0"?>
+<!DOCTYPE CodeBlocks_compiler_options>
+<CodeBlocks_compiler_options>
+    <RegEx name="Internal error"
+           type="error"
+           msg="1">
+        <![CDATA[[Ii]nternal [Ee]rror:[[:blank:]]*(.*)]]>
+    </RegEx>
+    <RegEx name="Compiler remark"
+           type="warning"
+           msg="3"
+           file="1"
+           line="2">
+        <![CDATA["?([][{}()[:blank:]#%$~[:alnum:]!&_:+/\\\.-]+)"?,([0-9]+)[[:blank:]]+([Rr]emark\[[0-9A-Za-z]*\]:.*)]]>
+    </RegEx>
+    <RegEx name="Compiler warning"
+           type="warning"
+           msg="3"
+           file="1"
+           line="2">
+        <![CDATA["?([][{}()[:blank:]#%$~[:alnum:]!&_:+/\\\.-]+)"?,([0-9]+)[[:blank:]]+([Ww]arning\[[0-9A-Za-z]*\]:.*)]]>
+    </RegEx>
+    <RegEx name="Compiler error"
+           type="error"
+           msg="3"
+           file="1"
+           line="2">
+        <![CDATA["?([][{}()[:blank:]#%$~[:alnum:]!&_:+/\\\.-]+)"?,([0-9]+)[[:blank:]]+([Ee]rror\[[0-9A-Za-z]*\]:.*)]]>
+    </RegEx>
+    <RegEx name="Compiler fatal error"
+           type="error"
+           msg="3"
+           file="1"
+           line="2">
+        <![CDATA["?([][{}()[:blank:]#%$~[:alnum:]!&_:+/\\\.-]+)"?,([0-9]+)[[:blank:]]+([Ff]atal[[:blank:]]+[Ee]rror\[[0-9A-Za-z]*\]:.*)]]>
+    </RegEx>
+    <RegEx name="Linker warning"
+           type="warning"
+           msg="1">
+        <![CDATA[([Ww]arning\[[0-9A-Za-z]*\]:.*)]]>
+    </RegEx>
+    <RegEx name="Linker error"
+           type="error"
+           msg="1">
+        <![CDATA[([Ee]rror\[[0-9A-Za-z]*\]:.*)]]>
+    </RegEx>
+    <RegEx name="Linker fatal "
+           type="error"
+           msg="1">
+        <![CDATA[([Ff]atal[[:blank:]]+[Ee]rror\[[0-9A-Za-z]*\]:.*)]]>
+    </RegEx>
+</CodeBlocks_compiler_options>

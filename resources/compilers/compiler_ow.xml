@@ -1,0 +1,18 @@
+<?xml version="1.0"?>
+<!DOCTYPE CodeBlocks_compiler>
+<CodeBlocks_compiler name="OpenWatcom Compiler"
+                     id="ow"
+                     weight="30"
+                     platform="windows">
+    <Path type="master">
+        <Search envVar="PATH" for="C"/>
+        <Search path="%WATCOM%"/>
+        <Fallback path="C:\WATCOM"/>
+    </Path>
+    <Path type="include">
+        <Add><master/>\h</Add>
+    </Path>
+    <Path type="lib">
+        <Add><master/>\lib386</Add>
+    </Path>
+</CodeBlocks_compiler>

@@ -109,6 +109,7 @@ import { registerDebugInstructionCommands } from './features/debugCommands';
 import {
   formatProfilerCallGraph,
   formatProfilerTable,
+  isFreshGmon,
   parseGprofCallGraph,
   parseGprofFlatProfile,
   profilerReportHtml,
@@ -6640,7 +6641,7 @@ function listCompilers(): Array<{ id: string; name: string }> {
     for (const file of fs.readdirSync(compilerResourcesDir)) {
       const m = /^options_(.+)\.xml$/i.exec(file);
       // options_common_*.xml 是 <Common name="..."> 引入的片段，不是可选编译器
-      if (m && !/^common(_|$)/i.test(m[1])) add(m[1]);
+      if (m && !/^common(_|$)/i.test(m[1])) add(m[1], compilerLoader?.metadataFor(m[1])?.name);
     }
   }
   for (const cfg of codeBlocksConfig?.listUserCompilers() ?? []) add(cfg.id, cfg.name);
@@ -7914,7 +7915,7 @@ async function buildOneProject(project: Project, targetTitle: string, rebuild: b
     outputChannel.warn(logT('[Code::Blocks] Project "{0}" has no target "{1}" (or does not support the current platform), skipped', project.title, targetTitle));
     return true;
   }
-  prepareAutoVersioningBuild(project, (line) => outputChannel.info(line));
+  const autoVersionToken = await prepareAutoVersioningBuild(project, (line) => outputChannel.info(line));
 
   // makefile 项目模式（对齐 UseMake：Build/Rebuild 走 make 命令而非内部引擎，GetMakeCommandFor:2178-2197）
   if (project.makefileIsCustom) {
@@ -7946,12 +7947,12 @@ async function buildOneProject(project: Project, targetTitle: string, rebuild: b
       const silentCmd = getMakeCommand(project, target, 'silentBuild');
       if (silentCmd) {
         const makeOk = await runMakeBuild(project, silentCmd, targetTitle);
-        if (makeOk) completeAutoVersioningBuild(project, (line) => outputChannel.info(line));
+        if (makeOk) await completeAutoVersioningBuild(project, autoVersionToken, (line) => outputChannel.info(line));
         return makeOk;
       }
     }
     const makeOk = await runMakeBuild(project, buildCmd, targetTitle);
-    if (makeOk) completeAutoVersioningBuild(project, (line) => outputChannel.info(line));
+    if (makeOk) await completeAutoVersioningBuild(project, autoVersionToken, (line) => outputChannel.info(line));
     return makeOk;
   }
 
@@ -8030,7 +8031,7 @@ async function buildOneProject(project: Project, targetTitle: string, rebuild: b
   const stats = engine.lastStats ?? { success: ok, compiledCount: 0, skippedCount: 0, failedCount: 0, linkSuccess: ok, linkSkipped: true, hadCommands: false, outputFilename: undefined };
   // 取消判定：引擎统计标记或取消源已置位（用户中途停止）
   const cancelled = !!stats.cancelled || !!cancel?.isCancelled();
-  if (ok && !cancelled) completeAutoVersioningBuild(project, (line) => outputChannel.info(line));
+  if (ok && !cancelled) await completeAutoVersioningBuild(project, autoVersionToken, (line) => outputChannel.info(line));
   const projectName = path.basename(path.dirname(project.filename));
 
   // 输出顺序调整：构建完成汇总块不再在此输出，统一由 printBuildSummaryBlocks()
@@ -9470,6 +9471,16 @@ async function profileTarget(): Promise<void> {
   const env: Record<string, string> = { ...(process.env as Record<string, string>) };
   for (const ev of [...project.envVars, ...target.envVars]) env[ev.name] = ev.value;
   const args = splitCommandLine(target.executionParameters ?? '');
+  const gmonCandidates = [path.join(path.dirname(exePath), 'gmon.out'), path.join(cwd, 'gmon.out')];
+  const gmonBefore = new Map<string, { mtimeMs: number; size: number }>();
+  for (const candidate of gmonCandidates) {
+    try {
+      const st = fs.statSync(candidate);
+      gmonBefore.set(candidate, { mtimeMs: st.mtimeMs, size: st.size });
+    } catch {
+      // 不存在即为旧数据；运行后出现即视为本次生成
+    }
+  }
   const ch = profilerOutputChannel();
   ch.appendLine(i18n.t('Profiling target: {0}', target.title));
   ch.appendLine(`> "${exePath}" ${args.join(' ')}`);
@@ -9483,10 +9494,16 @@ async function profileTarget(): Promise<void> {
     ch.appendLine(i18n.t('The profiled program exited with code {0}; profiling continues if gmon.out exists.', runResult.code ?? '?'));
   }
 
-  const gmonCandidates = [path.join(path.dirname(exePath), 'gmon.out'), path.join(cwd, 'gmon.out')];
-  const gmon = gmonCandidates.find((p) => fs.existsSync(p));
+  const gmon = gmonCandidates.find((p) => {
+    try {
+      const st = fs.statSync(p);
+      return isFreshGmon(gmonBefore.get(p), { mtimeMs: st.mtimeMs, size: st.size });
+    } catch {
+      return false;
+    }
+  });
   if (!gmon) {
-    vscode.window.showErrorMessage(i18n.t('gmon.out was not found — rebuild the target with -pg and run it again'));
+    vscode.window.showErrorMessage(i18n.t('A fresh gmon.out was not found — rebuild the target with -pg and run it again'));
     return;
   }
   const gprof = vscode.workspace.getConfiguration('codeblocks').get<string>('profiler.gprofPath', '').trim() || 'gprof';
@@ -9518,11 +9535,27 @@ async function profileTarget(): Promise<void> {
 
     if (vscode.workspace.getConfiguration('codeblocks').get<boolean>('profiler.annotatedSource', true)) {
       try {
-        const annotated = await runCapture(gprof, ['-A', '-l', exePath, gmon], { cwd: path.dirname(exePath), timeoutMs: 2 * 60 * 1000 });
-        if (annotated.code === 0 && annotated.stdout.trim()) {
+        const annotatedDir = path.dirname(exePath);
+        const annotatedBefore = new Set(
+          fs.readdirSync(annotatedDir).filter((name) => name.endsWith('.annotated')),
+        );
+        let annotated = await runCapture(gprof, ['-A', '-l', exePath, gmon], { cwd: annotatedDir, timeoutMs: 2 * 60 * 1000 });
+        let annotatedText = annotated.stdout;
+        if (annotated.code === 0 && !annotatedText.trim()) {
+          // GNU gprof 在部分工具链上把注解写入单独文件；再试一次 --separate-files。
+          const separate = await runCapture(gprof, ['-A', '-l', '--separate-files', exePath, gmon], { cwd: annotatedDir, timeoutMs: 2 * 60 * 1000 });
+          const created = fs.readdirSync(annotatedDir)
+            .filter((name) => name.endsWith('.annotated') && !annotatedBefore.has(name));
+          if (created.length) {
+            annotatedText = created.map((name) => `--- ${name} ---\n${fs.readFileSync(path.join(annotatedDir, name), 'utf-8')}`).join('\n');
+          } else if (separate.stdout.trim()) {
+            annotatedText = separate.stdout;
+          }
+        }
+        if (annotated.code === 0 && annotatedText.trim()) {
           const sourceChannel = annotatedSourceOutputChannel();
           sourceChannel.appendLine(i18n.t('Annotated source for {0}', target.title));
-          sourceChannel.appendLine(annotated.stdout);
+          sourceChannel.appendLine(annotatedText);
           sourceChannel.show(true);
         } else if (annotated.stderr.trim()) {
           ch.appendLine(annotated.stderr);
@@ -9577,7 +9610,7 @@ async function exportProfilerReport(
     ? profilerRowsToCsv(rows)
     : profilerReportHtml({ target: targetName, executable: exePath, rows, callGraph });
   try {
-    fs.writeFileSync(picked.fsPath, content, 'utf8');
+    writeFileAtomicSync(picked.fsPath, content, 'utf-8');
     vscode.window.showInformationMessage(i18n.t('Profiler report saved: {0}', picked.fsPath));
   } catch (err) {
     vscode.window.showErrorMessage(i18n.t('Failed to save profiler report: {0}', (err as Error).message));

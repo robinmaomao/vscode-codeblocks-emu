@@ -15,8 +15,8 @@
 | T2 | Profiler（gprof） | ✔ 0.8.156 | 运行目标 → 定位 `gmon.out` → `gprof` → flat profile + call graph；`gprof -A` 源码注解独立输出通道；CSV/HTML 导出 |
 | T3 | Copy strings to clipboard | ✔ 0.8.154 | Tools → Copy Strings；状态机移植（忽略注释/单引号、去重排序） |
 | T5 | 跨库符号搜索 | ✔ 0.8.154 | Tools → Find Symbol in Libraries…；收集工程链接库，`nm -C -A` 并行解析 |
-| T6 | AutoVersioning | ✔ 0.8.156 | `.cbp <Extensions><AutoVersioning>` 读写；AutoVersioning… / Bump Version / Generate Version Header；构建前生成 `version.h`、成功后递增 `BUILDS_COUNT` |
-| T7 | 更多编译器资源 | ✔ 0.8.156 | TCC / Borland C++ / Digital Mars / ARM ELF GCC / PowerPC EABI GCC 的 `options_*.xml` + `compiler_*.xml` + 探测 |
+| T6 | AutoVersioning | ✔ 0.8.156 / 0.8.157 | `.cbp <Extensions><AutoVersioning>` 读写；命令与构建钩子；0.8.157 补内容跳过、构建会话去重、do_auto_increment/ask、manifest、SVN、Changes Log、version.h 加入工程 |
+| T7 | 更多编译器资源 | ✔ 0.8.156 / 0.8.157 | TCC / Borland C++ / Digital Mars / ARM ELF GCC / PowerPC EABI GCC；0.8.157 补 CB 全量 options/metadata、显示名与 OpenWatcom/Cygwin/MSYS2/TDM/D/Fortran 探测 |
 | M2 | File 菜单剩余项 | ◐ 0.8.154 | Save Project As / Save·Close Workspace / Open default workspace 已完成；Print 仍不移植 |
 | M3 | File → New 子菜单 | ◐ 0.8.154 | New Build Target… / New File… 已完成；Custom… 仍不做 |
 | M4 | Edit 菜单剩余项 | ✖ 维持 | Clear changes history / Toggle all folds / Movement·Zoom 等无稳定 VS Code 等价命令；Stream/Box comment 用内置注释命令 |
@@ -77,3 +77,4 @@
 | 2026-11-18 | 0.8.154 | P0/P1/P2 批次实施：G1/G2/T2/T3/T5 完成；M2/M3/M6/M7 子集完成；新增原子写、单元路径 XML 转义、package.json i18n、Makefile CompileFile·DistClean；N5（WebView CSP/模块拆分）仍待 P3 |
 | 2026-11-18 | 0.8.155 | P3 第一批：WebView nonce CSP、`.cbp` 未知节点透传、激活扫描优化、Feature 拆分与架构文档 |
 | 2026-11-19 | 0.8.156 | T2 Profiler 完整化（call graph / -A / 导出）、T6 AutoVersioning、T7 编译器资源（TCC/BCC/DMC/ARM/PowerPC）；DoxyBlocks/Print/Fortran/Env/Valgrind 统一转推荐扩展文档 |
+| 2026-11-19 | 0.8.157 | AutoVersioning/Profiler 正确性收口（mtime、构建会话、do_auto_increment、SVN、旧 gmon、-A 回退）；compiler_* 元数据与 CB 全量 XML；扩展探测 |

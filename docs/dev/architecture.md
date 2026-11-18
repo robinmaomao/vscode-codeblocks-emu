@@ -1,7 +1,7 @@
 # 架构与模块地图
 
 > 目的：给后续功能开发一个稳定的落点说明。本文只描述**当前实现**与**已规划的拆分边界**，不重复用户文档。
-> 基线：0.8.155（P3 第一批拆分后）。
+> 基线：0.8.157（AutoVersioning/Profiler 正确性 + 编译器元数据批次后）。
 
 ## 1. 数据流
 
@@ -30,7 +30,7 @@ flowchart LR
 | 目录 | 职责 | 备注 |
 |---|---|---|
 | `src/model/` | `.cbp`/`.workspace` 模型、解析、序列化、原子写、XML 转义 | 纯逻辑优先，避免依赖 vscode |
-| `src/compiler/` | 编译器 XML 加载、命令生成、宏展开、探测、缓存 | 与 CB `compilergcc` 对齐 |
+| `src/compiler/` | 编译器 XML 加载、元数据（显示名/master 路径）、命令生成、宏展开、探测、缓存 | 与 CB `compilergcc` 对齐；`compilerMetadata.ts` 不执行 registry/外部命令 |
 | `src/build/` | 构建状态机、输出解析、诊断、脚本、Makefile、无工程编译 | 可独立单测 |
 | `src/debug/` | GDB/MI 会话、DAP 适配器、内存格式化 | 通过 `debugRegistry` 与 UI 解耦 |
 | `src/project/` | 新建/导入/模板、递归添加、单元文本手术、workspace 写入 | 文件级操作 |

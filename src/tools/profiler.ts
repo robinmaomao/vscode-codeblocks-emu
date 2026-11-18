@@ -8,6 +8,16 @@
 import { spawn } from 'child_process';
 import { OutputLineDecoder } from './encoding';
 
+export interface FileStamp {
+  mtimeMs: number;
+  size: number;
+}
+
+/** gmon.out 是否比运行前更新（新生成或内容变化）。 */
+export function isFreshGmon(before: FileStamp | undefined, after: FileStamp): boolean {
+  return !before || before.mtimeMs !== after.mtimeMs || before.size !== after.size;
+}
+
 export interface GprofRow {
   percent: number;
   cumulativeSeconds: number;
