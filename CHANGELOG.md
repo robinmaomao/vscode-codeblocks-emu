@@ -3,6 +3,13 @@
 本文件记录**正式版**里程碑；近期 dev 迭代的逐轮发布说明见 [`docs/release/`](./docs/release/)（`0.8.xx-dev.md`），
 `0.8.76`–`0.8.128` 的 dev 说明已合并归档到 [`docs/release/archive/`](./docs/release/archive/)；版本号与维护约定见 [`docs/release/00-index.md`](./docs/release/00-index.md)。
 
+## 0.8.159 — 2026-11-19
+
+> 体验版：项目管理菜单拆分与架构收敛。
+
+- `showProjectManager` / `buildManagerItems` 从 `extension.ts` 移入 `src/features/projectManager.ts`，通过 `ProjectManagerDeps` 注入依赖。
+- 新增 `test-project-manager-feature.js` 回归守卫；命令/设置计数不变。
+
 ## 0.8.158 — 2026-11-19
 
 > 体验版：Profiler 命令拆分与架构收敛。
