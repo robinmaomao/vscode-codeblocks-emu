@@ -2,7 +2,7 @@
   "name": "codeblocks-vscode",
   "displayName": "%extension.displayName%",
   "description": "%extension.description%",
-  "version": "0.8.155",
+  "version": "0.8.156",
   "icon": "resources/icon.png",
   "publisher": "robinmaomao",
   "author": {
@@ -255,6 +255,18 @@
       {
         "command": "codeblocks.profileTarget",
         "title": "%command.codeblocks.profileTarget.title%"
+      },
+      {
+        "command": "codeblocks.autoVersioning",
+        "title": "%command.codeblocks.autoVersioning.title%"
+      },
+      {
+        "command": "codeblocks.bumpVersion",
+        "title": "%command.codeblocks.bumpVersion.title%"
+      },
+      {
+        "command": "codeblocks.generateVersionHeader",
+        "title": "%command.codeblocks.generateVersionHeader.title%"
       },
       {
         "command": "codeblocks.findSymbolInLibraries",
@@ -871,6 +883,11 @@
             "type": "string",
             "default": "",
             "description": "%configuration.codeblocks.profiler.gprofPath.description%"
+          },
+          "codeblocks.profiler.annotatedSource": {
+            "type": "boolean",
+            "default": true,
+            "description": "%configuration.codeblocks.profiler.annotatedSource.description%"
           },
           "codeblocks.parallelJobs": {
             "type": "number",

@@ -67,7 +67,7 @@ npm.cmd run compile
 npm.cmd run package
 
 # 安装（版本号以 package.json 为准）
-code --install-extension "codeblocks-vscode-0.8.155.vsix" --force
+code --install-extension "codeblocks-vscode-0.8.156.vsix" --force
 
 # 全量回归测试
 npm.cmd test
@@ -127,8 +127,9 @@ npm.cmd test
 | [0.8.152](../release/0.8.152.md) | 体验版：Build options / Properties 第二轮逐项对齐 Code::Blocks —— 启用联动规则、Build options 严格对齐（去 Extensions/自定义变量/Dist-clean/Silent）、additionalLibs 写入 Other linker options（整串 + 反向勾选 + 冲突询问）、工程级 Linker executable 隐藏、构建脚本红字、变量键值对话框、覆盖层 OK/Cancel、编译器切换三重询问、Set Programs' Arguments 换行归一、Selected file properties 三页重写与 customBuild 可用、类型切换改写扩展名/前缀（含宏名、不受自动勾选影响）、目标命名校验、列表点击修复、Import/Definition 占位符、脚本校验 CB 三行文案与换行、左对齐与文案/tooltip/红字分行/↑↓语义/双击入口 |
 | [0.8.154](../release/0.8.154.md) | 功能/健壮性批次：Workspace 生命周期（Save Project As / Save·Close·Open default workspace）、`.workspace` 外部修改检测、无工程编译 GBK 编码、原子写、单元路径 XML 转义、package.json 调试属性 i18n、New Build Target/File、指令级步进/Examine Memory、Backtick Cache 管理器、Copy Strings、Profiler (gprof)、SymTab 跨库符号、Makefile CompileFile/DistClean |
 | [0.8.155](../release/0.8.155.md) | P3 架构批次：WebView nonce CSP + 公共运行时（`src/ui/webview/common.ts`）、`.cbp` 未知节点/未知 Unit Option 透传、`detect.autoOpen=off` 跳过激活期全量扫描 + 激活耗时日志、compile/link 单节点增量刷新、`features/{toolCommands,workspaceCommands,newProjectCommands,debugCommands}.ts` 四批拆分、架构文档 |
+| [0.8.156](../release/0.8.156.md) | Profiler 完整化（call graph、`gprof -A` 源码注解、CSV/HTML 导出）、AutoVersioning（`.cbp` 配置 + `version.h` 构建钩子 + 三个命令）、TCC/BCC/DMC/ARM/PowerPC 编译器资源、推荐扩展双语文档 |
 
-> 当前版本 **0.8.155**（体验版；发布说明见 [release/0.8.155.md](../release/0.8.155.md)，上一版见 [release/0.8.154.md](../release/0.8.154.md)）；测试报告见 [test-report-0.8.155.md](../testing/test-report-0.8.155.md)；无头回归见 `npm test`（`TOTAL=207 FAIL=0 SKIP=1`，另有契约 / E2E / 视觉 / 性能 / 打包 / 宿主分层，见 [测试方案](../testing/strategy.md)）。
+> 当前版本 **0.8.156**（体验版；发布说明见 [release/0.8.156.md](../release/0.8.156.md)，上一版见 [release/0.8.155.md](../release/0.8.155.md)）；测试报告见 [test-report-0.8.156.md](../testing/test-report-0.8.156.md)；无头回归见 `npm test`（`TOTAL=210 FAIL=0 SKIP=1`，另有契约 / E2E / 视觉 / 性能 / 打包 / 宿主分层，见 [测试方案](../testing/strategy.md)）。
 
 ## 文档：GitHub Release 页面格式统一
 

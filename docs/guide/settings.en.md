@@ -109,6 +109,7 @@ Example:
 |---------|------|---------|-------|-------------|
 | `codeblocks.gdbTimeoutMs` | number | `30000` |  | GDB MI command timeout (≥1000 ms). |
 | `codeblocks.profiler.gprofPath` | string | `""` |  | Path to the `gprof` executable (empty = search PATH). |
+| `codeblocks.profiler.annotatedSource` | boolean | `true` |  | Run `gprof -A` after profiling and show annotated source in a separate output channel. |
 | `codeblocks.debug.initCommands` | array | `[]` |  | GDB commands executed after the debug session starts (e.g. `set pagination off`). |
 | `codeblocks.debug.userArguments` | string | `""` |  | Extra arguments appended to the GDB command line (quote-aware splitting). |
 | `codeblocks.debug.disableInit` | boolean | `true` |  | Pass `-nx` to GDB so `.gdbinit` / `gdb.ini` are not executed. |

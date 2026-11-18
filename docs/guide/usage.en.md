@@ -1,7 +1,7 @@
 # Code::Blocks for VS Code — Usage Guide
 
 > Language: **English** ｜ [中文](./usage.md)
-> Version: 0.8.155 ｜ Native port of Code::Blocks core features to VS Code, driving GCC / GDB directly, **without** `tasks.json` / `launch.json`.
+> Version: 0.8.156 ｜ Native port of Code::Blocks core features to VS Code, driving GCC / GDB directly, **without** `tasks.json` / `launch.json`.
 
 ---
 
@@ -50,7 +50,7 @@ Code::Blocks for VS Code is a "mini IDE kernel": it parses `.cbp` / `.workspace`
 ### 2.1 Install from VSIX
 
 ```powershell
-code --install-extension codeblocks-vscode-0.8.155.vsix --force
+code --install-extension codeblocks-vscode-0.8.156.vsix --force
 ```
 
 ### 2.2 Build from source
@@ -58,7 +58,7 @@ code --install-extension codeblocks-vscode-0.8.155.vsix --force
 ```powershell
 npm install
 npm run package
-code --install-extension codeblocks-vscode-0.8.155.vsix --force
+code --install-extension codeblocks-vscode-0.8.156.vsix --force
 ```
 
 > `npm run package` = `vsce package` (before packaging, the `vscode:prepublish` hook runs `tsc` compilation (`dist/`, for local testing) + the **esbuild single-file bundle** (`bundle/extension.js`, the release entry));
@@ -999,14 +999,14 @@ The following Code::Blocks features have not been ported yet; when you hit the r
 | **EvalXMLCondition exec branch** | Evaluating compiler XML conditions `<if exec="program">` by actually running the external program is not implemented (simplified to returning default; the gcc/clang XMLs do not use it) |
 | **`stopOnEntry` launch parameter** | Supported (0.8.129-dev): for launch, the entry symbol is chosen in the order `main` → `WinMain` → `wWinMain` (excluding the CRT `main` stub of GUI programs), a temporary breakpoint performs the initial stop and reports `reason=entry`, and when none is available it falls back to the program entry address (no source line; relocatable images excepted); if the launch is aborted by the entry breakpoint, the breakpoint is removed and the launch retried; attach/remote show a "not applicable" hint (see §8) |
 | **Extension-less executables (Windows)** | Run/Debug need an artifact with an executable extension (a requirement of `cmd.exe` / `CreateProcess`, aligned with upstream Code::Blocks). With toolchains such as TCC where "`-o` does not append `.exe`", write the full `.exe` in the target's output file name |
-| **Profiler subset** | gprof flat profile is supported; the call-graph tree, source annotation (`gprof -A`) and export are not implemented |
+| **Profiler subset** | gprof flat profile, call graph, `gprof -A` annotated source and CSV/HTML export are supported; for finer-grained Valgrind/Callgrind data see [recommended extensions](./recommended-extensions.en.md) §6 |
 | **SymTab scope** | Searches only libraries linked by the active project/target; arbitrary-directory scans and dynamic-library runtime symbols are not implemented |
-| **Print** | VS Code has no native print; use a marketplace print extension |
+| **Print** | VS Code has no native print; use a print extension from [recommended extensions](./recommended-extensions.en.md) §2 |
 | **Global variables editing** | Read-only (default.conf write-back race; see `docs/dev/decisions.md`) |
 
 ### 16.1 Prefer a VS Code extension instead (not implemented here)
 
-The following Code::Blocks features (round 5 batch 3 T1/T4/T5) were assessed as **not to be re-implemented in this extension**; using a mature VS Code extension directly is recommended:
+The Code::Blocks features below were assessed as **not to be re-implemented in this extension**; using a mature VS Code extension directly is recommended. For the complete list (Doxygen, printing, Fortran, environment variables, single-library nm, Valgrind) see **[recommended extensions](./recommended-extensions.en.md)**. This section keeps the frequently used static-analysis and regex entries:
 
 | Code::Blocks feature | Recommended extension (extension ID) | Description |
 |---|---|---|
@@ -1014,12 +1014,20 @@ The following Code::Blocks features (round 5 batch 3 T1/T4/T5) were assessed as 
 | Regex test bench (T4) | **Regex Previewer** (`chrmarti.regex`, for JS/TS/PHP/Haxe) · **Regexp Explain** (`louiswt.regexp-preview`) · RegExp Preview and Editor | General regex validation; the regex mode of the VS Code search box also does basic validation |
 | Symbol table nm viewer (single library/file) | **Nm tool** (`wibren-wiersma.nm-tool`) · **vscode-binutils** (`sqlpassion.vscode-binutils`) | nm / objdump for a single library; cross-library symbol search is provided by this extension's **Tools → Find Symbol in Libraries…** |
 
-> Profiler (gprof), Copy Strings and cross-library symbol search are now implemented (0.8.155, see “What’s new” below).
+> Profiler (gprof), Copy Strings and cross-library symbol search are now implemented (0.8.156, see “What’s new” below).
 > T5 cross-library symbol search. Export Makefile now lives in the Build menu (matching CB `compiler_menu.xrc`).
 > For details and the decision record, see the [unimplemented-feature backlog](../dev/backlog.md) §2 (not-ported list).
 > Reminder: the extensions above are community/vendor products; evaluate them before installing. This extension neither bundles nor ships them.
 
-## 17. What's new in 0.8.155
+## 17. What's new in 0.8.156
+
+- **Profiler completion**: gprof **call graph** parsing/output; `gprof -A` annotated source in a separate output channel (setting `codeblocks.profiler.annotatedSource`, default on); **CSV / HTML report export** after profiling.
+- **AutoVersioning**: reads/writes `.cbp <Extensions><AutoVersioning>`; commands **AutoVersioning…** (configure/edit values/toggle autoincrement/set header path), **Bump Version**, **Generate Version Header**. When configured, `version.h` is generated before a build and `BUILDS_COUNT` is incremented and atomically written back after a successful build.
+- **More compilers**: **TCC**, **Borland C++ 5.5/5.82**, **Digital Mars**, **ARM ELF GCC** and **PowerPC EABI GCC** option/detection resources.
+- **Recommended extensions**: new [recommended extensions](./recommended-extensions.en.md) page covering Doxygen, printing, Modern Fortran, environment variables, single-library nm and Valgrind/Callgrind; these are no longer re-implemented here.
+- **Behavior notes**: AutoVersioning rewrites `version.h` before builds — back it up or disable the project configuration if you maintain it by hand; `gprof -A` can be slow on large projects and can be turned off.
+
+## 18. What's new in 0.8.155
 
 - **Workspace lifecycle**: File → Save Project As… / Save Workspace / Save Workspace As… / Close Workspace / Open default workspace; closing the last project clears workspace state, saving writes project order, `active` and `<Depends>`.
 - **`.workspace` external change detection**: external edits to the project list/dependencies/active project prompt Reload / Ignore; only projects whose disk signature changed are reloaded.

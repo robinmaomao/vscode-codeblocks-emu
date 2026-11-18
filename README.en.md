@@ -6,13 +6,13 @@ An extension that natively ports the Code::Blocks core features to VS Code — a
 
 Open a `.cbp` / `.workspace` project directly in VS Code and get a build, debug, and project browsing experience aligned with Code::Blocks.
 
-> **Author**: Robinmaomao ｜ **Version**: 0.8.155
+> **Author**: Robinmaomao ｜ **Version**: 0.8.156
 
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](./LICENSE.md)
 
 > **License note**: The TypeScript code of this extension is an independent rewrite (it does not copy GPL sources); however, the error regular-expression table (`resources/compilers/options_common_re.xml`) and the command templates (`resources/compilers/options_gcc.xml`) are derived from the GPL v3 Code::Blocks `compilergcc` resources, so the extension as a whole is released under GPL v3. See [LICENSE.md](./LICENSE.md) for details.
 
-> 📖 For a detailed feature tour, usage instructions, and a **complete RISC-V cross-compilation example**, see [Usage guide](./docs/guide/usage.md) (English: [Usage guide (EN)](./docs/guide/usage.en.md)); for item-by-item alignment evidence, see [Code::Blocks alignment reference](./docs/guide/alignment.md); for how Code::Blocks dialogs are ported (methods, pitfalls, checklist), see [Code::Blocks porting lessons](./docs/dev/cb-porting-lessons.md).
+> 📖 For a detailed feature tour, usage instructions, and a **complete RISC-V cross-compilation example**, see [Usage guide](./docs/guide/usage.md) (English: [Usage guide (EN)](./docs/guide/usage.en.md)); for item-by-item alignment evidence, see [Code::Blocks alignment reference](./docs/guide/alignment.md); for how Code::Blocks dialogs are ported (methods, pitfalls, checklist), see [Code::Blocks porting lessons](./docs/dev/cb-porting-lessons.md); for companion extensions (Doxygen, printing, Fortran, environment variables, Valgrind), see [recommended extensions](./docs/guide/recommended-extensions.en.md).
 
 > **Unofficial notice**: This extension is an **independent rewrite and port** of Code::Blocks features by an individual community developer based on public information. It has **no affiliation, cooperation, or endorsement relationship** with the official Code::Blocks project or its authors / team, and does not represent their positions. The "Code::Blocks" name and logo are copyright their original authors; they are used here only to describe the feature set and compatibility target being modelled. Please report issues to [this repository](https://github.com/robinmaomao/vscode-codeblocks-emu/issues), **not** to the Code::Blocks team.
 >
@@ -48,7 +48,7 @@ Open a `.cbp` / `.workspace` project directly in VS Code and get a build, debug,
 
 - 📁 **Native project parsing**: loads `.cbp` / `.workspace` directly (`fast-xml-parser`) and fully reconstructs the `Project` / `BuildTarget` / `ProjectFile` in-memory model, with support for virtual targets and virtual folders.
 - 🔨 **Real build engine**: does not rely on `tasks.json`. Uses the built-in Code::Blocks command templates + macro expansion (`$compiler $options $includes ...`) and `spawn`s compile/link processes directly; incremental builds compare mtimes of source files + `#include` headers + link inputs.
-- ⚙️ **Compiler management**: full parsing of `options_<id>.xml` (including `extends` inheritance, `<if platform>` platform branches, and `<Common>` references); auto-detects GCC / MinGW / Clang / MSVC / RISC-V as well as AVR / MSP430 / SDCC toolchains; reads **user-defined cross compilers** from the Code::Blocks `default.conf`.
+- ⚙️ **Compiler management**: full parsing of `options_<id>.xml` (including `extends` inheritance, `<if platform>` platform branches, and `<Common>` references); auto-detects GCC / MinGW / Clang / MSVC / RISC-V as well as AVR / MSP430 / SDCC / TCC / Borland C++ / Digital Mars / ARM ELF / PowerPC EABI toolchains; reads **user-defined cross compilers** from the Code::Blocks `default.conf`.
 - 🗂️ **Multi-project management**: open several `.cbp` files at once; the project tree supports drag-and-drop ordering (which sets the build order), move up/down, remove project, and active-project highlighting; opening a workspace auto-detects `.cbp` files, and a multi-select dialog (directory/file names, all selected by default) or the status bar entry reopens them at any time.
 - 📂 **Project tree browsing**: multi-level nested directory tree rooted at the common top-level path (`relativeToCommonTopLevelPath`), file-type icons, missing-file markers, and directories sorted first (aligned with the VS Code Explorer).
 - 🔎 **Project Search**: a dedicated sidebar view that searches **only opened `.cbp` projects** (Files/Text modes, active project first, click to jump, cancellable); search history with a visual **Keep history** toggle at the top, and `Ctrl+Alt+P` focuses Files mode. It does not replace the built-in search or scan files outside the projects.
@@ -87,7 +87,7 @@ Open a `.cbp` / `.workspace` project directly in VS Code and get a build, debug,
 
 ### Tools
 
-- 📊 **Helper tools**: code statistics, TODO scan, AStyle formatting, **Tidy comments**, **header guards** (including auto-insert for new files), **Swap Header / Source**, **Copy Strings**, **Profiler (gprof)**, **cross-library symbol search (SymTab)**, **custom tools** (Configure tools: `codeblocks.tools` + dynamic Tools menu entries), **show compiler commands**, **Makefile export**, **project import** (Dev-C++ / VC6 / VS2010+ → `.cbp`), **workspace dependency editing** (with cycle detection), **Open default.conf** (entry point for editing global settings by hand).
+- 📊 **Helper tools**: code statistics, TODO scan, AStyle formatting, **Tidy comments**, **header guards** (including auto-insert for new files), **Swap Header / Source**, **Copy Strings**, **Profiler (gprof flat profile / call graph / `-A` annotated source / CSV·HTML export)**, **AutoVersioning** (`.cbp` configuration + `version.h` build hook), **cross-library symbol search (SymTab)**, **custom tools** (Configure tools: `codeblocks.tools` + dynamic Tools menu entries), **show compiler commands**, **Makefile export**, **project import** (Dev-C++ / VC6 / VS2010+ → `.cbp`), **workspace dependency editing** (with cycle detection), **Open default.conf** (entry point for editing global settings by hand).
 
 ## ⚠️ Known limitations (unsupported features)
 
@@ -119,10 +119,10 @@ code --install-extension robinmaomao.codeblocks-vscode
 
 ### Option 2: install from GitHub Releases
 
-Download `codeblocks-vscode-0.8.155.vsix` from [Releases](https://github.com/robinmaomao/vscode-codeblocks-emu/releases):
+Download `codeblocks-vscode-0.8.156.vsix` from [Releases](https://github.com/robinmaomao/vscode-codeblocks-emu/releases):
 
 ```powershell
-code --install-extension codeblocks-vscode-0.8.155.vsix --force
+code --install-extension codeblocks-vscode-0.8.156.vsix --force
 ```
 
 ### Option 3: build from source
@@ -130,7 +130,7 @@ code --install-extension codeblocks-vscode-0.8.155.vsix --force
 ```powershell
 npm install
 npm run package
-code --install-extension codeblocks-vscode-0.8.155.vsix --force
+code --install-extension codeblocks-vscode-0.8.156.vsix --force
 ```
 
 > `npm run package` = `vsce package` (packaging runs the `vscode:prepublish` hook automatically = `tsc` compile (`dist/`, for local tests) + esbuild single-file bundle (`bundle/extension.js`, the release entry)); running `npx vsce package` / `npx vsce publish` directly also builds automatically and never packs a stale or missing `bundle/`; on Windows, prefer `npm.cmd` / `npx.cmd` (PSReadLine execution policy).

@@ -2,7 +2,7 @@
 
 > 语言：**中文** ｜ [English](./usage.en.md)
 >
-> 版本：0.8.155 ｜ 本扩展为 Code::Blocks 核心功能的原生移植，直接驱动 GCC / GDB，**不依赖** `tasks.json` / `launch.json`。
+> 版本：0.8.156 ｜ 本扩展为 Code::Blocks 核心功能的原生移植，直接驱动 GCC / GDB，**不依赖** `tasks.json` / `launch.json`。
 
 ---
 
@@ -51,7 +51,7 @@ Code::Blocks for VS Code 是一个「迷你 IDE 内核」：直接解析 `.cbp` 
 ### 2.1 从 VSIX 安装
 
 ```powershell
-code --install-extension codeblocks-vscode-0.8.155.vsix --force
+code --install-extension codeblocks-vscode-0.8.156.vsix --force
 ```
 
 ### 2.2 从源码构建
@@ -59,7 +59,7 @@ code --install-extension codeblocks-vscode-0.8.155.vsix --force
 ```powershell
 npm install
 npm run package
-code --install-extension codeblocks-vscode-0.8.155.vsix --force
+code --install-extension codeblocks-vscode-0.8.156.vsix --force
 ```
 
 > `npm run package` = `vsce package`（打包前自动执行 `vscode:prepublish` 钩子 = `tsc` 编译（`dist/`，本地测试用）+ **esbuild 单文件打包**（`bundle/extension.js`，发布入口））；
@@ -1000,15 +1000,15 @@ A：**已全覆盖**（0.8.132 批次 2，2026-11 菜单优化后同步）。构
 | **EvalXMLCondition exec 分支** | 编译器 XML 条件 `<if exec="程序">` 实际运行外部程序判定未实现（简化返回 default；gcc/clang XML 未使用） |
 | **`stopOnEntry` 启动参数** | 已支持（0.8.129-dev）：launch 下按 `main` → `WinMain` → `wWinMain` 选入口符号（排除 GUI 程序的 CRT `main` 桩）插临时断点实现首停并上报 `reason=entry`，均不可用时兜底到程序入口地址（无源码行；可重定位镜像除外）；启动被入口断点中止时自动撤断点重试；attach/远程给出「不适用」提示（详见 §8） |
 | **无扩展名的可执行产物（Windows）** | Run/Debug 需要一个带可执行扩展名的产物（`cmd.exe` / `CreateProcess` 的要求，对齐上游 Code::Blocks）。用 TCC 等「`-o` 不补 `.exe`」的工具链时，请在目标「输出文件名」里写全 `.exe` |
-| **Profiler 子集** | 已支持 gprof flat profile；call graph 交互树、源码注解（`gprof -A`）与导出未实现 |
+| **Profiler 子集** | 已支持 gprof flat profile、call graph、`gprof -A` 源码注解与 CSV/HTML 导出；更细粒度的 Valgrind/Callgrind 数据请配合 [推荐扩展](./recommended-extensions.md) §6 |
 | **SymTab 范围** | 只搜索当前工程/目标链接的库；任意目录批量扫描、动态库运行时符号未实现 |
-| **Print** | VS Code 无原生打印；建议使用市场打印扩展 |
+| **Print** | VS Code 无原生打印；建议使用 [推荐扩展](./recommended-extensions.md) §2 中的打印扩展 |
 | **Global variables 编辑** | 只读查看（default.conf 写回竞态，见 [决策](../dev/decisions.md)） |
 | **WebView CSP / 模块拆分** | 0.8.155 起五个面板使用 nonce CSP；`extension.ts` 已首批拆出 `features/toolCommands.ts`，其余域按 [架构文档](../dev/architecture.md) §4 分批（不影响用户功能） |
 
 ### 16.1 建议用 VS Code 扩展替代（本扩展不另行实现）
 
-以下 Code::Blocks 功能（第五轮批次三 T1/T4/T5）经评估**不在本扩展重复实现**，推荐直接用成熟的 VS Code 扩展：
+以下 Code::Blocks 功能经评估**不在本扩展重复实现**，推荐直接用成熟的 VS Code 扩展。完整清单（Doxygen、打印、Fortran、环境变量、单库 nm、Valgrind）见 **[推荐扩展](./recommended-extensions.md)**；本节保留高频的静态分析与正则两项：
 
 | Code::Blocks 功能 | 推荐扩展（扩展 ID） | 说明 |
 |---|---|---|
@@ -1016,12 +1016,20 @@ A：**已全覆盖**（0.8.132 批次 2，2026-11 菜单优化后同步）。构
 | 正则测试台（T4） | **Regex Previewer**（`chrmarti.regex`，面向 JS/TS/PHP/Haxe）· **Regexp Explain**（`louiswt.regexp-preview`）· RegExp Preview and Editor | 通用正则验证；VS Code 搜索框的正则模式也可做基础验证 |
 | 符号表 nm 查看（单库/单文件） | **Nm tool**（`wibren-wiersma.nm-tool`）· **vscode-binutils**（`sqlpassion.vscode-binutils`） | 单库 nm / objdump 查看；跨多个链接库的符号搜索已由本扩展 **Tools → Find Symbol in Libraries…** 提供 |
 
-> Profiler（gprof）、Copy strings、跨库符号搜索已在本扩展实现（0.8.155，见 §17）；
+> Profiler（gprof）、Copy strings、跨库符号搜索已在本扩展实现（0.8.156，见 §17）；
 > Export Makefile 已移入 Build 菜单（对齐 CB `compiler_menu.xrc`）。
 > 详情与决策见 [未实现功能待办](../dev/backlog.md) §2（明确不移植清单）。
 > 提醒：以上扩展为社区/厂商产品，请自行评估安装；本扩展不内置或捆绑它们。
 
-## 17. 0.8.155 新增与行为变更
+## 17. 0.8.156 新增与行为变更
+
+- **Profiler 完整化**：gprof **call graph** 解析与输出；`gprof -A` 源码注解写入独立输出通道（设置 `codeblocks.profiler.annotatedSource`，默认开启）；分析完成后可 **导出 CSV / HTML** 报告。
+- **AutoVersioning**：读写 `.cbp` 的 `<Extensions><AutoVersioning>`；命令 **AutoVersioning…**（配置/编辑版本/切换自动递增/设置头文件路径）、**Bump Version**、**Generate Version Header**。配置存在时构建前生成 `version.h`，构建成功后递增 `BUILDS_COUNT` 并原子写回。
+- **更多编译器**：新增 **TCC**、**Borland C++ 5.5/5.82**、**Digital Mars**、**ARM ELF GCC**、**PowerPC EABI GCC** 的选项与探测资源。
+- **推荐扩展**：新增 [推荐扩展](./recommended-extensions.md)：Doxygen、打印、Modern Fortran、环境变量、单库 nm、Valgrind/Callgrind；这些能力不再由本扩展重复实现。
+- **行为提示**：AutoVersioning 构建前会重写 `version.h`，手工维护该文件时请先备份或关闭工程配置；`gprof -A` 在大工程上可能较慢，可关闭。
+
+## 18. 0.8.155 新增与行为变更
 
 - **Workspace 生命周期**：File → Save Project As… / Save Workspace / Save Workspace As… / Close Workspace / Open default workspace；关闭最后一个工程会清理工作区状态，保存工作区会写回工程顺序、`active` 与 `<Depends>`。
 - **`.workspace` 外部修改检测**：外部修改工程列表/依赖/active 后，窗口焦点或文件事件会提示 Reload / Ignore；重载只刷新磁盘签名变化的工程。
