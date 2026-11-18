@@ -161,7 +161,7 @@ async function main() {
 
   // ---- C4. 渲染后的内联脚本必须能编译（英文译文含撇号/引号会截断 '...' 字符串，导致整个面板脚本不执行） ----
   {
-    const scriptOf = (h) => (h.match(/<script>([\s\S]*?)<\/script>/) || [, ''])[1];
+    const scriptOf = (h) => (h.match(/<script(?:\s+nonce="[^"]*")?>([\s\S]*?)<\/script>/) || [, ''])[1];
     const bad = [];
     for (const [id, html] of [...Object.entries(zh), ...Object.entries(en)]) {
       try {

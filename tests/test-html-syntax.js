@@ -42,7 +42,7 @@ let html = neutralizeInterpolations(
 );
 
 // 4. 提取 script 内容
-const sm = html.match(/<script>([\s\S]*?)<\/script>/);
+const sm = html.match(/<script(?:\s+nonce="[^"]*")?>([\s\S]*?)<\/script>/);
 if (!sm) { console.error('未找到 <script>'); process.exit(1); }
 const script = sm[1];
 
@@ -64,7 +64,7 @@ const htmlFocus = neutralizeInterpolations(
   htmlTemplate.replace('${data}', data).replace('${typeOptions}', typeOptions)
     .replace('${initialTabJs}', JSON.stringify('files')).replace('${focusFileJs}', JSON.stringify('src/main.c')),
 );
-const focusScript = htmlFocus.match(/<script>([\s\S]*?)<\/script>/)[1];
+const focusScript = htmlFocus.match(/<script(?:\s+nonce="[^"]*")?>([\s\S]*?)<\/script>/)[1];
 try {
   new Function(focusScript);
   const focusAt = focusScript.indexOf('if (focusFile)');

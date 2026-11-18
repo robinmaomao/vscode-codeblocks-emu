@@ -3,6 +3,16 @@
 本文件记录**正式版**里程碑；近期 dev 迭代的逐轮发布说明见 [`docs/release/`](./docs/release/)（`0.8.xx-dev.md`），
 `0.8.76`–`0.8.128` 的 dev 说明已合并归档到 [`docs/release/archive/`](./docs/release/archive/)；版本号与维护约定见 [`docs/release/00-index.md`](./docs/release/00-index.md)。
 
+## 0.8.155 — 2026-11-18
+
+> 体验版：P3 架构与健壮性批次。
+
+- **WebView CSP nonce**：五个面板内联脚本改用 nonce，新增 `src/ui/webview/common.ts` 公共运行时。
+- **`.cbp` 未知节点透传**：Project / Target / Unit 插件自定义 XML 与 Unit 未知 Option 属性保存不丢。
+- **激活扫描优化**：`detect.autoOpen=off` 跳过激活期全量扫描；新增激活耗时日志。
+- **首批拆分**：`src/features/toolCommands.ts`（Copy Strings / Backtick Cache）；新增 [架构与模块地图](docs/dev/architecture.md)。
+- 测试：无头 207、契约 / WebView / 未知 XML / 项目检测全绿。
+
 ## 0.8.154 — 2026-11-18
 
 > 体验版：Code::Blocks 剩余功能缺口 + 健壮性收口。

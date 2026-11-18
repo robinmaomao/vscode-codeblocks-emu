@@ -1,19 +1,19 @@
-# 测试执行报告（0.8.154 · 滚动更新）
+# 测试执行报告（0.8.155 · 滚动更新）
 
 > 生成时间：2026-11-18 ｜ 执行环境：Windows 11 x64 ｜ Node v24.22.3 ｜ CPU demo CPU ×16 ｜ 32GB ｜ w64devkit GCC 16.2 / GDB 18.1
 > 方案见 [测试方案](./strategy.md)；覆盖台账见 [测试覆盖矩阵](./coverage-matrix.md)；性能数据见 [性能基准](./performance-baseline.md)。
-> 上一版权威复核见 [0.8.152 测试报告](./test-report-0.8.152-archive.md)；本版发布说明见 [release/0.8.154.md](../release/0.8.154.md)。
+> 上一版权威复核见 [0.8.152 测试报告](./test-report-0.8.152-archive.md)；本版发布说明见 [release/0.8.155.md](../release/0.8.155.md)。
 
 ## 1. 分层结果
 
 | 层 | 命令 | 本轮结果 | 说明 |
 |----|------|----------|------|
 | L-1 契约 | `npm run test:contract` | **3/3** | 契约 44 项 + 文档一致性 6 项 + 设置契约 719 断言 |
-| 无头层（unit） | `npm test` | **TOTAL=206 FAIL=0 SKIP=1** | SKIP=`tests/test-writer.js`；新增 `test-atomic-write` / `test-unit-path-xml-escape` / `test-workspace-change-tracker` / `test-workspace-serializer` / `test-no-project-compile` / `test-copy-strings` / `test-memory-dump` / `test-profiler-parse` / `test-symtab-parse` / `test-workspace-lifecycle-commands` 等 11 个脚本 |
+| 无头层（unit） | `npm test` | **TOTAL=207 FAIL=0 SKIP=1** | SKIP=`tests/test-writer.js`；P3 新增 `test-writer-unknown-nodes.js`（未知 XML 透传）；WebView / 项目检测 / 命令模块测试同步更新 |
 | L1 端到端 | `npm run test:e2e` | **6/6** | 边界 39 pass / 2 skip、构建矩阵 48、ccache 21、调试 141 pass / 1 skip、链接期诊断 9、工具链 42 pass / 2 skip |
 | L3 视觉 | `npm run test:visual` | **26/26** | dark/light 各一套；本机指纹走跨环境容差分支 |
 | L4 性能 | `npm run test:perf` | **13/13** | 13 项微基准 + 真实构建；0 warn / 0 fail |
-| L5 打包 | `npm run test:pack` | **1/1（15 断言）** | VSIX 0.8.154 打包 / 安装冒烟通过，含 `bundle/search-worker.js` 检查 |
+| L5 打包 | `npm run test:pack` | **1/1（15 断言）** | VSIX 0.8.155 打包 / 安装冒烟通过，含 `bundle/search-worker.js` 检查 |
 | 产物 | `npm run bundle` + `npm run bundle:search` | 通过 | esbuild 无告警 |
 | L2 宿主 | `npm run test:host` | **1/1（24 用例）** | 真实 VS Code 1.85.0 宿主；**24 pass / 0 fail / 0 skip** |
 
@@ -45,7 +45,7 @@
 
 | 项 | 说明 |
 |---|---|
-| 主题 | Code::Blocks 剩余功能缺口 + 健壮性收口（Workspace 生命周期 / `.workspace` 检测 / 无工程编码 / 指令步进 / Copy Strings / Profiler / SymTab / Makefile CompileFile·DistClean） |
+| 主题 | P3 架构批次：WebView nonce CSP + 公共运行时、`.cbp` 未知节点透传、激活扫描优化、`features/toolCommands` 首拆、架构文档 |
 | 菜单结构 | 一级收敛为 9 个顶级菜单；Recent Files / Recent Projects / Workspace Build Order 移入 File；TODO List → View、Export Makefile → Build、Find/Changed line → Search；补 Remove Files / Save Project / Close Project / Project Properties / Debugging Windows |
 | 显示规则 | 全部菜单项 1.85 合法 codicon；子菜单 chevron；description 仅“快捷键 · 不可用原因”；面包屑 + 返回；动态列表图标与活动工程标记 |
 | 标签 | 修正 11 条中英混排、`Copy`/`Duplicate` 重名、`Project tree` → `Project Tree`、`Debug Information` → `Information` 等 |
@@ -68,6 +68,6 @@
 
 ## 5. 结论
 
-- 单元 **206** / 契约 **3/3** / E2E **6/6** / 视觉 **26/26** / 性能 **13/13** / 打包 **15 断言** / 宿主 **25/25** 全部通过，无遗留失败。
+- 单元 **207** / 契约 **3/3** / E2E **6/6** / 视觉 **26/26** / 性能 **13/13** / 打包 **15 断言** / 宿主 **25/25** 全部通过，无遗留失败。
 - 菜单项 168 项全部有图标；命令/设置规模不变；未修改 `.cbp` 数据模型与保存协议。
 - 剩余 CB 菜单缺口（M2–M7）已记录在 [未实现功能待办](../dev/backlog.md)，不在本版范围内。

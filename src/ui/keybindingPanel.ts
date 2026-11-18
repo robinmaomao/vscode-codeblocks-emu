@@ -8,6 +8,7 @@
 import * as vscode from 'vscode';
 import { KeybindingRow } from '../tools/keybindingConfig';
 import * as i18n from '../i18n';
+import { createNonce, cspMeta } from './webview/common';
 
 /** 面板数据（宿主构建；含行模型 / 文件路径 / cbStyle 状态 / 设置告警） */
 export interface KeybindingPanelState {
@@ -131,6 +132,7 @@ export class KeybindingPanel {
   }
 
   private buildHtml(): string {
+    const nonce = createNonce();
     const data = JSON.stringify({
       rows: [],
       path: '',
@@ -143,7 +145,7 @@ export class KeybindingPanel {
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline';">
+${cspMeta(nonce)}
 <style>
   body { font-family: var(--vscode-font-family); color: var(--vscode-foreground); padding: 0 14px 14px; }
   h2 { margin: 12px 0 6px; }
@@ -195,7 +197,7 @@ export class KeybindingPanel {
 <div id="list"></div>
 <div class="footer" id="footer"></div>
 
-<script>
+<script nonce="${nonce}">
   'use strict';
   var vscode = acquireVsCodeApi();
   var state = ${data};

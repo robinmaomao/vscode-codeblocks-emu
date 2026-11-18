@@ -7,6 +7,7 @@
  *  - 内联 JS 禁止模板字符串 `${}`（会被服务端模板插值），统一字符串拼接。
  */
 import * as i18n from '../i18n';
+import { createNonce, cspMeta } from './webview/common';
 
 export interface ProjectSearchViewHtmlOptions {
   /** Seti 图标字体的 webview URI（与 VS Code Explorer 同款）；缺省时回退为字母图标 */
@@ -16,6 +17,7 @@ export interface ProjectSearchViewHtmlOptions {
 }
 
 export function buildProjectSearchViewHtml(options: ProjectSearchViewHtmlOptions = {}): string {
+  const nonce = createNonce();
   const fontUri = options.fontUri ?? '';
   const fontCsp = fontUri && options.cspSource ? ` font-src ${options.cspSource};` : '';
   const fontFace = fontUri
@@ -26,7 +28,7 @@ export function buildProjectSearchViewHtml(options: ProjectSearchViewHtmlOptions
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline';${fontCsp}">
+${cspMeta(nonce, fontCsp)}
 <style>
 ${fontFace}
 :root { color-scheme: light dark; }
@@ -316,7 +318,7 @@ button { cursor: pointer; }
   </section>
   <div class="footer">Ctrl+Alt+P · ${i18n.tr('文件模式空查询浏览全部；内容模式回车搜索')}</div>
 </div>
-<script>
+<script nonce="${nonce}">
 (function () {
   var vscode = acquireVsCodeApi();
   var T = {

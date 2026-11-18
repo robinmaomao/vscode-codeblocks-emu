@@ -6,6 +6,7 @@
  *  - 工程属性面板内的页内模态覆盖层（projectPropertiesPanel.ts）
  */
 import * as i18n from '../i18n';
+import { createNonce, cspMeta, jsonForScript } from './webview/common';
 
 /** 单个作用域（工程或一个构建目标）的构建选项 */
 export interface BuildOptionsScopeData {
@@ -1536,11 +1537,12 @@ export function buildOptionsScript(data: BuildOptionsData, embedded: boolean): s
 
 /** 完整独立页面（Build options 面板） */
 export function buildOptionsPage(data: BuildOptionsData, initialScope?: string): string {
+  const nonce = createNonce();
   return `<!DOCTYPE html>
 <html lang="${i18n.htmlLang()}">
 <head>
   <meta charset="UTF-8">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline';">
+  ${cspMeta(nonce)}
   <style>
     html, body { height: 100%; margin: 0; }
     body { font-family: var(--vscode-font-family); font-size: var(--vscode-font-size, 13px); overflow: hidden; }
@@ -1549,9 +1551,9 @@ export function buildOptionsPage(data: BuildOptionsData, initialScope?: string):
 </head>
 <body>
   <div id="bo-root-host" class="bo-root">${buildOptionsMarkup(false)}</div>
-  <script>window.__cbVscode = acquireVsCodeApi();</script>
-  <script>${buildOptionsScript(data, false)}</script>
-  ${initialScope === undefined ? '' : `<script>window.cbBuildOptions.open(null, ${JSON.stringify(initialScope)});</script>`}
+  <script nonce="${nonce}">window.__cbVscode = acquireVsCodeApi();</script>
+  <script nonce="${nonce}">${buildOptionsScript(data, false)}</script>
+  ${initialScope === undefined ? '' : `<script nonce="${nonce}">window.cbBuildOptions.open(null, ${jsonForScript(initialScope)});</script>`}
 </body>
 </html>`;
 }

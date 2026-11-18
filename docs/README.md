@@ -18,6 +18,7 @@ docs/
     backlog.md             未实现功能与决策
     decisions.md           遗留问题决策清单
     cb-porting-lessons.md  Code::Blocks 对话框移植经验（方法/事实/踩坑/清单）
+    architecture.md        模块地图、数据流、Feature 拆分约定与 P3 路线
     setup.md               开发环境配置（Windows/Node/MinGW/测试）
     setup.en.md            开发环境配置（英文）
     i18n.md                国际化约定与实现
@@ -45,6 +46,7 @@ docs/
 | [dev/backlog.md](./dev/backlog.md) | 功能对齐现状：剩余缺口、明确不移植清单、A–E 组完成摘要 |
 | [dev/decisions.md](./dev/decisions.md) | 历次核查待确认项的处置结论（状态表 + 缺陷一览 + 决策记录） |
 | [dev/cb-porting-lessons.md](./dev/cb-porting-lessons.md) | **Code::Blocks 对话框移植经验**：源码地图、已确认的 CB 语义（Build options / Properties / 通用控件）、有意保留差异、实现踩坑、测试分层与对齐清单 |
+| [dev/architecture.md](./dev/architecture.md) | **架构与模块地图**：数据流、目录职责、Feature 模块约定、WebView nonce/CSP 约定、P3 拆分路线 |
 | [dev/setup.md](./dev/setup.md) | **开发环境配置**：Node 24 LTS、w64devkit（gcc/g++/gdb）、依赖构建、分层测试、VS Code 调试与排错｜英文版 [dev/setup.en.md](./dev/setup.en.md) |
 | [dev/i18n.md](./dev/i18n.md) | 中英双语约定与实现：nls 静态贡献 / `ui.language` 运行时、`i18n.t()` 用法、批次台账、已知限制｜英文版 [dev/i18n.en.md](./dev/i18n.en.md) |
 
@@ -54,7 +56,7 @@ docs/
 |------|------|
 | [testing/strategy.md](./testing/strategy.md) | 分层测试体系（L-1…L5 + CI）：覆盖范围、运行方式、环境约束、工具链安装 |
 | [testing/coverage-matrix.md](./testing/coverage-matrix.md) | 命令/视图/设置/键位/语言语法/DAP 能力逐项覆盖台账（`npm run coverage:matrix` 生成） |
-| [testing/test-report-0.8.154.md](./testing/test-report-0.8.154.md) | 当前版本的测试执行报告（滚动更新）：分层结果、覆盖台账、本版变更与缺陷处置 |
+| [testing/test-report-0.8.155.md](./testing/test-report-0.8.155.md) | 当前版本的测试执行报告（滚动更新）：分层结果、覆盖台账、本版变更与缺陷处置 |
 | [testing/test-report-0.8.139-full.md](./testing/test-report-0.8.139-full.md) | 0.8.139 完整独立复核：七层结果、失败/SKIP 取证、ccache 与短路径专项、性能明细 |
 | [testing/manual-acceptance.md](./testing/manual-acceptance.md) | 需人工 GUI 会话执行的验收项与留档要求（自动化不可覆盖的交互） |
 | [testing/performance-baseline.md](./testing/performance-baseline.md) | 微基准 + 真实构建的性能数据与预算（`npm run perf:report` 更新，含趋势） |
@@ -87,7 +89,7 @@ docs/
 
 ## 维护约定
 
-- 测试类文档维护时机：**视觉基线**在 UI/WebView 变更后刷新（`npm run visual:baseline`，随 PR 附基线 PNG）；**性能基准**在构建链路或依赖变化后刷新（`npm run perf:baseline`）并同步 [testing/performance-baseline.md](./testing/performance-baseline.md)（`npm run perf:report`）；**覆盖矩阵**在新增/调整用例后刷新（`npm run coverage:matrix`），并与当版 [测试报告](./testing/test-report-0.8.154.md) §2 台账保持一致。
+- 测试类文档维护时机：**视觉基线**在 UI/WebView 变更后刷新（`npm run visual:baseline`，随 PR 附基线 PNG）；**性能基准**在构建链路或依赖变化后刷新（`npm run perf:baseline`）并同步 [testing/performance-baseline.md](./testing/performance-baseline.md)（`npm run perf:report`）；**覆盖矩阵**在新增/调整用例后刷新（`npm run coverage:matrix`），并与当版 [测试报告](./testing/test-report-0.8.155.md) §2 台账保持一致。
 - **文档一致性巡检**：`tests/contract/test-doc-consistency.js`（随 `npm run test:contract` 自动跑）校验「文档里的命令/相对链接真实存在」「覆盖矩阵与性能基准的计数与产物一致」「版本标记与 `package.json` 一致」；改文档后可单独跑一次，`--self-test` 自检规则本身。
 - **GitHub Release 页面**：正文放 [release/pages/](./release/pages/)（文件名 = tag，链接必须绝对），模板与发布步骤见 [release/00-index.md](./release/00-index.md#github-release-页面pages)；新增/修改后跑 `node tests/contract/gen-release-notes.js --check`，发布时用 `gh release edit <tag> --title <纯版本号> --notes-file …`（Release 标题不带主题与英文）。
 - **CB 移植经验**：每轮对齐 Code::Blocks 对话框后，把新确认的语义补进 [dev/cb-porting-lessons.md](./dev/cb-porting-lessons.md) §3（事实）、§4（有意差异）、§5（踩坑），避免下一轮重新翻源码或把已决策的差异改回去。

@@ -24,7 +24,7 @@ const fixture = {
 const data = JSON.stringify(fixture).replace(/</g, '\\u003c');
 let html = neutralizeInterpolations(htmlTemplate.replace('${data}', data));
 
-const sm = html.match(/<script>([\s\S]*?)<\/script>/);
+const sm = html.match(/<script(?:\s+nonce="[^"]*")?>([\s\S]*?)<\/script>/);
 if (!sm) { console.error('未找到 <script>'); process.exit(1); }
 const script = sm[1];
 

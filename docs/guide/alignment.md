@@ -102,7 +102,7 @@
 | SymTab 范围 | 只搜索当前工程/目标链接的库（含 libDirs 下的 `.a`/`.lib`）；任意目录批量扫描与动态库运行时符号未实现 |
 | Print | VS Code 无原生打印；建议市场打印扩展 |
 | Global variables 编辑 | 维持只读（default.conf 写回竞态，见上） |
-| WebView CSP / 模块拆分 | 仍为 `script-src 'unsafe-inline'` + 巨型 `extension.ts`；P3 架构批次处理 |
+| WebView CSP / 模块拆分 | 0.8.155 起五个面板使用 nonce CSP + 公共运行时；`extension.ts` 已首批拆出 `features/toolCommands.ts`，剩余域按 [architecture.md](../dev/architecture.md) §4 分批 |
 
 ## 5. 菜单对齐（Code::Blocks 菜单栏 → 状态栏 Menu）
 

@@ -78,12 +78,12 @@ for (const p of PANELS) {
   check(`${p.name}：模板提取成功`, tpl !== null && tpl.includes('</html>'), tpl === null ? 'extract failed' : undefined);
 
   if (tpl) {
-    check(`${p.name}：含 CSP meta`, tpl.includes('http-equiv="Content-Security-Policy"'), null);
+    check(`${p.name}：含 CSP meta`, tpl.includes('cspMeta') || tpl.includes('http-equiv="Content-Security-Policy"'), null);
     // 转义函数：项目属性/快捷键在模板内（客户端 esc）；编译选项在宿主侧（escapeHtml/escapeAttr 先构建再插值）
     check(`${p.name}：含转义函数`, p.escapePattern.test(tpl) || p.escapePattern.test(dist), null);
 
     const html = neutralizePlaceholders(tpl);
-    const sm = html.match(/<script>([\s\S]*?)<\/script>/);
+    const sm = html.match(/<script(?:\s+nonce="[^"]*")?>([\s\S]*?)<\/script>/);
     check(`${p.name}：提取到 <script> 块`, !!sm, null);
     if (sm) {
       try {
@@ -132,7 +132,7 @@ function fnBody(script, name) {
   const tpl = extractTemplate(propsDist, propsDist.indexOf('return `<!DOCTYPE html>') + 'return '.length);
   const html = neutralizePlaceholders(tpl);
   const css = (html.match(/<style>([\s\S]*?)<\/style>/) || [, ''])[1];
-  const script = (html.match(/<script>([\s\S]*?)<\/script>/) || [, ''])[1];
+  const script = (html.match(/<script(?:\s+nonce="[^"]*")?>([\s\S]*?)<\/script>/) || [, ''])[1];
 
   check('工程属性：按钮禁止逐字换行（button white-space: nowrap）',
     /white-space:\s*nowrap/.test(ruleBody(css, 'button') || ''), ruleBody(css, 'button'));
@@ -244,9 +244,9 @@ function fnBody(script, name) {
   const pageTpl = pageIdx >= 0 ? extractTemplate(dist, dist.indexOf('return `', pageIdx) + 'return '.length) : null;
   check('编译选项：页面模板提取成功', !!pageTpl && pageTpl.includes('</html>'), pageTpl === null ? 'extract failed' : undefined);
   if (pageTpl) {
-    check('编译选项：含 CSP meta', pageTpl.includes('http-equiv="Content-Security-Policy"'), null);
+    check('编译选项：含 CSP meta', pageTpl.includes('cspMeta') || pageTpl.includes('http-equiv="Content-Security-Policy"'), null);
     const html = neutralizePlaceholders(pageTpl);
-    const sm = html.match(/<script>([\s\S]*?)<\/script>/);
+    const sm = html.match(/<script(?:\s+nonce="[^"]*")?>([\s\S]*?)<\/script>/);
     check('编译选项：提取到 <script> 块', !!sm, null);
     if (sm) {
       try {

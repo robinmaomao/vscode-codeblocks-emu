@@ -70,7 +70,7 @@ import { buildLogPrefs, logT, msg, quietSuccess, resetBuildLogPrefsCache } from 
 import { decodeText, decodeTextWithEncoding, encodeText, OutputLineDecoder, TextEncoding } from './tools/encoding';
 import { ASM_HASH_COMMENT_SETTING, ASM_LANGUAGE_ID, asmCommentsRule } from './tools/asmCommentConfig';
 import * as i18n from './i18n';
-import { clearBackticksCache, getBackticksCacheEntries, CommandGenerator } from './compiler/commandGenerator';
+import { clearBackticksCache, CommandGenerator } from './compiler/commandGenerator';
 import { OutputParser } from './build/outputParser';
 import { isCompilerUsable, renderInvalidCompilerMessage, renderTriedCompilerPaths, triedCompilerPaths } from './build/invalidCompiler';
 import { collectClangdEntries, writeClangdDatabase, CompileCommandEntry } from './build/compileCommands';
@@ -104,7 +104,7 @@ import {
 } from './settings/migration';
 import { applyHeaderGuard } from './tools/headerGuard';
 import { tidyCommentBlock } from './tools/tidyComments';
-import { extractStringLiterals } from './tools/copyStrings';
+import { registerToolCommands } from './features/toolCommands';
 import { formatProfilerTable, parseGprofFlatProfile, runCapture } from './tools/profiler';
 import { filterSymbols, parseNmOutput, SymbolRow } from './tools/symtab';
 import { parseToolsSetting, buildToolInvocation, ToolContext } from './tools/toolRunner';
@@ -374,6 +374,7 @@ async function migrateSettingsOnce(context: vscode.ExtensionContext): Promise<vo
 }
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
+  const activateStartedAt = Date.now();
   extContext = context;
   // 搜索视图尽早注册：package.json 已声明 type:"webview"，但侧边栏布局恢复可能早于 activate 完成；
   // provider 越早就绪，视图越早进入正常解析，避免长时间停留在空视图/加载态。
@@ -1934,43 +1935,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     }),
   );
 
-  // 反引号缓存管理器（对齐 CB Settings → Backtick Cache：Expression/Value 列表 + Clear and close）
-  context.subscriptions.push(
-    vscode.commands.registerCommand('codeblocks.backtickCache', async () => {
-      const entries = getBackticksCacheEntries();
-      const clearLabel = i18n.t('Clear and close');
-      const items: Array<vscode.QuickPickItem & { expression?: string; value?: string; clear?: boolean }> = [];
-      for (const e of entries) {
-        items.push({
-          label: e.expression,
-          description: e.value.length > 160 ? `${e.value.slice(0, 157)}...` : e.value,
-          expression: e.expression,
-          value: e.value,
-        });
-      }
-      if (entries.length) items.push({ label: '', kind: vscode.QuickPickItemKind.Separator });
-      items.push({ label: clearLabel, iconPath: new vscode.ThemeIcon('trash'), clear: true });
-      const pick = await vscode.window.showQuickPick(items, {
-        title: i18n.t('Backtick Cache'),
-        placeHolder: entries.length ? i18n.t('Cached backtick commands — select one to copy its value') : i18n.t('The backtick cache is empty'),
-        matchOnDescription: true,
-      });
-      if (!pick) return;
-      if (pick.clear) {
-        clearBackticksCache();
-        vscode.window.setStatusBarMessage(i18n.t('Backtick cache cleared (backtick commands run again on the next build)'), 3000);
-        return;
-      }
-      if (pick.value !== undefined) {
-        await vscode.env.clipboard.writeText(pick.value);
-        vscode.window.setStatusBarMessage(i18n.t('Backtick value copied: {0}', pick.expression ?? ''), 3000);
-      }
-    }),
-    vscode.commands.registerCommand('codeblocks.clearBacktickCache', () => {
-      clearBackticksCache();
-      vscode.window.setStatusBarMessage(i18n.t('Backtick cache cleared (backtick commands run again on the next build)'), 3000);
-    }),
-  );
+  // 工具类命令（Copy Strings / Backtick Cache）—— 已拆到 features/toolCommands.ts
+  registerToolCommands(context);
 
   // 快捷键冲突检测（VS Code 默认表 / 用户 keybindings.json / 其他已安装扩展）+ 托管覆盖状态（D7）
   context.subscriptions.push(
@@ -2209,20 +2175,6 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   // Tidy 注释（D3：tidycmt 对齐）
   context.subscriptions.push(
-    vscode.commands.registerCommand('codeblocks.copyStrings', async () => {
-      const editor = vscode.window.activeTextEditor;
-      if (!editor) { vscode.window.showWarningMessage(i18n.t('No file is open')); return; }
-      const selection = editor.selection;
-      const text = selection.isEmpty ? editor.document.getText() : editor.document.getText(selection);
-      const strings = extractStringLiterals(text);
-      if (!strings.length) {
-        vscode.window.showInformationMessage(i18n.t('No double-quoted string literals found'));
-        return;
-      }
-      const eol = process.platform === 'win32' ? '\r\n' : '\n';
-      await vscode.env.clipboard.writeText(strings.join(eol));
-      vscode.window.showInformationMessage(i18n.t('{0} literal string(s) copied to the clipboard', strings.length));
-    }),
     vscode.commands.registerCommand('codeblocks.tidyComments', async () => {
       await tidyCommentsInActiveEditor();
     }),
@@ -2367,6 +2319,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   // 初始状态：无工程时仅显示 Code::Blocks 入口，有工程时显示 Target/Build/Rebuild/Compiler
   refreshStatusBars();
+  outputChannel.debug(logT('[Code::Blocks] Activation completed in {0}ms', Date.now() - activateStartedAt));
 
   return;
 }
@@ -2380,6 +2333,15 @@ async function autoDetectAndOpenProject(force = false): Promise<void> {
     if (active && fs.existsSync(active) && openProjects.length === 0) {
       await openProject(active);
     }
+    return;
+  }
+
+  // 大工作区保护：显式关闭自动打开时，激活/工作区变化不再全量扫描；
+  // 用户仍可从状态栏/项目管理菜单或命令手动触发 Detect workspace projects。
+  if (detectAutoOpenMode() === 'off') {
+    pendingCbpFiles = [];
+    updateCbpStatusBar();
+    outputChannel?.debug(logT('[Code::Blocks] Automatic project detection is off; workspace scan skipped (use "Detect workspace projects…")'));
     return;
   }
 
