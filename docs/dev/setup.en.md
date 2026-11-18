@@ -138,6 +138,7 @@ Notes:
 - `test:host` reuses the VS Code copy cached in `.vscode-test/`; it downloads again on first use or when the cache is damaged.
 - `test:host` first builds `bundle/extension.js` and `bundle/search-worker.js` via `pretest:host`, so it works from a clean checkout without a manual build.
 - Visual/performance layers are outside the default development flow. Use `npm run test:visual` / `npm run test:perf` when needed and see the [layered testing strategy](../testing/strategy.md).
+- **Visual baselines across machines**: the baselines in `tests/visual/baselines` come from another machine, so the local fingerprint differs. The run automatically takes the **cross-environment tolerance** path and marks every case `OK(P)`; this is expected. Refresh baselines only after confirming a real UI change: `npm run visual:baseline` (with a mismatched fingerprint it writes to `.cb-tools/visual/<fingerprint>/`; `--canonical` is required to touch the committed baselines).
 
 ## 6. VS Code development and debugging
 
@@ -155,6 +156,17 @@ Manual smoke test:
 1. Open `test-project/hello-cb.cbp` in the Extension Development Host.
 2. Confirm the status bar detects the GCC/MinGW compiler.
 3. Press `Ctrl+F9` to build, `F9` to run, and `F5` to start GDB debugging; verify breakpoints and variables.
+
+### 6.1 Packaging and installing (VSIX)
+
+```powershell
+npm.cmd run package                                   # = vsce package (auto compile + bundle + bundle:search)
+code.cmd --install-extension codeblocks-vscode-0.8.152.vsix --force
+code.cmd --list-extensions --show-versions | Select-String codeblocks
+```
+
+- `.vscodeignore` excludes `src/`, `tests/`, `test-project/`, `docs/`, `.github/`, `.vscode/`, `.nvmrc`, `*.map`, and `package-lock.json`; the only VSIX entry point is `bundle/extension.js`.
+- **Reload the window** after installing; re-installing the same version requires `--force`.
 
 ## 7. Troubleshooting
 

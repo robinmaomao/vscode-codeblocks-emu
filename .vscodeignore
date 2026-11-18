@@ -1,4 +1,7 @@
 .vscode/**
+.github/**
+.nvmrc
+.gitattributes
 codeblocks-src/**
 docs/**
 test-project/**
