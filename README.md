@@ -6,7 +6,7 @@
 
 直接在 VS Code 中打开 `.cbp` / `.workspace` 工程，即可获得与 Code::Blocks 对齐的构建、调试与工程浏览体验。
 
-> **作者**：Robinmaomao ｜ **版本**：0.8.156
+> **作者**：Robinmaomao ｜ **版本**：0.8.157
 
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](./LICENSE.md)
 
@@ -48,7 +48,7 @@
 
 - 📁 **原生工程解析**：直接加载 `.cbp` / `.workspace`（`fast-xml-parser`），完整还原 `Project` / `BuildTarget` / `ProjectFile` 内存模型，支持虚拟目标与虚拟文件夹。
 - 🔨 **真实构建引擎**：不依赖 `tasks.json`。内置 Code::Blocks 的命令模板 + 宏展开（`$compiler $options $includes ...`），直接 `spawn` 编译/链接进程；增量编译（源文件 + `#include` 头文件 + 链接输入 mtime 比对）。
-- ⚙️ **编译器管理**：完整解析 `options_<id>.xml`（含 `extends` 继承、`<if platform>` 平台分支、`<Common>` 引用）；自动探测 GCC / MinGW / Clang / MSVC / RISC-V，以及 AVR / MSP430 / SDCC / TCC / Borland C++ / Digital Mars / ARM ELF / PowerPC EABI 工具链；支持从 Code::Blocks 的 `default.conf` 读取**用户自定义交叉编译器**。
+- ⚙️ **编译器管理**：完整解析 `options_<id>.xml`（含 `extends` 继承、`<if platform>` 平台分支、`<Common>` 引用）；内置 Code::Blocks 全量编译器选项/元数据资源，读取真实显示名与 master 路径；自动探测 GCC / MinGW / Clang / MSVC / RISC-V、AVR / MSP430 / SDCC、TCC / Borland C++ / Digital Mars / ARM ELF / PowerPC EABI、OpenWatcom / Cygwin / MSYS2 / TDM / DMD / GDC / gfortran 等常见工具链；支持从 Code::Blocks 的 `default.conf` 读取**用户自定义交叉编译器**。
 - 🗂️ **多项目管理**：同时打开多个 `.cbp`，工程树支持拖拽排序（即编译顺序）、上移/下移、移除项目、活动项目高亮；打开工作区自动检测 `.cbp`，多选弹窗（目录名/文件名、默认全选）或状态栏入口随时重新打开。
 - 📂 **工程树浏览**：按公共顶层目录（`relativeToCommonTopLevelPath`）展开的多层嵌套目录树、文件类型图标、缺失文件标记、目录优先排序（对齐 VS Code Explorer）。
 - 🔎 **工程搜索（Project Search）**：侧边栏专用视图，**只搜索已打开 `.cbp` 工程**（文件/内容双模式、活动工程优先、点击跳转、可停止）；顶部搜索历史 + `保留历史` 可视化开关，`Ctrl+Alt+P` 直达文件模式；不替换内置搜索、不扫描工作区外文件。
@@ -122,10 +122,10 @@ code --install-extension robinmaomao.codeblocks-vscode
 
 ### 方式二：从 GitHub Releases 安装
 
-从 [Releases](https://github.com/robinmaomao/vscode-codeblocks-emu/releases) 下载 `codeblocks-vscode-0.8.156.vsix`：
+从 [Releases](https://github.com/robinmaomao/vscode-codeblocks-emu/releases) 下载 `codeblocks-vscode-0.8.157.vsix`：
 
 ```powershell
-code --install-extension codeblocks-vscode-0.8.156.vsix --force
+code --install-extension codeblocks-vscode-0.8.157.vsix --force
 ```
 
 ### 方式三：从源码构建
@@ -133,7 +133,7 @@ code --install-extension codeblocks-vscode-0.8.156.vsix --force
 ```powershell
 npm install
 npm run package
-code --install-extension codeblocks-vscode-0.8.156.vsix --force
+code --install-extension codeblocks-vscode-0.8.157.vsix --force
 ```
 
 > `npm run package` = `vsce package`（打包前会自动执行 `vscode:prepublish` 钩子 = `tsc` 编译（`dist/`，本地测试用）+ esbuild 单文件打包（`bundle/extension.js`，发布入口））；直接运行 `npx vsce package` / `npx vsce publish` 同样会自动构建，不会打进过期或缺失的 `bundle/`；Windows 下建议使用 `npm.cmd` / `npx.cmd`（PSReadLine 执行策略）。

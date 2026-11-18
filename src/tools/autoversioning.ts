@@ -5,8 +5,10 @@
  * 覆盖 .cbp `<Extensions><AutoVersioning>` 配置读写、version.h 解析/生成，
  * 以及构建计数与版本递增规则；构建钩子由 extension.ts 负责调用。
  */
+import * as fs from 'fs';
 import * as path from 'path';
 import type { Project } from '../model/types';
+import { writeFileAtomicSync } from '../model/atomicWrite';
 
 export interface AutoVersioningScheme {
   minorMax: number;
@@ -65,6 +67,11 @@ export interface AutoVersioningState {
   values: AutoVersioningValues;
   status: AutoVersioningStatus;
   buildHistory: number;
+}
+
+export interface AutoVersioningSvnInfo {
+  revision: string;
+  date: string;
 }
 
 export function defaultAutoVersioningConfig(): AutoVersioningConfig {
@@ -227,6 +234,27 @@ export function versionHeaderPath(project: Project, config: AutoVersioningConfig
   return path.resolve(project.basePath, config.settings.headerPath || 'version.h');
 }
 
+export interface VersionHeaderWriteResult {
+  file: string;
+  written: boolean;
+}
+
+/**
+ * 写入 version.h，但内容完全相同时跳过，避免仅因 mtime 变化触发全量重编译。
+ */
+export function writeVersionHeaderIfChanged(file: string, text: string): VersionHeaderWriteResult {
+  try {
+    if (fs.existsSync(file) && fs.readFileSync(file, 'utf-8') === text) {
+      return { file, written: false };
+    }
+  } catch {
+    // 读失败按需要写入处理
+  }
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  writeFileAtomicSync(file, text);
+  return { file, written: true };
+}
+
 function numericValue(text: string, name: string): number | undefined {
   const re = new RegExp(`(?:^|[^A-Za-z0-9_])(?:[A-Za-z_][A-Za-z0-9_]*_)?${name}\\b[^\\S\\r\\n]*(?:=[^\\S\\r\\n]*)?(-?\\d+)`, 'm');
   const m = re.exec(text);
@@ -276,6 +304,7 @@ export function generateVersionHeader(
   config: AutoVersioningConfig,
   state: AutoVersioningState,
   now: Date = new Date(),
+  svn?: AutoVersioningSvnInfo,
 ): string {
   const guard = headerGuard(config);
   const prefix = config.code.prefix ? `${config.code.prefix}_` : '';
@@ -319,6 +348,12 @@ export function generateVersionHeader(
   L.push(`\t#define ${prefix}RC_FILEVERSION ${v.major},${v.minor},${v.build},${v.revision}`);
   L.push(`\t#define ${prefix}RC_FILEVERSION_STRING "${v.major}, ${v.minor}, ${v.build}, ${v.revision}\\0"`);
   L.push(`\t${charDecl}${prefix}FULLVERSION_STRING${array}${equal}${quote(`${v.major}.${v.minor}.${v.build}.${v.revision}`)}${end}`);
+  if (config.settings.svn) {
+    L.push('');
+    L.push('\t//SVN Version');
+    L.push(`\t${charDecl}${prefix}SVN_REVISION${array}${equal}${quote(svn?.revision ?? '')}${end}`);
+    L.push(`\t${charDecl}${prefix}SVN_DATE${array}${equal}${quote(svn?.date ?? '')}${end}`);
+  }
   L.push('');
   L.push("\t//These values are to keep track of your versioning state, don't modify them.");
   L.push(`\t${longDecl}${prefix}BUILD_HISTORY${equal}${state.buildHistory}${end}`);

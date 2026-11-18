@@ -161,7 +161,7 @@ Manual smoke test:
 
 ```powershell
 npm.cmd run package                                   # = vsce package (auto compile + bundle + bundle:search)
-code.cmd --install-extension codeblocks-vscode-0.8.156.vsix --force
+code.cmd --install-extension codeblocks-vscode-0.8.157.vsix --force
 code.cmd --list-extensions --show-versions | Select-String codeblocks
 ```
 

@@ -372,11 +372,11 @@ function scanDirsByPrefix(root: string, prefix: string): string[] {
  */
 function detectToolchain(
   id: string, name: string, exeName: string,
-  masterFallbacks: string[], wildcard?: { root: string; prefix: string },
+  masterFallbacks: string[], wildcard?: { root: string; prefix: string }, usePath = true,
 ): DetectedCompiler | null {
   const win = process.platform === 'win32';
   const exe = win ? exeName + '.exe' : exeName;
-  let exePath = findInPath(exe, process.env.PATH ?? '');
+  let exePath = usePath ? findInPath(exe, process.env.PATH ?? '') : null;
   let master = '';
   if (exePath) {
     const dir = path.dirname(exePath);
@@ -455,6 +455,61 @@ export function detectPowerpcEabi(): DetectedCompiler | null {
       : ['/usr/local/powerpc-eabi']);
 }
 
+/** 探测 OpenWatcom（对齐 compiler_ow.xml / options_ow.xml）。 */
+export function detectOw(): DetectedCompiler | null {
+  const win = process.platform === 'win32';
+  return detectToolchain('ow', 'OpenWatcom Compiler', 'wcl386',
+    win ? [process.env['WATCOM'] ?? 'C:\\WATCOM'] : ['/opt/watcom']);
+}
+
+/** 探测 Cygwin GCC（仅保守检查常见安装目录，避免把普通 GCC 误判成 Cygwin）。 */
+export function detectCygwin(): DetectedCompiler | null {
+  if (process.platform !== 'win32') return null;
+  return detectToolchain('cygwin', 'Cygwin GCC Compiler', 'gcc',
+    ['C:\\cygwin64', 'C:\\cygwin'], undefined, false);
+}
+
+/** 探测 MSYS2 MinGW64 GCC。 */
+export function detectMsys2(): DetectedCompiler | null {
+  if (process.platform !== 'win32') return null;
+  return detectToolchain('gcc-msys2-mingw64', 'GNU GCC Compiler (MSYS2 MinGW64)', 'gcc',
+    ['C:\\msys64\\mingw64'], undefined, false);
+}
+
+/** 探测 TDM-GCC 64 位工具链。 */
+export function detectTdm(): DetectedCompiler | null {
+  if (process.platform !== 'win32') return null;
+  return detectToolchain('gcc-tdm-64', 'GNU GCC Compiler (TDM64)', 'gcc',
+    ['C:\\TDM-GCC-64'], undefined, false);
+}
+
+/** 探测 LCC 编译器。 */
+export function detectLcc(): DetectedCompiler | null {
+  const win = process.platform === 'win32';
+  return detectToolchain('lcc', 'LCC Compiler', 'lcc',
+    win ? ['C:\\lcc'] : ['/usr/local/lcc']);
+}
+
+/** 探测 DMD 编译器。 */
+export function detectDmd(): DetectedCompiler | null {
+  const win = process.platform === 'win32';
+  return detectToolchain('dmd', 'Digital Mars D Compiler', 'dmd',
+    win ? ['C:\\D\\dmd2', 'C:\\dmd'] : ['/usr/local/dmd']);
+}
+
+/** 探测 GDC（GCC D 编译器）。 */
+export function detectGdc(): DetectedCompiler | null {
+  return detectToolchain('gdc', 'GNU D Compiler', 'gdc', []);
+}
+
+/** 探测 gfortran / MinGW gfortran。 */
+export function detectGfortran(): DetectedCompiler | null {
+  const win = process.platform === 'win32';
+  if (!win) return detectToolchain('gfortran', 'GNU Fortran Compiler', 'gfortran', ['/usr']);
+  return detectToolchain('gfortran', 'GNU Fortran Compiler', 'mingw32-gfortran', ['C:\\MinGW', 'C:\\mingw64'])
+    ?? detectToolchain('gfortran', 'GNU Fortran Compiler', 'gfortran', ['C:\\MinGW', 'C:\\mingw64']);
+}
+
 /** 统一探测所有可用编译器 */
 export function detectAllCompilers(masterPath = ''): DetectedCompiler[] {
   const result: DetectedCompiler[] = [];
@@ -465,7 +520,7 @@ export function detectAllCompilers(masterPath = ''): DetectedCompiler[] {
   const msvc = detectMsvc();
   if (msvc) result.push(msvc);
   result.push(...detectRiscv());
-  for (const c of [detectAvr(), detectMsp430(), detectSdcc(), detectTcc(), detectBcc(), detectDmc(), detectArmElf(), detectPowerpcEabi()]) {
+  for (const c of [detectAvr(), detectMsp430(), detectSdcc(), detectTcc(), detectBcc(), detectDmc(), detectArmElf(), detectPowerpcEabi(), detectOw(), detectCygwin(), detectMsys2(), detectTdm(), detectLcc(), detectDmd(), detectGdc(), detectGfortran()]) {
     if (c) result.push(c);
   }
   return result;
@@ -707,11 +762,11 @@ async function detectRiscvAsync(): Promise<DetectedCompiler[]> {
 /** 通用工具链探测（异步版：路径查找同步、版本查询异步） */
 async function detectToolchainAsync(
   id: string, name: string, exeName: string,
-  masterFallbacks: string[], wildcard?: { root: string; prefix: string },
+  masterFallbacks: string[], wildcard?: { root: string; prefix: string }, usePath = true,
 ): Promise<DetectedCompiler | null> {
   const win = process.platform === 'win32';
   const exe = win ? exeName + '.exe' : exeName;
-  let exePath = findInPath(exe, process.env.PATH ?? '');
+  let exePath = usePath ? findInPath(exe, process.env.PATH ?? '') : null;
   let master = '';
   if (exePath) {
     const dir = path.dirname(exePath);
@@ -779,9 +834,51 @@ async function detectPowerpcEabiAsync(): Promise<DetectedCompiler | null> {
       : ['/usr/local/powerpc-eabi']);
 }
 
+async function detectOwAsync(): Promise<DetectedCompiler | null> {
+  const win = process.platform === 'win32';
+  return detectToolchainAsync('ow', 'OpenWatcom Compiler', 'wcl386',
+    win ? [process.env['WATCOM'] ?? 'C:\\WATCOM'] : ['/opt/watcom']);
+}
+
+async function detectCygwinAsync(): Promise<DetectedCompiler | null> {
+  if (process.platform !== 'win32') return null;
+  return detectToolchainAsync('cygwin', 'Cygwin GCC Compiler', 'gcc', ['C:\\cygwin64', 'C:\\cygwin'], undefined, false);
+}
+
+async function detectMsys2Async(): Promise<DetectedCompiler | null> {
+  if (process.platform !== 'win32') return null;
+  return detectToolchainAsync('gcc-msys2-mingw64', 'GNU GCC Compiler (MSYS2 MinGW64)', 'gcc', ['C:\\msys64\\mingw64'], undefined, false);
+}
+
+async function detectTdmAsync(): Promise<DetectedCompiler | null> {
+  if (process.platform !== 'win32') return null;
+  return detectToolchainAsync('gcc-tdm-64', 'GNU GCC Compiler (TDM64)', 'gcc', ['C:\\TDM-GCC-64'], undefined, false);
+}
+
+async function detectLccAsync(): Promise<DetectedCompiler | null> {
+  const win = process.platform === 'win32';
+  return detectToolchainAsync('lcc', 'LCC Compiler', 'lcc', win ? ['C:\\lcc'] : ['/usr/local/lcc']);
+}
+
+async function detectDmdAsync(): Promise<DetectedCompiler | null> {
+  const win = process.platform === 'win32';
+  return detectToolchainAsync('dmd', 'Digital Mars D Compiler', 'dmd', win ? ['C:\\D\\dmd2', 'C:\\dmd'] : ['/usr/local/dmd']);
+}
+
+async function detectGdcAsync(): Promise<DetectedCompiler | null> {
+  return detectToolchainAsync('gdc', 'GNU D Compiler', 'gdc', []);
+}
+
+async function detectGfortranAsync(): Promise<DetectedCompiler | null> {
+  const win = process.platform === 'win32';
+  if (!win) return detectToolchainAsync('gfortran', 'GNU Fortran Compiler', 'gfortran', ['/usr']);
+  return await detectToolchainAsync('gfortran', 'GNU Fortran Compiler', 'mingw32-gfortran', ['C:\\MinGW', 'C:\\mingw64'])
+    ?? await detectToolchainAsync('gfortran', 'GNU Fortran Compiler', 'gfortran', ['C:\\MinGW', 'C:\\mingw64']);
+}
+
 /** 统一探测所有可用编译器（异步并行版；弹窗后台探测用，不阻塞 UI） */
 export async function detectAllCompilersAsync(masterPath = ''): Promise<DetectedCompiler[]> {
-  const [gcc, clang, msvc, riscv, avr, msp430, sdcc, tcc, bcc, dmc, arm, powerpc] = await Promise.all([
+  const [gcc, clang, msvc, riscv, avr, msp430, sdcc, tcc, bcc, dmc, arm, powerpc, ow, cygwin, msys2, tdm, lcc, dmd, gdc, gfortran] = await Promise.all([
     detectGccAsync(masterPath),
     detectClangAsync(),
     detectMsvcAsync(),
@@ -794,13 +891,21 @@ export async function detectAllCompilersAsync(masterPath = ''): Promise<Detected
     detectDmcAsync(),
     detectArmElfAsync(),
     detectPowerpcEabiAsync(),
+    detectOwAsync(),
+    detectCygwinAsync(),
+    detectMsys2Async(),
+    detectTdmAsync(),
+    detectLccAsync(),
+    detectDmdAsync(),
+    detectGdcAsync(),
+    detectGfortranAsync(),
   ]);
   const result: DetectedCompiler[] = [];
   if (gcc) result.push(gcc);
   if (clang) result.push(clang);
   if (msvc) result.push(msvc);
   result.push(...riscv);
-  for (const c of [avr, msp430, sdcc, tcc, bcc, dmc, arm, powerpc]) {
+  for (const c of [avr, msp430, sdcc, tcc, bcc, dmc, arm, powerpc, ow, cygwin, msys2, tdm, lcc, dmd, gdc, gfortran]) {
     if (c) result.push(c);
   }
   return result;

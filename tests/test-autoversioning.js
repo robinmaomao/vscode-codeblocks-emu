@@ -95,6 +95,16 @@ try {
 
   const counted = av.bumpBuildCount(state);
   check('build count increments', counted.values.buildCount === 7 && state.values.buildCount === 6, counted.values.buildCount, 7);
+  const svnConfig = av.defaultAutoVersioningConfig();
+  svnConfig.settings.svn = true;
+  const svnHeader = av.generateVersionHeader(svnConfig, state, new Date(2024, 0, 2), { revision: '1234', date: '2026-11-19T00:00:00Z' });
+  check('SVN fields are generated', svnHeader.includes('static const char SVN_REVISION[] = "1234";') && svnHeader.includes('static const char SVN_DATE[] = "2026-11-19T00:00:00Z";'), svnHeader, 'SVN');
+  const headerFile = path.join(dir, 'version-if-changed.h');
+  check('header writer skips identical content', (() => {
+    const first = av.writeVersionHeaderIfChanged(headerFile, 'same');
+    const second = av.writeVersionHeaderIfChanged(headerFile, 'same');
+    return first.written && !second.written;
+  })(), fs.readFileSync(headerFile, 'utf8'), 'same');
   const value = av.parseVersionValue('4.5.6.7');
   check('version value parse', value && value.major === 4 && value.revision === 7, value, '4.5.6.7');
   check('invalid version value', av.parseVersionValue('4.5.6') === null, av.parseVersionValue('4.5.6'), null);

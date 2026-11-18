@@ -79,11 +79,12 @@
 | 2026-10-12 | 边界/异常 E2E 新发现 D-14…D-19 | 全部修复（随 0.8.129-dev） |
 | 2026-11-04 | 审计 2.5 复核 | 已由 0.8.129-dev 测试分层 + CI 落地，状态改为 ✔；仅审计 3.2 保持待确认 |
 | 2026-11-18 | 0.8.154 功能/健壮性批次 | G1/G2/T2/T3/T5/M2/M3/M6/M7 子集实施；原子写、单元路径 XML 转义、package.json i18n、Makefile CompileFile/DistClean 收口；P3（WebView CSP、模块拆分）仍待排期 |
+| 2026-11-19 | 0.8.157 AutoVersioning/Profiler | AutoVersioning 的 ChangesLog 只提供文本打开/创建（不移植 wxGrid）；SVN 查询失败只警告并生成空字段；`version.h` 内容不变不写。Profiler 拒绝旧 `gmon.out`，`gprof -A` 空 stdout 时回退 `--separate-files` |
 
 ## 3. 仍开放项
 
 | 编号 | 项 | 说明 |
 |---|---|---|
-| 审计 3.2 | 巨型模块拆分 | 进行中（0.8.155）：纯逻辑模块 + `features/{toolCommands,workspaceCommands,newProjectCommands,debugCommands}.ts` 已拆出；工程/构建/调试/UI 四批按 [architecture.md](./architecture.md) §4 推进 |
+| 审计 3.2 | 巨型模块拆分 | 进行中（0.8.155）：纯逻辑模块 + `features/{toolCommands,workspaceCommands,newProjectCommands,debugCommands}.ts` 已拆出；0.8.157 又拆出编译器元数据纯模块。工程/构建/调试/UI 四批按 [architecture.md](./architecture.md) §4 推进 |
 | G1 / G2 | `.workspace` 外部修改检测、无工程单文件编译编码 | ✔ 0.8.154 已实施（见 [未实现功能待办](./backlog.md) §1） |
 | 原子写（R5） | `.cbp`/`.workspace` 写入中断 | ✔ 0.8.154：同目录临时文件 + rename；失败保留原文件 |
