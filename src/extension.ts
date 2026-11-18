@@ -105,6 +105,7 @@ import {
 import { applyHeaderGuard } from './tools/headerGuard';
 import { tidyCommentBlock } from './tools/tidyComments';
 import { registerToolCommands } from './features/toolCommands';
+import { registerDebugInstructionCommands } from './features/debugCommands';
 import { formatProfilerTable, parseGprofFlatProfile, runCapture } from './tools/profiler';
 import { filterSymbols, parseNmOutput, SymbolRow } from './tools/symtab';
 import { parseToolsSetting, buildToolInvocation, ToolContext } from './tools/toolRunner';
@@ -123,7 +124,6 @@ import { renameUnitInCbpText } from './project/unitText';
 import { escapeXmlAttr } from './model/xml';
 import { writeFileAtomicSync } from './model/atomicWrite';
 import { buildNoProjectCompilePlan, runNoProjectCompile } from './build/noProjectCompile';
-import { formatMemoryDump } from './debug/memoryDump';
 import {
   addVirtualFolder,
   renameVirtualFolder,
@@ -737,62 +737,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     });
   }));
 
-  // 指令级步进 / Examine memory（对齐 CB debugger_menu.xrc:51-57 与 Examine memory 对话框）
-  context.subscriptions.push(
-    vscode.commands.registerCommand('codeblocks.debug.nextInstruction', async () => {
-      const adapter = getActiveAdapter();
-      if (!adapter || !adapter.isActive()) { vscode.window.showWarningMessage(i18n.t('No active Code::Blocks debug session')); return; }
-      if (!adapter.isStopped()) { vscode.window.showWarningMessage(i18n.t('Pause the program first (instruction stepping is only available while stopped)')); return; }
-      try {
-        await adapter.stepInstruction('next');
-      } catch (err) {
-        vscode.window.showErrorMessage(i18n.t('Instruction step failed: {0}', (err as Error).message));
-      }
-    }),
-    vscode.commands.registerCommand('codeblocks.debug.stepIntoInstruction', async () => {
-      const adapter = getActiveAdapter();
-      if (!adapter || !adapter.isActive()) { vscode.window.showWarningMessage(i18n.t('No active Code::Blocks debug session')); return; }
-      if (!adapter.isStopped()) { vscode.window.showWarningMessage(i18n.t('Pause the program first (instruction stepping is only available while stopped)')); return; }
-      try {
-        await adapter.stepInstruction('into');
-      } catch (err) {
-        vscode.window.showErrorMessage(i18n.t('Instruction step failed: {0}', (err as Error).message));
-      }
-    }),
-    vscode.commands.registerCommand('codeblocks.debug.examineMemory', async () => {
-      const adapter = getActiveAdapter();
-      if (!adapter || !adapter.isActive()) { vscode.window.showWarningMessage(i18n.t('No active Code::Blocks debug session')); return; }
-      if (!adapter.isStopped()) { vscode.window.showWarningMessage(i18n.t('Pause the program first (memory examination is only available while stopped)')); return; }
-      const expr = await vscode.window.showInputBox({
-        prompt: i18n.t('Address or expression to examine (for example &buf or 0x1000)'),
-        placeHolder: '&buf',
-        validateInput: (v) => (v.trim() ? undefined : i18n.t('The expression must not be empty')),
-      });
-      if (!expr?.trim()) return;
-      const countText = await vscode.window.showInputBox({
-        prompt: i18n.t('Number of bytes to read (1-65536)'),
-        value: '64',
-        validateInput: (v) => {
-          const n = Number(v);
-          if (!Number.isInteger(n) || n <= 0) return i18n.t('Enter a positive integer');
-          if (n > 65536) return i18n.t('At most 65536 bytes per read');
-          return undefined;
-        },
-      });
-      if (!countText) return;
-      try {
-        const dump = await adapter.readMemoryDump(expr.trim(), Number(countText));
-        const ch = memoryOutputChannel();
-        ch.appendLine(i18n.t('Examine memory: {0} ({1} byte(s))', expr.trim(), dump.data.length));
-        ch.appendLine(formatMemoryDump(dump.address, dump.data));
-        ch.show(true);
-      } catch (err) {
-        vscode.window.showErrorMessage(i18n.t('Memory read failed: {0}', (err as Error).message));
-      }
-    }),
-  );
-
-  /** 列举本机进程（附加调试用；Windows tasklist / POSIX ps） */
+/** 列举本机进程（附加调试用；Windows tasklist / POSIX ps） */
   function listProcesses(): Promise<ProcessInfo[]> {
     return new Promise((resolve) => {
       if (process.platform === 'win32') {
@@ -1982,6 +1927,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   // 工具类命令（Copy Strings / Backtick Cache）—— 已拆到 features/toolCommands.ts
   registerToolCommands(context);
+  registerDebugInstructionCommands(context, {
+    getActiveAdapter: () => getActiveAdapter() ?? undefined,
+    memoryChannel: () => memoryOutputChannel(),
+  });
 
   // 快捷键冲突检测（VS Code 默认表 / 用户 keybindings.json / 其他已安装扩展）+ 托管覆盖状态（D7）
   context.subscriptions.push(

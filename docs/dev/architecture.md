@@ -50,7 +50,7 @@ flowchart LR
 3. 纯逻辑放 `src/tools/` / `src/model/`，feature 模块只做 vscode 接线；
 4. 每个 feature 至少一个无头测试（纯逻辑）或宿主测试（命令注册/交互）。
 
-已迁移示例：[toolCommands.ts](../../src/features/toolCommands.ts)（Copy Strings / Backtick Cache）、[workspaceCommands.ts](../../src/features/workspaceCommands.ts)（Save Project As / Workspace 生命周期）、[newProjectCommands.ts](../../src/features/newProjectCommands.ts)（New Build Target / New File）。
+已迁移示例：[toolCommands.ts](../../src/features/toolCommands.ts)（Copy Strings / Backtick Cache）、[workspaceCommands.ts](../../src/features/workspaceCommands.ts)（Save Project As / Workspace 生命周期）、[newProjectCommands.ts](../../src/features/newProjectCommands.ts)（New Build Target / New File）、[debugCommands.ts](../../src/features/debugCommands.ts)（Next Instruction / Examine Memory）。
 
 ## 4. 拆分路线（P3-1）
 
@@ -60,7 +60,7 @@ flowchart LR
 | 2 | 工具类命令拆到 `src/features/toolCommands.ts` | ✅ 0.8.155 |
 | 3 | 工程生命周期（open/close/reload/workspace/recent/status bar）→ `features/projectManager.ts` | ◐ 0.8.155：workspace 生命周期 + New 命令已拆出；open/close/reload/recent/status bar 待拆 |
 | 4 | 构建/运行/清理/编译命令 → `features/buildCommands.ts` | ☐ 待排期 |
-| 5 | 调试辅助命令/寄存器/内存 → `features/debugCommands.ts` | ☐ 待排期 |
+| 5 | 调试辅助命令/寄存器/内存 → `features/debugCommands.ts` | ◐ 0.8.155：指令级步进 / Examine memory 已拆出；寄存器/attach/detach 等待拆 |
 | 6 | 菜单/面板/设置入口 → `features/uiCommands.ts` | ☐ 待排期 |
 
 每批只移动代码、不改行为；每批独立 PR，跑 `npm test` + `test:contract` 后再进入下一批。
