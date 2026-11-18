@@ -84,6 +84,6 @@
 
 | 编号 | 项 | 说明 |
 |---|---|---|
-| 审计 3.2 | 巨型模块拆分 | 进行中（0.8.155）：纯逻辑模块 + `features/toolCommands.ts` 已拆出；工程/构建/调试/UI 四批按 [architecture.md](./architecture.md) §4 推进 |
+| 审计 3.2 | 巨型模块拆分 | 进行中（0.8.155）：纯逻辑模块 + `features/toolCommands.ts` / `workspaceCommands.ts` / `newProjectCommands.ts` 已拆出；工程/构建/调试/UI 四批按 [architecture.md](./architecture.md) §4 推进 |
 | G1 / G2 | `.workspace` 外部修改检测、无工程单文件编译编码 | ✔ 0.8.154 已实施（见 [未实现功能待办](./backlog.md) §1） |
 | 原子写（R5） | `.cbp`/`.workspace` 写入中断 | ✔ 0.8.154：同目录临时文件 + rename；失败保留原文件 |

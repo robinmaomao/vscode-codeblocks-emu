@@ -13,7 +13,7 @@ import { isExecutableTargetType, resolveExecutablePath, requiresExecutableExtens
 import { ProjectParser, WorkspaceParser } from './model/parser';
 import { Project, BuildTarget, ProjectFile, TargetType, CommandType, Workspace, OptionsRelation, OptionsRelationType, LinkerExecutableOption, supportsCurrentPlatform, PLATFORM_ALL, MakeCommandsMap } from './model/types';
 import { serializeProject } from './model/projectWriter';
-import { createProjectFromTemplate, makeTarget, PROJECT_TEMPLATES } from './project/newProject';
+import { createProjectFromTemplate, PROJECT_TEMPLATES } from './project/newProject';
 import { instantiateUserTemplate, listUserTemplates, saveAsUserTemplate } from './project/userTemplates';
 import { Compiler } from './compiler/compiler';
 import { queryCompilerVersionString } from './compiler/compilerVersion';
@@ -111,7 +111,8 @@ import { parseToolsSetting, buildToolInvocation, ToolContext } from './tools/too
 import { applyCustomVariables } from './model/customVariables';
 import { parseProjectDebuggerConfig, mergeRemoteOptions, applyProjectDebuggerConfig, RemoteDebuggingOptions } from './model/projectDebuggerExtensions';
 import { setProjectDependencies, wouldCreateCycle } from './model/workspaceWriter';
-import { buildWorkspaceEntries, serializeWorkspace } from './model/workspaceSerializer';
+import { registerWorkspaceCommands } from './features/workspaceCommands';
+import { registerNewProjectCommands } from './features/newProjectCommands';
 import { PathOwnerIndex, buildPathOwnerIndex, findSoleOwner, normFilePath } from './model/pathOwnerIndex';
 import { generateMakefile } from './build/makefileExporter';
 import { buildProjectFromImport, importDevProject, importDspProject, importVcxproj } from './project/projectImporter';
@@ -1301,15 +1302,59 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   );
 
   // File 菜单：Save project as… / Save·Close·Open default workspace（对齐 CB main.cpp:2988-3089）
-  context.subscriptions.push(
-    vscode.commands.registerCommand('codeblocks.saveProjectAs', () => saveProjectAs()),
-    vscode.commands.registerCommand('codeblocks.saveWorkspace', () => saveWorkspace(false)),
-    vscode.commands.registerCommand('codeblocks.saveWorkspaceAs', () => saveWorkspace(true)),
-    vscode.commands.registerCommand('codeblocks.closeWorkspace', () => closeWorkspace()),
-    vscode.commands.registerCommand('codeblocks.openDefaultWorkspace', () => openDefaultWorkspace()),
-    vscode.commands.registerCommand('codeblocks.newBuildTarget', () => newBuildTarget()),
-    vscode.commands.registerCommand('codeblocks.newFile', () => newProjectFile()),
-  );
+  registerWorkspaceCommands(context, {
+    getOpenProjects: () => openProjects,
+    setOpenProjects: (v) => { openProjects = v; },
+    getActiveProject: () => activeProject,
+    setActiveProject: (p) => setActiveProject(p, { persist: true }),
+    getOpenedWorkspaceFile: () => openedWorkspaceFile,
+    setOpenedWorkspaceFile: (v) => {
+      openedWorkspaceFile = v;
+      void extContext?.workspaceState.update('codeblocks.openedWorkspace', v);
+    },
+    getWorkspaceDeps: () => workspaceDeps,
+    setWorkspaceDeps: (v) => { workspaceDeps = v; },
+    getSelectedTarget: (p) => getSelectedTarget(p),
+    setSelectedTarget: (p, t) => setSelectedTarget(p, t),
+    forgetSelectedTarget: (f) => { selectedTargets.delete(f); persistSelectedTargets(); },
+    clearSelectedTargets: () => selectedTargets.clear(),
+    persistSelectedTargets: () => persistSelectedTargets(),
+    getRecentProjects: () => extContext?.globalState.get<string[]>('codeblocks.recentProjects', []) ?? [],
+    setRecentProjects: (list) => { void extContext?.globalState.update('codeblocks.recentProjects', list); },
+    recordRecentProject: (f) => recordRecentProject(f),
+    requireProject: () => requireProject(),
+    saveProjectToDisk: (f) => saveProjectToDisk(f),
+    openProject: (f) => openProject(f),
+    closePanels: (p) => { ProjectPropertiesPanel.closeFor(p); BuildOptionsPanel.closeFor(p); },
+    refreshProjectUi: () => {
+      projectTreeProvider?.setProjects(openProjects);
+      projectTreeProvider?.setActiveProject(activeProject);
+      analysisTreeProvider?.refresh();
+      markFallbackIndexDirty();
+      refreshStatusBars();
+      updateCbpStatusBar();
+      projectSearch?.provider.notifyContextChanged();
+    },
+    persistProjectOrder: () => { void persistProjectOrder(); },
+    clearWorkspaceState: () => clearWorkspaceState(),
+    projectChangeTracker,
+    workspaceChangeTracker,
+    output: {
+      info: (line) => outputChannel.info(line),
+      warn: (line) => outputChannel.warn(line),
+      error: (line) => outputChannel.error(line),
+    },
+  });
+  registerNewProjectCommands(context, {
+    getOpenProjects: () => openProjects,
+    requireProject: () => requireProject(),
+    persistProjectAndReload: (p) => persistProjectAndReload(p),
+    setActiveProject: (p) => setActiveProject(p, { persist: true }),
+    setSelectedTarget: (p, t) => setSelectedTarget(p, t),
+    writeUnitsToCbp: (cbpPath, units) => writeUnitsToCbp(cbpPath, units),
+    reloadProjectFromDisk: (f) => reloadProjectFromDisk(f),
+    output: { info: (line) => outputChannel.info(line) },
+  });
 
   // 从工程移除文件（对齐 CB Project → Remove files...，磁盘文件保留）
   context.subscriptions.push(
@@ -5876,317 +5921,6 @@ async function saveProjectToDisk(filename: string): Promise<void> {
     vscode.window.showInformationMessage(i18n.t('Project saved: {0}', path.basename(project.filename)));
   } catch (err) {
     vscode.window.showErrorMessage(i18n.t('Failed to save the project: {0}', (err as Error).message));
-  }
-}
-
-/**
- * 另存工程（对齐 CB File → Save project as… / cbProject::SaveAs）：
- * 只改工程文件路径并保存副本，单元相对路径保持不变；随后按新路径重新解析。
- */
-async function saveProjectAs(): Promise<void> {
-  const project = requireProject();
-  if (!project) return;
-  const save = await vscode.window.showSaveDialog({
-    defaultUri: vscode.Uri.file(path.join(project.basePath, path.basename(project.filename))),
-    filters: { [i18n.t('Code::Blocks project')]: ['cbp'], [i18n.t('All files')]: ['*'] },
-    saveLabel: i18n.t('Save Project As'),
-    title: i18n.t('Save Project As'),
-  });
-  if (!save) return;
-  const target = /\.cbp$/i.test(save.fsPath) ? save.fsPath : `${save.fsPath}.cbp`;
-  if (normPath(target) === normPath(project.filename)) {
-    await saveProjectToDisk(project.filename);
-    return;
-  }
-  if (openProjects.some((p) => normPath(p.filename) === normPath(target))) {
-    vscode.window.showErrorMessage(i18n.t('Another open project already uses this file: {0}', target));
-    return;
-  }
-  if (fs.existsSync(target)) {
-    const overwrite = await vscode.window.showWarningMessage(
-      i18n.t('"{0}" already exists. Overwrite it?', path.basename(target)),
-      { modal: true },
-      i18n.t('Overwrite'),
-    );
-    if (overwrite !== i18n.t('Overwrite')) return;
-  }
-
-  const oldFilename = project.filename;
-  const oldIndex = openProjects.findIndex((p) => normPath(p.filename) === normPath(oldFilename));
-  const previousTarget = getSelectedTarget(project);
-  const wasActive = normPath(activeProject?.filename ?? '') === normPath(oldFilename);
-  try {
-    const exported: Project = { ...project, filename: target, basePath: path.dirname(target) };
-    writeFileAtomicSync(target, serializeProject(exported), 'utf-8');
-    ProjectPropertiesPanel.closeFor(project);
-    BuildOptionsPanel.closeFor(project);
-    projectChangeTracker.forget(oldFilename);
-    openProjects = openProjects.filter((p) => normPath(p.filename) !== normPath(oldFilename));
-    await openProject(target);
-    const opened = openProjects.find((p) => normPath(p.filename) === normPath(target));
-    if (!opened) throw new Error(i18n.t('Failed to open the saved project: {0}', target));
-    if (oldIndex >= 0 && openProjects[openProjects.length - 1]?.filename === opened.filename) {
-      openProjects.pop();
-      openProjects.splice(Math.min(oldIndex, openProjects.length), 0, opened);
-    }
-    selectedTargets.delete(oldFilename);
-    if (previousTarget) setSelectedTarget(opened, previousTarget);
-    if (wasActive) setActiveProject(opened, { persist: true });
-    replaceRecentProject(oldFilename, target);
-    remapWorkspaceAfterProjectSaveAs(oldFilename, target);
-    projectTreeProvider?.setProjects(openProjects);
-    projectTreeProvider?.setActiveProject(activeProject);
-    analysisTreeProvider?.refresh();
-    markFallbackIndexDirty();
-    refreshStatusBars();
-    updateCbpStatusBar();
-    projectSearch?.provider.notifyContextChanged();
-    outputChannel.info(logT('[Code::Blocks] Project saved as: {0}', target));
-    vscode.window.showInformationMessage(i18n.t('Project saved as: {0}', path.basename(target)));
-  } catch (err) {
-    vscode.window.showErrorMessage(i18n.t('Failed to save the project as: {0}', (err as Error).message));
-  }
-}
-
-/** 最近工程列表里把旧路径替换为新路径（另存工程后避免重复项） */
-function replaceRecentProject(oldFile: string, newFile: string): void {
-  const list = extContext?.globalState.get<string[]>('codeblocks.recentProjects', []) ?? [];
-  const next = list.map((f) => (normPath(f) === normPath(oldFile) ? newFile : f));
-  void extContext?.globalState.update('codeblocks.recentProjects', next);
-  recordRecentProject(newFile);
-}
-
-/** 另存工程后同步工作区依赖图（内存；磁盘上的 .workspace 需 Save Workspace 才写回） */
-function remapWorkspaceAfterProjectSaveAs(oldFile: string, newFile: string): void {
-  if (!openedWorkspaceFile) return;
-  const oldKey = normPath(oldFile);
-  const next: Record<string, string[]> = {};
-  for (const [proj, deps] of Object.entries(workspaceDeps)) {
-    const key = normPath(proj) === oldKey ? newFile : proj;
-    next[key] = deps
-      .map((d) => (normPath(d) === oldKey ? newFile : d))
-      .filter((d) => normPath(d) !== normPath(key));
-  }
-  workspaceDeps = next;
-}
-
-/** 默认工作区路径（对齐 CB ConfigManager::GetConfigFolder()/default.workspace） */
-function defaultWorkspacePath(): string {
-  if (process.platform === 'win32') {
-    const appData = process.env.APPDATA;
-    if (appData) return path.join(appData, 'CodeBlocks', 'default.workspace');
-  }
-  return path.join(process.env.HOME ?? process.env.USERPROFILE ?? '', '.codeblocks', 'default.workspace');
-}
-
-/** 保存工作区（对齐 CB File → Save workspace / Save workspace as…） */
-async function saveWorkspace(saveAs = false): Promise<void> {
-  if (!openProjects.length) {
-    vscode.window.showWarningMessage(i18n.t('No open projects — open or create a project first'));
-    return;
-  }
-  let file = saveAs ? undefined : openedWorkspaceFile;
-  if (!file) {
-    const base = openedWorkspaceFile ? path.dirname(openedWorkspaceFile) : openProjects[0].basePath;
-    const defaultName = openedWorkspaceFile
-      ? path.basename(openedWorkspaceFile)
-      : `${openProjects[0].title}.workspace`;
-    const save = await vscode.window.showSaveDialog({
-      defaultUri: vscode.Uri.file(path.join(base, defaultName)),
-      filters: { [i18n.t('Code::Blocks workspace')]: ['workspace'], [i18n.t('All files')]: ['*'] },
-      saveLabel: i18n.t('Save Workspace'),
-      title: saveAs ? i18n.t('Save Workspace As') : i18n.t('Save Workspace'),
-    });
-    if (!save) return;
-    file = /\.workspace$/i.test(save.fsPath) ? save.fsPath : `${save.fsPath}.workspace`;
-  }
-
-  let title = path.basename(file, '.workspace');
-  if (!saveAs && openedWorkspaceFile) {
-    try {
-      title = new WorkspaceParser().parse(openedWorkspaceFile).title || title;
-    } catch {
-      /* 解析失败时用文件名作为标题 */
-    }
-  }
-  try {
-    const base = path.dirname(file);
-    const entries = buildWorkspaceEntries(base, openProjects, workspaceDeps, activeProject?.filename);
-    writeFileAtomicSync(file, serializeWorkspace(title, entries), 'utf-8');
-    openedWorkspaceFile = file;
-    workspaceChangeTracker.remember(file);
-    await extContext?.workspaceState.update('codeblocks.openedWorkspace', file);
-    refreshStatusBars();
-    updateCbpStatusBar();
-    outputChannel.info(logT('[Code::Blocks] Workspace saved: {0} ({1} project(s))', file, entries.length));
-    vscode.window.showInformationMessage(i18n.t('Workspace saved: {0}', path.basename(file)));
-  } catch (err) {
-    vscode.window.showErrorMessage(i18n.t('Failed to save the workspace: {0}', (err as Error).message));
-  }
-}
-
-/** 关闭工作区（关闭全部工程，磁盘文件保留） */
-async function closeWorkspace(): Promise<void> {
-  if (!openedWorkspaceFile) {
-    vscode.window.showWarningMessage(i18n.t('No workspace is open'));
-    return;
-  }
-  const close = i18n.t('Close Workspace');
-  const answer = await vscode.window.showWarningMessage(
-    i18n.t('Close workspace "{0}" and all projects? (files on disk are kept)', path.basename(openedWorkspaceFile)),
-    { modal: true },
-    close,
-  );
-  if (answer !== close) return;
-  for (const p of [...openProjects]) {
-    ProjectPropertiesPanel.closeFor(p);
-    BuildOptionsPanel.closeFor(p);
-    projectChangeTracker.forget(p.filename);
-  }
-  openProjects = [];
-  activeProject = undefined;
-  selectedTargets.clear();
-  persistSelectedTargets();
-  clearWorkspaceState();
-  void persistProjectOrder();
-  void extContext?.workspaceState.update('codeblocks.activeProject', undefined);
-  projectTreeProvider?.setProjects(openProjects);
-  projectTreeProvider?.setActiveProject(undefined);
-  analysisTreeProvider?.refresh();
-  markFallbackIndexDirty();
-  refreshStatusBars();
-  updateCbpStatusBar();
-  projectSearch?.provider.notifyContextChanged();
-  outputChannel.info(logT('[Code::Blocks] Workspace closed'));
-}
-
-/** 打开默认工作区；不存在时按 CB 语义提供创建入口 */
-async function openDefaultWorkspace(): Promise<void> {
-  const file = defaultWorkspacePath();
-  if (!fs.existsSync(file)) {
-    const create = i18n.t('Create');
-    const answer = await vscode.window.showWarningMessage(
-      i18n.t('Default workspace not found: {0}', file),
-      { modal: true },
-      create,
-    );
-    if (answer !== create) return;
-    try {
-      fs.mkdirSync(path.dirname(file), { recursive: true });
-      writeFileAtomicSync(file, serializeWorkspace('Default workspace', []), 'utf-8');
-    } catch (err) {
-      vscode.window.showErrorMessage(i18n.t('Failed to create the default workspace: {0}', (err as Error).message));
-      return;
-    }
-  }
-  await openProject(file);
-  vscode.window.showInformationMessage(i18n.t('Default workspace opened: {0}', file));
-}
-
-/** 目标名校验（对齐 CB ProjectOptionsDlg::ValidateTargetName 的服务端等价实现） */
-function validateBuildTargetName(project: Project, name: string, exceptTitle?: string): string | undefined {
-  const value = name.trim();
-  if (!value) return i18n.t('The target name must not be empty');
-  if (value !== exceptTitle && (project.buildTargets.some((t) => t.title === value) || project.virtualTargets.some((v) => v.title === value))) {
-    return i18n.t('A target with this name already exists');
-  }
-  if (/[;,!@#$%^&*"'~=?\\><`]/.test(value)) {
-    return i18n.t('The target name contains an invalid character (; , ! @ # $ % ^ & * " \' ~ = ? \\ > < `)');
-  }
-  return undefined;
-}
-
-/** File → New → Build Target…（对齐 CB main_menu.xrc idFileNewTarget） */
-async function newBuildTarget(): Promise<void> {
-  const project = requireProject();
-  if (!project) return;
-  const title = await vscode.window.showInputBox({
-    prompt: i18n.t('New build target name'),
-    value: '',
-    validateInput: (v) => validateBuildTargetName(project, v),
-  });
-  if (title === undefined || !title.trim()) return;
-
-  const types: Array<{ label: string; description: string; type: TargetType }> = [
-    { label: i18n.t('GUI application'), description: 'ttExecutable', type: TargetType.Executable },
-    { label: i18n.t('Console application'), description: 'ttConsoleOnly', type: TargetType.ConsoleOnly },
-    { label: i18n.t('Static library'), description: 'ttStaticLib', type: TargetType.StaticLib },
-    { label: i18n.t('Dynamic library'), description: 'ttDynamicLib', type: TargetType.DynamicLib },
-    { label: i18n.t('Commands only'), description: 'ttCommandsOnly', type: TargetType.CommandsOnly },
-  ];
-  const pick = await vscode.window.showQuickPick(types, {
-    placeHolder: i18n.t('Build target type'),
-    matchOnDescription: true,
-  });
-  if (!pick) return;
-
-  try {
-    const target = makeTarget(project.title, title.trim(), pick.type, [], project.compilerId || 'gcc');
-    project.buildTargets.push(target);
-    await persistProjectAndReload(project);
-    const reloaded = openProjects.find((p) => normPath(p.filename) === normPath(project.filename));
-    if (reloaded) {
-      setSelectedTarget(reloaded, title.trim());
-      setActiveProject(reloaded, { persist: true });
-      projectTreeProvider?.setActiveProject(reloaded);
-    }
-    outputChannel.info(logT('[Code::Blocks] Build target added: {0} ({1})', title.trim(), pick.description));
-    vscode.window.showInformationMessage(i18n.t('Build target "{0}" created', title.trim()));
-  } catch (err) {
-    vscode.window.showErrorMessage(i18n.t('Failed to create the build target: {0}', (err as Error).message));
-  }
-}
-
-/** File → New → File…（对齐 CB main_menu.xrc idFileNewFile 的轻量模板入口） */
-async function newProjectFile(): Promise<void> {
-  const project = requireProject();
-  if (!project) return;
-  const rel = await vscode.window.showInputBox({
-    prompt: i18n.t('New file path (relative to the project directory)'),
-    value: 'main.c',
-    validateInput: (v) => {
-      const value = v.trim().replace(/\\/g, '/');
-      if (!value) return i18n.t('The file path must not be empty');
-      if (path.isAbsolute(value) || value.startsWith('../') || value.includes('/../') || value === '..') {
-        return i18n.t('The file path must stay inside the project directory');
-      }
-      if (project.files.some((f) => f.relativeFilename.replace(/\\/g, '/').toLowerCase() === value.toLowerCase())) {
-        return i18n.t('This file is already part of the project');
-      }
-      return undefined;
-    },
-  });
-  if (rel === undefined || !rel.trim()) return;
-  const relative = rel.trim().replace(/\\/g, '/').replace(/^\.\//, '');
-
-  const templates: Array<{ label: string; description: string; content: string }> = [
-    { label: i18n.t('C source'), description: '.c', content: '#include <stdio.h>\n\nint main(void)\n{\n    printf("Hello, world!\\n");\n    return 0;\n}\n' },
-    { label: i18n.t('C++ source'), description: '.cpp', content: '#include <iostream>\n\nint main()\n{\n    std::cout << "Hello, world!" << std::endl;\n    return 0;\n}\n' },
-    { label: i18n.t('Header file'), description: '.h', content: '#pragma once\n\n' },
-    { label: i18n.t('Empty file'), description: '', content: '' },
-  ];
-  const pick = await vscode.window.showQuickPick(templates, { placeHolder: i18n.t('File template') });
-  if (!pick) return;
-
-  const abs = path.join(project.basePath, relative);
-  if (fs.existsSync(abs)) {
-    const overwrite = await vscode.window.showWarningMessage(
-      i18n.t('"{0}" already exists. Overwrite it?', relative),
-      { modal: true },
-      i18n.t('Overwrite'),
-    );
-    if (overwrite !== i18n.t('Overwrite')) return;
-  }
-  try {
-    fs.mkdirSync(path.dirname(abs), { recursive: true });
-    writeFileAtomicSync(abs, pick.content, 'utf-8');
-    const unit = buildUnitXmlForTargets(relative, path.extname(relative).toLowerCase(), null);
-    writeUnitsToCbp(project.filename, [unit]);
-    await reloadProjectFromDisk(project.filename);
-    await vscode.window.showTextDocument(vscode.Uri.file(abs), { preview: false });
-    outputChannel.info(logT('[Code::Blocks] File created and added to the project: {0}', relative));
-  } catch (err) {
-    vscode.window.showErrorMessage(i18n.t('Failed to create the file: {0}', (err as Error).message));
   }
 }
 

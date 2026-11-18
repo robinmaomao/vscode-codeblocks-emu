@@ -12,7 +12,9 @@ for (const id of ['codeblocks.saveWorkspaceAs', 'codeblocks.openDefaultWorkspace
   check('???????' + id, ids.has(id), id, true);
 }
 const src = fs.readFileSync(path.join(__dirname, '..', 'src', 'extension.ts'), 'utf8')
-  + '\n' + fs.readFileSync(path.join(__dirname, '..', 'src', 'features', 'toolCommands.ts'), 'utf8');
+  + '\n' + fs.readFileSync(path.join(__dirname, '..', 'src', 'features', 'toolCommands.ts'), 'utf8')
+  + '\n' + fs.readFileSync(path.join(__dirname, '..', 'src', 'features', 'workspaceCommands.ts'), 'utf8')
+  + '\n' + fs.readFileSync(path.join(__dirname, '..', 'src', 'features', 'newProjectCommands.ts'), 'utf8');
 for (const id of ['codeblocks.saveWorkspace', 'codeblocks.saveWorkspaceAs', 'codeblocks.closeWorkspace', 'codeblocks.openDefaultWorkspace', 'codeblocks.distClean', 'codeblocks.backtickCache', 'codeblocks.clearBacktickCache']) {
   check('?? registerCommand?' + id, src.includes("registerCommand('" + id + "'"), id, 'registered');
 }
