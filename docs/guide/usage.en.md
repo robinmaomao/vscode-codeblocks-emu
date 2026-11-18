@@ -1,7 +1,7 @@
 # Code::Blocks for VS Code — Usage Guide
 
 > Language: **English** ｜ [中文](./usage.md)
-> Version: 0.8.154 ｜ Native port of Code::Blocks core features to VS Code, driving GCC / GDB directly, **without** `tasks.json` / `launch.json`.
+> Version: 0.8.155 ｜ Native port of Code::Blocks core features to VS Code, driving GCC / GDB directly, **without** `tasks.json` / `launch.json`.
 
 ---
 
@@ -50,7 +50,7 @@ Code::Blocks for VS Code is a "mini IDE kernel": it parses `.cbp` / `.workspace`
 ### 2.1 Install from VSIX
 
 ```powershell
-code --install-extension codeblocks-vscode-0.8.154.vsix --force
+code --install-extension codeblocks-vscode-0.8.155.vsix --force
 ```
 
 ### 2.2 Build from source
@@ -58,7 +58,7 @@ code --install-extension codeblocks-vscode-0.8.154.vsix --force
 ```powershell
 npm install
 npm run package
-code --install-extension codeblocks-vscode-0.8.154.vsix --force
+code --install-extension codeblocks-vscode-0.8.155.vsix --force
 ```
 
 > `npm run package` = `vsce package` (before packaging, the `vscode:prepublish` hook runs `tsc` compilation (`dist/`, for local testing) + the **esbuild single-file bundle** (`bundle/extension.js`, the release entry));
@@ -1014,12 +1014,12 @@ The following Code::Blocks features (round 5 batch 3 T1/T4/T5) were assessed as 
 | Regex test bench (T4) | **Regex Previewer** (`chrmarti.regex`, for JS/TS/PHP/Haxe) · **Regexp Explain** (`louiswt.regexp-preview`) · RegExp Preview and Editor | General regex validation; the regex mode of the VS Code search box also does basic validation |
 | Symbol table nm viewer (single library/file) | **Nm tool** (`wibren-wiersma.nm-tool`) · **vscode-binutils** (`sqlpassion.vscode-binutils`) | nm / objdump for a single library; cross-library symbol search is provided by this extension's **Tools → Find Symbol in Libraries…** |
 
-> Profiler (gprof), Copy Strings and cross-library symbol search are now implemented (0.8.154, see “What’s new” below).
+> Profiler (gprof), Copy Strings and cross-library symbol search are now implemented (0.8.155, see “What’s new” below).
 > T5 cross-library symbol search. Export Makefile now lives in the Build menu (matching CB `compiler_menu.xrc`).
 > For details and the decision record, see the [unimplemented-feature backlog](../dev/backlog.md) §2 (not-ported list).
 > Reminder: the extensions above are community/vendor products; evaluate them before installing. This extension neither bundles nor ships them.
 
-## 17. What's new in 0.8.154
+## 17. What's new in 0.8.155
 
 - **Workspace lifecycle**: File → Save Project As… / Save Workspace / Save Workspace As… / Close Workspace / Open default workspace; closing the last project clears workspace state, saving writes project order, `active` and `<Depends>`.
 - **`.workspace` external change detection**: external edits to the project list/dependencies/active project prompt Reload / Ignore; only projects whose disk signature changed are reloaded.

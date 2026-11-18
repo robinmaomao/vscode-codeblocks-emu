@@ -2,7 +2,7 @@
 
 > 语言：**中文** ｜ [English](./usage.en.md)
 >
-> 版本：0.8.154 ｜ 本扩展为 Code::Blocks 核心功能的原生移植，直接驱动 GCC / GDB，**不依赖** `tasks.json` / `launch.json`。
+> 版本：0.8.155 ｜ 本扩展为 Code::Blocks 核心功能的原生移植，直接驱动 GCC / GDB，**不依赖** `tasks.json` / `launch.json`。
 
 ---
 
@@ -51,7 +51,7 @@ Code::Blocks for VS Code 是一个「迷你 IDE 内核」：直接解析 `.cbp` 
 ### 2.1 从 VSIX 安装
 
 ```powershell
-code --install-extension codeblocks-vscode-0.8.154.vsix --force
+code --install-extension codeblocks-vscode-0.8.155.vsix --force
 ```
 
 ### 2.2 从源码构建
@@ -59,7 +59,7 @@ code --install-extension codeblocks-vscode-0.8.154.vsix --force
 ```powershell
 npm install
 npm run package
-code --install-extension codeblocks-vscode-0.8.154.vsix --force
+code --install-extension codeblocks-vscode-0.8.155.vsix --force
 ```
 
 > `npm run package` = `vsce package`（打包前自动执行 `vscode:prepublish` 钩子 = `tsc` 编译（`dist/`，本地测试用）+ **esbuild 单文件打包**（`bundle/extension.js`，发布入口））；
@@ -1004,7 +1004,7 @@ A：**已全覆盖**（0.8.132 批次 2，2026-11 菜单优化后同步）。构
 | **SymTab 范围** | 只搜索当前工程/目标链接的库；任意目录批量扫描、动态库运行时符号未实现 |
 | **Print** | VS Code 无原生打印；建议使用市场打印扩展 |
 | **Global variables 编辑** | 只读查看（default.conf 写回竞态，见 [决策](../dev/decisions.md)） |
-| **WebView CSP / 模块拆分** | 仍使用 `script-src 'unsafe-inline'` 与巨型 `extension.ts`；P3 架构批次处理（不影响用户功能） |
+| **WebView CSP / 模块拆分** | 0.8.155 起五个面板使用 nonce CSP；`extension.ts` 已首批拆出 `features/toolCommands.ts`，其余域按 [架构文档](../dev/architecture.md) §4 分批（不影响用户功能） |
 
 ### 16.1 建议用 VS Code 扩展替代（本扩展不另行实现）
 
@@ -1016,12 +1016,12 @@ A：**已全覆盖**（0.8.132 批次 2，2026-11 菜单优化后同步）。构
 | 正则测试台（T4） | **Regex Previewer**（`chrmarti.regex`，面向 JS/TS/PHP/Haxe）· **Regexp Explain**（`louiswt.regexp-preview`）· RegExp Preview and Editor | 通用正则验证；VS Code 搜索框的正则模式也可做基础验证 |
 | 符号表 nm 查看（单库/单文件） | **Nm tool**（`wibren-wiersma.nm-tool`）· **vscode-binutils**（`sqlpassion.vscode-binutils`） | 单库 nm / objdump 查看；跨多个链接库的符号搜索已由本扩展 **Tools → Find Symbol in Libraries…** 提供 |
 
-> Profiler（gprof）、Copy strings、跨库符号搜索已在本扩展实现（0.8.154，见 §17）；
+> Profiler（gprof）、Copy strings、跨库符号搜索已在本扩展实现（0.8.155，见 §17）；
 > Export Makefile 已移入 Build 菜单（对齐 CB `compiler_menu.xrc`）。
 > 详情与决策见 [未实现功能待办](../dev/backlog.md) §2（明确不移植清单）。
 > 提醒：以上扩展为社区/厂商产品，请自行评估安装；本扩展不内置或捆绑它们。
 
-## 17. 0.8.154 新增与行为变更
+## 17. 0.8.155 新增与行为变更
 
 - **Workspace 生命周期**：File → Save Project As… / Save Workspace / Save Workspace As… / Close Workspace / Open default workspace；关闭最后一个工程会清理工作区状态，保存工作区会写回工程顺序、`active` 与 `<Depends>`。
 - **`.workspace` 外部修改检测**：外部修改工程列表/依赖/active 后，窗口焦点或文件事件会提示 Reload / Ignore；重载只刷新磁盘签名变化的工程。

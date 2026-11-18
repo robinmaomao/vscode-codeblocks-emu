@@ -1451,5 +1451,7 @@
   "Dist Clean is only available for projects with a custom Makefile": "彻底清理仅适用于使用自定义 Makefile 的工程",
   "No DistClean command is configured in the project Make commands": "工程的 Make 命令中未配置 DistClean",
   "This project uses a custom Makefile but has no CompileFile command; configure it in Build options or use Build": "该工程使用自定义 Makefile，但未配置 CompileFile 命令；请在构建选项中配置或使用“构建”",
-  "Dist Clean": "彻底清理"
+  "Dist Clean": "彻底清理",
+  "[Code::Blocks] Activation completed in {0}ms": "[Code::Blocks] 激活完成，用时 {0}ms",
+  "[Code::Blocks] Automatic project detection is off; workspace scan skipped (use \"Detect workspace projects…\")": "[Code::Blocks] 已关闭自动工程检测；跳过工作区扫描（可使用“检测工作区工程…”）"
 }

@@ -13,10 +13,10 @@ const i18n = require('../dist/i18n');
 i18n.refreshUiLanguage();
 const { buildProjectSearchViewHtml } = require('../dist/ui/projectSearchViewHtml.js');
 const html = buildProjectSearchViewHtml();
-const script = (html.match(/<script>([\s\S]*?)<\/script>/) || [, ''])[1];
+const script = (html.match(/<script(?:\s+nonce="[^"]*")?>([\s\S]*?)<\/script>/) || [, ''])[1];
 
 check('HTML：doctype + lang=zh-CN', /^<!DOCTYPE html>/.test(html) && html.includes('lang="zh-CN"'), html.slice(0, 80));
-check('HTML：CSP 限制为内联脚本/样式', html.includes("default-src 'none'") && html.includes("script-src 'unsafe-inline'") && html.includes("style-src 'unsafe-inline'"));
+check('HTML：CSP 限制为内联脚本/样式', html.includes("default-src 'none'") && html.includes("script-src 'nonce-") && html.includes("style-src 'unsafe-inline'"));
 check('HTML：历史区位于结果区之后、页脚之前', html.indexOf('id="historySection"') > html.indexOf('id="empty"')
   && html.indexOf('id="historySection"') < html.indexOf('class="footer"'),
   { history: html.indexOf('id="historySection"'), empty: html.indexOf('id="empty"'), footer: html.indexOf('class="footer"') });

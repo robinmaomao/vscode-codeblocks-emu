@@ -11,7 +11,8 @@ const ids = new Set(pkg.contributes.commands.map((c) => c.command));
 for (const id of ['codeblocks.saveWorkspaceAs', 'codeblocks.openDefaultWorkspace', 'codeblocks.distClean', 'codeblocks.clearBacktickCache']) {
   check('???????' + id, ids.has(id), id, true);
 }
-const src = fs.readFileSync(path.join(__dirname, '..', 'src', 'extension.ts'), 'utf8');
+const src = fs.readFileSync(path.join(__dirname, '..', 'src', 'extension.ts'), 'utf8')
+  + '\n' + fs.readFileSync(path.join(__dirname, '..', 'src', 'features', 'toolCommands.ts'), 'utf8');
 for (const id of ['codeblocks.saveWorkspace', 'codeblocks.saveWorkspaceAs', 'codeblocks.closeWorkspace', 'codeblocks.openDefaultWorkspace', 'codeblocks.distClean', 'codeblocks.backtickCache', 'codeblocks.clearBacktickCache']) {
   check('?? registerCommand?' + id, src.includes("registerCommand('" + id + "'"), id, 'registered');
 }

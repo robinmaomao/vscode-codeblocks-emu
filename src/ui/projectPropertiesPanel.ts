@@ -18,6 +18,7 @@ import { validateSquirrelSyntax } from '../tools/squirrelValidator';
 import { cbBuiltinVars, envVarMap, replaceCbMacros } from '../compiler/cbMacros';
 import { applyFlagAction, buildCompilerCatalog, writeLanguageFlags } from '../compiler/compilerFlagSettings';
 import { BuildOptionsData, BuildOptionsScopeData, buildOptionsCss, buildOptionsMarkup, buildOptionsScript } from './buildOptionsView';
+import { createNonce, cspMeta } from './webview/common';
 import { analyzeFile, objectNameFor } from '../model/fileStats';
 import * as i18n from '../i18n';
 
@@ -402,6 +403,7 @@ export class ProjectPropertiesPanel {
   }
 
   private buildHtml(): string {
+    const nonce = createNonce();
     const targets: TargetEditData[] = this.project.buildTargets.map((t) => ({
       originalTitle: t.title,
       title: t.title,
@@ -639,7 +641,7 @@ export class ProjectPropertiesPanel {
 <html lang="${i18n.htmlLang()}">
 <head>
   <meta charset="UTF-8">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline';">
+  ${cspMeta(nonce)}
   <style>
     :root {
       --cb-border: var(--vscode-widget-border, rgba(128,128,128,.35));
@@ -1181,7 +1183,7 @@ export class ProjectPropertiesPanel {
   </div>
 </div>
 
-  <script>
+  <script nonce="${nonce}">
     const vscode = acquireVsCodeApi();
     window.__cbVscode = vscode;
     const data = ${data};
@@ -2799,7 +2801,7 @@ export class ProjectPropertiesPanel {
       }
     }, true);
   </script>
-  <script>${buildOptionsScript(initialBoData, true)}</script>
+  <script nonce="${nonce}">${buildOptionsScript(initialBoData, true)}</script>
 </body>
 </html>`;
   }

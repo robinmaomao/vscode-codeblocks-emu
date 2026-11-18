@@ -110,8 +110,9 @@ async function runOffCase(c) {
   const ws = makeWorkspace(3);
   const app = await activate({ tmpDir: ws.tmp, findFilesResult: ws.list, config: { 'codeblocks.detect.autoOpen': 'off' } });
   c.check('E1 autoOpen=off：不弹多选', app.records.quickPickPrompts.length === 0, app.records.quickPickPrompts.length, 0);
-  c.check('E2 autoOpen=off：状态栏仍提供入口',
-    barTexts(app).some((t) => /Code::Blocks 项目 \(3\)/.test(t)), barTexts(app), '含「Code::Blocks 项目 (3)」');
+  c.check('E2 autoOpen=off：状态栏仍提供 Code::Blocks 入口',
+    barTexts(app).some((t) => /Code::Blocks/.test(t)),
+    barTexts(app), '含 Code::Blocks 入口');
   await app.deactivate().catch(() => undefined);
 }
 

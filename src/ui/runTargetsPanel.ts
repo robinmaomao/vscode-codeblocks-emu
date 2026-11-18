@@ -8,6 +8,7 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import * as i18n from '../i18n';
+import { createNonce, cspMeta, jsonForScript } from './webview/common';
 
 export interface RunTargetEntry {
   title: string;
@@ -45,12 +46,13 @@ function labels(): Record<string, string> {
 
 export function runTargetsPage(data: RunTargetsData): string {
   const L = labels();
-  const payload = JSON.stringify({ data, labels: L }).replace(/</g, '\\u003c');
+  const nonce = createNonce();
+  const payload = jsonForScript({ data, labels: L });
   return `<!DOCTYPE html>
 <html lang="${i18n.htmlLang()}">
 <head>
   <meta charset="UTF-8">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline';">
+  ${cspMeta(nonce)}
   <style>
     html, body { height: 100%; margin: 0; }
     body {
@@ -127,7 +129,7 @@ export function runTargetsPage(data: RunTargetsData): string {
     <button id="rt-cancel">${L.cancel}</button>
     <button id="rt-ok" class="default">${L.ok}</button>
   </div>
-  <script>
+  <script nonce="${nonce}">
   (function () {
     var BOOT = ${payload};
     var L = BOOT.labels;
