@@ -31,6 +31,7 @@
 | [0.8.150.md](./0.8.150.md) | 工程右键 `Build options…` / `Properties…` 完整移植 Code::Blocks：共享 Build options 视图、Compiler Flags 右键菜单（新建/修改/删除/仅 C/仅 C++/展开折叠）+ 覆盖与自定义参数、Silent build 派生、Selected compiler 自动匹配 |
 | [0.8.151.md](./0.8.151.md) | 工程属性 / 构建选项 UI 二次精修：按 CB `project_options.xrc` 重排 6 个页签、按钮统一复用 Build options `.bo-*`、还原设置、工程右键菜单排序、Expand All 修复（发布后 main 追加的对齐内容见 [0.8.152.md](./0.8.152.md)） |
 | [0.8.152.md](./0.8.152.md) | Build options / Properties 第二轮逐项对齐 Code::Blocks：启用联动规则、Build options 严格对齐（去 Extensions/自定义变量/Dist-clean/Silent）、additionalLibs→Other linker options（整串/反向勾选/冲突询问）、工程级 Linker executable 隐藏、构建脚本红字、变量键值对话框、覆盖层 OK/Cancel、编译器切换三重询问、Set Programs' Arguments 换行归一、类型切换改写扩展名/前缀（含宏名、不受自动勾选影响）、目标命名校验、列表点击修复、Selected file properties 三页重写与 customBuild 可用、Import/Definition 占位符、脚本校验 CB 三行文案与换行、左对齐与文案/tooltip/红字分行/↑↓语义/双击入口 |
+| [0.8.153.md](./0.8.153.md) | 状态栏 Menu 显示优化 + 168 项逐项对齐 Code::Blocks：全部菜单项补齐 1.85 合法 codicon、子菜单 chevron/面包屑/返回、一级收敛 9 菜单、File 动态区、CB 位置与已有命令补齐（TODO List→View、Export Makefile→Build、Find/Changed line→Search、Remove Files、Save/Close/Properties、Debugging Windows/Information）、needsProject/needsWorkspace/needsDebugSession 标注、Settings 分组与过滤串、菜单展示模型与图标白名单回归 |
 
 ## 分支预发布版本（branch prerelease）
 

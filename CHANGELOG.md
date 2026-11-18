@@ -3,6 +3,33 @@
 本文件记录**正式版**里程碑；近期 dev 迭代的逐轮发布说明见 [`docs/release/`](./docs/release/)（`0.8.xx-dev.md`），
 `0.8.76`–`0.8.128` 的 dev 说明已合并归档到 [`docs/release/archive/`](./docs/release/archive/)；版本号与维护约定见 [`docs/release/00-index.md`](./docs/release/00-index.md)。
 
+## 0.8.153 — 2026-11-18
+
+> 体验版：状态栏 Menu 显示优化 + 168 项逐项对齐 Code::Blocks。
+
+**Menu 显示**
+
+- **图标 100% 覆盖**：除分隔线外每项都有语义 codicon；修复 `Undo` 的非法 `undo`（改为 `discard`）与 70 项缺图标；新增 VS Code 1.85 codicon 白名单回归。
+- **子菜单/返回/面包屑**：label 末尾统一 `$(chevron-right)`；每个子层级第一项为“返回”，标题显示 `Code::Blocks › File › …`。
+- **description 统一**：只保留“快捷键 · 不可用原因”，不再混入“子菜单”文案；开启按 description/detail 过滤。
+- **一级收敛**：固定 9 个顶级菜单；Recent Files / Recent Projects / Workspace Build Order 移入 File。
+- **标签修正**：11 条中英混排译文、`Copy` / `Duplicate` 重名、`Project tree` → `Project Tree` 等。
+
+**结构与 CB 对齐**
+
+- 按 `main_menu.xrc` / `compiler_menu.xrc` / `debugger_menu.xrc` / `projectmanagerui.cpp` / 插件 `BuildMenu` 重排 File / Edit / View / Search / Project / Build / Debug / Tools / Settings。
+- TODO List → View、Export Makefile → Build、Find Selected / Goto changed line → Search、Remove Files / Save Project / Close Project / Project Properties 补齐。
+- 新增 Debugging Windows 子菜单；Debug Information 更名 Information；Tools 自定义工具插到 Configure Tools 之前；Settings clangd 维护入口收拢为子菜单。
+
+**可用性**
+
+- 修正 `needsProject`；新增 `needsWorkspace` / `needsDebugSession`；Categorize 用 check / list-flat 图标表示状态。
+- Settings 的 Editor / Compiler / Debugger / Build 过滤串改为扩展作用域 + 对应设置组。
+- Export compile_commands 无工程、AStyle / Open Include File 无编辑器时给出提示。
+
+- 验证：`npm test` **TOTAL=196 FAIL=0 SKIP=1**；契约 **3/3**；E2E **6/6**；视觉 **26/26**；性能 **13/13**；打包 **15 断言**；宿主 **24/24**；i18n 11/11。
+- 发布说明见 [`docs/release/0.8.153.md`](./docs/release/0.8.153.md)。
+
 ## 0.8.152 — 2026-11-16
 
 > 体验版：Build options / Properties 第二轮逐项对齐 Code::Blocks（源码级复核 + 人工复核调整）。
@@ -30,7 +57,7 @@
 - 程序参数换行保存时替换为空格（`TargetListData::SetExecParameters`）。
 
 - 验证：`npm test` **TOTAL=195 FAIL=0 SKIP=1**；契约 3/3；E2E 6/6；视觉 **26/26**；打包 15 断言；VSIX 0.8.152 打包 / 安装通过。
-- 发布说明见 [`docs/release/0.8.152.md`](./docs/release/0.8.152.md)；测试结果见 [`docs/testing/test-report-0.8.152.md`](./docs/testing/test-report-0.8.152.md)。
+- 发布说明见 [`docs/release/0.8.152.md`](./docs/release/0.8.152.md)；测试结果见 [`docs/testing/test-report-0.8.152-archive.md`](./docs/testing/test-report-0.8.152-archive.md)。
 
 ## 0.8.151 — 2026-11-12
 

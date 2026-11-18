@@ -2,7 +2,7 @@
 
 > 本扩展**原生移植 Code::Blocks 的构建/调试内核**：直接解析 `.cbp` / `.workspace`、内置其命令模板与宏展开引擎、直接派生进程执行编译/链接/调试，**不是** `.cbp → tasks.json/launch.json` 桥接。
 > 本文档记录逐项对齐依据（对应 `codeblocks-src/` 源码位置）、扩展实现与有意保留的差异。
-> 最后更新：0.8.152（2026-11-16）。功能级剩余项与不移植清单见 [未实现功能待办](../dev/backlog.md)；Build options / Properties 的移植方法与已确认语义见 [Code::Blocks 对话框移植经验](../dev/cb-porting-lessons.md)。
+> 最后更新：0.8.153（2026-11-18）。功能级剩余项与不移植清单见 [未实现功能待办](../dev/backlog.md)；Build options / Properties 的移植方法与已确认语义见 [Code::Blocks 对话框移植经验](../dev/cb-porting-lessons.md)。
 
 ## 1. 构建链路对齐
 
