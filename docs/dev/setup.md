@@ -191,10 +191,18 @@ code.cmd --extensionDevelopmentPath="." --disable-extensions --new-window
 ## 8. 可选组件
 
 - **ccache / sccache**：w64devkit 2.11.0 已自带 **ccache 4.14.1**，无需额外安装；用于 `codeblocks.build.compilerCache` 与 ccache E2E。
+- **clangd**：仓库 `.cb-tools/toolchains/llvm/bin` 已含 **clangd 23.1.3**；该目录已加入用户 PATH，宿主 D-10 用例不再 SKIP。
 - **Playwright Chromium**：视觉回归默认使用系统 Edge；如需固定 Chromium，执行 `npx playwright install chromium` 并设置 `CB_VISUAL_BROWSER=chromium`。
-- **交叉工具链**：AVR / RISC-V / LLVM / TCC 可解压到 `.cb-tools/toolchains/<name>/`（已 gitignore），测试会自动探测；无需修改系统 PATH。
+- **交叉工具链**：AVR / RISC-V / LLVM / TCC / MSP430 / SDCC 已解包到 `.cb-tools/toolchains/<name>/`（已 gitignore），测试自动探测；其中 MSP430 为 **4.6.3**（PlatformIO `toolchain-timsp430`），SDCC 为 **4.6.4 #17226**（SourceForge nightly），均无需修改系统 PATH。
 
-## 9. 版本基线
+## 9. 依赖安全（npm audit）
+
+- `fast-xml-parser` 升级到 **5.12.1**，修复低危 `GHSA-474x-hrwr-fgx4`。
+- `@vscode/vsce` 升级到 **4.1.1**；`overrides.minimatch` 固定 **11.0.9**，修复中危 `GHSA-g3hv-75wg-m249`。
+- 剩余 **4 个 high** 均来自开发期打包工具链 `@vscode/vsce → tinyglobby → fdir/picomatch`；截至当前无可用修复版本（`picomatch <=4.0.7`、`fdir >=5.2.1`、`tinyglobby *`）。它们**不进入扩展运行时**；`npm audit fix --force` 会降级 vsce 到 3.9.1（引入 keytar 原生依赖），不建议。
+- `npm audit --omit=dev` 为 0：全部剩余项都是 `devDependencies` 的传递依赖。
+
+## 10. 版本基线
 
 | 组件 | 版本 |
 |------|------|
@@ -204,5 +212,10 @@ code.cmd --extensionDevelopmentPath="." --disable-extensions --new-window
 | VS Code | `>= 1.85`（本机 1.140.0） |
 | TypeScript | 5.9.3（lock） |
 | esbuild | 0.28.2（lock） |
+| fast-xml-parser | 5.12.1（lock） |
+| @vscode/vsce | 4.1.1（dev） |
+| clangd | 23.1.3（`.cb-tools/toolchains/llvm/bin`） |
+| MSP430 GCC | 4.6.3（`.cb-tools/toolchains/msp430`） |
+| SDCC | 4.6.4 #17226（`.cb-tools/toolchains/sdcc`） |
 
 相关配置：[.vscode/settings.json](../../.vscode/settings.json)、[.vscode/tasks.json](../../.vscode/tasks.json)、[.vscode/launch.json](../../.vscode/launch.json)。

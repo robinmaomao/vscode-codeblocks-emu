@@ -92,8 +92,8 @@ node tests/run-all.js --group all --json out.json
 | LLVM/clang | `llvm/llvm-project` releases → `clang+llvm-*-x86_64-pc-windows-msvc.tar.zst` | clang 构建+运行（`--target=x86_64-w64-mingw32` 复用 MinGW 运行时）、`--target=riscv64-unknown-elf` 交叉 | ✅ 23.1.3（riscv 后端可用；官方构建**未含** avr/msp430 后端） |
 | AVR GCC | `ZakKemble/avr-gcc-build` releases → `avr-gcc-*-x64-windows.zip` | AVR 交叉编译（`-mmcu=atmega328p`，ELF `e_machine=83`） | ✅ 16.1.0 |
 | RISC-V GCC | `xpack-dev-tools/riscv-none-elf-gcc-xpack` releases → `*-win32-x64.zip` | RISC-V 交叉编译（ELF `e_machine=243`） | ✅ 15.2.0 |
-| MSP430 GCC | TI MSP430 GCC（需交互下载，未纳入自动安装） | 未装时 SKIP | ❌ 未安装 |
-| SDCC | SourceForge（稳定版仅 `*-setup.exe` 安装器；nightly 快照有 ~38MB zip） | MCS51 交叉编译 | ❌ 未安装（已评估：安装器/快照质量与被限速的 SourceForge 下载不成比例，保持 SKIP） |
+| MSP430 GCC | PlatformIO `toolchain-timsp430` → `toolchain-timsp430-windows-*.tar.gz`（44MB，含 `msp430-gcc` 4.6.3） | MSP430 交叉编译（`-mmcu=msp430g2553`，ELF `e_machine=105`） | ✅ 4.6.3（解包到 `.cb-tools/toolchains/msp430/`） |
+| SDCC | SourceForge nightly → `sdcc-snapshot-x86_64-w64-mingw32-*.zip` | MCS51 交叉编译 | ✅ 4.6.4 #17226（解包到 `.cb-tools/toolchains/sdcc/`） |
 | TCC | `download.savannah.nongnu.org/releases/tinycc/` → `tcc-0.9.27-win64-bin.zip`（~0.5MB，官方发布区） | 异构 C 编译器：全量构建 + 运行产物 | ✅ 0.9.27（解包到 `.cb-tools/toolchains/tcc/bin/`；其 `-o` **不补 `.exe`**——D-13 后由扩展按 `extension_auto` 补平台扩展名，测例用**无扩展名输出**验证该行为） |
 
 > `.tar.zst` 解包：Windows 自带 `bsdtar` 需要外部 `zstd`，且官方 LLVM 包使用 1GB 窗口 → 需
@@ -196,7 +196,7 @@ node tests/run-all.js --group all --json out.json
 | S5 clang 交叉目标 | `clang --target=<riscv64-unknown-elf\|avr-unknown-unknown\|msp430-unknown-unknown>` | 交叉对象文件 ELF 魔数 + `e_machine` 校验；**先按 `--print-targets` 判定后端是否编译进本机 clang** | RISC-V OK；avr/msp430 SKIP（后端未包含） |
 | S6 AVR GCC | `avr-gcc`（`-mmcu=atmega328p`） | 对象级：同 S5（`e_machine=83`）；**链接级见 S9** | OK |
 | S7 RISC-V GCC | `riscv-none-elf-gcc` | 对象级：同 S5（`e_machine=243`）；**链接级见 S9** | OK |
-| S8 MSP430 / SDCC / TCC | 对应工具链 | SDCC：目标文件生成与类型校验；TCC：全量构建 + 运行产物（**无扩展名输出**——`extension_auto` 由扩展补 `.exe`，D-13 后不再需要显式 `.exe` 输出，见 §5.0）；缺失时 SKIP 并打印安装指引 | MSP430/SDCC SKIP（未安装）；TCC OK（0.9.27） |
+| S8 MSP430 / SDCC / TCC | 对应工具链 | SDCC：目标文件生成与类型校验；TCC：全量构建 + 运行产物（**无扩展名输出**——`extension_auto` 由扩展补 `.exe`，D-13 后不再需要显式 `.exe` 输出，见 §5.0）；缺失时 SKIP 并打印安装指引 | MSP430 OK（4.6.3，`e_machine=105`）；SDCC OK（4.6.4）；TCC OK（0.9.27） |
 | S9 AVR / RISC-V **链接级** | `avr-gcc` / `riscv-none-elf-gcc`（链接用 gcc 驱动：自带 crt0/运行时） | 全量构建（编译+链接）产出 `.elf`：文件存在 + ELF `e_machine` + 入口地址语义（AVR 复位向量 `0x0`；RISC-V 非 0 且落在 `.text` 区间）+ `.text` 非空（工具链自带 `objdump -h`）+ `objcopy -O ihex` 可转 Intel HEX | OK（实测 AVR `e_entry=0x0`、RISC-V `e_entry=0x100e2`） |
 
 工具链探测优先级：`PATH` → `CB_TOOLCHAIN_ROOT` → `.cb-tools/toolchains/**/bin`。**缺失即 SKIP 且计入 SKIP 数**（不静默通过）。
@@ -230,4 +230,4 @@ node tests/run-all.js --group all --json out.json
 - **不要用绝对行号做断言**：无关代码增删会让断言误报（曾因 `gdbDebugAdapter.ts` 增行 44 行使 main CI 变红）。静态读点断言请用「语义/同语句特征」判定（例：`tests/test-settings-coverage.js` 断言键所在行是一次真实 `.get(...)` 取值）。
 - **不要依赖未入库的本地快照**：`codeblocks-src/`（Code::Blocks 源码）被 `.gitignore` 排除，CI 不检出。凡是拿它做事实校验的断言一律走 `checkCb()`（`tests/test-build-options-enable-rules.js`、`tests/test-properties-enable-rules.js`），快照缺失时输出 `SKIP …（codeblocks-src 快照缺失）` 并计为跳过；直接 `readFileSync` 会因 `ENOENT` 让 CI 变红（0.8.152 后的回归即此原因）。
 - **不要用固定 `sleep` 等异步就绪**：一律轮询「条件成立」（带超时），并给 `spawnSync` 显式 `timeout`；真实进程类用例在失败路径上清理长驻进程（`taskkill`），必要时「清理半成品 + 重试 1 次」（例：`tests/test-debug-detach-symbol.js`、`tests/test-makefile-export.js`）。
-- **能力缺口不伪造断言**：宿主/GDB 能力缺失时用 `ctx.skip` / `skipCheck` 记录现状与原因（例：调试 E2E 中 GDB 8.1 全量寄存器读取、工具链矩阵里缺失的 MSP430/SDCC），并登记到 [遗留问题决策清单](../dev/decisions.md)。
+- **能力缺口不伪造断言**：宿主/GDB 能力缺失时用 `ctx.skip` / `skipCheck` 记录现状与原因（例：调试 E2E 中 GDB 8.1 全量寄存器读取、工具链矩阵里未解包的可选工具链），并登记到 [遗留问题决策清单](../dev/decisions.md)。
