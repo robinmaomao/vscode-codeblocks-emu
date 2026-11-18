@@ -37,6 +37,7 @@
 | [0.8.156.md](./0.8.156.md) | Profiler 完整化（call graph / `gprof -A` / CSV·HTML 导出）、AutoVersioning（`.cbp` 配置 + `version.h` 构建钩子）、TCC/BCC/DMC/ARM/PowerPC 编译器资源、推荐扩展双语文档 |
 | [0.8.157.md](./0.8.157.md) | AutoVersioning/Profiler 正确性、编译器元数据加载与 CB 全量 XML、OpenWatcom/Cygwin/MSYS2/TDM/D/Fortran 探测 |
 | [0.8.158.md](./0.8.158.md) | Profiler 命令拆分（`features/profilerCommands.ts`）与架构收敛 |
+| [0.8.159.md](./0.8.159.md) | 项目管理菜单拆分（`features/projectManager.ts`）与架构收敛 |
 
 ## 分支预发布版本（branch prerelease）
 

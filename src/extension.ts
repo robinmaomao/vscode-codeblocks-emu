@@ -120,6 +120,7 @@ import {
   registerAutoVersioningCommands,
 } from './features/autoVersioningCommands';
 import { registerProfilerCommands } from './features/profilerCommands';
+import { showProjectManager } from './features/projectManager';
 import { PathOwnerIndex, buildPathOwnerIndex, findSoleOwner, normFilePath } from './model/pathOwnerIndex';
 import { generateMakefile } from './build/makefileExporter';
 import { buildProjectFromImport, importDevProject, importDspProject, importVcxproj } from './project/projectImporter';
@@ -2264,7 +2265,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   );
   context.subscriptions.push(
     vscode.commands.registerCommand('codeblocks.projectManager', async () => {
-      await showProjectManager();
+      await showProjectManager({
+        getOpenProjects: () => openProjects,
+        getActiveProject: () => activeProject,
+        setActiveProject: (p) => setActiveProject(p, { persist: true }),
+        removeProject: (file) => removeProject(file),
+        scanWorkspaceProjects: () => scanAndOpenWorkspaceProjects(),
+      });
     }),
   );
 
@@ -2482,92 +2489,6 @@ function updateCbpStatusBar(): void {
     cbpStatusBar.command = 'codeblocks.openProject';
     cbpStatusBar.show();
   }
-}
-
-/** 项目管理菜单项（扩展 QuickPickItem，携带 action / filename） */
-interface ProjectManagerItem extends vscode.QuickPickItem {
-  action?: 'open' | 'new' | 'scan';
-  filename?: string;
-}
-
-/** 构建项目管理菜单项：打开 / 新建 / 检测工作区项目 + 已打开项目（活动标记 + 移除按钮） */
-function buildManagerItems(): ProjectManagerItem[] {
-  const items: ProjectManagerItem[] = [
-    { label: i18n.t('$(folder-opened) Open Project...'), description: i18n.t('Open .cbp / .workspace'), action: 'open' },
-    { label: i18n.t('$(new-file) New Project...'), description: i18n.t('Create a Code::Blocks project from a template'), action: 'new' },
-    { label: i18n.t('$(search) Detect workspace projects...'), description: i18n.t('Scan for and open .cbp / .workspace files in the workspace'), action: 'scan' },
-  ];
-  if (openProjects.length > 0) {
-    items.push({ label: i18n.t('Projects opened'), kind: vscode.QuickPickItemKind.Separator });
-    for (const p of openProjects) {
-      const isActive = p.filename === activeProject?.filename;
-      items.push({
-        label: `${isActive ? '$(circle-filled)' : '$(circle-outline)'} ${p.title || path.basename(p.filename, '.cbp')}`,
-        description: `${path.basename(path.dirname(p.filename))}${isActive ? i18n.t(' · Active') : ''}`,
-        detail: p.filename,
-        filename: p.filename,
-        buttons: [{ iconPath: new vscode.ThemeIcon('close'), tooltip: i18n.t('Remove the project from the sidebar') }],
-      });
-    }
-  }
-  return items;
-}
-
-/** 项目管理菜单：打开 / 新建 / 检测工作区项目，下方内联已打开项目（选中即切换活动工程，按钮移除，菜单保持打开） */
-async function showProjectManager(): Promise<void> {
-  const qp = vscode.window.createQuickPick<ProjectManagerItem>();
-  qp.title = 'Code::Blocks';
-  qp.placeholder = i18n.t('Select an action, or click an opened project to switch the active one');
-  qp.matchOnDescription = true;
-  qp.items = buildManagerItems();
-
-  // 实时切换：选中已打开项目立即设为活动工程（菜单保持打开）
-  qp.onDidChangeSelection((sel) => {
-    const item = sel[0];
-    if (item?.filename) {
-      const proj = openProjects.find((p) => p.filename === item.filename);
-      if (proj) setActiveProject(proj, { persist: true });
-    }
-  });
-
-  // 回车：执行动作或关闭
-  qp.onDidAccept(async () => {
-    const item = qp.selectedItems[0];
-    if (!item) {
-      qp.hide();
-      return;
-    }
-    if (item.action === 'open') {
-      qp.hide();
-      await vscode.commands.executeCommand('codeblocks.openProject');
-    } else if (item.action === 'new') {
-      qp.hide();
-      await vscode.commands.executeCommand('codeblocks.newProject');
-    } else if (item.action === 'scan') {
-      qp.hide();
-      await scanAndOpenWorkspaceProjects();
-    } else if (item.filename) {
-      const proj = openProjects.find((p) => p.filename === item.filename);
-      if (proj) setActiveProject(proj, { persist: true });
-      qp.hide();
-    }
-  });
-
-  // 移除按钮：点击移除项目并刷新列表
-  qp.onDidTriggerItemButton((e) => {
-    if (e.item.filename) {
-      removeProject(e.item.filename);
-      qp.items = buildManagerItems();
-    }
-  });
-
-  qp.onDidHide(() => qp.dispose());
-  qp.show();
-}
-
-/** 工作区项目选择项（扩展 QuickPickItem，携带 filename） */
-interface WorkspaceProjectPickItem extends vscode.QuickPickItem {
-  filename: string;
 }
 
 /** 统计当前 ripgrep 进程数（诊断用；Windows 走 tasklist，POSIX 走 ps） */
@@ -2971,6 +2892,11 @@ async function showWorkspaceScanReport(): Promise<void> {
   }
   outputChannel?.info(lines.join('\n'));
   vscode.window.showInformationMessage(i18n.t('Workspace scan diagnostics: {0} project(s), scan took {1}ms (see the Code::Blocks output channel)', files.length, scanMs));
+}
+
+/** 工作区项目选择项（扩展 QuickPickItem，携带 filename） */
+interface WorkspaceProjectPickItem extends vscode.QuickPickItem {
+  filename: string;
 }
 
 /** 扫描工作区所有 .cbp/.workspace，多选打开（已打开则设为活动工程） */

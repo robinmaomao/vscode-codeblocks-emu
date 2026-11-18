@@ -9,7 +9,7 @@
 | 层 | 命令 | 本轮结果 | 说明 |
 |----|------|----------|------|
 | L-1 契约 | `npm run test:contract` | **3/3** | 契约 44 项 + 文档一致性 6 项 + 设置契约 725 断言 |
-| 无头层（unit） | `npm test` | **TOTAL=210 FAIL=0 SKIP=1** | SKIP=`tests/test-writer.js`；新增 Profiler 命令拆分守卫 |
+| 无头层（unit） | `npm test` | **TOTAL=211 FAIL=0 SKIP=1** | SKIP=`tests/test-writer.js`；新增 Profiler 命令拆分守卫 |
 | L1 端到端 | `npm run test:e2e` | **6/6** | 边界 39 pass / 2 skip、构建矩阵 48、ccache 21、调试 141 pass / 1 skip、链接期诊断 9、工具链 42 pass / 2 skip |
 | L3 视觉 | `npm run test:visual` | **26/26** | dark/light 各一套；本机指纹走跨环境容差分支 |
 | L4 性能 | `npm run test:perf` | **13/13** | 13 项微基准 + 真实构建；0 warn / 0 fail |
@@ -59,5 +59,5 @@
 
 ## 5. 结论
 
-- 单元 **210** / 契约 **3/3** / E2E **6/6** / 视觉 **26/26** / 性能 **13/13** / 打包 **15 断言** / 宿主 **25/25** 全部通过。
+- 单元 **211** / 契约 **3/3** / E2E **6/6** / 视觉 **26/26** / 性能 **13/13** / 打包 **15 断言** / 宿主 **25/25** 全部通过。
 - 无用户可见行为变化；`extension.ts` 进一步收缩。
