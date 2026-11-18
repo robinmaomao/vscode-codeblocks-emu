@@ -5996,19 +5996,12 @@ async function removeFileFromProject(project: Project, file: ProjectFile): Promi
 async function toggleFileOption(project: Project, file: ProjectFile, opt: 'compile' | 'link', enable: boolean): Promise<void> {
   try {
     setUnitOptionInCbp(project.filename, file.relativeFilename, opt, enable);
+    // 就地更新模型 + 单节点刷新；不再整工程重解析（大工程右键切换明显更快）
+    if (opt === 'compile') file.compile = enable;
+    else file.link = enable;
+    projectTreeProvider?.refreshFile(project, file);
     const name = opt === 'compile' ? i18n.t('Compile') : i18n.t('Link');
     outputChannel.info(logT('[Code::Blocks] File {0} {1} = {2}', file.relativeFilename, name, enable));
-    // 重新解析项目刷新树
-    const idx = openProjects.findIndex((p) => p.filename === project.filename);
-    if (idx !== -1) openProjects.splice(idx, 1);
-    const wasActive = activeProject?.filename === project.filename;
-    await openProject(project.filename);
-    if (wasActive) {
-      activeProject = openProjects.find((p) => p.filename === project.filename);
-      projectTreeProvider?.setActiveProject(activeProject);
-      updateTargetStatusBar();
-      updateCompilerStatusBar();
-    }
   } catch (err) {
     vscode.window.showErrorMessage(i18n.t('Failed to toggle the {0} option: {1}', opt === 'compile' ? i18n.t('Compile') : i18n.t('Link'), (err as Error).message));
   }

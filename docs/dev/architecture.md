@@ -76,4 +76,5 @@ flowchart LR
 
 - 激活耗时：`[Code::Blocks] Activation completed in {0}ms`（输出通道 debug 级）。
 - `detect.autoOpen=off` 时激活/工作区变化跳过全量 `findFiles`，仅保留状态栏入口与增量 watcher。
+- compile/link 右键切换只更新模型字段并刷新单节点（`projectTreeProvider.refreshFile`），不再重解析整个工程。
 - 构建/解析基准见 [性能基准](../testing/performance-baseline.md)，预算门禁按 `min` 判定。

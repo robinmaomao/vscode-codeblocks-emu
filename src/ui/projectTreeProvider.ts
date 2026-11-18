@@ -341,6 +341,15 @@ export class ProjectTreeProvider implements vscode.TreeDataProvider<TreeNode> {
     return node;
   }
 
+  /** 文件编译/链接开关变化后就地刷新该节点（避免整工程重解析） */
+  refreshFile(project: Project, file: ProjectFile): void {
+    const node = this.findFileNode(project, file);
+    const c = file.compile !== false;
+    const l = file.link !== false;
+    node.contextValue = 'file' + (c ? '' : '-nocompile') + (l ? '' : '-nolink');
+    this._onDidChangeTreeData.fire(node);
+  }
+
   /**
    * 查找某文件在树中的节点（P1「查找文件」定位用）。
    * 按与 getChildren 相同的路径规则预先构建链条（带缓存），并登记父节点映射，
