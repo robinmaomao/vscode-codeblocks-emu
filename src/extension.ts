@@ -4938,7 +4938,11 @@ async function generateClangdForWorkspaceInternal(interactive: boolean): Promise
     // （实测：日志有 warning 而 Problems 0 条）。vscode.extensions.getExtension 对未安装/被禁用的扩展返回 undefined。
     clangdDiagnosticsEnabled = !!clangd && !!vscode.extensions.getExtension(CLANGD_EXTENSION_ID);
 
-    if (!openProjects.length) return;
+    if (!openProjects.length) {
+      // 启动/设置变更触发的静默生成：无工程直接返回；命令/菜单手动触发时给出提示，避免“点了没反应”
+      if (interactive) vscode.window.showWarningMessage(i18n.t('Open a Code::Blocks project (.cbp) first'));
+      return;
+    }
 
     // 收集所有打开项目的编译单元（每项目用其编译器 + 该系统 include 路径）。
     // 活动工程排最前：共享文件（同文件出现在多个工程）时保留活动工程的编译命令（对齐 CodeBlocks 活动工程决定 flag）。
@@ -6814,7 +6818,10 @@ async function bookmarkGoto(dir: 1 | -1): Promise<void> {
 /** R11：打开光标处 #include 指向的文件（当前文件目录 → 目标 include 搜索目录） */
 async function openIncludeFileCmd(): Promise<void> {
   const ed = vscode.window.activeTextEditor;
-  if (!ed) return;
+  if (!ed) {
+    vscode.window.showInformationMessage(i18n.t('Open a file first'));
+    return;
+  }
   const directive = parseIncludeDirective(ed.document.lineAt(ed.selection.active.line).text);
   if (!directive) {
     vscode.window.showWarningMessage(i18n.t('The current line is not an #include directive'));
@@ -7841,23 +7848,36 @@ function recordRecentProject(filename: string): void {
   } catch { /* 非关键 */ }
 }
 
-/** 菜单动态区数据（最近工程 + 工作区拓扑构建顺序，E1/E2）——供状态栏菜单按需拉取 */
+/** 菜单动态区数据（最近工程 + 工作区拓扑构建顺序 + 可用状态，E1/E2）——供状态栏菜单按需拉取 */
 function getMenuDynamicData(): MenuDynamicData {
+  const activeFile = activeProject?.filename;
   try {
     const recents = (extContext?.globalState.get<string[]>('codeblocks.recentProjects', []) ?? [])
       .filter((f) => fs.existsSync(f))
       .slice(0, recentProjectsLimit());
     return {
-      recents: recents.map((f) => ({ label: path.basename(f), file: f })),
+      recents: recents.map((f) => ({ label: path.basename(f), file: f, active: normPath(f) === normPath(activeFile ?? '') })),
       order: topologicalBuildOrder(openProjects).map((p, i) => ({
         label: `${i + 1}. ${path.basename(path.dirname(p.filename)) || p.title}`,
         file: p.filename,
+        active: normPath(p.filename) === normPath(activeFile ?? ''),
       })),
       hasProjects: openProjects.length > 0,
+      hasWorkspace: !!openedWorkspaceFile && fs.existsSync(openedWorkspaceFile),
+      hasDebugSession: !!vscode.debug.activeDebugSession,
+      categorize: vscode.workspace.getConfiguration('codeblocks').get<boolean>('projectTree.categorize', true),
       tools: parseToolsSetting(vscode.workspace.getConfiguration('codeblocks').get('tools')).map((t, i) => ({ label: t.name, index: i })),
     };
   } catch {
-    return { recents: [], order: [], hasProjects: openProjects.length > 0, tools: [] };
+    return {
+      recents: [],
+      order: [],
+      hasProjects: openProjects.length > 0,
+      hasWorkspace: false,
+      hasDebugSession: !!vscode.debug.activeDebugSession,
+      categorize: true,
+      tools: [],
+    };
   }
 }
 

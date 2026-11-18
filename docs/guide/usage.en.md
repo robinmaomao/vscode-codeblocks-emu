@@ -80,7 +80,7 @@ After installation, the **Code::Blocks** icon appears in the Activity Bar on the
 
 | Entry | Location | Description |
 |------|------|------|
-| **Menu** | Far left of the status bar (`⊞ Menu`) | The Code::Blocks menu bar (File / Edit / View / Search / Project / Build / Debug / Tools / Settings): click to open a two-level menu (Project tree / Folding / Case / Line / Errors etc. are **submenus** you can drill into); the list shows **keybindings** and separators, and when no project is open the related items are marked **(no project)**; **hover to expand** common command links in place |
+| **Menu** | Far left of the status bar (`⊞ Menu`) | The Code::Blocks menu bar (File / Edit / View / Search / Project / Build / Debug / Tools / Settings): the first level is always the 9 menus and **every row has an icon**; Project Tree / Folding / Case / Line / Errors / Debugging Windows / Information etc. are **submenus** (marked with a trailing `›`, drill in to open); every sub-level starts with **Back** and shows a `Code::Blocks › File › …` breadcrumb title; the right side shows **keybindings**, and unavailable items are marked **(no project)** / **(no debug session)** / **(no .workspace)**; **hover to expand** common command links in place |
 | **Project** | Sidebar (main body) | Project tree: multiple projects + nested folders + file browsing (drag to reorder, right-click actions); hovering a project row shows quick **Build / Rebuild / Clean / Properties** buttons |
 | **Project Search** | Sidebar | Search inside open `.cbp` projects only: Files/Text modes, active project first, collapsible groups, click to jump, search history with a visual toggle at the top; `Ctrl+Alt+P` focuses Files mode |
 | **Analysis** | Sidebar | Project analysis: shows key `.cbp` properties per project (Summary / Build targets / Build commands / Search directories / Files / Virtual targets / Variables / Notes); **hover to show the matching .cbp snippet**, **click a property to locate it in the .cbp**, right-click to copy the snippet; the top holds a "recent build" shortcut (click to open Build Log) |
@@ -88,7 +88,7 @@ After installation, the **Code::Blocks** icon appears in the Activity Bar on the
 | **Build Log** | Bottom Panel (tab) | Structured build summary tree (compiler / compile statistics / link result / error and warning groups) |
 
 - The **position, side-by-side/stacked arrangement and size** of views can all be dragged and adjusted freely; VS Code saves them automatically and restores them the next time you open the window.
-- **Menu dynamic area**: **Workspace** lists the build order by dependency topology (click to set the active project); **Recent Projects** lists recent projects (the **Clear Recent Projects** item at the end clears the history).
+- **Menu dynamic area (inside File)**: **Recent Files ▸** (Open Recent / Clear Recent Files), **Recent Projects ▸** (recent projects; the active project is marked with ✓; the **Clear Recent Projects** item at the end clears the history), and **Workspace Build Order ▸** (build order by dependency topology; click to set the active project). The first level no longer mixes in dynamic entries.
 - Run **`Code::Blocks: Reset View Layout`** to restore the default layout in one click (Build Log back to the bottom Panel, sidebar order Project → Search → Symbols → Analysis, with Symbols hidden by default).
 - When no project is open, the **Project** view shows an empty-state guide (open project / new project / compile single file / detect compilers).
 - The **Analysis view** is fully collapsed by default (only the first project's "Summary" is expanded); the **⟳** button in the title bar refreshes manually, and it also refreshes automatically when a project is opened/removed and when a build finishes.
@@ -147,7 +147,7 @@ Other status bar items: **build target (Target)**, **build menu (Build)**, **com
 ### 5.2 Multiple projects
 
 - After opening several `.cbp` files, the **Project** view lists them in order (**that order is the compile order**).
-- Drag project nodes to change the compile order; right-click a project node to **Move Up / Move Down / Remove** (also available from Menu → Project → Project tree, applied to the active project).
+- Drag project nodes to change the compile order; right-click a project node to **Move Up / Move Down / Remove** (also available from Menu → Project → Project Tree, applied to the active project).
 - `Alt+F5` / `Alt+F6` **cycle** the active project among the open projects (aligned with Code::Blocks Activate prior/next project).
 - The **active project** (marked with a solid green dot in the tree) determines the status bar Target / Compiler and what `F9` builds.
 - **Clicking any node in the project tree** (project / folder / file) makes the project that owns that node the active project; **editing a file of a project makes the active project follow it** (switches to the project that owns the file).
@@ -370,7 +370,7 @@ Template directory: `<globalStorage>/templates/<id>/` (`template.json` manifest 
 | Attach to process | Attach to process | Command `Code::Blocks: Attach to Process…` (lists local processes, `-target-attach`) |
 | **Detach debugger** | Debug → Detach | Command `Code::Blocks: Detach` (Debug menu) — available **while paused**; after detaching, the debuggee **keeps running** and the debug session ends (aligned with CB: offered only for attach sessions while paused; launch sessions work too, as a protective extension) |
 | **Add symbol file** | Debug → Add symbol file | Command `Code::Blocks: Add Symbol File…` (Debug menu) — available **while paused**; the QuickPick lists **loaded libraries (with the .text load address automatically)** or "Select file…" (exe/dll/so/elf/o), and the address is mandatory (a GDB hard requirement: without it GDB reports `The address where … has been loaded is missing`). In CB 25.03 this item is effectively unusable (the implementation is commented out and the command lacks the address); this extension provides a working version |
-| Debug information (Information submenu) | Debug → Information | Debug menu **Debug Information** submenu: current frame / loaded libraries / target and files / FPU status / signal handling (GDB `info frame` / `sharedlibrary` / `files` / `float` / `signals`, output to the Code::Blocks Output channel; round 3) |
+| Debug information (Information submenu) | Debug → Information | Debug menu **Information** submenu: current frame / loaded libraries / target and files / FPU status / signal handling (GDB `info frame` / `sharedlibrary` / `files` / `float` / `signals`, output to the Code::Blocks Output channel; round 3). The sibling **Debugging Windows** submenu exposes Breakpoints / Call Stack / Variables / Watch / Registers / Disassembly native views |
 
 **Debugger settings** (aligned with CB Debugger settings, see §13): `initCommands` (initialization commands), `userArguments` (extra GDB command-line arguments), `disableInit` (on by default: GDB is passed `-nx` so the user's `.gdbinit`/`gdb.ini` is not executed, aligned with CB "Disable startup scripts (-nx)"), `printPretty` / `printElements` (variable display), `disassemblyFlavor` + `instructionSet` (disassembly flavor, including custom), `charset`, `gdbPath` (GDB path), `addOtherProjectDirs` (other project search directories). Every session also receives CB's fixed initialization commands (`set confirm off` / `width 0` / `height 0` / `breakpoint pending on` / `print asm-demangle on` / `unwindonsignal on` / `filename-display absolute` / `style enabled off`; items unsupported by older GDB are ignored automatically).
 
@@ -456,7 +456,7 @@ By default the extension uses "`--target` + hand-written `-isystem`/`-include`" 
 
 - Every **project open** (including opening a detected project from the status bar "Code::Blocks projects" entry) regenerates the compile database and the user-level config. Whenever the database or the config actually changes, the extension restarts clangd so an already running language server picks up the new configuration (not gated by `codeblocks.clangd.restartOnActiveProjectSwitch`).
 - The Output channel prints the reason, for example "Project opened; restarting clangd to apply the new compile database / config", so you can confirm the restart was triggered.
-- To trigger it manually: command `Code::Blocks: Restart clangd Language Server` (menu `Code::Blocks → Settings → Restart clangd Language Server`).
+- To trigger it manually: command `Code::Blocks: Restart clangd Language Server` (menu `Code::Blocks → Settings → clangd / IntelliSense → Restart clangd Language Server`).
 
 
 **Fallback when clangd is not installed (lightweight symbol completion):**
@@ -478,7 +478,7 @@ The **Symbols** view in the sidebar is aligned with the Code::Blocks Symbols pan
 
 ## 10. Build Log
 
-The Build Log view lives in the **bottom Panel** (ways to open it: press `Ctrl+J` and select the "Build Log" tab, use the menu Build → Build Log, or let it focus automatically when a build finishes — the timing is controlled by the `codeblocks.ui.buildLogAutoFocus` setting, **by default only when the build has errors**; when there are errors it also jumps to the first error by default, and that can be disabled with `codeblocks.ui.buildLogFocusFirstError`). Each build produces one structured summary tree:
+The Build Log view lives in the **bottom Panel** (ways to open it: press `Ctrl+J` and select the "Build Log" tab, use the menu View → Build Log, or let it focus automatically when a build finishes — the timing is controlled by the `codeblocks.ui.buildLogAutoFocus` setting, **by default only when the build has errors**; when there are errors it also jumps to the first error by default, and that can be disabled with `codeblocks.ui.buildLogFocusFirstError`). Each build produces one structured summary tree:
 
 ```
 Build succeeded / failed (root, showing elapsed time · N errors · N warnings)
@@ -972,7 +972,7 @@ A: They control different things and never override each other:
 That is: if you want the **log to always be English** (to compare against CB output while troubleshooting) → enable `codeblocks.log.english`; if you want **UI and log to change together** → change only `ui.language`.
 
 **Q: Is the build log (Output channel) fully bilingual now?**
-A: **Fully covered** (0.8.132 batch 2). Build engine logs, tree view nodes, debug layer hints, clangd/keybinding/statistics tool hints, 148 status bar menu labels and the internal fields of the three WebView panels all follow `ui.language` and are bilingual;
+A: **Fully covered** (0.8.132 batch 2, synced after the 2026-11 menu cleanup). Build engine logs, tree view nodes, debug layer hints, clangd/keybinding/statistics tool hints, all status bar menu labels (168 items at present) and the internal fields of the three WebView panels all follow `ui.language` and are bilingual;
 the only exception is that with `codeblocks.log.english=true` the log is forced to English (see the previous item). If you find a missing translation, run the guard check in [Internationalization](../dev/i18n.md) §6.
 
 ---
@@ -1002,7 +1002,7 @@ The following Code::Blocks features (round 5 batch 3 T1/T4/T5) were assessed as 
 | Symbol table nm viewer (T5, single library/file) | **Nm tool** (`wibren-wiersma.nm-tool`) · **vscode-binutils** (`sqlpassion.vscode-binutils`) | nm / objdump for a single library; **"bulk symbol search across multiple libraries" has no extension alternative yet** and is recorded as a todo (not implemented for now) |
 
 > **Remaining round-5 batch-3 items (decision on 2026-09-28: record as todos, do not implement for now)**: Profiler (gprof), Copy strings to clipboard,
-> T5 cross-library symbol search, Export Makefile in the Build menu (the command exists but currently lives in the Tools menu).
+> T5 cross-library symbol search. Export Makefile now lives in the Build menu (matching CB `compiler_menu.xrc`).
 > For details and the decision record, see the [unimplemented-feature backlog](../dev/backlog.md) §2 (not-ported list).
 > Reminder: the extensions above are community/vendor products; evaluate them before installing. This extension neither bundles nor ships them.
 

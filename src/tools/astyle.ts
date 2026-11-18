@@ -62,7 +62,10 @@ export function formatWithAstyle(source: string, options: string[] = ['--style=a
  */
 export async function formatActiveDocument(): Promise<void> {
   const editor = vscode.window.activeTextEditor;
-  if (!editor) return;
+  if (!editor) {
+    vscode.window.showInformationMessage(i18n.t('Open a file first'));
+    return;
+  }
 
   const doc = editor.document;
   const source = doc.getText();
