@@ -15,7 +15,12 @@
 | T2 | Profiler（gprof） | 未实现；市场无 gprof 前端（`blacksmith` 属 valgrind/callgrind 换后端） | CB `profiler/cbprofiler.cpp:83-255`、`cbprofilerexec.cpp:44-426`；需目标带 `-pg`，Windows 下 gprof 输出编码/路径需处理；建议 S→M（目标选择 + `gmon.out` 校验 + `gprof` 运行 + 输出查看） |
 | T3 | Copy strings to clipboard | 未实现；无等效扩展 | CB `copystrings/copystrings.cpp:67-183`；XS |
 | T5 | 跨库符号搜索 | 单库查看可用市场扩展（`nm-tool` / `vscode-binutils`），跨库批量搜索无替代 | CB `symtab/symtabexec.cpp:64-542`、`symtabconfig.cpp:188-343`；S（选目录 → 枚举库 → 逐个 `nm`） |
-| M1 | Export Makefile 入 Build 菜单 | 命令已有（Tools 菜单，`menuStructure.ts`），未放入 Build 菜单 | CB `compiler_menu.xrc:85-86`；XS（可双入口，同步 `test-menu-structure.js`） |
+| M2 | File 菜单剩余项 | Open default workspace / Save project as… / Save workspace / Save workspace as… / Close workspace / Print 未移植 | CB `main_menu.xrc:4-120`；VS Code 原生菜单承担部分；需先确认 workspace 保存语义 |
+| M3 | File → New 子菜单 | CB 还有 Build target… / File… / Custom… 三个向导入口；扩展目前只有 Empty File / Project / From Template | CB `main_menu.xrc:5-30`；Build target 可复用属性面板 targets 页，File/Custom 需新向导 |
+| M4 | Edit 菜单剩余项 | Clear changes history、Toggle all folds、Special commands 的 Movement/Zoom/Stream·Box comment 未移植 | CB `main_menu.xrc:140-500`；多数无 VS Code 等价命令 |
+| M5 | Project 菜单剩余项 | Automatic source paths… / Edit file types && categories… / Display folders as on disk / Hide folder name / Sort alphabetically 未移植 | CB `projectmanagerui.cpp:864-909`；globs 编辑已在 §2 决策不实施，其余需工程树设置项 |
+| M6 | Debug 菜单剩余项 | Active debuggers、Next instruction / Step into instruction 独立菜单项、Memory 视图入口未单列 | DAP 已支持 `supportsSteppingGranularity`/`readMemory`；VS Code 没有稳定的独立命令（见 `debugger_menu.xrc`） |
+| M7 | Settings 菜单剩余项 | Global variables 只读（CB 可编辑）、Backtick Cache 直接清空（CB 为对话框） | 已在 §2/§3 记录为替代入口；如要做需完整编辑/对话框，影响面较大 |
 
 > 盘点时的 UI 落位与编译/链接影响结论：可实施项中 19 项零影响、6 项轻度（只写 `.cbp`/`.workspace`/`default.conf`，经既有读取路径生效）、1 项需改造构建状态机（B5 Squirrel，未实施）。
 
@@ -47,6 +52,7 @@
 | D 编辑器辅助 | D1 头文件保护 / D3 Tidy 注释 / D4 Edit 菜单补项 | ✔ 0.8.78-dev |
 | D 编辑器辅助 | D2 缩写 / D5 Class wizard 等 | ✖ 不做（snippets / 市场扩展替代） |
 | E 工具与其它 | E1 Configure tools | ✔ 0.8.78-dev |
+| E 工具与其它 | M1 Export Makefile 入 Build 菜单 | ✔ 2026-11-18（状态栏 Menu 优化） |
 | E 工具与其它 | E2 Scripting / E3 Console runner / E4 Autosave 等 / E5 日志与平台工具 | ✖ 不做（见 §2） |
 
 ## 4. 决策与变更记录
@@ -59,3 +65,4 @@
 | 2026-09-28 | 0.8.92-dev | 第五轮批次三：T1/T4/T5 单库查看 → 替代扩展；T2 Profiler / T3 Copy strings / T5 跨库搜索 / M1 菜单位移 → 记录暂不实施（§1） |
 | 2026-10-22 | 0.8.132 | 界面语言（i18n）批次 2 全部完成，细则见 [国际化](./i18n.md) §4 |
 | 2026-11-04 | 0.8.137 | 复核：新增 G1/G2 两项已知缺口；其余结论不变 |
+| 2026-11-18 | 0.8.152 | 状态栏 Menu 显示优化 + 逐项排查：M1（Export Makefile 入 Build）完成；新增 M2–M7 菜单缺口（CB 有、扩展无对应命令，本次只登记不实施） |

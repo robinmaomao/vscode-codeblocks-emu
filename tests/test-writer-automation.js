@@ -45,7 +45,7 @@ const UNIT_PATTERN = /^test-.*\.js$/;
 /** tests 根目录下不是测试脚本但参与 runner 的文件 */
 const UNIT_ROOT_ALLOW = new Set(['run-all.js']);
 /** 辅助目录（非测试层；其 .js 只是被引用） */
-const HELPER_DIRS = new Set(['_harness']);
+const HELPER_DIRS = new Set(['_harness', 'fixtures']);
 
 const runAllSrc = fs.readFileSync(path.join(TESTS, 'run-all.js'), 'utf-8');
 const knMatch = runAllSrc.match(/const KNOWN_MANUAL = new Set\(\[([^\]]*)\]\)/);

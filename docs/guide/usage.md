@@ -81,7 +81,7 @@ code --extensionDevelopmentPath="." --disable-extensions --new-window
 
 | 入口 | 位置 | 说明 |
 |------|------|------|
-| **Menu** | 状态栏最左（`⊞ Menu`） | Code::Blocks 菜单栏（File / Edit / View / Search / Project / Build / Debug / Tools / Settings）：点击弹出两级菜单（Project tree / Folding / Case / Line / Errors 等为**子菜单**，可继续下钻）；列表显示**快捷键**与分隔线，未打开工程时相关项标注**（无工程）**；**悬停就地展开**常用命令链接 |
+| **Menu** | 状态栏最左（`⊞ Menu`） | Code::Blocks 菜单栏（File / Edit / View / Search / Project / Build / Debug / Tools / Settings）：一级固定 9 个菜单且**每项都有图标**；Project Tree / Folding / Case / Line / Errors / Debugging Windows / Information 等为**子菜单**（label 末尾 `›`，可继续下钻）；每个子层级第一项为**返回**，标题显示 `Code::Blocks › File › …` 面包屑；右侧显示**快捷键**，不可用项统一标注**（无工程）/（无调试会话）/（无 .workspace）**；**悬停就地展开**常用命令链接 |
 | **Project** | 侧边栏（主体） | 工程树：多项目 + 嵌套目录 + 文件浏览（可拖拽排序、右键操作）；项目行悬停显示 **Build / Rebuild / Clean / Properties** 快捷按钮 |
 | **Project Search** | 侧边栏 | 工程内搜索：只搜索已打开 `.cbp` 工程中的文件/内容；文件/内容两种模式、活动工程优先、可折叠分组、点击跳转、搜索历史（顶部可视化开关）；`Ctrl+Alt+P` 聚焦文件模式 |
 | **Analysis** | 侧边栏 | 工程分析：按工程展示 `.cbp` 重要属性（概要 / 构建目标 / 构建命令 / 搜索目录 / 文件 / 虚拟目标 / 变量 / 备注）；**悬停显示对应的 .cbp 配置片段**，**点击属性在 .cbp 中定位**，右键可复制片段；顶部为「最近构建」快捷入口（点击打开 Build Log） |
@@ -89,7 +89,7 @@ code --extensionDevelopmentPath="." --disable-extensions --new-window
 | **Build Log** | 底部 Panel（标签页） | 结构化构建摘要树（编译器 / 编译统计 / 链接结果 / 错误警告分组） |
 
 - 视图的**位置、并排/上下排布、大小**均可自由拖动调整，由 VS Code 自动保存并在下次打开时恢复。
-- **Menu 动态区**：**Workspace** 按依赖拓扑列出构建顺序（点击设为活动工程）；**Recent Projects** 列出最近工程（末尾 **Clear Recent Projects** 可清空历史）。
+- **Menu 动态区（File 菜单内）**：**Recent Files ▸**（Open Recent / Clear Recent Files）、**Recent Projects ▸**（最近工程，当前活动工程带 ✓；末尾 **Clear Recent Projects** 可清空历史）、**Workspace Build Order ▸**（按依赖拓扑列出构建顺序，点击设为活动工程）。一级列表不再混入动态项。
 - 执行 **`Code::Blocks: Reset View Layout`** 可一键恢复默认排布（Build Log 回到底部 Panel，侧栏顺序 Project → Search → Symbols → Analysis，其中 Symbols 默认隐藏）。
 - 未打开工程时，**Project** 视图显示空态引导（打开工程 / 新建工程 / 单文件编译 / 检测编译器）。
 - **Analysis 视图**默认全部折叠（仅第一个工程的「概要」展开）；标题栏 **⟳** 可手动刷新，打开/移除工程与构建完成时自动刷新。
@@ -148,7 +148,7 @@ code --extensionDevelopmentPath="." --disable-extensions --new-window
 ### 5.2 多项目
 
 - 同时打开多个 `.cbp` 后，**Project** 视图按顺序列出（**顺序即编译顺序**）。
-- 拖拽工程节点调整编译顺序；右键工程节点可 **上移 / 下移 / 移除**（也可从 Menu → Project → Project tree 执行，作用对象为活动工程）。
+- 拖拽工程节点调整编译顺序；右键工程节点可 **上移 / 下移 / 移除**（也可从 Menu → Project → Project Tree 执行，作用对象为活动工程）。
 - `Alt+F5` / `Alt+F6` 在打开的工程间**循环切换**活动工程（对齐 Code::Blocks Activate prior/next project）。
 - **活动项目**（树中实心绿点标识）决定状态栏 Target / Compiler 和 `F9` 构建的对象。
 - **点击工程树任意节点**（项目 / 文件夹 / 文件）即可把该节点所属工程设为活动项目；**编辑某工程的文件时活动项目会自动跟随**（切到该文件所属工程）。
@@ -371,7 +371,7 @@ code --extensionDevelopmentPath="." --disable-extensions --new-window
 | 附加进程 | Attach to process | 命令 `Code::Blocks: Attach to Process…`（列出本机进程，`-target-attach`） |
 | **分离调试器** | Debug → Detach | 命令 `Code::Blocks: Detach`（Debug 菜单）——**暂停时**可用；分离后被调试进程**继续运行**，调试会话结束（对齐 CB：附加会话 + 暂停才提供；launch 会话同样可用，为保护性扩展） |
 | **附加符号文件** | Debug → Add symbol file | 命令 `Code::Blocks: Add Symbol File…`（Debug 菜单）——**暂停时**可用；QuickPick 列出**已加载库（自动带 .text 加载地址）**或「选择文件…」（exe/dll/so/elf/o），地址必填（GDB 硬要求：无地址会报 `The address where … has been loaded is missing`）。CB 25.03 该项实际不可用（实现被注释且命令缺地址），本扩展为可用版 |
-| 调试信息（Information 子菜单） | Debug → Information | Debug 菜单 **Debug Information** 子菜单：当前栈帧 / 已加载库 / 目标与文件 / FPU 状态 / 信号处理（GDB `info frame` / `sharedlibrary` / `files` / `float` / `signals`，输出到 Code::Blocks 输出通道；第三轮） |
+| 调试信息（Information 子菜单） | Debug → Information | Debug 菜单 **Information** 子菜单：当前栈帧 / 已加载库 / 目标与文件 / FPU 状态 / 信号处理（GDB `info frame` / `sharedlibrary` / `files` / `float` / `signals`，输出到 Code::Blocks 输出通道；第三轮）。同级的 **Debugging Windows** 子菜单提供 Breakpoints / Call Stack / Variables / Watch / Registers / Disassembly 原生视图入口 |
 
 **调试器设置**（对齐 CB Debugger settings，见 §13）：`initCommands`（初始化命令）、`userArguments`（GDB 命令行附加参数）、`disableInit`（默认开：GDB 传 `-nx` 不执行用户 `.gdbinit`/`gdb.ini`，对齐 CB「Disable startup scripts (-nx)」）、`printPretty` / `printElements`（变量显示）、`disassemblyFlavor` + `instructionSet`（反汇编风格，含自定义）、`charset`、`gdbPath`（GDB 路径）、`addOtherProjectDirs`（其它工程搜索目录）。每次会话还会自动下发 CB 的固定初始化命令（`set confirm off` / `width 0` / `height 0` / `breakpoint pending on` / `print asm-demangle on` / `unwindonsignal on` / `filename-display absolute` / `style enabled off`，老 GDB 不支持的项自动忽略）。
 
@@ -458,7 +458,7 @@ code --extensionDevelopmentPath="." --disable-extensions --new-window
 - 每次**打开工程**（含从状态栏「Code::Blocks projects」入口打开检测到的工程）都会重新生成编译数据库与用户级配置；只要数据库或配置**实际变化**，扩展就会重启 clangd，
   让已启动的语言服务器按新配置重新分析（不受 `codeblocks.clangd.restartOnActiveProjectSwitch` 限制）。
 - 输出通道会打印一行原因，例如「已打开工程，重启 clangd 以套用新的编译数据库 / 配置」，可据此确认是否触发了重启。
-- 需要手动触发时：命令 `Code::Blocks: Restart clangd Language Server`（菜单 `Code::Blocks → Settings → Restart clangd Language Server`）。
+- 需要手动触发时：命令 `Code::Blocks: Restart clangd Language Server`（菜单 `Code::Blocks → Settings → clangd / IntelliSense → Restart clangd Language Server`）。
 
 
 **未安装 clangd 时的兜底（轻量符号补全）：**
@@ -480,7 +480,7 @@ code --extensionDevelopmentPath="." --disable-extensions --new-window
 
 ## 10. 构建日志（Build Log）
 
-Build Log 视图位于**底部 Panel**（打开方式：`Ctrl+J` 后选择「Build Log」标签页、菜单 Build → Build Log，或构建完成时自动聚焦——时机由设置 `codeblocks.ui.buildLogAutoFocus` 控制，**默认仅当构建有错误时**聚焦；有错误时默认还会自动跳转到第一个错误，可用 `codeblocks.ui.buildLogFocusFirstError` 关闭）。每次构建生成一棵结构化摘要树：
+Build Log 视图位于**底部 Panel**（打开方式：`Ctrl+J` 后选择「Build Log」标签页、菜单 View → Build Log，或构建完成时自动聚焦——时机由设置 `codeblocks.ui.buildLogAutoFocus` 控制，**默认仅当构建有错误时**聚焦；有错误时默认还会自动跳转到第一个错误，可用 `codeblocks.ui.buildLogFocusFirstError` 关闭）。每次构建生成一棵结构化摘要树：
 
 ```
 构建成功 / 失败（根，显示用时 · N 错误 · N 警告）
@@ -973,7 +973,7 @@ A：两者管不同东西，互不覆盖：
 即：想让**日志永远是英文**（对照 CB 输出排错）→ 开 `codeblocks.log.english`；想让**界面和日志一起变** → 只改 `ui.language`。
 
 **Q：构建日志（输出通道）现在中英都覆盖了吗？**
-A：**已全覆盖**（0.8.132 批次 2）。构建引擎日志、树视图节点、调试层提示、clangd/键位/统计工具提示、状态栏菜单 148 个菜单标签、三个 WebView 面板的内部字段都随 `ui.language` 双语；
+A：**已全覆盖**（0.8.132 批次 2，2026-11 菜单优化后同步）。构建引擎日志、树视图节点、调试层提示、clangd/键位/统计工具提示、状态栏菜单全部菜单标签（当前 168 项）、三个 WebView 面板的内部字段都随 `ui.language` 双语；
 唯一例外是 `codeblocks.log.english=true` 时日志被强制英文（见上一条）。发现漏翻请按 [国际化](../dev/i18n.md) §6 的守卫自查。
 
 ---
@@ -1003,7 +1003,7 @@ A：**已全覆盖**（0.8.132 批次 2）。构建引擎日志、树视图节�
 | 符号表 nm 查看（T5，单库/单文件） | **Nm tool**（`wibren-wiersma.nm-tool`）· **vscode-binutils**（`sqlpassion.vscode-binutils`） | 单库 nm / objdump 查看；**「跨多个库批量搜索符号」暂无扩展替代**，已记录待办（暂不实施） |
 
 > **其余批次三项目（2026-09-28 决策：记录待办、暂不实施）**：Profiler（gprof）、Copy strings to clipboard、
-> T5 跨库符号搜索、Export Makefile 入 Build 菜单（命令已具备，当前位于 Tools 菜单）。
+> T5 跨库符号搜索。Export Makefile 已移入 Build 菜单（对齐 CB `compiler_menu.xrc`）。
 > 详情与决策见 [未实现功能待办](../dev/backlog.md) §2（明确不移植清单）。
 > 提醒：以上扩展为社区/厂商产品，请自行评估安装；本扩展不内置或捆绑它们。
 

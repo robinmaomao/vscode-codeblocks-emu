@@ -48,8 +48,13 @@ for (const file of files) {
   if (rel === 'i18n/core.ts') continue; // 核心模块自身不做迁移
   const text = fs.readFileSync(file, 'utf-8');
   const sf = ts.createSourceFile(file, text, ts.ScriptTarget.ES2020, true, ts.ScriptKind.TS);
+  // menuPresentation 为保持无 vscode 依赖，接收注入的翻译函数（参数名 t）；其字面量源串同样纳入词条守卫
+  const isInjectedTranslateCall = (node) => rel === 'ui/menuPresentation.ts'
+    && ts.isCallExpression(node)
+    && ts.isIdentifier(node.expression)
+    && node.expression.text === 't';
   const visit = (node) => {
-    if (isI18nCall(node) || isLogCall(node)) {
+    if (isI18nCall(node) || isLogCall(node) || isInjectedTranslateCall(node)) {
       const arg = node.arguments[0];
       const line = sf.getLineAndCharacterOfPosition(node.getStart(sf)).line + 1;
       if (arg && (ts.isStringLiteral(arg) || ts.isNoSubstitutionTemplateLiteral(arg))) {

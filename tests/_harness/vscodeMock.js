@@ -41,6 +41,7 @@ class TreeItem {
 
 class ThemeIcon { constructor(id) { this.id = id; } }
 class ThemeColor { constructor(id) { this.id = id; } }
+const QuickPickItemKind = { Separator: -1, Default: 0 };
 class MarkdownString { constructor(value) { this.value = value; } appendText(t) { this.value += t; return this; } appendMarkdown(t) { this.value += t; return this; } appendCodeblock(t, lang) { this.value += '```' + (lang || '') + '\n' + t + '\n```'; return this; } }
 
 class Position { constructor(line, character) { this.line = line; this.character = character; } }
@@ -132,6 +133,7 @@ function createVscodeMock(opts = {}) {
     TreeItem,
     TreeItemCollapsibleState: { None: 0, Collapsed: 1, Expanded: 2 },
     ThemeIcon,
+    QuickPickItemKind,
     ThemeColor,
     MarkdownString,
     EventEmitter,
