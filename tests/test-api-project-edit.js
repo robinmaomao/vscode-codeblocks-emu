@@ -174,6 +174,16 @@ check('P6 不支持的操作降级 canonical', rFallback.ok && rFallback.format 
     && fs.readFileSync(pcbp, 'utf8') === beforeDry, { written: dryP.written, hasPreview: typeof dryP.preview === 'string' });
 }
 
+// 非法 format 直接抛 invalid-input（不再静默回退 canonical）
+{
+  let badFormat;
+  try {
+    editProject(pcbp, [{ op: 'set', scope: 'project', field: 'title', value: 'x' }], { format: 'fancy' });
+  } catch (e) { badFormat = e; }
+  check('P13 非法 format → invalid-input 且不写盘',
+    !!badFormat && badFormat.code === 'invalid-input', badFormat && badFormat.code);
+}
+
 // 清理
 fs.rmSync(TMP, { recursive: true, force: true });
 

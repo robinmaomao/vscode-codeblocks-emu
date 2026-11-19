@@ -8,10 +8,10 @@
 | 层 | 目录 | 内容 | 运行方式 |
 |----|------|------|----------|
 | L-1 静态契约 | `tests/contract/` | 贡献点/激活事件/命令注册交叉校验、语言语法、调试器 schema、资源与版本一致性、NLS 键集合、**文档一致性**（覆盖矩阵汇总/性能基准条目/文档命令与相对链接/版本标记） | `npm run test:contract` |
-| L0 无头单元/集成 | `tests/test-*.js` | 解析/写回/命令行/宏/缓存/键位/书签/工具等 135+ 项（dist 层，无 VS Code 宿主） | `npm test` |
+| L0 无头单元/集成 | `tests/test-*.js` | 解析/写回/命令行/宏/缓存/键位/书签/工具等 233 个脚本（dist 层，无 VS Code 宿主） | `npm test` |
 | L1 真实工程 E2E | `tests/e2e/` | 真实工具链构建矩阵、工作区依赖、工具类功能（临时目录探针工程） | `npm run test:e2e` |
 | L2 真实宿主 | `tests/host/` | 用 `@vscode/test-electron` 启动**真实 VS Code**（默认下载 `engines.vscode` 最低版本 1.102.0，可用 `CB_VSCODE_PATH` 指向本机安装）驱动真实命令/视图/调试/设置写入 | `npm run test:host` |
-| L3 像素视觉回归 | `tests/visual/` | 12 个 WebView HTML 面 × 2 主题 = 24 基线；pixelmatch 容差判定 | `npm run test:visual` |
+| L3 像素视觉回归 | `tests/visual/` | 13 个 WebView HTML 面 × 2 主题 = 26 基线；pixelmatch 容差判定 | `npm run test:visual` |
 | L4 性能基准 | `tests/perf/` | 12 项微基准 + 真实构建耗时；硬预算 fail / 漂移 warn | `npm run test:perf` |
 | L5 打包与安装 | `tests/pack/` | VSIX 打包内容核对 + 隔离 user-data-dir 安装激活冒烟（含 Agent CLI/MCP bundle 与体积预算） | `npm run test:pack` |
 | L6 Agent / MCP | `tests/test-agent-policy.js`、`tests/test-api-project-edit.js`、`tests/test-api-settings-reader.js`、`tests/test-api-tool-guards.js`、`tests/test-api-build-service.js`、`tests/test-debug-shapes.js`、`tests/test-api-run-plan.js`、`tests/test-cli.js`、`tests/test-mcp-server.js`、`tests/test-ai-tools-contract.js`、`tests/e2e/test-e2e-cli-build.js`、`tests/e2e/test-e2e-cli-debug.js`、`tests/host/suite/agent.tests.js` | 开关与只读白名单（含 MCP 暴露计划）、工程读改（含 query/preserve）、设置读取、写盘守卫（并发外部修改 / `build-busy`）、构建超时与清理（含 makefile 已最新不递增版本、语言参数覆盖、导出系统头）、调试响应跨传输归一化、运行工作目录锚点与默认超时、workspace 依赖路径规范化、export Makefile 覆盖保护、preserve XML 转义、虚拟目标平台并集判定、工具注册表契约、CLI 子进程与退出码（含 `--json` 失败输出、`no-build`、平台守卫）、MCP 握手/调用/错误分支与关闭·只读门控、真实工具链 CLI 构建与无头调试（`debug run` 断点/栈/变量）、宿主内 LM Tools 注册、未知 target 校验与平台不支持目标、超时取消、开关切换与只读拦截 | `npm test` / `npm run test:e2e` / `npm run test:host` |
@@ -45,7 +45,7 @@ node tests/run-all.js --group all --json out.json
 ## 3. 视觉回归（L3）
 
 - **范围**：仅 WebView HTML 面（原生 VS Code UI 不做像素门禁，改由宿主测试截图留档 + 手工清单覆盖）。
-- **面清单**：工程属性面板 9 个 tab（构建目标/虚拟目标/文件/构建选项/搜索目录/构建脚本/项目设置/备注/调试器）、快捷键面板、编译选项面板、HTML 构建日志 —— 共 12 面 × dark/light 两主题。
+- **面清单**：工程属性面板 9 个 tab（构建目标/虚拟目标/文件/构建选项/搜索目录/构建脚本/项目设置/备注/调试器）、快捷键面板、编译选项面板、运行参数对话框、HTML 构建日志 —— 共 13 面 × dark/light 两主题。
 - **HTML 来源**：dist 真实代码生成（`ProjectPropertiesPanel.buildHtml()` 等），不维护手写快照。
 - **确定性措施**：固定视口与 DPR=1；注入 `--vscode-*` 主题变量与固定字体栈；HTML 头部注入时间/随机冻结与 `acquireVsCodeApi` shim；禁用动画/过渡/光标、隐藏滚动条；等待字体与双 rAF 后截图。
 - **判定（两层，默认未被放宽）**：
@@ -156,7 +156,7 @@ node tests/run-all.js --group all --json out.json
 
 | 用例组 | 断言要点 |
 |--------|----------|
-| 激活与贡献面 | 扩展激活；**contributes 全表命令逐一注册（数量以 package.json 为准，当前 133 条）**；运行时内部命令（视图焦点/动态菜单）；5 个视图 `<viewId>.focus`；设置项默认值齐备（当前 90 项）；`ld/asm/xm` 语言注册 + 按扩展名正确关联语法 |
+| 激活与贡献面 | 扩展激活；**contributes 全表命令逐一注册（数量以 package.json 为准，当前 136 条）**；运行时内部命令（视图焦点/动态菜单）；5 个视图 `<viewId>.focus`；设置项默认值齐备（当前 93 项）；`ld/asm/xm` 语言注册 + 按扩展名正确关联语法 |
 | 无工程优雅降级 | 构建/运行类 9 条、面板工具类 16 条、调试辅助 4 条命令在「无工程/无会话」下均不抛异常 |
 | keybindings 托管写入 | `check`（QuickPick 场景自动关闭 UI）；`apply` 真实写入 `<user-data>/User/keybindings.json`（含覆盖键的正向条目 + 默认键移除规则）；`reset` 清理文件条目并清空设置 |
 | 仓库探针工程 | `test-project` 结构（3 个 `.cbp` + 1 个 `.workspace`）与调试目标产物存在性 |

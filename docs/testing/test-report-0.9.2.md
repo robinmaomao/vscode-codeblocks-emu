@@ -2,6 +2,7 @@
 
 > 生成时间：2026-11-19 ｜ 执行环境：Windows 11 x64 ｜ Node v24.22.3 ｜ CPU demo CPU ×16 ｜ 32GB ｜ w64devkit GCC 16.2 / GDB 18.1
 > 方案见 [测试方案](./strategy.md)；覆盖台账见 [测试覆盖矩阵](./coverage-matrix.md)；性能数据见 [性能基准](./performance-baseline.md)。
+> 全量逐项审计见 [0.9.2 功能审计](./functional-audit-0.9.2.md)（D-01…D-13 已全部修复，逐项验证见该报告 §12）。
 > 上一版报告见 [0.9.1 测试报告](./test-report-0.9.1-archive.md)；本版发布说明见 [release/0.9.2.md](../release/0.9.2.md)。
 
 ## 1. 分层结果
@@ -9,7 +10,7 @@
 | 层 | 命令 | 本轮结果 | 说明 |
 |----|------|----------|------|
 | L-1 契约 | `npm run test:contract` | **3/3** | 契约 44 项 + 文档一致性 6 项 + 设置契约 745 断言 |
-| 无头层（unit） | `npm test` | **TOTAL=244 FAIL=0 SKIP=1** | SKIP=`tests/test-writer.js`；新增调试形状 15 / run plan 4 / CLI 调试 E2E 8 |
+| 无头层（unit） | `npm test` | **TOTAL=233 FAIL=0 SKIP=1** | SKIP=`tests/test-writer.js`；新增调试形状 15 / run plan 4 / CLI 调试 E2E 8；审计轮新增命令分区守卫（入口冒烟 120/136）；修复轮新增调试命令行为 14 / 命令处理器 31 / 设置行为 20 |
 | L1 端到端 | `npm run test:e2e` | **7/7** | 边界 39 pass / 2 skip、构建矩阵 48、ccache 21、CLI 构建 7、**CLI 调试 8（真实 gdb）**、调试 141 pass / 1 skip、链接期诊断 9、工具链 42 pass / 2 skip |
 | L3 视觉 | `npm run test:visual` | **26/26** | dark/light 各一套 |
 | L4 性能 | `npm run test:perf` | **13/13** | 13 项微基准 + 真实构建；0 warn / 0 fail |
@@ -51,7 +52,7 @@
 |---|---|
 | 主题 | 0.9.0 合并后的九轮复查：跨端契约、失败语义、资源回收、数据安全 |
 | 代码 | `src/api/{toolRegistry,debugService,debugShapes,projectEdit,projectQuery,projectService,runService,exportService,buildService,agentPolicy,types}.ts`、`src/build/buildProject.ts`、`src/cli/{cb-cli,runtime}.ts`、`src/mcp/{provider,server}.ts`、`src/extension.ts`、`src/compiler/{languageFlags,compilerFlagSettings,compilerService}.ts`、`package.json`（`untrustedWorkspaces`） |
-| 新增断言 | 调试形状 15、run plan 4、CLI 调试 E2E 8、构建服务 +8、工程编辑 +25、工具守卫 +5、CLI +12、宿主 +1 |
+| 新增断言 | 调试形状 15、run plan 4、CLI 调试 E2E 8、构建服务 +8、工程编辑 +25、工具守卫 +5、CLI +12、宿主 +1；**审计轮**：命令分区守卫 6 + 入口冒烟 112→120；**修复轮**：调试命令行为 14、命令处理器 31、设置行为 20、工具守卫 +12、CLI +13、MCP +4、工程编辑 +1 |
 | 词条 | 无新增（错误码与提示复用既有词条） |
 
 ## 4. 缺陷与处置
@@ -70,6 +71,6 @@
 
 ## 5. 结论
 
-- 契约 **3/3**、无头 **244**（FAIL=0 / SKIP=1）、E2E **7/7**、视觉 **26/26**、性能 **13/13**、打包 **16 断言**、宿主 **37/37（VS Code 1.102.0）** 全部通过。
+- 契约 **3/3**、无头 **233**（FAIL=0 / SKIP=1）、E2E **7/7**、视觉 **26/26**、性能 **13/13**、打包 **16 断言**、宿主 **37/37（VS Code 1.102.0）** 全部通过；修复轮非宿主六层合计 **247** 行 / 0 失败 / 1 SKIP（含宿主 **248**）。
 - 修复集中在「失败被当成功」「跨端响应漂移」「资源泄漏 / 挂起」「相对路径口径」四类；无功能面新增。
 - 清单不变：命令 136 / 设置 93 / 分区 10 / 键位 34 / 视图 6 / LM Tools 11 / MCP provider 1。

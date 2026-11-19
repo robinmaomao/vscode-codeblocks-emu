@@ -173,8 +173,9 @@ async function activate(opts = {}) {
     return Promise.resolve(undefined);
   };
   vscode.tasks = vscode.tasks || {};
+  const taskEndListeners = [];
   vscode.tasks.executeTask = (t) => { records.tasks.push(t); return Promise.resolve({ terminate: () => {}, onDidTerminate: () => new MockDisposable() }); };
-  vscode.tasks.onDidEndTaskProcess = () => new MockDisposable();
+  vscode.tasks.onDidEndTaskProcess = (l) => { taskEndListeners.push(l); return new MockDisposable(); };
   vscode.tasks.onDidStartTaskProcess = () => new MockDisposable();
   vscode.tasks.onDidEndTask = () => new MockDisposable();
   vscode.tasks.onDidStartTask = () => new MockDisposable();
@@ -262,6 +263,10 @@ async function activate(opts = {}) {
       return handlers[handlers.length - 1](...args);
     },
     has: (id) => mock.commandHandlers.has(id),
+    /** 派发任务结束事件（编译后询问运行等路径） */
+    endTask(task, exitCode) {
+      for (const l of [...taskEndListeners]) l({ execution: { task }, exitCode });
+    },
     setConfig(key, value) { mock.configStore[key] = value; },
     setQuickPick(v) { queues.quickPick.push(v); },
     setInputBox(v) { queues.inputBox.push(v); },

@@ -111,6 +111,74 @@ check('C17 --json 失败时 stdout 仍是 { ok:false, error.code }',
   fs.rmSync(platDir, { recursive: true, force: true });
 }
 
+// ---------- 运行期校验（审计轮 D-01…D-09） ----------
+const help = run(['--help']);
+check('C20 --help 退出码 0', help.code === 0 && /Usage:/.test(help.stdout), { code: help.code });
+const helpShort = run(['-h']);
+check('C20b -h 退出码 0', helpShort.code === 0, helpShort.code);
+
+const unknownFlag = run(['show', cbp, '--json', '--frobnicate']);
+let unknownFlagJson;
+try { unknownFlagJson = JSON.parse(unknownFlag.stdout); } catch { unknownFlagJson = undefined; }
+check('C21 未知开关 → exit 2 + usage 错误', unknownFlag.code === 2 && unknownFlagJson?.error?.code === 'usage',
+  { code: unknownFlag.code, out: unknownFlag.stdout.slice(0, 120) });
+
+const badSection = run(['show', cbp, '--section', 'nope', '--json']);
+check('C22 非法 section → exit 3 invalid-input', badSection.code === 3 && /invalid-input/.test(badSection.stderr),
+  { code: badSection.code, err: badSection.stderr.slice(0, 120) });
+
+const badKind = run(['export', cbp, '--kind', 'nope', '--json']);
+check('C23 非法 export kind → exit 3', badKind.code === 3 && /invalid-input/.test(badKind.stderr),
+  { code: badKind.code, err: badKind.stderr.slice(0, 120) });
+
+const badCompiler = run(['compiler', 'info', '--compiler-id', 'nope', '--json']);
+check('C24 未知编译器 id → exit 3', badCompiler.code === 3 && /invalid-input/.test(badCompiler.stderr),
+  { code: badCompiler.code, err: badCompiler.stderr.slice(0, 120) });
+
+const badFormat = run(['edit', cbp, '--format', 'nope', '--ops', JSON.stringify([{ op: 'set', scope: 'project', field: 'title', value: 'hello-cb' }]), '--json']);
+check('C25 非法 format → exit 3', badFormat.code === 3, { code: badFormat.code, err: badFormat.stderr.slice(0, 120) });
+
+const badTimeout = run(['build', cbp, '--dry-run', '--timeout', 'abc', '--json']);
+check('C26 非法 timeout → exit 3 invalid-input', badTimeout.code === 3 && /invalid-input/.test(badTimeout.stderr),
+  { code: badTimeout.code, err: badTimeout.stderr.slice(0, 120) });
+
+const escapeOut = run(['export', cbp, '--kind', 'makefile', '--out', '..\\escape.mk', '--json']);
+check('C27 export out 越界 → exit 3', escapeOut.code === 3 && /invalid-input/.test(escapeOut.stderr),
+  { code: escapeOut.code, err: escapeOut.stderr.slice(0, 120) });
+check('C27b 未写出越界文件', !fs.existsSync(path.join(path.dirname(TMP), 'escape.mk')));
+
+// ---------- run 退出码传播：程序非零退出不得改写成 4 ----------
+{
+  const where = process.platform === 'win32'
+    ? spawnSync('where.exe', ['gcc'], { encoding: 'utf-8' })
+    : spawnSync('which', ['gcc'], { encoding: 'utf-8' });
+  const gccPath = (where.stdout || '').split(/\r?\n/).map((s) => s.trim()).filter(Boolean)[0];
+  if (gccPath) {
+    const dir = path.join(TMP, 'runner');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'main.c'), 'int main(void){return 3;}\n');
+    const rcbp = path.join(dir, 'r.cbp');
+    fs.writeFileSync(rcbp, [
+      '<?xml version="1.0" encoding="UTF-8" standalone="yes" ?>',
+      '<CodeBlocks_project_file><FileVersion major="1" minor="6" /><Project>',
+      '<Option title="r" /><Option compiler="gcc" /><Build>',
+      '<Target title="Debug"><Option output="bin/Debug/r" prefix_auto="1" extension_auto="1" />',
+      '<Option object_output="obj/Debug/" /><Option type="1" /><Option compiler="gcc" /></Target>',
+      '</Build><Unit filename="main.c" /></Project></CodeBlocks_project_file>',
+      '',
+    ].join('\n'));
+    const env = { CB_MASTER_PATH: path.dirname(gccPath) };
+    const rb = run(['build', rcbp, '--json'], env);
+    check('C28 前置：run 用例构建成功', rb.code === 0, { code: rb.code, err: rb.stderr.slice(0, 160) });
+    const rr = run(['run', rcbp, '--json'], env);
+    check('C29 run 保留程序退出码 3', rr.code === 3, { code: rr.code, out: rr.stdout.slice(0, 160) });
+    const rrPlain = run(['run', rcbp], env);
+    check('C29b plain 模式同样保留退出码', rrPlain.code === 3, rrPlain.code);
+  } else {
+    console.log('SKIP C28/C29（PATH 中无 gcc）');
+  }
+}
+
 // ---------- 运行时语言：CB_UI_LANGUAGE 决定 i18n 文案 ----------
 const brokenCbp = path.join(TMP, 'broken.cbp');
 fs.writeFileSync(brokenCbp, '<?xml version="1.0"?><foo></foo>');

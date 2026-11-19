@@ -295,6 +295,91 @@ async function expectCode(label, code, fn) {
     check('G12c 磁盘未写入', store.loadProject(cbp).title !== 'polluted', store.loadProject(cbp).title);
   }
 
+  // ---------- G13 运行期枚举校验（CLI/MCP 绕过 LM schema 时不再静默回退） ----------
+  {
+    const cbp = freshCopy('g13');
+    const ctx = makeContext();
+    await expectCode('G13 project_read 非法 section → invalid-input', 'invalid-input', () => registry.invokeTool(
+      ctx, 'codeblocks_project_read', { cbp, section: 'nope' },
+    ));
+    await expectCode('G13b project_edit 非法 format → invalid-input', 'invalid-input', () => registry.invokeTool(
+      ctx, 'codeblocks_project_edit', { cbp, format: 'nope', ops: [{ op: 'set', scope: 'project', field: 'title', value: 'x' }] },
+    ));
+    await expectCode('G13c project_file 非法 action → invalid-input', 'invalid-input', () => registry.invokeTool(
+      ctx, 'codeblocks_project_file', { cbp, action: 'frob' },
+    ));
+    await expectCode('G13d build 非法 mode → invalid-input', 'invalid-input', () => registry.invokeTool(
+      ctx, 'codeblocks_build', { cbp, mode: 'frob', dryRun: true },
+    ));
+    await expectCode('G13e workspace 非法 action → invalid-input', 'invalid-input', () => registry.invokeTool(
+      ctx, 'codeblocks_workspace', { action: 'frob' },
+    ));
+    await expectCode('G13f project_read target 为空串 → invalid-input', 'invalid-input', () => registry.invokeTool(
+      ctx, 'codeblocks_project_read', { cbp, target: '   ' },
+    ));
+  }
+
+  // ---------- G14 未知编译器 id → invalid-input（不再用默认工具链合成实例） ----------
+  {
+    const cbp = freshCopy('g14');
+    const fakeCompiler = {
+      resourcesDir: path.join(ROOT, 'resources', 'compilers'),
+      getCompiler: () => ({ name: 'gcc', masterPath: 'C:/fake', programs: { C: 'gcc' }, includeDirs: [], libDirs: [], extraPaths: [], versionString: '0' }),
+      resolveTargetCompiler: () => undefined,
+      isRegisteredCompiler: (id) => id === 'gcc',
+    };
+    const ctx = makeContext({ compiler: fakeCompiler });
+    const err = await expectCode('G14 compiler info 未知 id → invalid-input', 'invalid-input', () => registry.invokeTool(
+      ctx, 'codeblocks_compiler', { action: 'info', compilerId: 'nope' },
+    ));
+    check('G14b 错误详情提示可用 action=list', !!err && /action=list/.test(err.message), err && err.message);
+    const okInfo = await registry.invokeTool(ctx, 'codeblocks_compiler', { action: 'info', compilerId: 'gcc' });
+    check('G14c 已注册 id 正常返回', okInfo.compilerId === 'gcc' && okInfo.name === 'gcc', okInfo);
+  }
+
+  // ---------- G15 数值参数严格校验 ----------
+  {
+    const cbp = freshCopy('g15');
+    const ctx = makeContext();
+    await expectCode('G15 run timeoutMs 非数字 → invalid-input', 'invalid-input', () => registry.invokeTool(
+      ctx, 'codeblocks_run', { cbp, timeoutMs: 'abc' },
+    ));
+    await expectCode('G15b build timeoutMs 负数 → invalid-input', 'invalid-input', () => registry.invokeTool(
+      ctx, 'codeblocks_build', { cbp, timeoutMs: -1, dryRun: true },
+    ));
+    const debugBridge = {
+      start: async () => ({ ok: true }), stop: async () => ({ ok: true }), setBreakpoints: async () => ({ ok: true }),
+      state: async () => ({ active: false }), stack: async () => ({ frames: [] }), variables: async () => ({}),
+      evaluate: async () => ({}), continue: async () => ({ ok: true }), step: async () => ({ ok: true }),
+    };
+    const dbgCtx = makeContext({ debug: debugBridge });
+    await expectCode('G15c debug frameId 非数字 → invalid-input', 'invalid-input', () => registry.invokeTool(
+      dbgCtx, 'codeblocks_debug', { action: 'variables', frameId: '1' },
+    ));
+    await expectCode('G15d debug lines 非正整数 → invalid-input', 'invalid-input', () => registry.invokeTool(
+      dbgCtx, 'codeblocks_debug', { action: 'breakpoints', file: path.join(path.dirname(cbp), 'main.c'), lines: [0] },
+    ));
+  }
+
+  // ---------- G16 export out 必须留在工程目录内 ----------
+  {
+    const cbp = freshCopy('g16');
+    const ctx = makeContext({
+      compiler: {
+        ...makeContext().compiler,
+        getCompiler: () => ({ name: 'gcc', masterPath: '', programs: { C: 'gcc', CPP: 'g++' }, switches: {} }),
+      },
+    });
+    await expectCode('G16 export out 越界 → invalid-input', 'invalid-input', () => registry.invokeTool(
+      ctx, 'codeblocks_export', { cbp, kind: 'makefile', out: '..\\escape.mk' },
+    ));
+    check('G16b 未写出越界文件', !fs.existsSync(path.join(path.dirname(path.dirname(cbp)), 'escape.mk')));
+    await expectCode('G16c export out 绝对路径越界 → invalid-input', 'invalid-input', () => registry.invokeTool(
+      ctx, 'codeblocks_export', { cbp, kind: 'makefile', out: path.join(ROOT, '.cb-tools', 'escape-abs.mk') },
+    ));
+    check('G16d 未写出绝对越界文件', !fs.existsSync(path.join(ROOT, '.cb-tools', 'escape-abs.mk')));
+  }
+
   fs.rmSync(TMP, { recursive: true, force: true });
   mock.restore();
   console.log(`\ntoolRegistry 守卫回归: ${pass} pass, ${fail} fail`);

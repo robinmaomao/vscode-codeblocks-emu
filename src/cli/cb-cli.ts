@@ -74,6 +74,13 @@ const BOOLEAN_FLAGS = new Set([
   'json', 'dry-run', 'allow-scripts', 'force', 'no-compile', 'no-link', 'rebuild', 'clean', 'help', 'h', 'stop-on-entry',
 ]);
 
+/** 已知开关（含带值开关）：未知 `--xxx` 必须报 usage，而不是静默忽略 */
+const KNOWN_FLAGS = new Set([
+  ...BOOLEAN_FLAGS,
+  'cbp', 'target', 'targets', 'copy-from', 'type', 'section', 'format', 'kind', 'out', 'timeout', 'args', 'cwd',
+  'file', 'lines', 'expression', 'frame', 'workspace', 'project', 'ops', 'ops-file', 'compiler-id',
+]);
+
 function parseArgs(argv: string[]): ParsedArgs {
   const flags: Record<string, FlagValue> = {};
   const positional: string[] = [];
@@ -103,14 +110,18 @@ function parseArgs(argv: string[]): ParsedArgs {
 
 function flagString(parsed: ParsedArgs, key: string): string | undefined {
   const v = parsed.flags[key];
-  return typeof v === 'string' ? v : undefined;
+  if (v === undefined) return undefined;
+  if (typeof v !== 'string') throw new ControlError('usage', `--${key} requires a value`);
+  return v;
 }
 
 function flagNumber(parsed: ParsedArgs, key: string): number | undefined {
-  const s = flagString(parsed, key);
-  if (s === undefined) return undefined;
-  const n = Number(s);
-  return Number.isFinite(n) ? n : undefined;
+  const v = parsed.flags[key];
+  if (v === undefined) return undefined;
+  if (typeof v !== 'string' || !v.trim()) throw new ControlError('usage', `--${key} requires a number`);
+  const n = Number(v);
+  if (!Number.isFinite(n)) throw new ControlError('invalid-input', `--${key} must be a finite number`, { got: v });
+  return n;
 }
 
 function out(text: string): void {
@@ -168,9 +179,17 @@ function exitCodeFor(err: ControlError): number {
 async function main(): Promise<void> {
   const parsed = parseArgs(process.argv.slice(2));
   jsonMode = parsed.json;
-  if (parsed.flags.help || parsed.flags.h || !parsed.command) {
+  if (parsed.flags.help || parsed.flags.h) {
     out(USAGE);
-    process.exit(parsed.command ? 0 : 2);
+    process.exit(0);
+  }
+  if (!parsed.command) {
+    out(USAGE);
+    process.exit(2);
+  }
+  const unknownFlags = Object.keys(parsed.flags).filter((k) => !KNOWN_FLAGS.has(k));
+  if (unknownFlags.length) {
+    throw new ControlError('usage', `Unknown option: --${unknownFlags[0]}`, { allowed: [...KNOWN_FLAGS].sort() });
   }
 
   // 延迟到 shim 安装后再加载（runtime 内部顺序敏感）
@@ -294,12 +313,17 @@ async function main(): Promise<void> {
       });
       break;
 
-    case 'compiler':
+    case 'compiler': {
+      const action = positional[0] ?? 'list';
+      if (action !== 'list' && action !== 'info' && action !== 'set') {
+        throw new ControlError('invalid-input', `Unknown compiler action: ${action}`, { allowed: ['list', 'info', 'set'] });
+      }
       result = await invokeTool(ctx, 'codeblocks_compiler', {
-        action: positional[0] === 'info' ? 'info' : 'list',
+        action,
         compilerId: flagString(parsed, 'compiler-id'),
       });
       break;
+    }
 
     case 'workspace':
       result = await invokeTool(ctx, 'codeblocks_workspace', {
@@ -331,6 +355,13 @@ async function main(): Promise<void> {
   }
 
   print(result, json);
+  // run：程序正常启动并退出（含非零）时保留程序退出码；超时/信号/工具失败仍用错误码
+  if (cmd === 'run' && result && typeof result === 'object') {
+    const r = result as { exitCode?: unknown; timedOut?: unknown };
+    if (r.timedOut !== true && typeof r.exitCode === 'number' && Number.isInteger(r.exitCode) && r.exitCode >= 0) {
+      process.exit(r.exitCode);
+    }
+  }
   const failed = result && typeof result === 'object' && (result as { ok?: unknown }).ok === false;
   process.exit(failed ? 4 : 0);
 }

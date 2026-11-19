@@ -48,8 +48,8 @@
 
 | 工具 | 主要参数 | 说明 |
 |---|---|---|
-| `codeblocks_project_read` | `cbp?`、`section=summary\|targets\|files\|options\|schema\|all`、`target?` | 读取工程模型；`section=schema` 返回**可编辑字段目录**（不需要工程）；未知 `target` 返回 `invalid-input` 并列出可选目标 |
-| `codeblocks_project_edit` | `ops[]`、`dryRun?`、`format=canonical\|preserve`、`allowScripts?`、`force?` | 增量编辑；返回 `changed[]` 与 `warnings[]` |
+| `codeblocks_project_read` | `cbp?`、`section=summary\|targets\|files\|options\|schema\|all`、`target?` | 读取工程模型；`section=schema` 返回**可编辑字段目录**（不需要工程）；未知 `section` / `target` 返回 `invalid-input` 并列出可选值 |
+| `codeblocks_project_edit` | `ops[]`、`dryRun?`、`format=canonical\|preserve`、`allowScripts?`、`force?` | 增量编辑；返回 `changed[]` 与 `warnings[]`；`format` 只接受 `canonical` / `preserve`，其他值返回 `invalid-input` |
 | `codeblocks_project_file` | `action=add\|remove\|rename`、`file`、`targets?`、`to?` | 工程内文件增删改 |
 | `codeblocks_project_target` | `action=add\|remove\|rename`、`title`、`copyFrom?`、`targetType?` | 构建目标增删改 |
 | `codeblocks_build` | `cbp?`、`target?`、`mode=build\|rebuild\|clean`、`timeoutMs?`、`dryRun?` | 构建并返回结构化诊断；`target` 必须是工程里存在的目标（否则 `invalid-input` 并列出可选目标），目标不支持当前平台时返回 `unsupported`，`timeoutMs` 到点立即取消（含 makefile 的 `make`） |
@@ -57,7 +57,7 @@
 | `codeblocks_run` | `cbp?`、`target?`、`args?`、`cwd?`、`timeoutMs?` | 运行目标并捕获输出与退出码（非交互）；`cwd` 的相对路径按**工程目录**解析；`timeoutMs` 缺省 **120000**，显式 `0` = 不限时 |
 | `codeblocks_debug` | `action=start\|stop\|breakpoints\|state\|stack\|variables\|evaluate\|continue\|step\|run`、`timeoutMs?` | 调试控制；`run` = 启动 + 断点 + 返回栈/变量（`includeStack` / `includeVariables` 可关掉这两项以省 token）；`timeoutMs` = 等程序停下（命中断点/退出）的预算，默认 30000，作用于 `start` / `run` / `continue` / `step`；`breakpoints` **替换**该文件的断点（宿主可在 start 前预置，CLI/MCP 需先 `start`），`run` 的断点随 `start` 一次性应用 |
 | `codeblocks_compiler` | `action=list\|info`、`compilerId?` | 列出可用编译器、解析实际程序路径 |
-| `codeblocks_export` | `kind=makefile\|compile_commands\|commands`、`out?` | 导出构建信息；默认写 `<工程>/Makefile.cb` 与 `<工程>/.cb-tools/compile_commands/`，`out` 相对工程目录解析；`out` 命中工程声明的 Makefile（`<Option makefile>`）时拒绝覆盖 |
+| `codeblocks_export` | `kind=makefile\|compile_commands\|commands`、`out?` | 导出构建信息；默认写 `<工程>/Makefile.cb` 与 `<工程>/.cb-tools/compile_commands/`；未知 `kind` 返回 `invalid-input`；`out` 必须是**工程目录内的相对/绝对路径**（越界返回 `invalid-input`），命中工程声明的 Makefile（`<Option makefile>`）时拒绝覆盖 |
 | `codeblocks_workspace` | `action=info\|deps\|list\|open\|close\|setActive` | `.workspace` 与多工程管理；`deps` 的 `project` / `dependencies` 接受绝对路径，写回时统一为 workspace 相对路径（跨机器可移植），不在 workspace 中的工程报 `invalid-input` |
 
 所有工具都接受 `cbp`；省略时使用**当前活动工程**。
@@ -161,7 +161,7 @@ gdb 后端输出同一份形状，模型不必按传输切换字段：
 - CLI/MCP 的 `stopOnEntry` 是「在 `main` 上下断点」的近似，不等同 DAP 的 entry 停顿。
 - CLI/MCP 找不到 GDB 时返回 `compiler-missing`（提示里带 `codeblocks.debug.gdbPath`）；CLI 退出码 4。
 - `codeblocks_build` 的 `timeoutMs` 从**构建阶段**开始计时（打开/解析工程的时间不计入）。
-- `codeblocks_export` 的默认落盘位置：`kind=makefile` → `<工程目录>/Makefile.cb`（**不会**覆盖工程里真正的 Makefile）；`kind=compile_commands` → `<工程目录>/.cb-tools/compile_commands/`。`out` 为相对路径时按**工程目录**解析；建议把 `.cb-tools/` 加入忽略列表。
+- `codeblocks_export` 的默认落盘位置：`kind=makefile` → `<工程目录>/Makefile.cb`（**不会**覆盖工程里真正的 Makefile）；`kind=compile_commands` → `<工程目录>/.cb-tools/compile_commands/`。`out` 为相对路径时按**工程目录**解析，且必须落在工程目录内（越界返回 `invalid-input`）；建议把 `.cb-tools/` 加入忽略列表。
 
 ---
 
@@ -191,8 +191,9 @@ node bundle/cb-cli.js compiler info --compiler-id gcc --json
 
 - **stdout 只放结果**（`--json` 时是纯 JSON）；构建日志与警告全部走 **stderr**；
   `--json` 下失败也会在 stdout 给出 `{ "ok": false, "error": { "code", "message", "details"? } }`（stderr 同时保留文本）；
-- 退出码：`0` 成功、`1` 未归类、`2` 用法错误、`3` 参数/校验/权限（含 `no-build`、`read-only`、`disabled`）、
-  `4` 构建或运行失败（含 `unsupported`、`timeout`）、`5` 写盘 / 工程或工作区不存在；
+- 退出码：`0` 成功、`1` 未归类、`2` 用法错误（含未知开关、缺参数值；`--help` 为 `0`）、`3` 参数/校验/权限（含 `no-build`、`read-only`、`disabled`、`invalid-input`）、
+  `4` 构建或运行失败（含 `unsupported`、`timeout`、`compiler-missing`）、`5` 写盘 / 工程或工作区不存在；
+- `run` 成功启动后，CLI 的退出码 = **被运行程序的退出码**（例如程序返回 3 → CLI 退出码 3）；只有未启动/超时等失败才映射为上表的 `4`；
 - `run` 的 `--timeout` 缺省 **120000ms**（2 分钟），显式 `--timeout 0` = 不限时；`debug` 也接受 `--timeout`（等程序停下/命中断点的预算，默认 30000ms）与
   `--file` / `--lines` / `--expression` / `--frame` / `--kind` / `--stop-on-entry`；完整开关见 `cb-cli --help`；
 - 设置来源与扩展一致：用户 `settings.json` → 工作区 `.vscode/settings.json` → `CB_*` 环境变量

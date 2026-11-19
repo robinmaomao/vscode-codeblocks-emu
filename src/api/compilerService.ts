@@ -23,6 +23,8 @@ export interface CompilerProviderOptions {
 export interface CompilerProvider {
   getCompiler(compilerId?: string): Compiler;
   resolveTargetCompiler(compilerId: string): Compiler | undefined;
+  /** 是否为已注册编译器（XML 资源或用户自定义），不做默认回退 */
+  isRegisteredCompiler(compilerId: string): boolean;
   /** 随包编译器资源目录 */
   resourcesDir: string;
 }
@@ -72,5 +74,8 @@ export function createCompilerProvider(opts: CompilerProviderOptions): CompilerP
     return id ? getCompiler(id) : undefined;
   };
 
-  return { getCompiler, resolveTargetCompiler, resourcesDir: opts.resourcesDir };
+  /** 注册判定：未知 id 必须显式报错，而不是用默认编译器合成一个「看起来存在」的实例 */
+  const isRegisteredCompiler = (compilerId: string): boolean => !!findRegisteredCompilerId(compilerId, registryDeps());
+
+  return { getCompiler, resolveTargetCompiler, isRegisteredCompiler, resourcesDir: opts.resourcesDir };
 }

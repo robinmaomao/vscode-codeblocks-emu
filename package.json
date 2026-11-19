@@ -2919,7 +2919,7 @@
             },
             "out": {
               "type": "string",
-              "description": "Output file (makefile) or directory (compile_commands)"
+              "description": "Output file (makefile) or directory (compile_commands); must stay inside the project directory"
             }
           },
           "required": [

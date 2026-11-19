@@ -49,6 +49,12 @@ export const SEARCH_VIEW_STATE_KEY = 'codeblocks.search.viewState';
 export const SEARCH_KEEP_HISTORY_SETTING = 'search.keepHistory';
 export const SEARCH_SCOPE_SETTING = 'search.scope';
 
+/** 设置中的默认搜索范围（非法值回退 openProjects） */
+export function configuredSearchScope(): ProjectSearchScope {
+  const configured = vscode.workspace.getConfiguration('codeblocks').get<string>(SEARCH_SCOPE_SETTING, 'openProjects');
+  return configured === 'activeProject' ? 'activeProject' : 'openProjects';
+}
+
 const DEFAULT_TOTAL_TIMEOUT_MS = 20_000;
 const DEFAULT_NO_PROGRESS_TIMEOUT_MS = 5_000;
 const WORKER_IDLE_MS = 5 * 60_000;
@@ -412,8 +418,7 @@ export class ProjectSearchViewProvider implements vscode.WebviewViewProvider {
   ) {
     this.viewState = sanitizeViewState(context.workspaceState.get(SEARCH_VIEW_STATE_KEY));
     if (!context.workspaceState.get(SEARCH_VIEW_STATE_KEY)) {
-      const configuredScope = vscode.workspace.getConfiguration('codeblocks').get<string>('search.scope', 'openProjects');
-      this.viewState.scope = configuredScope === 'activeProject' ? 'activeProject' : 'openProjects';
+      this.viewState.scope = configuredSearchScope();
     }
     this.history = parseHistory(context.workspaceState.get(SEARCH_HISTORY_KEY));
     this.subtree = sanitizeSubtree(context.workspaceState.get('codeblocks.search.subtree'));
