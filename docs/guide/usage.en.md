@@ -1,7 +1,7 @@
 # Code::Blocks for VS Code — Usage Guide
 
 > Language: **English** ｜ [中文](./usage.md)
-> Version: 0.8.159 ｜ Native port of Code::Blocks core features to VS Code, driving GCC / GDB directly, **without** `tasks.json` / `launch.json`.
+> Version: 0.8.160 ｜ Native port of Code::Blocks core features to VS Code, driving GCC / GDB directly, **without** `tasks.json` / `launch.json`.
 
 ---
 
@@ -50,7 +50,7 @@ Code::Blocks for VS Code is a "mini IDE kernel": it parses `.cbp` / `.workspace`
 ### 2.1 Install from VSIX
 
 ```powershell
-code --install-extension codeblocks-vscode-0.8.159.vsix --force
+code --install-extension codeblocks-vscode-0.8.160.vsix --force
 ```
 
 ### 2.2 Build from source
@@ -58,7 +58,7 @@ code --install-extension codeblocks-vscode-0.8.159.vsix --force
 ```powershell
 npm install
 npm run package
-code --install-extension codeblocks-vscode-0.8.159.vsix --force
+code --install-extension codeblocks-vscode-0.8.160.vsix --force
 ```
 
 > `npm run package` = `vsce package` (before packaging, the `vscode:prepublish` hook runs `tsc` compilation (`dist/`, for local testing) + the **esbuild single-file bundle** (`bundle/extension.js`, the release entry));
@@ -1019,26 +1019,40 @@ The Code::Blocks features below were assessed as **not to be re-implemented in t
 > For details and the decision record, see the [unimplemented-feature backlog](../dev/backlog.md) §2 (not-ported list).
 > Reminder: the extensions above are community/vendor products; evaluate them before installing. This extension neither bundles nor ships them.
 
-## 17. What's new in 0.8.159
+## 17. Bug fixes in 0.8.160
+
+- **New-project overwrite guard**: when the target folder already has same-named files, confirm per file and keep them by default (no more whole-folder overwrite).
+- **HeaderGuard**: include guards are generated/updated for header files only; sources are left untouched.
+- **Open Include File**: resolves system headers (`<vector>` …) and project-suffix candidates so `#include` navigation no longer dead-ends.
+- **TODO scanner comment languages**: comment markers are detected per language (`#` / `REM` / `::` / `.S` preprocessor guard) instead of treating code as comments.
+- **Build-log and debug-gate localization**: `Target up to date`, `Make:` and the “build before debugging” prompt now go through the dictionary (no Chinese in an English UI, no English in a Chinese UI).
+- **i18n consistency**: WebView / run-target panel strings completed, plus an English-UI guard test to prevent regressions.
+- **Project name validation**: rejects `.` / `..` / trailing dot or space / Windows reserved names.
+- **Docs and test system**: keybinding/dictionary/menu counts corrected; 10 print-only scripts gained assertions and exit codes; new 112-command entry smoke test and TODO-scanner language cases.
+
+- **Not executed (by decision)**: F-02 (`.ld` line comments) and F-03 (TODO comment-language scope) keep the current behavior.
+- **Unchanged inventory**: 136 commands / 91 settings / 6 views / 34 keybindings.
+
+## 18. What's new in 0.8.159
 
 - **Project manager extraction**: `showProjectManager` / `buildManagerItems` moved to `src/features/projectManager.ts`, with open-project/active-project/remove/scan callbacks injected through `ProjectManagerDeps`; QuickPick behavior is unchanged.
 - **Regression guard**: `test-project-manager-feature.js` verifies the feature module, active-project marker, action items and that the old implementation has not returned.
 - **No user-visible feature/setting changes**: commands 136 / settings 91 / views 6 remain unchanged.
 
-## 18. What's new in 0.8.158
+## 19. What's new in 0.8.158
 
 - **Profiler command extraction**: `profileTarget` and report export moved from `extension.ts` to `src/features/profilerCommands.ts`, with project/compiler/working-directory/output-channel dependencies injected through `ProfilerCommandDeps`; behavior is unchanged.
 - **Architecture**: `extension.ts` continues to shrink under the Strangler pattern; `test-profiler-commands.js` guards against duplicate registration or regression back into the giant module.
 - **No feature/setting changes**: commands 136 / settings 91 / views 6 remain unchanged.
 
-## 19. What's new in 0.8.157
+## 20. What's new in 0.8.157
 
 - **AutoVersioning correctness**: `version.h` is no longer rewritten when its content is unchanged (avoiding mtime churn/full rebuilds); build sessions are deduplicated so `BUILDS_COUNT` advances once per build; `do_auto_increment` / `ask_to_increment` now work; Bump/Generate update `manifest.xml`; added SVN fields, a Changes Log entry and "Add version.h to Project".
 - **Profiler runtime**: records `gmon.out` timestamps before running and only analyzes fresh output; falls back to `gprof -A --separate-files` and collects `.annotated` files; CSV/HTML export uses atomic writes.
 - **Compiler metadata/resources**: reads real display names and master paths from `compiler_*.xml`; bundles the full Code::Blocks `options_*.xml` / `compiler_*.xml` set; fixes `extends` inheritance; adds conservative detection for OpenWatcom, Cygwin, MSYS2 MinGW64, TDM64, LCC, DMD, GDC and gfortran.
 - **Behavior notes**: `do_auto_increment` remains off by default; when enabled, a build may prompt for version increment. Scripts relying on date constants being refreshed on every build should run Generate Version Header explicitly.
 
-## 20. What's new in 0.8.156
+## 21. What's new in 0.8.156
 
 - **Profiler completion**: gprof **call graph** parsing/output; `gprof -A` annotated source in a separate output channel (setting `codeblocks.profiler.annotatedSource`, default on); **CSV / HTML report export** after profiling.
 - **AutoVersioning**: reads/writes `.cbp <Extensions><AutoVersioning>`; commands **AutoVersioning…** (configure/edit values/toggle autoincrement/set header path), **Bump Version**, **Generate Version Header**. When configured, `version.h` is generated before a build and `BUILDS_COUNT` is incremented and atomically written back after a successful build.
@@ -1046,7 +1060,7 @@ The Code::Blocks features below were assessed as **not to be re-implemented in t
 - **Recommended extensions**: new [recommended extensions](./recommended-extensions.en.md) page covering Doxygen, printing, Modern Fortran, environment variables, single-library nm and Valgrind/Callgrind; these are no longer re-implemented here.
 - **Behavior notes**: AutoVersioning rewrites `version.h` before builds — back it up or disable the project configuration if you maintain it by hand; `gprof -A` can be slow on large projects and can be turned off.
 
-## 21. What's new in 0.8.155
+## 22. What's new in 0.8.155
 
 - **Workspace lifecycle**: File → Save Project As… / Save Workspace / Save Workspace As… / Close Workspace / Open default workspace; closing the last project clears workspace state, saving writes project order, `active` and `<Depends>`.
 - **`.workspace` external change detection**: external edits to the project list/dependencies/active project prompt Reload / Ignore; only projects whose disk signature changed are reloaded.

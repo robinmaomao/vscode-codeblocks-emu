@@ -4,13 +4,13 @@
 > 判定口径：契约项 ID（命令/视图/设置键/键位/语言/语法/DAP 能力标记）在对应测试层源码中出现即计为命中；
 > 视觉层/性能层不引用命令 ID 字面量，按 `EXPLICIT_HITS`（面/引擎级覆盖）人工补充，明细见脚本内注释。
 > 列 `src` 表示实现存在（不算测试覆盖）；`契约/无头/E2E/视觉/性能/宿主` 为六个自动化测试层。
-> 数据来源：package.json v0.8.159 + tests/** + src/**
+> 数据来源：package.json v0.8.160 + tests/** + src/**
 
 ## 汇总
 
 | 契约项 | 总数 | 契约层 | 无头层 | E2E 层 | 视觉层 | 性能层 | 宿主层 | 未覆盖 | 覆盖率 |
 |--------|------|--------|--------|--------|--------|--------|--------|--------|--------|
-| 命令 | 136 | 3 | 121 | 4 | 12 | 5 | 39 | 0 | 100% |
+| 命令 | 136 | 3 | 127 | 4 | 12 | 5 | 39 | 0 | 100% |
 | 视图 | 6 | 2 | 6 | 1 | 1 | 0 | 5 | 0 | 100% |
 | 设置 | 91 | 91 | 78 | 15 | 0 | 1 | 6 | 0 | 100% |
 | 快捷键 | 34 | 3 | 32 | 2 | 4 | 2 | 12 | 0 | 100% |
@@ -51,7 +51,7 @@
 | 28 | `codeblocks.run` | Code::Blocks: 运行 | · | ✔ | · | ✔ | · | ✔ | ✅ |
 | 29 | `codeblocks.selectTarget` | Code::Blocks: 选择构建目标 | · | · | · | · | · | ✔ | ✅ |
 | 30 | `codeblocks.selectProjectTarget` | Code::Blocks: 为该工程选择构建目标 | · | ✔ | · | · | · | ✔ | ✅ |
-| 31 | `codeblocks.detectCompilers` | Code::Blocks: 检测编译器 | · | · | · | · | · | ✔ | ✅ |
+| 31 | `codeblocks.detectCompilers` | Code::Blocks: 检测编译器 | · | ✔ | · | · | · | ✔ | ✅ |
 | 32 | `codeblocks.workspaceScanReport` | Code::Blocks: 工作区扫描报告 | · | ✔ | · | · | · | · | ✅ |
 | 33 | `codeblocks.checkWorkspacePath` | Code::Blocks: 检查工作区路径 | · | ✔ | · | · | · | · | ✅ |
 | 34 | `codeblocks.excludeBuildOutputs` | Code::Blocks: 从文件监听/搜索中排除构建产物 | · | ✔ | · | · | · | · | ✅ |
@@ -59,7 +59,7 @@
 | 36 | `codeblocks.projectProperties` | 属性... | · | ✔ | · | ✔ | · | ✔ | ✅ |
 | 37 | `codeblocks.generateCompileCommands` | Code::Blocks: 生成 compile_commands.json (IntelliSense) | · | ✔ | · | · | ✔ | ✔ | ✅ |
 | 38 | `codeblocks.cleanClangdConfig` | Code::Blocks: 清理失效的 clangd 配置片段 | · | ✔ | · | · | · | · | ✅ |
-| 39 | `codeblocks.restartClangd` | Code::Blocks: 重启 clangd 语言服务器 | · | · | · | · | · | ✔ | ✅ |
+| 39 | `codeblocks.restartClangd` | Code::Blocks: 重启 clangd 语言服务器 | · | ✔ | · | · | · | ✔ | ✅ |
 | 40 | `codeblocks.clangd.applyQueryDriver` | Code::Blocks: 配置 clangd --query-driver | · | ✔ | · | · | · | · | ✅ |
 | 41 | `codeblocks.debug` | Code::Blocks: 调试 | · | ✔ | ✔ | · | · | ✔ | ✅ |
 | 42 | `codeblocks.codeStats` | Code::Blocks: 代码统计 | · | · | · | · | · | ✔ | ✅ |
@@ -69,13 +69,13 @@
 | 46 | `codeblocks.bumpVersion` | Code::Blocks: 递增版本 | · | ✔ | · | · | · | · | ✅ |
 | 47 | `codeblocks.generateVersionHeader` | Code::Blocks: 生成版本头文件 | · | ✔ | · | · | · | · | ✅ |
 | 48 | `codeblocks.findSymbolInLibraries` | Code::Blocks: 在库中查找符号... | · | ✔ | · | · | · | · | ✅ |
-| 49 | `codeblocks.todoList` | Code::Blocks: TODO 列表 | · | · | · | · | · | ✔ | ✅ |
+| 49 | `codeblocks.todoList` | Code::Blocks: TODO 列表 | · | ✔ | · | · | · | ✔ | ✅ |
 | 50 | `codeblocks.todo.add` | Code::Blocks: 添加 TODO 项... | · | ✔ | · | · | · | · | ✅ |
 | 51 | `codeblocks.bookmarks.toggle` | Code::Blocks: 切换书签 | · | ✔ | · | · | · | · | ✅ |
 | 52 | `codeblocks.bookmarks.prev` | Code::Blocks: 上一个书签 | · | ✔ | · | · | · | · | ✅ |
 | 53 | `codeblocks.bookmarks.next` | Code::Blocks: 下一个书签 | · | ✔ | · | · | · | · | ✅ |
 | 54 | `codeblocks.bookmarks.clearAll` | Code::Blocks: 清除全部书签 | · | ✔ | · | · | · | · | ✅ |
-| 55 | `codeblocks.openIncludeFile` | Code::Blocks: 打开包含文件 | ✔ | · | · | · | · | · | ✅ |
+| 55 | `codeblocks.openIncludeFile` | Code::Blocks: 打开包含文件 | ✔ | ✔ | · | · | · | · | ✅ |
 | 56 | `codeblocks.format` | Code::Blocks: 使用 AStyle 格式化 | · | ✔ | · | · | · | · | ✅ |
 | 57 | `codeblocks.insertHeaderGuard` | Code::Blocks: 插入头文件保护 | · | ✔ | · | · | · | · | ✅ |
 | 58 | `codeblocks.tidyComments` | Code::Blocks: 整理注释 | · | ✔ | · | · | · | · | ✅ |
@@ -137,9 +137,9 @@
 | 114 | `codeblocks.backtickCache` | Code::Blocks: 反引号缓存... | · | ✔ | · | · | · | · | ✅ |
 | 115 | `codeblocks.clearBacktickCache` | Code::Blocks: 清除反引号缓存 | · | ✔ | · | · | · | · | ✅ |
 | 116 | `codeblocks.keybindings.check` | Code::Blocks: 检查快捷键冲突 | · | · | · | · | · | ✔ | ✅ |
-| 117 | `codeblocks.keybindings.apply` | Code::Blocks: 应用快捷键 | · | · | · | · | · | ✔ | ✅ |
+| 117 | `codeblocks.keybindings.apply` | Code::Blocks: 应用快捷键 | · | ✔ | · | · | · | ✔ | ✅ |
 | 118 | `codeblocks.keybindings.configure` | Code::Blocks: 配置快捷键... | · | ✔ | · | · | · | · | ✅ |
-| 119 | `codeblocks.keybindings.reset` | Code::Blocks: 重置快捷键 | · | · | · | · | · | ✔ | ✅ |
+| 119 | `codeblocks.keybindings.reset` | Code::Blocks: 重置快捷键 | · | ✔ | · | · | · | ✔ | ✅ |
 | 120 | `codeblocks.keybindings.panel` | Code::Blocks: 快捷键设置 | · | ✔ | · | ✔ | · | ✔ | ✅ |
 | 121 | `codeblocks.keybindings.export` | Code::Blocks: 导出快捷键方案 | · | ✔ | · | · | · | · | ✅ |
 | 122 | `codeblocks.keybindings.import` | Code::Blocks: 导入快捷键方案 | · | ✔ | · | · | · | · | ✅ |

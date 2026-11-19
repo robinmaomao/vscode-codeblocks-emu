@@ -161,7 +161,7 @@ code.cmd --extensionDevelopmentPath="." --disable-extensions --new-window
 
 ```powershell
 npm.cmd run package                                   # = vsce package（自动 compile + bundle + bundle:search）
-code.cmd --install-extension codeblocks-vscode-0.8.159.vsix --force
+code.cmd --install-extension codeblocks-vscode-0.8.160.vsix --force
 code.cmd --list-extensions --show-versions | Select-String codeblocks
 ```
 
