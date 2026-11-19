@@ -60,6 +60,7 @@ docs/
 | [testing/strategy.md](./testing/strategy.md) | 分层测试体系（L-1…L5 + CI）：覆盖范围、运行方式、环境约束、工具链安装 |
 | [testing/coverage-matrix.md](./testing/coverage-matrix.md) | 命令/视图/设置/键位/语言语法/DAP 能力逐项覆盖台账（`npm run coverage:matrix` 生成） |
 | [testing/test-report-0.9.2.md](./testing/test-report-0.9.2.md) | 当前版本的测试执行报告（滚动更新）：分层结果、覆盖台账、本版变更与缺陷处置 |
+| [testing/e3-manual-report-0.9.2.md](./testing/e3-manual-report-0.9.2.md) | **0.9.2 E3 GUI 验收记录**：便携 VS Code + CDP 驱动真实工作台，覆盖工程树/菜单/构建/WebView/GDB/语言/搜索，附观察项与截图目录 |
 | [testing/functional-audit-0.9.2.md](./testing/functional-audit-0.9.2.md) | **0.9.2 全量逐项审计与修复**：命令/设置/视图/键位/语言/DAP/WebView + Agent 三端逐项证据、覆盖真实性、D-01…D-13 缺陷与修复（E0–E4 分级；§12 修复轮记录） |
 | [testing/functional-audit-0.8.159.md](./testing/functional-audit-0.8.159.md) | **独立功能审计报告**：136 命令 / 91 设置（0.9.0 起 93）/ 34 键位 / 30 DAP 的逐项证据、覆盖真实性、S1–S3 缺陷与修复建议（附录 [台账](./testing/functional-audit-0.8.159-ledger.md)；§13 记录 0.9.0 合并轮） |
 | [testing/test-report-0.8.139-full.md](./testing/test-report-0.8.139-full.md) | 0.8.139 完整独立复核：七层结果、失败/SKIP 取证、ccache 与短路径专项、性能明细 |
