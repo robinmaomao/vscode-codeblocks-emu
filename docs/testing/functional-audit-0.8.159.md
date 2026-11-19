@@ -696,3 +696,25 @@
 - `tests/test-command-entry-smoke.js`（F-12）
 - `tests/test-i18n-webview.js` 扩展运行目标面板（F-12）
 - 10 个原 print-only 脚本全部补断言与退出码（F-12）
+
+## 13. 合并轮验证记录（0.9.0）
+
+`feat/agent-control`（Agent 控制面）于 0.9.0 以 `--no-ff` 合入 main。合并的难点不是文本冲突，而是
+**Agent 分支把 `buildOneProject` / `buildCompilerInstance` 抽成无 vscode 依赖模块后，main 在同一批函数里继续修的缺陷会静默回退**。
+合并时逐项移植并复核：
+
+| 审计修复 | 合并后落点 | 验证 |
+|---|---|---|
+| 仅 C / 仅 C++ 参数覆盖（`readLanguageFlags`） | `compilerFactory.languageFlags`（宿主注入） | 契约 + 设置覆盖用例 |
+| 编译器缓存键含 `languageFlagsSignature` | `extension.getCompiler` 缓存键 | 单元（编译器缓存） |
+| 自动版本号（构建前生成 / 成功后递增） | `buildProject` 的 `prepareBuild` / `finishBuild` 钩子 | 单元（AutoVersioning 26+19） |
+| makefile：`silentBuild` / `askRebuildNeeded` / Stop / `reportToUi=false` | `buildProject` makefile 分支 + 统一 `cancel` 源 | E2E 构建矩阵 + 真实 makefile 工程 |
+| 不可导航诊断归一化（链接器伪文件 / `.o` / 伪路径） | `buildProject` 摘要过滤 + `extension.onDiagnostic` 回退项目根 | 单元（诊断路径）+ E2E 链接期诊断 9 |
+| `Target … up to date` / `Make:` 本地化 | `buildProject` 使用 `logT` 与既有词条 | 契约（英文 UI 守卫） |
+| clangd 重启合并 vs 重启判定 | `tools/clangdRestart.ts` 同时导出 coalescer 与 `decideClangdRestart` | 单元 `test-clangd-restart` + `-decision` + `-startup-restore` |
+
+**回归结果（0.9.0）**：契约 3/3（44 + 6 + 745）、无头 **227**（FAIL=0 / SKIP=1）、E2E **7/7**（含 CLI 构建 7）、
+视觉 26/26、性能 13/13、打包 16 断言、宿主 **33/33（VS Code 1.102.0）**。详见 [0.9.0 测试报告](./test-report-0.9.0.md)。
+
+**清单变化**：设置 91 → **93**（新增第 10 分区 `codeblocks.agent`），`engines.vscode` 1.85 → **1.102**，
+命令 136 / 键位 34 / 视图 6 不变。

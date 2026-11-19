@@ -46,6 +46,9 @@ jobs:
       - name: 打包搜索 worker（esbuild bundle:search）
         run: npm run bundle:search
 
+      - name: 打包 Agent CLI/MCP（esbuild bundle:agent）
+        run: npm run bundle:agent
+
       - name: 工具链自检（信息性）
         shell: pwsh
         continue-on-error: true
@@ -182,6 +185,7 @@ jobs:
           npm run compile
           npm run bundle
           npm run bundle:search
+          npm run bundle:agent
 
       - name: 缓存 VS Code 靶点（@vscode/test-electron → .vscode-test）
         uses: actions/cache@v4
@@ -199,7 +203,7 @@ jobs:
         continue-on-error: true
         run: npm run test:perf
 
-      - name: VS Code 宿主集成（自动下载 engines 最低版本 1.85.0）
+      - name: VS Code 宿主集成（自动下载 engines 最低版本 1.102.0）
         id: host
         continue-on-error: true
         run: npm run test:host

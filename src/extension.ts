@@ -16,7 +16,7 @@ import { serializeProject } from './model/projectWriter';
 import { createProjectFromTemplate, PROJECT_TEMPLATES } from './project/newProject';
 import { getUserTemplate, instantiateUserTemplate, isValidProjectName, listUserTemplates, saveAsUserTemplate } from './project/userTemplates';
 import { Compiler } from './compiler/compiler';
-import { queryCompilerVersionString } from './compiler/compilerVersion';
+import { buildCompilerInstance as buildCompilerInstanceCore } from './compiler/compilerFactory';
 import { CompilerRegistryDeps, findRegisteredCompilerId, resolveEffectiveCompilerId } from './compiler/compilerRegistry';
 import { BoundedMap, buildCompilerCacheKey } from './compiler/compilerCache';
 import { resolveProgramsForCompiler, setProgramsForCompiler } from './compiler/compilerPrograms';
@@ -37,6 +37,15 @@ import { applyProjectCodeCompletionSearchPaths, parseProjectCodeCompletionSearch
 import { ProjectTreeProvider } from './ui/projectTreeProvider';
 import { registerStatusBarMenu, MenuDynamicData } from './ui/statusBarMenu';
 import { BuildLogTreeProvider, BuildLogProject, BuildLogDiagnostic } from './ui/buildLogTreeProvider';
+import { buildProjectTarget } from './build/buildProject';
+import type { BuildDiagnosticsBudget, BuildLogSummary } from './build/buildSummary';
+import type { ToolContext as AgentToolContext } from './api/toolRegistry';
+import type { CompilerProvider } from './api/compilerService';
+import type { BuildOutcome, BuildRequest } from './api/buildService';
+import { ControlError } from './api/types';
+import { registerLanguageModelTools } from './lm/tools';
+import { registerCodeblocksMcpProvider } from './mcp/provider';
+import { isAgentEnabled, isAgentReadOnly } from './api/agentPolicy';
 import { normalizeBuildLogAutoFocusMode, maybeAutoFocusBuildLog } from './ui/buildLogFocus';
 import { openFileAtLocation } from './ui/openLocation';
 import { buildDiagnosticPathIndex, createDiagnosticResolver, isNavigableDiagnosticFile } from './build/diagnosticPath';
@@ -76,6 +85,7 @@ import { isCompilerUsable, renderInvalidCompilerMessage, renderTriedCompilerPath
 import { collectClangdEntries, writeClangdDatabase, CompileCommandEntry } from './build/compileCommands';
 import { DiagnosticPublisher } from './build/diagnosticPublisher';
 import { collectOutputDirs, excludeGlobsFor, mergeExcludePatterns } from './build/watcherExclude';
+import { decideClangdRestart } from './tools/clangdRestart';
 import { detectClangd, queryCompilerSystemIncludes, queryCompilerTarget, resolveCompilerProgram, updateClangdUserConfig, clangdUserConfigPath, clearClangdDetectionCache, extraConfigWarnings, findStaleClangdFragments, listManagedFragments, cleanStaleClangdFragments, readClangdUserConfigText, preferClangdSource } from './tools/clangd';
 import { ClangdInactiveRegionsWatcher } from './tools/clangdInactiveRegions';
 import {
@@ -205,10 +215,8 @@ let lastBuildMeta: LastBuildMeta | undefined;
 let extContext: vscode.ExtensionContext | undefined;
 /** 当前一次构建累积的项目摘要（供 Build Log 视图） */
 const currentBuildProjects: BuildLogProject[] = [];
-/** 本次构建已收集的错误总数（用于 maxReportedErrors 截断判断） */
-let currentBuildErrorCount = 0;
-/** 本次构建是否因达到 maxReportedErrors 上限而被截断 */
-let maxErrorsReached = false;
+/** 本次构建的诊断预算（跨项目累计；maxReportedErrors 截断判断） */
+const buildDiagnosticsBudget: BuildDiagnosticsBudget = { errorCount: 0, truncated: false };
 /** 当前构建的取消源（「停止构建」命令与通知取消按钮共用） */
 let currentBuildCancel: BuildCancelSource | undefined;
 /** 构建进行中互斥标志（防止双开构建进程打架） */
@@ -389,6 +397,349 @@ async function migrateSettingsOnce(context: vscode.ExtensionContext): Promise<vo
   if (queryDriverRemoved) {
     outputChannel.info(logT('[Code::Blocks] Removed the obsolete codeblocks.clangd.queryDriver setting (use codeblocks.clangd.builtinHeaders = queryDriver instead).'));
   }
+}
+
+// ———— Agent 控制层（Language Model Tools / MCP 的扩展侧接线） ————
+
+/** 扩展侧工具上下文（延迟到激活完成、provider 就绪后创建） */
+let agentToolContext: AgentToolContext | undefined;
+
+/** 已注册的 LM Tools 句柄（设置切换时整体注销后重建，无需重载窗口） */
+let agentToolsDisposables: vscode.Disposable[] = [];
+/** 当前注册时生效的只读标记（与设置不一致时需重建上下文） */
+let agentAppliedReadOnly: boolean | undefined;
+/** MCP provider 的「定义已变化」事件（设置切换后通知宿主重新拉取） */
+const agentMcpChange = new vscode.EventEmitter<void>();
+
+/**
+ * Agent 控制面是否允许暴露：设置总闸开启 **且** 工作区受信任。
+ * 不受信任的工作区不自动获得写盘 / 执行 / 调试能力（对齐 VS Code 工作区信任模型）。
+ */
+function agentSurfaceAllowed(): boolean {
+  if (!vscode.workspace.isTrusted) return false;
+  return isAgentEnabled(vscode.workspace.getConfiguration('codeblocks'));
+}
+
+function disposeAgentTools(): void {
+  for (const d of agentToolsDisposables) {
+    try {
+      d.dispose();
+    } catch {
+      // 单个注销失败不阻断其余
+    }
+  }
+  agentToolsDisposables = [];
+  agentToolContext = undefined;
+  agentAppliedReadOnly = undefined;
+}
+
+/** 按当前设置注册 / 注销 Agent 控制面（可重入；切换即时生效） */
+function applyAgentSurface(reason: string): void {
+  if (!agentSurfaceAllowed()) {
+    const had = agentToolsDisposables.length > 0;
+    disposeAgentTools();
+    if (had) outputChannel.info(logT('[Code::Blocks] Agent control disabled ({0})', reason));
+    agentMcpChange.fire();
+    return;
+  }
+  const readOnly = isAgentReadOnly(vscode.workspace.getConfiguration('codeblocks'));
+  // 只读切换也要重建上下文（readOnly 是注册时快照，不能只改设置）
+  if (!agentToolsDisposables.length || agentAppliedReadOnly !== readOnly) {
+    disposeAgentTools();
+    const ctx = createAgentToolContext();
+    if (readOnly) ctx.readOnly = true;
+    agentToolContext = ctx;
+    // 审计日志：每次工具调用一行（工具名 / 结果 / 耗时）
+    agentToolsDisposables = registerLanguageModelTools(ctx, { log: (line) => outputChannel.info(line) });
+    agentAppliedReadOnly = readOnly;
+    outputChannel.info(logT('[Code::Blocks] Agent control enabled: {0} tools (read-only={1})', agentToolsDisposables.length, readOnly));
+  }
+  agentMcpChange.fire();
+}
+
+/** 初始化 Agent 控制面：注册 MCP provider + 监听设置/信任变化（LM Tools 由 applyAgentSurface 负责） */
+function initAgentSurface(context: vscode.ExtensionContext): void {
+  const mcpProvider = registerCodeblocksMcpProvider(context, {
+    isEnabled: agentSurfaceAllowed,
+    onDidChange: agentMcpChange.event,
+  });
+  if (mcpProvider) context.subscriptions.push(mcpProvider);
+  context.subscriptions.push(agentMcpChange);
+  // 扩展停用时注销已注册的工具（正常情况下宿主也会回收，这里保证 dispose 语义完整）
+  context.subscriptions.push(new vscode.Disposable(() => disposeAgentTools()));
+  context.subscriptions.push(vscode.workspace.onDidChangeConfiguration((e) => {
+    if (!e.affectsConfiguration('codeblocks.agent')) return;
+    applyAgentSurface('settings changed');
+  }));
+  if (typeof vscode.workspace.onDidGrantWorkspaceTrust === 'function') {
+    context.subscriptions.push(vscode.workspace.onDidGrantWorkspaceTrust(() => applyAgentSurface('workspace trusted')));
+  }
+  applyAgentSurface('activation');
+}
+
+/** 合成构建摘要（makefile 模式 / 清理路径没有 BuildEngine 统计时使用） */
+function summarizeAgentBuild(
+  project: Project,
+  targetTitle: string,
+  ok: boolean,
+  startMs: number,
+  diagnostics: BuildLogDiagnostic[],
+): BuildLogSummary {
+  const entry: BuildLogProject = {
+    projectName: path.basename(path.dirname(project.filename)),
+    targetName: targetTitle,
+    compilerPath: getCompiler(project.compilerId).programs.C || getCompiler(project.compilerId).name,
+    success: ok,
+    compiledCount: 0,
+    skippedCount: 0,
+    failedCount: ok ? 0 : 1,
+    linkSuccess: ok,
+    linkSkipped: true,
+    diagnostics,
+    commands: [],
+    files: project.files.map((f) => f.absolutePath),
+    durationMs: Date.now() - startMs,
+    startTime: startMs,
+    projectTitle: project.title,
+  };
+  const errorCount = diagnostics.filter((d) => d.severity === 'error').length;
+  const warningCount = diagnostics.filter((d) => d.severity === 'warning').length;
+  return { success: ok, durationMs: entry.durationMs, startTime: startMs, projects: [entry], errorCount, warningCount };
+}
+
+/**
+ * agent 构建：复用 UI 构建路径（Build Log / Problems / 状态栏可见），
+ * 但跳过所有模态确认（Rebuild / 停止调试），并支持超时取消。
+ */
+async function agentBuild(req: BuildRequest): Promise<BuildOutcome> {
+  const cbp = path.resolve(req.cbp);
+  let project = openProjects.find((p) => normPath(p.filename) === normPath(cbp));
+  if (!project) {
+    await openProject(cbp);
+    project = openProjects.find((p) => normPath(p.filename) === normPath(cbp));
+  }
+  if (!project) throw new ControlError('project-not-found', `Project not found: ${cbp}`);
+  const targetTitle = req.target
+    ?? getSelectedTarget(project)
+    ?? project.buildTargets.find((t) => supportsCurrentPlatform(t.platforms))?.title;
+  if (!targetTitle) throw new ControlError('unsupported', 'The project has no build targets');
+  const startMs = Date.now();
+
+  if (req.mode === 'clean') {
+    if (buildInProgress) throw new ControlError('build-busy', 'A build is already running');
+    buildInProgress = true;
+    try {
+      await stopDebuggerIfRunning(false);
+      await saveAllBeforeBuild();
+      await autoExcludeBuildOutputs({ notify: false });
+      const cancelSource = new BuildCancelSource();
+      currentBuildCancel = cancelSource;
+      await cleanTargets(project, targetTitle);
+      return { ok: true, target: targetTitle, summary: summarizeAgentBuild(project, targetTitle, true, startMs, []), timedOut: false };
+    } finally {
+      buildInProgress = false;
+      currentBuildCancel = undefined;
+      flushPendingClangdRestart();
+    }
+  }
+
+  let timedOut = false;
+  const timer = req.timeoutMs && req.timeoutMs > 0
+    ? setTimeout(() => {
+        timedOut = true;
+        currentBuildCancel?.cancel();
+      }, req.timeoutMs)
+    : undefined;
+  try {
+    const ok = await buildSingleProject(project.filename, req.mode === 'rebuild', { interactive: false });
+    const summary = buildLogTreeProvider?.getSummary()
+      ?? summarizeAgentBuild(project, targetTitle, ok, startMs, []);
+    return { ok: ok && !timedOut, target: targetTitle, summary, timedOut };
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+/** 扩展侧调试桥：通过 vscode.debug + DAP customRequest 控制会话 */
+function createAgentDebugBridge(): NonNullable<AgentToolContext['debug']> {
+  const sessionOrFail = (): vscode.DebugSession => {
+    const s = vscode.debug.activeDebugSession;
+    if (!s) throw new ControlError('not-running', 'No active debug session');
+    return s;
+  };
+  const firstThreadId = async (s: vscode.DebugSession): Promise<number> => {
+    const res = await s.customRequest('threads') as { threads?: Array<{ id: number }> };
+    const id = res?.threads?.[0]?.id;
+    if (id === undefined) throw new ControlError('not-running', 'The debug session has no threads');
+    return id;
+  };
+  const topFrame = async (s: vscode.DebugSession): Promise<{ threadId: number; frameId?: number }> => {
+    const threadId = await firstThreadId(s);
+    const res = await s.customRequest('stackTrace', { threadId, startFrame: 0, levels: 1 }) as { stackFrames?: Array<{ id: number }> };
+    return { threadId, frameId: res?.stackFrames?.[0]?.id };
+  };
+
+  return {
+    async start({ cbp, target, args, stopOnEntry }) {
+      const filename = cbp ? path.resolve(cbp) : activeProject?.filename;
+      if (!filename) throw new ControlError('invalid-input', 'No project selected for debugging');
+      if (!openProjects.some((p) => normPath(p.filename) === normPath(filename))) await openProject(filename);
+      const project = openProjects.find((p) => normPath(p.filename) === normPath(filename));
+      if (project) setActiveProject(project, { persist: true });
+      const derived = await deriveDebugLaunchConfig(target);
+      if ('error' in derived) throw new ControlError('invalid-input', derived.error);
+      const config = { ...derived.config } as vscode.DebugConfiguration;
+      if (args !== undefined) config.args = splitCommandLine(args);
+      if (stopOnEntry === true) config.stopOnEntry = true;
+      const ok = await vscode.debug.startDebugging(undefined, config);
+      if (!ok) throw new ControlError('unsupported', 'Failed to start the debug session');
+      // 等待会话真正就绪（startDebugging 返回后 activeDebugSession 可能尚未赋值）
+      for (let i = 0; i < 50 && !vscode.debug.activeDebugSession; i++) {
+        await new Promise((r) => setTimeout(r, 100));
+      }
+      const s = vscode.debug.activeDebugSession;
+      return { ok: true, session: s ? { id: s.id, name: s.name, type: s.type } : null };
+    },
+    async stop() {
+      const s = sessionOrFail();
+      await vscode.debug.stopDebugging(s);
+      return { ok: true };
+    },
+    async setBreakpoints({ file, lines }) {
+      if (!file) throw new ControlError('invalid-input', 'An absolute source file path is required');
+      const uri = vscode.Uri.file(file);
+      const existing = vscode.debug.breakpoints.filter((bp) =>
+        bp instanceof vscode.SourceBreakpoint && normPath(bp.location.uri.fsPath) === normPath(uri.fsPath));
+      if (existing.length) vscode.debug.removeBreakpoints(existing);
+      const added = lines
+        .filter((l) => Number.isInteger(l) && l > 0)
+        .map((l) => new vscode.SourceBreakpoint(new vscode.Location(uri, new vscode.Position(l - 1, 0))));
+      if (added.length) vscode.debug.addBreakpoints(added);
+      return { ok: true, file: uri.fsPath, lines };
+    },
+    async state() {
+      const s = vscode.debug.activeDebugSession;
+      return s ? { active: true, id: s.id, name: s.name, type: s.type } : { active: false };
+    },
+    async stack() {
+      const s = sessionOrFail();
+      const threadId = await firstThreadId(s);
+      const res = await s.customRequest('stackTrace', { threadId, startFrame: 0, levels: 30 }) as {
+        stackFrames?: Array<{ id: number; name: string; line: number; column: number; source?: { path?: string; name?: string } }>;
+      };
+      return {
+        threadId,
+        frames: (res?.stackFrames ?? []).map((f) => ({
+          id: f.id, name: f.name, file: f.source?.path ?? f.source?.name ?? '', line: f.line, column: f.column,
+        })),
+      };
+    },
+    async variables(req) {
+      const s = sessionOrFail();
+      const resolvedFrame = req?.frameId ?? (await topFrame(s)).frameId;
+      if (resolvedFrame === undefined) return { scopes: [] };
+      const scopesRes = await s.customRequest('scopes', { frameId: resolvedFrame }) as { scopes?: Array<{ name: string; variablesReference: number; expensive: boolean }> };
+      const scopes = [];
+      for (const scope of scopesRes?.scopes ?? []) {
+        if (!scope.variablesReference || scope.expensive) {
+          scopes.push({ name: scope.name, variables: [] });
+          continue;
+        }
+        const varsRes = await s.customRequest('variables', { variablesReference: scope.variablesReference }) as {
+          variables?: Array<{ name: string; value: string; type?: string; variablesReference?: number }>;
+        };
+        scopes.push({
+          name: scope.name,
+          variables: (varsRes?.variables ?? []).map((v) => ({ name: v.name, value: v.value, type: v.type, children: v.variablesReference ?? 0 })),
+        });
+      }
+      return { frameId: resolvedFrame, scopes };
+    },
+    async evaluate({ expression, frameId }) {
+      const s = sessionOrFail();
+      const resolvedFrame = frameId ?? (await topFrame(s)).frameId;
+      const res = await s.customRequest('evaluate', { expression, frameId: resolvedFrame, context: 'watch' }) as { result?: string; type?: string };
+      return { expression, result: res?.result ?? '', type: res?.type };
+    },
+    async continue() {
+      const s = sessionOrFail();
+      const threadId = await firstThreadId(s);
+      await s.customRequest('continue', { threadId });
+      return { ok: true, threadId };
+    },
+    async step({ kind }) {
+      const s = sessionOrFail();
+      const threadId = await firstThreadId(s);
+      const command = kind === 'stepIn' ? 'stepIn' : kind === 'stepOut' ? 'stepOut' : 'next';
+      await s.customRequest(command, { threadId });
+      return { ok: true, threadId, command };
+    },
+  };
+}
+
+/** 构造扩展侧的 ToolContext（与 CLI/MCP 共用同一份 handler） */
+function createAgentToolContext(): AgentToolContext {
+  const settings = {
+    get<T>(key: string, defaultValue: T): T {
+      return vscode.workspace.getConfiguration('codeblocks').get<T>(key, defaultValue);
+    },
+  };
+  const compiler: CompilerProvider = {
+    resourcesDir: compilerResourcesDir,
+    getCompiler: (id?: string) => getCompiler(id),
+    resolveTargetCompiler: (id: string) => resolveTargetCompiler(id),
+  };
+  return {
+    settings,
+    compiler,
+    output: outputChannel,
+    loadProject: async (cbp: string) => {
+      const abs = path.resolve(cbp);
+      const open = openProjects.find((p) => normPath(p.filename) === normPath(abs));
+      return open ?? new ProjectParser().parse(abs);
+    },
+    saveProject: async (project, saveOpts) => {
+      if (!saveOpts.force && projectChangeTracker.hasChanged(project.filename)) {
+        throw new ControlError('external-modified', `The project file was modified outside the editor: ${project.filename}`, {
+          hint: 'Pass force: true to overwrite, or reload the project in VS Code first.',
+        });
+      }
+      const open = openProjects.find((p) => normPath(p.filename) === normPath(project.filename));
+      if (open) {
+        // 写回内存模型 → 序列化 → 重新解析并刷新树/状态栏（不触发「外部修改」弹窗）
+        Object.assign(open, project);
+        await persistProjectAndReload(open);
+      } else {
+        writeCbpAndRemember(project.filename, serializeProject(project));
+      }
+    },
+    reloadProject: async (cbp: string) => {
+      await reloadProjectFromDisk(cbp, { notify: false });
+    },
+    isExternallyModified: (file: string) => projectChangeTracker.hasChanged(file),
+    listOpenProjects: () => openProjects.map((p) => ({
+      filename: p.filename,
+      title: p.title,
+      active: !!activeProject && normPath(activeProject.filename) === normPath(p.filename),
+    })),
+    setActiveProject: async (cbp: string) => {
+      const p = openProjects.find((x) => normPath(x.filename) === normPath(cbp));
+      if (p) setActiveProject(p, { persist: true });
+    },
+    openProject: async (cbp: string) => {
+      if (!openProjects.some((x) => normPath(x.filename) === normPath(cbp))) await openProject(cbp);
+    },
+    closeProject: async (cbp: string) => {
+      removeProject(cbp);
+    },
+    build: agentBuild,
+    lastBuild: () => buildLogTreeProvider?.getSummary(),
+    isBuildInProgress: () => buildInProgress,
+    get cancelBuild() {
+      return currentBuildCancel;
+    },
+    debug: createAgentDebugBridge(),
+  };
 }
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
@@ -2357,6 +2708,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   refreshStatusBars();
   outputChannel.debug(logT('[Code::Blocks] Activation completed in {0}ms', Date.now() - activateStartedAt));
 
+  // Agent 控制层：LM Tools + MCP provider，受 codeblocks.agent.enabled / readOnly 与工作区信任门控。
+  // 旧宿主 / 未安装 Copilot 时注册函数内部静默跳过，不影响扩展激活。
+  initAgentSurface(context);
+
   return;
 }
 
@@ -2460,9 +2815,11 @@ async function pickAndOpenCbp(files: string[]): Promise<void> {
     },
   );
   if (picked && picked.length) {
-    for (const p of picked) {
-      await openProject(p.description!);
-    }
+    await withClangdBatch(async () => {
+      for (const p of picked) {
+        await openProject(p.description!);
+      }
+    });
   }
   // 重新计算待打开列表（未选中的仍保留在状态栏入口）
   const stillOpen = new Set(openProjects.map((p) => p.filename));
@@ -3668,6 +4025,43 @@ async function saveProjectAsTemplate(): Promise<void> {
   }
 }
 
+/**
+ * 批量打开工程（启动恢复 / 多选打开）期间抑制「每打开一个工程就全量生成一次 clangd 配置」，
+ * 批量结束后统一生成一次：避免 N 个工程触发 N 次数据库扫描 / config 写入 / clangd 重启。
+ */
+let clangdBatchDepth = 0;
+let clangdBatchDeferred = false;
+
+/** 启动恢复（窗口重载后恢复上次会话工程）进行中：此刻 clangd 客户端刚随窗口启动、仍在 initialize */
+let sessionRestoreInProgress = false;
+/** 当前排队/进行中的 clangd 生成是否由启动恢复触发（决定「仅配置变化」时是否跳过重启） */
+let clangdGenerationFromRestore = false;
+
+/** 打开工程后的 clangd 生成请求（批量打开时延后到批量结束） */
+function requestClangdGenerationAfterOpen(): void {
+  if (clangdBatchDepth > 0) {
+    clangdBatchDeferred = true;
+    return;
+  }
+  restartClangdReason = 'open';
+  void generateClangdForWorkspace();
+}
+
+/** 在批量打开语义下执行 fn（结束时若有延后的生成请求则统一跑一次） */
+async function withClangdBatch<T>(fn: () => Promise<T>): Promise<T> {
+  clangdBatchDepth++;
+  try {
+    return await fn();
+  } finally {
+    clangdBatchDepth--;
+    if (clangdBatchDepth === 0 && clangdBatchDeferred) {
+      clangdBatchDeferred = false;
+      restartClangdReason = 'open';
+      void generateClangdForWorkspace();
+    }
+  }
+}
+
 async function openProject(filename: string): Promise<void> {
   try {
     // P3：工程集合/文件列表即将变化 → 失效属主索引（所有重解析路径均经由此处）
@@ -3726,6 +4120,8 @@ async function openProject(filename: string): Promise<void> {
     void autoExcludeBuildOutputs({ notify: false });
     outputChannel.info(logT('[Code::Blocks] Project opened: {0}', project.title));
     outputChannel.info(logT('  Targets: {0}', project.buildTargets.map((t) => t.title).join(', ')));
+    // 同名工程（不同目录）靠标题无法区分，补一行路径便于排障
+    outputChannel.info(logT('  Project file: {0}', project.filename));
 
     // 刷新项目树（活动项目高亮随 activeProject 同步）
     projectTreeProvider?.setProjects(openProjects);
@@ -3752,9 +4148,9 @@ async function openProject(filename: string): Promise<void> {
     vscode.window.showInformationMessage(i18n.t('Code::Blocks project opened: {0}', project.title));
 
     // 生成 compile_commands.json（clangd 补全，写到工作区外缓存），失败不阻塞。
-    // 打开工程后 clangd 必须按新数据库重新分析（首开工程时旧 clangd 进程可能还按"无数据库"的状态在跑）
-    restartClangdReason = 'open';
-    void generateClangdForWorkspace();
+    // 打开工程后 clangd 必须按新数据库重新分析（首开工程时旧 clangd 进程可能还按"无数据库"的状态在跑）；
+    // 批量打开（启动恢复 / 多选）时由 withClangdBatch 合并成一次。
+    requestClangdGenerationAfterOpen();
     projectSearch?.provider.notifyContextChanged();
   } catch (err) {
     vscode.window.showErrorMessage(i18n.t('Failed to open the project: {0}', (err as Error).message));
@@ -4967,6 +5363,7 @@ function extractMultilibFlags(project: Project, target?: BuildTarget): string[] 
  * 带去抖 + 单飞：打开多个项目会连续触发，合并为一次，避免并发写同一文件。
  */
 async function generateClangdForWorkspace(interactive = false): Promise<void> {
+  if (sessionRestoreInProgress) clangdGenerationFromRestore = true;
   if (clangdGenTimer) clearTimeout(clangdGenTimer);
   clangdGenTimer = setTimeout(() => {
     clangdGenTimer = undefined;
@@ -5184,6 +5581,8 @@ async function generateClangdForWorkspaceInternal(interactive: boolean): Promise
   // 捕获本次是否由「活动工程切换 / 编译器设置变化」触发（用于 DB 变化后决定是否重启 clangd）
   const restartReason = restartClangdReason;
   restartClangdReason = undefined;
+  const fromSessionRestore = clangdGenerationFromRestore;
+  clangdGenerationFromRestore = false;
   try {
     if (!extContext) return;
     const cfg = vscode.workspace.getConfiguration('codeblocks');
@@ -5268,7 +5667,7 @@ async function generateClangdForWorkspaceInternal(interactive: boolean): Promise
       ? logT('compile_commands.json is unchanged, skipping the write')
       : logT('Regenerated compile_commands.json ({0} compile command(s)) → {1}', count, outPath)}`);
 
-    // 是否写入了新的 clangd 配置片段（配置变了同样需要重启，见下方 restart 判定）
+    // 是否实际写入了新的 clangd 配置片段（仅配置变化时是否需要重启见下方判定）
     let configWritten = false;
 
     if (clangd) {
@@ -5353,7 +5752,9 @@ async function generateClangdForWorkspaceInternal(interactive: boolean): Promise
         outputChannel.warn(logT('[Code::Blocks] codeblocks.clangd.builtinHeaders is queryDriver, but VS Code\'s clangd.arguments does not contain --query-driver yet;')
           + logT('Run the command "Code::Blocks: Configure clangd --query-driver" to write it in one click (suggested value --query-driver={0}/*)', path.dirname(firstCompilerPath).replace(/\\/g, '/')));
       }
-      outputChannel.info(logT('[Code::Blocks] clangd user config updated → {0}', clangdUserConfigPath()));
+      outputChannel.info(written
+        ? logT('[Code::Blocks] clangd user config updated → {0}', clangdUserConfigPath())
+        : logT('[Code::Blocks] clangd user config unchanged, skipping the write'));
       configWritten = written;
       outputChannel.info(logT('[Code::Blocks] clangd detected: {0}', clangd));
       if (interactive) {
@@ -5375,22 +5776,36 @@ async function generateClangdForWorkspaceInternal(interactive: boolean): Promise
       }
     }
 
-    // 编译数据库/配置实际变化 → 重启 clangd，让已打开文件按新编译命令与配置重新分析：
+    // 编译数据库实际变化 → 重启 clangd，让已打开文件按新编译命令重新分析：
     //  - 'open'（打开工程）：必须重启（不受开关限制）——打开动作本身就是"让它开始按本工程分析"；
     //    否则上次会话遗留的 clangd 进程仍按旧配置（或"没有编译数据库"）继续工作，看起来就是"没触发分析"
     //  - 'compiler'（编译器设置变化）：必须重启（不重启等于设置没生效）
     //  - 'project'（切换活动工程）：尊重 clangd.restartOnActiveProjectSwitch（重启会触发重新索引，允许关闭）
     // 门槛：clangd 扩展已激活（服务器在跑，重启才有意义）或存在已打开 C/C++ 文件（重启只为刷新它们）
-    const restartAllowed = restartReason === 'compiler'
-      || restartReason === 'open'
-      || cfg.get<boolean>('clangd.restartOnActiveProjectSwitch', true);
-    if (restartReason && (!skipped || configWritten) && restartAllowed && (clangdExtensionActive() || hasOpenSourceFile())) {
+    //
+    // 启动恢复期间「仅配置变化」跳过重启：此刻 clangd 进程刚随窗口重载启动（正在 initialize），
+    // 调用 clangd.restart 会与其自身初始化竞态（command 'clangd.applyFix' already exists →
+    // “couldn't create connection to server”弹窗）；而配置变化 clangd 会即时生效。
+    // 判定真值表见 tools/clangdRestart.ts（decideClangdRestart，有单测覆盖）。
+    const restartAction = decideClangdRestart({
+      reason: restartReason,
+      databaseUnchanged: skipped,
+      configWritten,
+      fromSessionRestore,
+      restartAllowed: restartReason === 'compiler'
+        || restartReason === 'open'
+        || cfg.get<boolean>('clangd.restartOnActiveProjectSwitch', true),
+      hasConsumer: clangdExtensionActive() || hasOpenSourceFile(),
+    });
+    if (restartAction === 'restart') {
       outputChannel.info(restartReason === 'compiler'
         ? logT('[Code::Blocks] Compiler settings changed; restarting clangd to refresh the open files')
         : restartReason === 'open'
           ? logT('[Code::Blocks] Project opened; restarting clangd to apply the new compile database / config')
           : logT('[Code::Blocks] Active project switched; restarting clangd to refresh the open files'));
       scheduleClangdRestart();
+    } else if (restartAction === 'skip-config-only') {
+      outputChannel.info(logT('[Code::Blocks] clangd is still starting after the window reload; only the config changed, so the restart is skipped (changes take effect immediately)'));
     }
   } catch (err) {
     vscode.window.showErrorMessage(i18n.t('Failed to generate compile_commands.json: {0}', (err as Error).message));
@@ -5469,27 +5884,34 @@ function restoreProjectOrder(): string[] {
 /** 恢复上次会话打开的项目：优先 .workspace（重新打开全部项目+依赖），否则按持久化顺序恢复各项目 */
 async function restorePersistedProjects(): Promise<void> {
   if (openProjects.length > 0) return;
-  const wsPath = extContext?.workspaceState.get<string>('codeblocks.openedWorkspace', '');
-  if (wsPath && fs.existsSync(wsPath)) {
-    await openProject(wsPath);
-    return;
-  }
-  const order = restoreProjectOrder();
-  const fallback = extContext?.workspaceState.get<string>('codeblocks.activeProject', '') ?? '';
-  const list = order.length ? order : [fallback].filter(Boolean);
-  // 恢复上限：上次会话打开了 N 个工程时不再全部恢复（父目录多工程工作区下会成倍放大 clangd/索引开销）
-  const limit = detectAutoOpenThreshold();
-  const use = list.length > limit ? list.slice(0, limit) : list;
-  if (list.length > limit) {
-    outputChannel?.info(
-      logT('[Code::Blocks] The last session had {0} projects open; restoring only the first {1}', list.length, limit) +
-        logT(' (threshold: codeblocks.detect.autoOpenThreshold; open the rest from the status bar or the project management menu)'),
-    );
-  }
-  for (const fn of use) {
-    if (fn && fs.existsSync(fn) && !openProjects.some((p) => p.filename === fn)) {
-      await openProject(fn);
-    }
+  sessionRestoreInProgress = true;
+  try {
+    await withClangdBatch(async () => {
+      const wsPath = extContext?.workspaceState.get<string>('codeblocks.openedWorkspace', '');
+      if (wsPath && fs.existsSync(wsPath)) {
+        await openProject(wsPath);
+        return;
+      }
+      const order = restoreProjectOrder();
+      const fallback = extContext?.workspaceState.get<string>('codeblocks.activeProject', '') ?? '';
+      const list = order.length ? order : [fallback].filter(Boolean);
+      // 恢复上限：上次会话打开了 N 个工程时不再全部恢复（父目录多工程工作区下会成倍放大 clangd/索引开销）
+      const limit = detectAutoOpenThreshold();
+      const use = list.length > limit ? list.slice(0, limit) : list;
+      if (list.length > limit) {
+        outputChannel?.info(
+          logT('[Code::Blocks] The last session had {0} projects open; restoring only the first {1}', list.length, limit) +
+            logT(' (threshold: codeblocks.detect.autoOpenThreshold; open the rest from the status bar or the project management menu)'),
+        );
+      }
+      for (const fn of use) {
+        if (fn && fs.existsSync(fn) && !openProjects.some((p) => p.filename === fn)) {
+          await openProject(fn);
+        }
+      }
+    });
+  } finally {
+    sessionRestoreInProgress = false;
   }
 }
 
@@ -6528,72 +6950,13 @@ function buildCompilerInstance(
   masterPath: string,
   cfg: vscode.WorkspaceConfiguration,
 ): Compiler {
-  // 编译器全局搜索目录 + 链接库（default.conf /compiler_sets/<id>，对齐 Compiler::LoadSettings）
-  const applyGlobalDirs = (compiler: Compiler): Compiler => {
-    const uc = codeBlocksConfig?.find(id);
-    if (uc?.name) compiler.name = uc.name; // 显示名对齐 CB（取 default.conf 中用户编译器的 NAME）
-    const sd = codeBlocksConfig?.searchDirs(id);
-    if (sd) {
-      compiler.includeDirs = sd.includeDirs;
-      compiler.libDirs = sd.libDirs;
-      compiler.resIncludeDirs = sd.resIncludeDirs;
-      compiler.linkLibs = sd.linkLibs;
-      compiler.extraPaths = sd.extraPaths;
-      compiler.includePrjCwd = codeBlocksConfig?.includePrjCwd() ?? false;
-      compiler.includeFileCwd = codeBlocksConfig?.includeFileCwd() ?? false;
-      compiler.compilerOptions = sd.compilerOptions;
-      compiler.linkerOptions = sd.linkerOptions;
-      compiler.resourceCompilerOptions = sd.resourceCompilerOptions;
-    }
-    // 用户自定义错误正则按索引覆盖/追加（对齐 Compiler::LoadSettings:699-737）
-    codeBlocksConfig?.applyUserRegexes(id, compiler.regexes);
-    // 仅 C / 仅 C++ 参数：用户覆盖优先，否则用 XML <Sort> 基线
-    const language = readLanguageFlags(id, { cOnly: compiler.cOnlyFlags, cppOnly: compiler.cppOnlyFlags });
-    compiler.cOnlyFlags = language.cOnly;
-    compiler.cppOnlyFlags = language.cppOnly;
-    return compiler;
-  };
-  if (compilerLoader) {
-    const compiler = compilerLoader.load(id);
-    compiler.masterPath = masterPath;
-
-    // 优先：CodeBlocks 用户自定义编译器（如交叉编译器）——从 default.conf 解析程序路径
-    const userPrograms = codeBlocksConfig?.resolvePrograms(id);
-    if (userPrograms) {
-      compiler.programs = {
-        ...compiler.programs,
-        C: userPrograms.C,
-        CPP: userPrograms.CPP,
-        LD: userPrograms.LD,
-        LIB: userPrograms.LIB,
-        WINDRES: compiler.programs.WINDRES || '',
-        MAKE: compiler.programs.MAKE || '',
-        DBGconfig: compiler.programs.DBGconfig || 'gdb_debugger:Default',
-      };
-      compiler.masterPath = userPrograms.masterPath;
-      return applyGlobalDirs(compiler);
-    }
-
-    // 次优：探测到的完整程序路径（交叉编译器如 RISC-V）——**只作用于本家族**：
-    // 旧扁平形态视为「写入时的全局 compilerId 的程序路径」，其它家族不受影响（D-20：否则选定交叉编译器后
-    // `<Option compiler="gcc">` 的工程会被静默改用交叉工具链构建）
-    const programs = resolveProgramsForCompiler(
-      cfg.get<unknown>('compilerPrograms', {}),
-      id,
-      cfg.get<string>('compilerId', 'gcc'),
-    );
-    if (programs && programs.C) {
-      compiler.programs = { ...compiler.programs, ...programs } as any;
-    }
-    // PCH include 前置需要 gcc 主版本号（对齐 Compiler::m_VersionString），惰性查询一次并缓存
-    if (compiler.switches.supportsPCH && !compiler.versionString) {
-      compiler.versionString = queryCompilerVersionString(compiler);
-    }
-    return applyGlobalDirs(compiler);
-  }
-  // 回退：内置 GCC
-  const { createGccCompiler } = require('./compiler/compiler');
-  return applyGlobalDirs(createGccCompiler(process.platform, masterPath));
+  // 实现已下沉到 compiler/compilerFactory.ts（CLI/MCP 共用同一装配逻辑）；
+  // 仅 C / 仅 C++ 参数（用户覆盖优先，否则用 XML <Sort> 基线）通过 languageFlags 注入。
+  return buildCompilerInstanceCore(id, masterPath, cfg, {
+    loader: compilerLoader,
+    codeBlocksConfig,
+    languageFlags: readLanguageFlags,
+  });
 }
 
 /** 可选编译器列表（资源 options_<id>.xml + default.conf 用户编译器 + 当前设置），供 Build options → Selected compiler */
@@ -7360,9 +7723,15 @@ async function confirmRebuild(): Promise<boolean> {
  * 构建前停止调试会话 —— 对齐 StopRunningDebugger（compilergcc.cpp:879-905）：
  * 调试器运行中 → 模态询问；确认则停止并继续，否则记录 Aborting (re-)build. 并中止构建。
  */
-async function stopDebuggerIfRunning(): Promise<boolean> {
+async function stopDebuggerIfRunning(interactive = true): Promise<boolean> {
   const session = vscode.debug.activeDebugSession;
   if (!session) return true;
+  if (!interactive) {
+    // agent 调用：无需确认，直接停止（否则模态框会卡住工具调用）
+    outputChannel.info('[Code::Blocks] Stopping debugger (agent build)...');
+    await vscode.debug.stopDebugging(session);
+    return true;
+  }
   const choice = await vscode.window.showWarningMessage(
     i18n.t('The debugger must be stopped to do a (re-)build.\nDo you want to stop the debugger now?'),
     { modal: true },
@@ -7573,8 +7942,8 @@ async function buildWorkspaceLocked(rebuild: boolean, clearLog: boolean): Promis
 
   const buildStartMs = Date.now();
   currentBuildProjects.length = 0;
-  currentBuildErrorCount = 0;
-  maxErrorsReached = false;
+  buildDiagnosticsBudget.errorCount = 0;
+  buildDiagnosticsBudget.truncated = false;
 
   const total = openProjects.length;
   let done = 0;
@@ -7650,11 +8019,11 @@ async function buildWorkspaceLocked(rebuild: boolean, clearLog: boolean): Promis
 }
 
 /** 构建单个项目（右键菜单的 Build/Rebuild 与主 Build 命令使用，对齐 CB 单活动项目 Build） */
-async function buildSingleProject(filename: string, rebuild: boolean): Promise<boolean> {
+async function buildSingleProject(filename: string, rebuild: boolean, opts: { interactive?: boolean } = {}): Promise<boolean> {
   // 构建互斥：置位必须先于任何 await（D-15，防止同 tick 双发并发双跑）
   if (!claimBuildMutex()) return false;
   try {
-    return await buildSingleProjectLocked(filename, rebuild);
+    return await buildSingleProjectLocked(filename, rebuild, opts);
   } finally {
     buildInProgress = false;
     currentBuildCancel = undefined;
@@ -7663,14 +8032,15 @@ async function buildSingleProject(filename: string, rebuild: boolean): Promise<b
 }
 
 /** 构建单个项目主体（互斥已由 buildSingleProject 占有） */
-async function buildSingleProjectLocked(filename: string, rebuild: boolean): Promise<boolean> {
+async function buildSingleProjectLocked(filename: string, rebuild: boolean, opts: { interactive?: boolean } = {}): Promise<boolean> {
+  const interactive = opts.interactive !== false;
   // 对齐 DoBuild:2897：构建前须先停止调试会话
-  if (!(await stopDebuggerIfRunning())) {
+  if (!(await stopDebuggerIfRunning(interactive))) {
     return false;
   }
 
-  // Rebuild 前由用户确认（对齐 Code::Blocks 的 Rebuild 确认对话框）
-  if (rebuild && !(await confirmRebuild())) {
+  // Rebuild 前由用户确认（对齐 Code::Blocks 的 Rebuild 确认对话框）；agent 调用时跳过
+  if (rebuild && interactive && !(await confirmRebuild())) {
     return false;
   }
 
@@ -7709,8 +8079,8 @@ async function buildSingleProjectLocked(filename: string, rebuild: boolean): Pro
 
   const buildStartMs = Date.now();
   currentBuildProjects.length = 0;
-  currentBuildErrorCount = 0;
-  maxErrorsReached = false;
+  buildDiagnosticsBudget.errorCount = 0;
+  buildDiagnosticsBudget.truncated = false;
 
   let ok = false;
   let cancelled = false;
@@ -7882,169 +8252,44 @@ async function cleanSingleFile(project: Project, file: ProjectFile): Promise<voi
   new BuildEngine(project, compiler, outputChannel, (id) => resolveTargetCompiler(id)).cleanFile(targetTitle, file.relativeFilename);
 }
 
-/** 构建单个项目的一个目标（被 build / buildSingleProject 复用）；支持虚拟目标展开 */
+/**
+ * 构建单个项目的一个目标（被 build / buildSingleProject 复用）；支持虚拟目标展开。
+ * 内核已下沉到 `build/buildProject.ts`（UI / CLI / MCP 共用同一份实现），这里只做宿主侧接线：
+ * 编译器解析、诊断发布（含可导航判定与 maxReportedErrors 截断计数）、自动版本号、输出通道与取消源。
+ * 构建互斥（buildInProgress / currentBuildCancel）与诊断发布器生命期仍由调用方维护。
+ */
 async function buildOneProject(project: Project, targetTitle: string, rebuild: boolean, cancel?: BuildCancelHandle): Promise<boolean> {
-  // 虚拟目标：展开为其包含的物理目标，在同一个 engine.build 调用里逐个构建
-  // （项目级 pre/post 只执行一次，对齐 CodeBlocks 状态机 bsProjectPreBuild/bsProjectPostBuild）
-  const vt = project.virtualTargets.find((v) => v.title === targetTitle);
-  const targetTitles: string[] = vt ? vt.targets : [targetTitle];
-
-  const target = vt
-    ? project.buildTargets.find((t) => vt.targets.includes(t.title))
-    : project.buildTargets.find((t) => t.title === targetTitle);
-  if (!target || !supportsCurrentPlatform(target.platforms)) {
-    outputChannel.warn(logT('[Code::Blocks] Project "{0}" has no target "{1}" (or does not support the current platform), skipped', project.title, targetTitle));
-    return true;
-  }
-  const autoVersionToken = await prepareAutoVersioningBuild(project, (line) => outputChannel.info(line));
-
-  // makefile 项目模式（对齐 UseMake：Build/Rebuild 走 make 命令而非内部引擎，GetMakeCommandFor:2178-2197）
-  if (project.makefileIsCustom) {
-    if (rebuild) {
-      const cleanCmd = getMakeCommand(project, target, 'clean');
-      if (cleanCmd && !(await runMakeBuild(project, cleanCmd, targetTitle))) return false;
-    }
-    const buildCmd = getMakeCommand(project, target, 'build');
-    if (!buildCmd) {
-      outputChannel.error(logT('[Code::Blocks] Makefile project "{0}" has no <MakeCommands><Build command=...> configured', project.title));
-      return false;
-    }
-    // 对齐 compilergcc.cpp:2560-2585：Build 前执行 askRebuildNeeded（0=已最新跳过构建）；
-    // 审计修复：原 spawnSync 无超时同步阻塞主线程 → 改异步 spawn + 30s 超时 + 取消注册（语义同 CB）
-    const mkCompiler = getCompiler(target.compilerId || project.compilerId);
-    const askCmd = getMakeCommand(project, target, 'askRebuildNeeded');
-    if (askCmd) {
-      if (mkCompiler.switches.logging === 'full') {
-        outputChannel.info(`[Code::Blocks] Checking if target is up-to-date: ${askCmd}`);
-      }
-      const askCwd = project.executionDir ? path.resolve(project.basePath, project.executionDir) : project.basePath;
-      const askCode = await runMakeAskRebuild(askCmd, askCwd, cancel);
-      if (askCode === 0) {
-        outputChannel.info(logT("[Code::Blocks] Target '{0}' is up to date. Nothing to be done.", targetTitle));
-        return true;
-      }
-    }
-    if (mkCompiler.switches.logging !== 'full') {
-      const silentCmd = getMakeCommand(project, target, 'silentBuild');
-      if (silentCmd) {
-        const makeOk = await runMakeBuild(project, silentCmd, targetTitle);
-        if (makeOk) await completeAutoVersioningBuild(project, autoVersionToken, (line) => outputChannel.info(line));
-        return makeOk;
-      }
-    }
-    const makeOk = await runMakeBuild(project, buildCmd, targetTitle);
-    if (makeOk) await completeAutoVersioningBuild(project, autoVersionToken, (line) => outputChannel.info(line));
-    return makeOk;
-  }
-
-  const compiler = getCompiler(target.compilerId || project.compilerId);
-  // 构建 Banner 由引擎在项目 pre-build 之后、每个目标构建前打印（对齐 bsTargetPreBuild 的 PrintBanner）
-
-  // 本次项目构建的摘要数据（供 Build Log 视图）
-  const diagnostics: BuildLogDiagnostic[] = [];
-  const startMs = Date.now();
-
-  // 项目源文件绝对路径（供「Build Log 使用 clangd 诊断」模式收集诊断 + 链接期诊断位置修正）
-  const projectFiles = new Set<string>();
-  for (const f of project.files) projectFiles.add(f.absolutePath);
-  for (const t of project.buildTargets) {
-    for (const f of t.files) projectFiles.add(f.absolutePath);
-  }
-  // 链接期错误（`func_bt.c:(.text.f+0x2e): undefined reference`）的定位修正：
-  // 文件按 basename 落回工程源码，行号从函数段名推出（否则 Problems / Build Log 都会打开不存在的路径）
-  const diagnoseIndex = buildDiagnosticPathIndex([...projectFiles], project.basePath);
-  const resolveDiagnostic = createDiagnosticResolver(diagnoseIndex, {
-    exists: (p) => {
-      try {
-        return fs.statSync(p).isFile();
-      } catch {
-        return false;
-      }
-    },
-    readFile: (p) => {
-      try {
-        return fs.readFileSync(p, 'utf-8');
-      } catch {
-        return undefined;
-      }
-    },
-  });
-
-  const engine = new BuildEngine(project, compiler, outputChannel, (id) => resolveTargetCompiler(id));
-  const ok = await engine.build(targetTitles, {
-    rebuild,
-    cancel,
-    resolveFile: (parsed, cwd) => resolveDiagnostic(parsed, cwd),
-    onLine: (line, severity) => {
-      if (severity === 'error') outputChannel.error(line);
-      else if (severity === 'warning') outputChannel.warn(line);
-      else outputChannel.info(line);
-    },
+  const result = await buildProjectTarget(project, targetTitle, rebuild, {
+    output: outputChannel,
+    getCompiler: (id) => getCompiler(id),
+    resolveCompiler: (id) => resolveTargetCompiler(id),
+    budget: buildDiagnosticsBudget,
+    maxErrors: vscode.workspace.getConfiguration('codeblocks').get<number>('maxReportedErrors', 50),
+    // clangd 接管 Build Log 诊断时不收集（对齐 buildLogUsesClangdDiagnostics）
+    collectDiagnostics: !(clangdDiagnosticsEnabled && buildLogUsesClangdDiagnostics()),
     onDiagnostic: (diag, fileUri) => {
       // clangd 接管诊断时，Problems 面板由 clangd 产出，构建引擎不再写入（避免重复）
       if (clangdDiagnosticsEnabled) return;
-      // 按具体文件 URI 分组挂到 Problems 面板；伪文件/不存在的路径回退到项目根
-      // 性能：归集 + 节流发布（每文件一次 set），避免每条诊断一次跨进程提交（见 DiagnosticPublisher）
-      const target = fileUri && isNavigableDiagnosticTarget(fileUri.fsPath) ? fileUri : vscode.Uri.file(project.basePath);
-      publishBuildDiagnostic(target, diag);
+      // 按具体文件 URI 分组挂到 Problems 面板；工具伪文件/不存在的路径回退到项目根（避免点了没反应）
+      const uri = fileUri as vscode.Uri | undefined;
+      publishBuildDiagnostic(
+        uri && isNavigableDiagnosticTarget(uri.fsPath) ? uri : vscode.Uri.file(project.basePath),
+        diag as vscode.Diagnostic,
+      );
     },
-    onStructuredDiagnostic: (d) => {
-      // Build Log 使用 clangd 诊断时，不再收集构建引擎的结构化诊断
-      if (clangdDiagnosticsEnabled && buildLogUsesClangdDiagnostics()) return;
-      // maxReportedErrors 截断：达到上限后停止收集（CodeBlocks max_reported_errors）
-      const maxErrors = vscode.workspace.getConfiguration('codeblocks').get<number>('maxReportedErrors', 50);
-      if (d.severity === 'error') {
-        if (maxErrors > 0 && currentBuildErrorCount >= maxErrors) {
-          maxErrorsReached = true;
-          return;
-        }
-        currentBuildErrorCount++;
-      }
-      // 无源码位置（链接器/工具输出、伪文件、构建产物）：去掉 file/line/column，只保留消息，
-      // 避免 Build Log 树里出现「看起来能点、点了没反应」的节点
-      diagnostics.push(isNavigableDiagnosticTarget(d.file)
-        ? d
-        : { ...d, file: undefined, line: undefined, column: undefined });
-    },
+    // makefile 项目：make 期间把输出通道拉到前台（构建互斥已由调用方置位）
+    onMakeStart: () => outputChannel.show(true),
+    // 自动版本号（main 行为）：构建前生成 version.h，成功且未取消后递增 BUILDS_COUNT
+    prepareBuild: () => prepareAutoVersioningBuild(project, (line) => outputChannel.info(line)),
+    finishBuild: (token) => completeAutoVersioningBuild(project, token as string | undefined, (line) => outputChannel.info(line)),
+    cancel,
   });
 
-  const durationMs = Date.now() - startMs;
-  const stats = engine.lastStats ?? { success: ok, compiledCount: 0, skippedCount: 0, failedCount: 0, linkSuccess: ok, linkSkipped: true, hadCommands: false, outputFilename: undefined };
-  // 取消判定：引擎统计标记或取消源已置位（用户中途停止）
-  const cancelled = !!stats.cancelled || !!cancel?.isCancelled();
-  if (ok && !cancelled) await completeAutoVersioningBuild(project, autoVersionToken, (line) => outputChannel.info(line));
-  const projectName = path.basename(path.dirname(project.filename));
-
-  // 输出顺序调整：构建完成汇总块不再在此输出，统一由 printBuildSummaryBlocks()
-  // 在「构建成功/失败」行之后输出（构建输出的最末尾）。
-
-  currentBuildProjects.push({
-    projectName,
-    targetName: targetTitle,
-    compilerPath: compiler.programs.C || compiler.name,
-    success: ok,
-    compiledCount: stats.compiledCount,
-    skippedCount: stats.skippedCount,
-    failedCount: stats.failedCount,
-    linkSuccess: stats.linkSuccess,
-    linkSkipped: stats.linkSkipped,
-    outputFilename: stats.outputFilename,
-    diagnostics,
-    // 第六轮 F8：HTML 构建日志 full_command_line 命令行块（build.saveHtmlLogFullCommandLine 开启时渲染）
-    commands: [...engine.lastCommands],
-    files: [...projectFiles],
-    durationMs,
-    startTime: startMs,
-    // 输出顺序调整：汇总块数据（取消标记 / 标题 / 最慢 Top3），在输出最末尾渲染
-    cancelled,
-    projectTitle: project.title,
-    topTimings: [...engine.lastCompileTimings],
-  });
-
-  if (!ok && !cancelled) {
+  if (result.reportToUi) currentBuildProjects.push(result.summary);
+  if (!result.ok && !result.summary.cancelled) {
     outputChannel.error(logT('[Code::Blocks] Project "{0}" compile failed', project.title));
   }
-  return ok;
+  return result.ok;
 }
 
 /**
@@ -8798,10 +9043,10 @@ async function finishBuildSummary(allOk: boolean, buildStartMs: number): Promise
     projects: [...currentBuildProjects],
     errorCount,
     warningCount,
-    truncated: maxErrorsReached,
+    truncated: buildDiagnosticsBudget.truncated,
   });
   // 达到上限时提示（CodeBlocks "More errors follow but not being shown"）
-  if (maxErrorsReached) {
+  if (buildDiagnosticsBudget.truncated) {
     outputChannel.warn(logT('[Code::Blocks] Error limit reached; further errors are no longer shown (adjust codeblocks.maxReportedErrors in the settings)'));
   }
   // 第六轮 F1：按设置决定是否自动聚焦（对齐 CB message_manager：默认仅错误时动作，成功/取消不动作；
@@ -9110,6 +9355,8 @@ async function rebuildWorkspace(): Promise<void> {
   // true → 单遍交错（DoWorkspaceBuild true,true，每工程 clean+build）；false → 两遍（默认分支）
   if (codeBlocksConfig?.rebuildSeperately() === true) {
     buildInProgress = true;
+    const cancelSource = new BuildCancelSource();
+    currentBuildCancel = cancelSource;
     try {
       for (const project of topologicalBuildOrder(openProjects)) {
         if (!supportsCurrentPlatform(project.platforms)) {
@@ -9122,10 +9369,11 @@ async function rebuildWorkspace(): Promise<void> {
           continue;
         }
         await cleanTargets(project, targetTitle);
-        await buildOneProject(project, targetTitle, false);
+        await buildOneProject(project, targetTitle, false, cancelSource);
       }
     } finally {
       buildInProgress = false;
+      currentBuildCancel = undefined;
       flushPendingClangdRestart();
     }
     return;

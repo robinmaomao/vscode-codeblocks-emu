@@ -1,7 +1,7 @@
 # Code::Blocks for VS Code — Usage Guide
 
 > Language: **English** ｜ [中文](./usage.md)
-> Version: 0.8.160 ｜ Native port of Code::Blocks core features to VS Code, driving GCC / GDB directly, **without** `tasks.json` / `launch.json`.
+> Version: 0.9.0 ｜ Native port of Code::Blocks core features to VS Code, driving GCC / GDB directly, **without** `tasks.json` / `launch.json`.
 
 ---
 
@@ -50,7 +50,7 @@ Code::Blocks for VS Code is a "mini IDE kernel": it parses `.cbp` / `.workspace`
 ### 2.1 Install from VSIX
 
 ```powershell
-code --install-extension codeblocks-vscode-0.8.160.vsix --force
+code --install-extension codeblocks-vscode-0.9.0.vsix --force
 ```
 
 ### 2.2 Build from source
@@ -58,7 +58,7 @@ code --install-extension codeblocks-vscode-0.8.160.vsix --force
 ```powershell
 npm install
 npm run package
-code --install-extension codeblocks-vscode-0.8.160.vsix --force
+code --install-extension codeblocks-vscode-0.9.0.vsix --force
 ```
 
 > `npm run package` = `vsce package` (before packaging, the `vscode:prepublish` hook runs `tsc` compilation (`dist/`, for local testing) + the **esbuild single-file bundle** (`bundle/extension.js`, the release entry));
@@ -630,7 +630,7 @@ Note: keybindings are **user-level** (shared across windows); combinations taken
 
 ## 13. Settings reference
 
-> The settings page is grouped into **9 sections** (Compiler / Build / Build Log & Notifications / Workspace & Projects / Debug / IntelliSense / UI / Editor & Tools / Keybindings; section titles are shown inside the VS Code Settings editor via the `configuration` array).
+> The settings page is grouped into **10 sections** (Compiler / Build / Build Log & Notifications / Workspace & Projects / Debug / IntelliSense / UI / Editor & Tools / Keybindings / Agent; section titles are shown inside the VS Code Settings editor via the `configuration` array).
 > **Full per-setting reference** (type, default, scope, allowed values and when changes take effect): [settings.en.md](./settings.en.md)｜Chinese [settings.md](./settings.md).
 > Section titles follow the VS Code display language (`package.nls.json` English default + `package.nls.zh-cn.json` Chinese).
 > Path-like settings `codeblocks.masterPath` / `codeblocks.compilerPrograms` / `codeblocks.debug.gdbPath` / `codeblocks.build.compilerCache` / `codeblocks.build.compilerCachePath` are declared **machine-overridable**: they do not take part in Settings Sync (avoiding broken paths synced across machines) while still being overridable per workspace.
@@ -771,6 +771,13 @@ Note: keybindings are **user-level** (shared across windows); combinations taken
 |--------|--------|------|
 | `codeblocks.keybindings.cbStyle` | `false` | CB fidelity keys: enables the Code::Blocks keys that conflict with VS Code defaults (F5 breakpoint / F2 Build Log / Ctrl+R replace and 9 more, 12 in total; see §12.3); disabling restores the VS Code defaults |
 | `codeblocks.keybindings.overrides` | `{}` | Per-command custom keybindings (key = command short id, value = keybinding string, or empty = unbind); the visual panel (§12.5) is recommended for changes (**a one-click entry is right in this setting's description in the extension settings UI**); after a change it is **written to the user's `keybindings.json` automatically** (managed entries only + first-time backup) |
+
+### 13.8 Agent (Copilot / MCP)
+
+| Setting | Default | Description |
+|--------|--------|------|
+| `codeblocks.agent.enabled` | `true` | Master switch: when off, the 11 Language Model Tools are not registered and the embedded MCP server is not exposed; untrusted workspaces are always treated as off. Applies immediately (the standalone `cb-cli` is not affected) |
+| `codeblocks.agent.readOnly` | `false` | Read-only mode: only `project_read` / `build_status` / `compiler list,info` / `workspace info,deps,list` / `debug state` are allowed; everything else fails with `read-only` |
 
 ---
 
@@ -1019,7 +1026,16 @@ The Code::Blocks features below were assessed as **not to be re-implemented in t
 > For details and the decision record, see the [unimplemented-feature backlog](../dev/backlog.md) §2 (not-ported list).
 > Reminder: the extensions above are community/vendor products; evaluate them before installing. This extension neither bundles nor ships them.
 
-## 17. Bug fixes in 0.8.160
+## 17. What's new in 0.9.0
+
+- **Agent control (Copilot / MCP / CLI)**: 11 Language Model Tools (`project_read` / `project_edit` / `project_file` / `project_target` / `build` / `build_status` / `run` / `debug` / `compiler` / `export` / `workspace`) + a bundled MCP server (`bundle/cb-mcp.js`) + a standalone CLI (`bundle/cb-cli.js`), all sharing one implementation with the UI. See [Agent control](./agent-control.en.md).
+- **Switches**: `codeblocks.agent.enabled` (on by default; when off the tools are not registered, the MCP server is not exposed and an already-running MCP server refuses calls) and `codeblocks.agent.readOnly` (off by default; only query tools/actions are allowed). **Untrusted workspaces are always treated as off**; changes apply immediately.
+- **Shared build kernel**: `src/build/buildProject.ts` is now the single build implementation, keeping the audit-round linker-diagnostic resolution, `maxReportedErrors` truncation, auto-versioning and makefile semantics.
+- **clangd**: session restore of multiple projects is coalesced into one generation; during startup restore a config-only change skips the restart (`decideClangdRestart`), coexisting with the restart coalescer and avoiding the `clangd.applyFix already exists` popup.
+- **Breaking change**: `engines.vscode` raised from `^1.85.0` to `^1.102.0` (the Language Model Tools / MCP provider APIs need 1.102).
+- **Inventory**: 136 commands / **93** settings (+10th section Agent) / 6 views / 34 keybindings / 11 LM Tools / 1 MCP provider.
+
+## 18. Bug fixes in 0.8.160
 
 - **New-project overwrite guard**: when the target folder already has same-named files, confirm per file and keep them by default (no more whole-folder overwrite).
 - **HeaderGuard**: include guards are generated/updated for header files only; sources are left untouched.
@@ -1033,26 +1049,26 @@ The Code::Blocks features below were assessed as **not to be re-implemented in t
 - **Not executed (by decision)**: F-02 (`.ld` line comments) and F-03 (TODO comment-language scope) keep the current behavior.
 - **Unchanged inventory**: 136 commands / 91 settings / 6 views / 34 keybindings.
 
-## 18. What's new in 0.8.159
+## 19. What's new in 0.8.159
 
 - **Project manager extraction**: `showProjectManager` / `buildManagerItems` moved to `src/features/projectManager.ts`, with open-project/active-project/remove/scan callbacks injected through `ProjectManagerDeps`; QuickPick behavior is unchanged.
 - **Regression guard**: `test-project-manager-feature.js` verifies the feature module, active-project marker, action items and that the old implementation has not returned.
 - **No user-visible feature/setting changes**: commands 136 / settings 91 / views 6 remain unchanged.
 
-## 19. What's new in 0.8.158
+## 20. What's new in 0.8.158
 
 - **Profiler command extraction**: `profileTarget` and report export moved from `extension.ts` to `src/features/profilerCommands.ts`, with project/compiler/working-directory/output-channel dependencies injected through `ProfilerCommandDeps`; behavior is unchanged.
 - **Architecture**: `extension.ts` continues to shrink under the Strangler pattern; `test-profiler-commands.js` guards against duplicate registration or regression back into the giant module.
 - **No feature/setting changes**: commands 136 / settings 91 / views 6 remain unchanged.
 
-## 20. What's new in 0.8.157
+## 21. What's new in 0.8.157
 
 - **AutoVersioning correctness**: `version.h` is no longer rewritten when its content is unchanged (avoiding mtime churn/full rebuilds); build sessions are deduplicated so `BUILDS_COUNT` advances once per build; `do_auto_increment` / `ask_to_increment` now work; Bump/Generate update `manifest.xml`; added SVN fields, a Changes Log entry and "Add version.h to Project".
 - **Profiler runtime**: records `gmon.out` timestamps before running and only analyzes fresh output; falls back to `gprof -A --separate-files` and collects `.annotated` files; CSV/HTML export uses atomic writes.
 - **Compiler metadata/resources**: reads real display names and master paths from `compiler_*.xml`; bundles the full Code::Blocks `options_*.xml` / `compiler_*.xml` set; fixes `extends` inheritance; adds conservative detection for OpenWatcom, Cygwin, MSYS2 MinGW64, TDM64, LCC, DMD, GDC and gfortran.
 - **Behavior notes**: `do_auto_increment` remains off by default; when enabled, a build may prompt for version increment. Scripts relying on date constants being refreshed on every build should run Generate Version Header explicitly.
 
-## 21. What's new in 0.8.156
+## 22. What's new in 0.8.156
 
 - **Profiler completion**: gprof **call graph** parsing/output; `gprof -A` annotated source in a separate output channel (setting `codeblocks.profiler.annotatedSource`, default on); **CSV / HTML report export** after profiling.
 - **AutoVersioning**: reads/writes `.cbp <Extensions><AutoVersioning>`; commands **AutoVersioning…** (configure/edit values/toggle autoincrement/set header path), **Bump Version**, **Generate Version Header**. When configured, `version.h` is generated before a build and `BUILDS_COUNT` is incremented and atomically written back after a successful build.
@@ -1060,7 +1076,7 @@ The Code::Blocks features below were assessed as **not to be re-implemented in t
 - **Recommended extensions**: new [recommended extensions](./recommended-extensions.en.md) page covering Doxygen, printing, Modern Fortran, environment variables, single-library nm and Valgrind/Callgrind; these are no longer re-implemented here.
 - **Behavior notes**: AutoVersioning rewrites `version.h` before builds — back it up or disable the project configuration if you maintain it by hand; `gprof -A` can be slow on large projects and can be turned off.
 
-## 22. What's new in 0.8.155
+## 23. What's new in 0.8.155
 
 - **Workspace lifecycle**: File → Save Project As… / Save Workspace / Save Workspace As… / Close Workspace / Open default workspace; closing the last project clears workspace state, saving writes project order, `active` and `<Depends>`.
 - **`.workspace` external change detection**: external edits to the project list/dependencies/active project prompt Reload / Ignore; only projects whose disk signature changed are reloaded.

@@ -39,6 +39,7 @@
 | [0.8.158.md](./0.8.158.md) | Profiler 命令拆分（`features/profilerCommands.ts`）与架构收敛 |
 | [0.8.159.md](./0.8.159.md) | 项目管理菜单拆分（`features/projectManager.ts`）与架构收敛 |
 | [0.8.160.md](./0.8.160.md) | 独立功能审计修复轮：新建工程覆盖保护、HeaderGuard 仅头文件、`#include` 系统头跳转、TODO 扫描器按语言识别注释、构建日志/调试门控本地化、工程名校验（F-02/F-03 未执行） |
+| [0.9.0.md](./0.9.0.md) | 正式版：合入 Agent 控制面（LM Tools 11 + MCP provider + CLI），构建内核下沉 `build/buildProject.ts` 由 UI/Agent 共用；`engines.vscode` → `^1.102.0`；设置 +2（第 10 分区 Agent） |
 
 ## 分支预发布版本（branch prerelease）
 
@@ -97,7 +98,7 @@ node tests/contract/gen-release-notes.js --all          # 批量输出
 ## <emoji> <主题>   ← 按主线分节，问题 / 根因 / 修复
 ## ✅ 验证          ← 分层回归数字 + 真机实测
 ## ⚠️ 行为变化与升级提示
-## 📦 安装          ← 附件名 codeblocks-vscode-<ver>.vsix + VS Code 1.85.0+
+## 📦 安装          ← 附件名 codeblocks-vscode-<ver>.vsix + VS Code 1.102.0+
 ## 📬 完整变更      ← 里程碑说明 + 提交对比（绝对链接）
 ```
 

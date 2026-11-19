@@ -1,6 +1,6 @@
 # 设置项完整参考
 
-> 适用于 Code::Blocks 扩展（`codeblocks-vscode`）。本页按设置页的 **9 个分区**逐项说明类型、默认值、作用域、取值与生效时机。
+> 适用于 Code::Blocks 扩展（`codeblocks-vscode`）。本页按设置页的 **10 个分区**逐项说明类型、默认值、作用域、取值与生效时机。
 > 英文版：[settings.en.md](./settings.en.md)｜功能与操作见 [用户手册](./usage.md)。
 
 ## 0. 通用说明
@@ -16,7 +16,7 @@
 - **升级迁移**（本版本）：
   - `codeblocks.parallelJobs` 的 `0` 从「逻辑核数 × 2」改为「当前主机逻辑核数」；升级时会把**显式配置的 0** 一次性改写为 `8`，之后重新设为 `0` 即按逻辑核数自动。
   - 已移除 `codeblocks.clangd.queryDriver`（仅用于输出提示）；需要 `--query-driver` 时把 `codeblocks.clangd.builtinHeaders` 设为 `queryDriver`，并执行命令 `Code::Blocks: Configure clangd --query-driver`。
-  - 设置分区重新整理为 9 个，**设置键本身未重命名**，原有配置文件无需修改。
+  - 设置分区重新整理为 9 个（现加 Agent 分区共 **10** 个），**设置键本身未重命名**，原有配置文件无需修改。
 
 ---
 
@@ -203,7 +203,27 @@
 
 ---
 
-## 10. 生效时机速查
+## 10. Agent（Copilot / MCP）
+
+| 设置项 | 类型 | 默认值 | 作用域 | 说明 |
+|--------|------|--------|--------|------|
+| `codeblocks.agent.enabled` | boolean | `true` |  | Agent 控制总闸：关闭后 11 个 Language Model Tools 不再注册、内嵌 MCP server 不暴露（已在运行的 MCP server 也拒绝调用）。**未受信任的工作区一律按关闭处理**。切换即时生效，无需重载窗口；独立的 `cb-cli` 不受影响。 |
+| `codeblocks.agent.readOnly` | boolean | `false` |  | 只读模式：仅放行 `project_read`、`build_status`、`compiler list/info`、`workspace info/deps/list` 与 `debug state`；改工程、构建、运行、调试一律返回 `read-only`。即时生效。 |
+
+示例：
+
+```jsonc
+{
+  "codeblocks.agent.enabled": true,
+  "codeblocks.agent.readOnly": false
+}
+```
+
+详见 [Agent 控制（Copilot / MCP / CLI）](./agent-control.md)。
+
+---
+
+## 11. 生效时机速查
 
 | 设置 | 生效时机 |
 |------|----------|
@@ -214,3 +234,4 @@
 | `debug.*` | 下一次调试会话 |
 | `compilerId` / `masterPath` / `compilerPrograms` | 即时刷新状态栏，并按需重新生成 clangd 编译数据库 |
 | `editor.*` / `astyleOptions` / `todo.keywords` / `tools` | 即时生效（工具菜单下次打开时刷新） |
+| `agent.enabled` / `agent.readOnly` | 即时生效（工具注册 / 只读拦截当场变化，无需重载窗口） |
