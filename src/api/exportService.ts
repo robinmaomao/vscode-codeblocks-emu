@@ -12,7 +12,8 @@ import { fail } from './types';
 import type { CompilerProvider } from './compilerService';
 import type { CbOutput } from '../build/cbChannel';
 
-export type ExportKind = 'makefile' | 'compile_commands' | 'commands';
+export const EXPORT_KINDS = ['makefile', 'compile_commands', 'commands'] as const;
+export type ExportKind = typeof EXPORT_KINDS[number];
 
 export interface ExportRequest {
   cbp: string;
@@ -43,15 +44,27 @@ export interface ExportOutcome {
 
 /** 导出 */
 export function exportProject(req: ExportRequest, deps: ExportServiceDeps): ExportOutcome {
+  if (typeof req.kind !== 'string' || !(EXPORT_KINDS as readonly string[]).includes(req.kind)) {
+    fail('invalid-input', `Unknown export kind: ${String(req.kind)}`, { allowed: [...EXPORT_KINDS] });
+  }
   const project = loadProject(req.cbp);
   const target = selectBuildTarget(project, req.target);
+
+  // out 必须留在工程目录内：Agent/MCP 不应对工作区外任意路径写文件
+  const resolveOut = (raw: string | undefined, fallback: string): string => {
+    const base = path.resolve(project.basePath);
+    const out = raw ? path.resolve(base, raw) : fallback;
+    const rel = path.relative(base, out);
+    if (rel.startsWith('..') || path.isAbsolute(rel)) {
+      fail('invalid-input', `out must stay inside the project directory: ${out}`, { projectDir: base });
+    }
+    return out;
+  };
 
   if (req.kind === 'makefile') {
     // 默认导出到 Makefile.cb（与 UI 的 Export Makefile 一致）：绝不覆盖工程里真正的 Makefile
     // ——自定义 Makefile 工程的 <Option makefile="…"> 指向用户手写文件，覆盖即数据丢失。
-    const out = req.out
-      ? path.resolve(project.basePath, req.out)
-      : path.join(project.basePath, 'Makefile.cb');
+    const out = resolveOut(req.out, path.join(project.basePath, 'Makefile.cb'));
     // 显式 out 也拦：命中工程声明的 Makefile 时拒绝（R2-01 的默认保证延伸到显式路径）。
     // 先判路径再生成内容：被拒绝的调用不该白跑一遍 makefile 生成。
     const configuredMakefile = project.makefile ? path.resolve(project.basePath, project.makefile) : undefined;
@@ -84,9 +97,7 @@ export function exportProject(req: ExportRequest, deps: ExportServiceDeps): Expo
     const systemIncludes = deps.systemIncludes?.(project, compiler) ?? [];
     const entries = collectClangdEntries(project, compiler, deps.output, systemIncludes);
     // 相对 out 按工程目录解析（扩展宿主的 process.cwd() 不可靠，可能是 System32）
-    const outDir = req.out
-      ? path.resolve(project.basePath, req.out)
-      : path.join(project.basePath, '.cb-tools', 'compile_commands');
+    const outDir = resolveOut(req.out, path.join(project.basePath, '.cb-tools', 'compile_commands'));
     const written = writeClangdDatabase(entries, outDir);
     return { kind: 'compile_commands', files: [written.outPath], count: written.count };
   }

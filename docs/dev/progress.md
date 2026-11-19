@@ -139,6 +139,8 @@ npm.cmd test
 
 > 当前版本 **0.9.2**（正式版；发布说明见 [release/0.9.2.md](../release/0.9.2.md)，上一版见 [release/0.9.1.md](../release/0.9.1.md)）；测试报告见 [test-report-0.9.2.md](../testing/test-report-0.9.2.md)；无头回归见 `npm test`（另有契约 / E2E / 视觉 / 性能 / 打包 / 宿主分层，见 [测试方案](../testing/strategy.md)）。
 
+> **0.9.2 全量逐项审计 + 修复轮**：E0–E4 证据分级覆盖 136 命令 / 93 设置 / 6 视图 / 34 键位 / 6 语言语法 / 30 DAP / 13 WebView 面 + Agent 11 工具 / CLI / MCP；命令入口冒烟 112→120 并新增分区守卫；发现并修复 D-01…D-13（P3 ×4 / P4 ×9，无 P1/P2）。修复含 Agent 三端运行期校验、`run` 退出码传播、`export out` 限定工程目录、mock Task/terminals，以及 36 条命令与 6 个设置的行为断言；无头 233/0/1、契约 3/0。报告见 [functional-audit-0.9.2.md](../testing/functional-audit-0.9.2.md)（§12 修复记录）。
+
 ## 文档：GitHub Release 页面格式统一
 
 - **背景**：Release 页面标题漂移成「`0.8.NNN — 中文主题 / English theme`」，正文也从 0.8.133 起逐步变成英文 / 中英混排，与 `0.8.127`–`0.8.131` 的发布页格式不一致。

@@ -272,7 +272,7 @@ function expectCode(label, code, fn) {
   // ---------- B16–B17 compile_commands 导出补齐系统头（与 UI 同源） ----------
   {
     const cbp = freshCopy('export');
-    const outDir = path.join(TMP, 'export-out');
+    const outDir = path.join(path.dirname(cbp), 'compile_commands_out');
     fs.rmSync(outDir, { recursive: true, force: true });
     const { exportProject } = require(path.join(ROOT, 'dist', 'api', 'exportService.js'));
     exportProject({ cbp, kind: 'compile_commands', out: outDir }, {

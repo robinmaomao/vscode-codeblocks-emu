@@ -7,7 +7,8 @@
 import type { BuildTarget, Project, ProjectFile, VirtualBuildTarget, Workspace } from '../model/types';
 import { fieldSpecs } from './types';
 
-export type QuerySection = 'summary' | 'targets' | 'files' | 'options' | 'schema' | 'all';
+export const QUERY_SECTIONS = ['summary', 'targets', 'files', 'options', 'schema', 'all'] as const;
+export type QuerySection = typeof QUERY_SECTIONS[number];
 
 export interface QueryOptions {
   section?: QuerySection;

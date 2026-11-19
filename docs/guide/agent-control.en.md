@@ -49,8 +49,8 @@ debug it, stop at main and print the local variables.
 
 | Tool | Main arguments | Purpose |
 |---|---|---|
-| `codeblocks_project_read` | `cbp?`, `section=summary\|targets\|files\|options\|schema\|all`, `target?` | Read the project model; `section=schema` returns the editable field catalog (works without a project); an unknown `target` fails with `invalid-input` plus the candidate list |
-| `codeblocks_project_edit` | `ops[]`, `dryRun?`, `format=canonical\|preserve`, `allowScripts?`, `force?` | Incremental edits; returns `changed[]` and `warnings[]` |
+| `codeblocks_project_read` | `cbp?`, `section=summary\|targets\|files\|options\|schema\|all`, `target?` | Read the project model; `section=schema` returns the editable field catalog (works without a project); an unknown `section` / `target` fails with `invalid-input` plus the allowed values |
+| `codeblocks_project_edit` | `ops[]`, `dryRun?`, `format=canonical\|preserve`, `allowScripts?`, `force?` | Incremental edits; returns `changed[]` and `warnings[]`; `format` only accepts `canonical` / `preserve`, anything else fails with `invalid-input` |
 | `codeblocks_project_file` | `action=add\|remove\|rename`, `file`, `targets?`, `to?` | Add/remove/rename project files |
 | `codeblocks_project_target` | `action=add\|remove\|rename`, `title`, `copyFrom?`, `targetType?` | Add/remove/rename build targets |
 | `codeblocks_build` | `cbp?`, `target?`, `mode=build\|rebuild\|clean`, `timeoutMs?`, `dryRun?` | Build and return structured diagnostics; `target` must exist on the project (otherwise `invalid-input` with the candidate list), a target that does not support the current platform returns `unsupported`, and `timeoutMs` cancels immediately (including makefile `make`) |
@@ -58,7 +58,7 @@ debug it, stop at main and print the local variables.
 | `codeblocks_run` | `cbp?`, `target?`, `args?`, `cwd?`, `timeoutMs?` | Run the target, capture output and exit code (non-interactive); a relative `cwd` is resolved against the **project directory**; `timeoutMs` defaults to **120000**, `0` means no limit |
 | `codeblocks_debug` | `action=start\|stop\|breakpoints\|state\|stack\|variables\|evaluate\|continue\|step\|run`, `timeoutMs?` | Debug control; `run` = start + breakpoints + stack/locals in one call (`includeStack` / `includeVariables` can turn the last two off to save tokens); `timeoutMs` bounds the wait for the program to stop (default 30000) for `start` / `run` / `continue` / `step`; `breakpoints` **replaces** the breakpoints of that file (the host may pre-set them before start, CLI/MCP must `start` first), and `run` applies its breakpoints through `start` |
 | `codeblocks_compiler` | `action=list\|info`, `compilerId?` | List compilers / resolve program paths |
-| `codeblocks_export` | `kind=makefile\|compile_commands\|commands`, `out?` | Export build information; defaults to `<project>/Makefile.cb` and `<project>/.cb-tools/compile_commands/`, and a relative `out` is resolved against the project directory; an `out` that matches the project Makefile (`<Option makefile>`) is refused |
+| `codeblocks_export` | `kind=makefile\|compile_commands\|commands`, `out?` | Export build information; defaults to `<project>/Makefile.cb` and `<project>/.cb-tools/compile_commands/`; an unknown `kind` fails with `invalid-input`; `out` must stay **inside the project directory** (otherwise `invalid-input`), and an `out` that matches the project Makefile (`<Option makefile>`) is refused |
 | `codeblocks_workspace` | `action=info\|deps\|list\|open\|close\|setActive` | `.workspace` and multi-project management; `deps` accepts absolute `project` / `dependencies` paths and writes them back workspace-relative (portable across machines); projects outside the workspace fail with `invalid-input` |
 
 Every tool accepts `cbp`; when omitted the active project is used.
@@ -161,7 +161,7 @@ Notes:
 - CLI/MCP `stopOnEntry` is approximated by a breakpoint on `main`, not DAP's entry stop.
 - When GDB is missing, CLI/MCP return `compiler-missing` (the hint names `codeblocks.debug.gdbPath`); the CLI exit code is 4.
 - `codeblocks_build`'s `timeoutMs` starts at the **build phase** (opening/parsing the project is not counted).
-- `codeblocks_export` defaults: `kind=makefile` → `<project>/Makefile.cb` (**never** overwrites the project's real Makefile); `kind=compile_commands` → `<project>/.cb-tools/compile_commands/`. A relative `out` is resolved against the **project directory**; consider ignoring `.cb-tools/`.
+- `codeblocks_export` defaults: `kind=makefile` → `<project>/Makefile.cb` (**never** overwrites the project's real Makefile); `kind=compile_commands` → `<project>/.cb-tools/compile_commands/`. A relative `out` is resolved against the **project directory** and must stay inside it (otherwise `invalid-input`); consider ignoring `.cb-tools/`.
 
 ---
 
@@ -182,8 +182,9 @@ Conventions:
 
 - **stdout carries only the result** (pure JSON with `--json`); build logs and warnings go to **stderr**.
   With `--json` a failure also prints `{ "ok": false, "error": { "code", "message", "details"? } }` on stdout (stderr keeps the text).
-- Exit codes: `0` ok, `1` unclassified, `2` usage, `3` validation/permission (including `no-build`, `read-only`, `disabled`),
-  `4` build or run failure (including `unsupported`, `timeout`), `5` write failure / project or workspace not found.
+- Exit codes: `0` ok, `1` unclassified, `2` usage (unknown flags, missing values; `--help` is `0`), `3` validation/permission (including `no-build`, `read-only`, `disabled`, `invalid-input`),
+  `4` build or run failure (including `unsupported`, `timeout`, `compiler-missing`), `5` write failure / project or workspace not found.
+- After `run` starts the program successfully, the CLI exit code is the **program's exit code** (e.g. the program returns 3 → CLI exits 3); only launch failures/timeouts map to `4` above.
 - `run` uses `--timeout` with a **120000ms** default (2 minutes); `--timeout 0` means no limit. `debug` also accepts `--timeout` (budget for the program to stop, default 30000ms) plus
   `--file` / `--lines` / `--expression` / `--frame` / `--kind` / `--stop-on-entry`; see `cb-cli --help` for the full list.
 - Settings resolution matches the extension: user `settings.json` -> workspace `.vscode/settings.json` -> `CB_*` env vars

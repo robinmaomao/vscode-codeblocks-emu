@@ -123,6 +123,7 @@ import { applyHeaderGuard } from './tools/headerGuard';
 import { tidyCommentBlock } from './tools/tidyComments';
 import { registerToolCommands } from './features/toolCommands';
 import { registerDebugInstructionCommands } from './features/debugCommands';
+import { useTaskTerminalForNoProjectCompile } from './features/noProjectCompileSettings';
 import { runCapture } from './tools/profiler';
 import { filterSymbols, parseNmOutput, SymbolRow } from './tools/symtab';
 import { parseToolsSetting, buildToolInvocation, ToolContext } from './tools/toolRunner';
@@ -768,6 +769,7 @@ function createAgentToolContext(): AgentToolContext {
     resourcesDir: compilerResourcesDir,
     getCompiler: (id?: string) => getCompiler(id),
     resolveTargetCompiler: (id: string) => resolveTargetCompiler(id),
+    isRegisteredCompiler: (id: string) => !!findRegisteredCompilerId(id, compilerRegistryDeps()),
   };
   return {
     settings,
@@ -9513,7 +9515,7 @@ function runWorkingDir(project: Project, target: BuildTarget, vars: Record<strin
  */
 async function compileFileWithoutProject(): Promise<void> {
   const cfg = vscode.workspace.getConfiguration('codeblocks');
-  if (cfg.get<boolean>('noProjectCompile.useTaskTerminal', false)) {
+  if (useTaskTerminalForNoProjectCompile()) {
     await compileFileWithoutProjectViaTask();
     return;
   }

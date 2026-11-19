@@ -36,6 +36,16 @@ export interface ProfilerCommandDeps {
   annotatedChannel(): vscode.OutputChannel;
 }
 
+/** gprof 命令（设置 codeblocks.profiler.gprofPath，空 = PATH 中的 gprof） */
+export function resolveGprofCommand(): string {
+  return vscode.workspace.getConfiguration('codeblocks').get<string>('profiler.gprofPath', '').trim() || 'gprof';
+}
+
+/** 是否运行 `gprof -A` 并把注解源码写入输出通道（codeblocks.profiler.annotatedSource） */
+export function annotatedSourceEnabled(): boolean {
+  return vscode.workspace.getConfiguration('codeblocks').get<boolean>('profiler.annotatedSource', true);
+}
+
 /** Profile target（gprof）—— 对齐 CB Tools → Profiler（cbprofiler.cpp:83-255） */
 export async function profileTarget(deps: ProfilerCommandDeps): Promise<void> {
   const project = deps.getProject();
@@ -109,7 +119,7 @@ export async function profileTarget(deps: ProfilerCommandDeps): Promise<void> {
     vscode.window.showErrorMessage(i18n.t('A fresh gmon.out was not found — rebuild the target with -pg and run it again'));
     return;
   }
-  const gprof = vscode.workspace.getConfiguration('codeblocks').get<string>('profiler.gprofPath', '').trim() || 'gprof';
+  const gprof = resolveGprofCommand();
   ch.appendLine(i18n.t('Running gprof: {0} "{1}" "{2}"', gprof, exePath, gmon));
   try {
     const gprofResult = await runCapture(gprof, [exePath, gmon], { cwd: path.dirname(exePath), timeoutMs: 2 * 60 * 1000 }, (line, stream) => {
@@ -136,7 +146,7 @@ export async function profileTarget(deps: ProfilerCommandDeps): Promise<void> {
       ch.appendLine(formatProfilerCallGraph(callGraph));
     }
 
-    if (vscode.workspace.getConfiguration('codeblocks').get<boolean>('profiler.annotatedSource', true)) {
+    if (annotatedSourceEnabled()) {
       try {
         const annotatedDir = path.dirname(exePath);
         const annotatedBefore = new Set(fs.readdirSync(annotatedDir).filter((name) => name.endsWith('.annotated')));

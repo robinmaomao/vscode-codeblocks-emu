@@ -1,5 +1,7 @@
 // 命令入口层 CI（F-12）：在可激活 mock 宿主中逐条调用非重命令，
 // 断言“命令已注册、入口可执行、无异常/无超时”。功能正确性仍由分域测试覆盖。
+// 分区守卫见 tests/test-command-inventory.js：除 HEAVY 外的命令都必须在此被执行，
+// 新增命令若既不在 HEAVY 里也未被本文件执行，守卫会报红。
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -16,12 +18,6 @@ const HEAVY = new Set([
   'codeblocks.installCompilerCache', 'codeblocks.findSymbolInLibraries', 'codeblocks.detectCompilers',
   'codeblocks.workspaceScanReport',
 ]);
-const DEFERRED = new Set([
-  'codeblocks.keybindings.panel', 'codeblocks.projectProperties', 'codeblocks.compilerOptions',
-  'codeblocks.keybindings.apply', 'codeblocks.keybindings.reset', 'codeblocks.debug.attachToProcess',
-]);
-const DESTRUCTIVE = new Set(['codeblocks.closeProject', 'codeblocks.removeProject']);
-const UI_PENDING = new Set(['codeblocks.detectCompilers']);
 
 async function withTimeout(promise, ms) {
   let timer;
@@ -40,12 +36,12 @@ async function withTimeout(promise, ms) {
 (async () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'cb-entry-'));
   const app = await activate({ tmpDir: tmp });
-  try { app.vscode.window.terminals = []; } catch { /* mock 无 terminals：补空数组即可 */ }
-  const ids = allIds.filter((id) => !HEAVY.has(id) && !DEFERRED.has(id) && !DESTRUCTIVE.has(id));
+  try { app.vscode.window.terminals.length = 0; } catch { /* mock 无 terminals：无需清理 */ }
+  const ids = allIds.filter((id) => !HEAVY.has(id));
   const failures = [];
   for (const id of ids) {
-    const r = await withTimeout(app.invoke(id), UI_PENDING.has(id) ? 2000 : 4000);
-    if (r.state !== 'ok' && !(r.state === 'timeout' && UI_PENDING.has(id))) failures.push({ id, ...r });
+    const r = await withTimeout(app.invoke(id), 4000);
+    if (r.state !== 'ok') failures.push({ id, ...r });
   }
   await app.deactivate().catch(() => undefined);
   if (failures.length) {
@@ -53,7 +49,7 @@ async function withTimeout(promise, ms) {
     console.log(`命令入口冒烟: ${ids.length - failures.length} pass, ${failures.length} fail（${allIds.length} 条声明）`);
     process.exit(1);
   }
-  console.log(`OK   命令入口冒烟：${ids.length}/${ids.length} 条非重命令可执行（${allIds.length} 条声明）`);
+  console.log(`OK   命令入口冒烟：${ids.length}/${allIds.length} 条命令可执行（其余 ${HEAVY.size} 条重命令由 e2e/host 覆盖）`);
   console.log(`命令入口冒烟: ${ids.length} pass, 0 fail（${allIds.length} 条声明）`);
   process.exit(0);
 })().catch((e) => { console.error(e && e.stack ? e.stack : e); process.exit(1); });

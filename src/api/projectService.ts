@@ -6,7 +6,7 @@ import { serializeProject } from '../model/projectWriter';
 import { applyEdits, applyUnitOptionToText, isPreserveCapable } from './projectEdit';
 import { captureSignature, loadProject, readProjectText, saveProject, signatureChanged, writeTextAtomic } from './projectStore';
 import type { EditChange, EditOp, WriteFormat } from './types';
-import { fail } from './types';
+import { fail, requireWriteFormat } from './types';
 
 export interface EditProjectOptions {
   dryRun?: boolean;
@@ -30,7 +30,7 @@ export interface EditProjectResult {
 
 /** 对工程应用一组编辑 */
 export function editProject(cbp: string, ops: EditOp[], opts: EditProjectOptions = {}): EditProjectResult {
-  const format: WriteFormat = opts.format === 'preserve' ? 'preserve' : 'canonical';
+  const format: WriteFormat = requireWriteFormat(opts.format);
   const guard = captureSignature(cbp);
 
   if (format === 'preserve' && isPreserveCapable(ops)) {

@@ -11,15 +11,15 @@ import type { Compiler } from '../compiler/compiler';
 import type { BuildCancelHandle } from '../build/cancelToken';
 import type { BuildLogSummary } from '../build/buildSummary';
 import { applyEdits, applyUnitOptionToText, isPreserveCapable } from './projectEdit';
-import { projectSnapshot, QuerySection, workspaceSnapshot } from './projectQuery';
+import { projectSnapshot, QUERY_SECTIONS, QuerySection, workspaceSnapshot } from './projectQuery';
 import { buildProject, BuildMode, BuildOutcome, BuildRequest, selectBuildTarget } from './buildService';
 import { runProject, RunOutcome, RunRequest, DEFAULT_RUN_TIMEOUT_MS } from './runService';
-import { exportProject, ExportKind, ExportOutcome } from './exportService';
+import { EXPORT_KINDS, exportProject, ExportKind, ExportOutcome } from './exportService';
 import { captureSignature, loadWorkspace, readProjectText, requireCbpPath, signatureChanged, updateWorkspaceDependencies, writeTextAtomic } from './projectStore';
 import type { CompilerProvider } from './compilerService';
 import type { CompilerSettingsLike } from '../compiler/compilerFactory';
 import type { CbOutput } from '../build/cbChannel';
-import { ControlError, EditChange, EditOp, fail, WriteFormat } from './types';
+import { ControlError, EditChange, EditOp, fail, requireWriteFormat, WRITE_FORMATS } from './types';
 import { normalizeDebugResult } from './debugShapes';
 import { isReadOnlyToolCall, READ_ONLY_HINT } from './agentPolicy';
 
@@ -99,7 +99,7 @@ function activeCbp(ctx: ToolContext): string | undefined {
 
 /** 解析目标工程：显式 cbp > 活动工程 */
 export function resolveCbp(ctx: ToolContext, input: Record<string, unknown>): string {
-  const explicit = typeof input.cbp === 'string' ? input.cbp : undefined;
+  const explicit = optionalText(input, 'cbp');
   if (explicit) return requireCbpPath(explicit);
   const active = activeCbp(ctx);
   if (active) return active;
@@ -116,6 +116,48 @@ async function loadForEdit(ctx: ToolContext, cbp: string): Promise<Project> {
   return JSON.parse(JSON.stringify(project)) as Project;
 }
 
+// ———— 运行期参数校验（schema enum 只在 LM 侧生效；CLI/MCP 必须由 handler 自己挡） ————
+
+/** 可选字符串：显式给出时不允许空串（`--target ""` 不得静默按缺省处理） */
+function optionalText(input: Record<string, unknown>, key: string): string | undefined {
+  const v = input[key];
+  if (v === undefined || v === null) return undefined;
+  if (typeof v !== 'string' || !v.trim()) {
+    fail('invalid-input', `${key} must be a non-empty string`, { got: v });
+  }
+  return v;
+}
+
+/** 可选有限数字：非数字 / NaN / Infinity / 越界一律报错 */
+function optionalNumber(
+  input: Record<string, unknown>,
+  key: string,
+  opts: { min?: number; integer?: boolean } = {},
+): number | undefined {
+  const v = input[key];
+  if (v === undefined || v === null) return undefined;
+  if (typeof v !== 'number' || !Number.isFinite(v)) {
+    fail('invalid-input', `${key} must be a finite number`, { got: v });
+  }
+  if (opts.integer && !Number.isInteger(v)) {
+    fail('invalid-input', `${key} must be an integer`, { got: v });
+  }
+  if (opts.min !== undefined && v < opts.min) {
+    fail('invalid-input', `${key} must be >= ${opts.min}`, { got: v });
+  }
+  return v;
+}
+
+/** 可选字符串数组（允许空数组；元素必须是字符串） */
+function optionalStringArray(input: Record<string, unknown>, key: string): string[] | undefined {
+  const v = input[key];
+  if (v === undefined || v === null) return undefined;
+  if (!Array.isArray(v) || v.some((x) => typeof x !== 'string')) {
+    fail('invalid-input', `${key} must be an array of strings`, { got: v });
+  }
+  return v as string[];
+}
+
 // ———— 工具实现 ————
 
 const projectRead: ToolDefinition = {
@@ -126,17 +168,21 @@ const projectRead: ToolDefinition = {
     type: 'object',
     properties: {
       cbp: { type: 'string', description: 'Absolute path to the .cbp (defaults to the active project)' },
-      section: { type: 'string', enum: ['summary', 'targets', 'files', 'options', 'schema', 'all'], description: 'Which slice to return' },
+      section: { type: 'string', enum: [...QUERY_SECTIONS], description: 'Which slice to return' },
       target: { type: 'string', description: 'Restrict targets/files/options to one target title' },
     },
   },
   async handler(ctx, input) {
-    const section = (input.section as QuerySection) ?? 'all';
+    const rawSection = input.section;
+    if (rawSection !== undefined && (typeof rawSection !== 'string' || !(QUERY_SECTIONS as readonly string[]).includes(rawSection))) {
+      fail('invalid-input', `Unknown section: ${String(rawSection)}`, { allowed: [...QUERY_SECTIONS] });
+    }
+    const section = (rawSection as QuerySection | undefined) ?? 'all';
     if (section === 'schema') {
       return { schema: projectSnapshot({ buildTargets: [], files: [] } as unknown as Project, { section: 'schema' }).schema };
     }
     const cbp = resolveCbp(ctx, input);
-    const target = typeof input.target === 'string' ? input.target : undefined;
+    const target = optionalText(input, 'target');
     const project = await ctx.loadProject(cbp);
     // 未知 target 必须显式报错：返回 { ok:true, error } 会让只检查 ok 的 agent 误判成功
     if (target && !project.buildTargets.some((t) => t.title === target)) {
@@ -161,7 +207,7 @@ const projectEdit: ToolDefinition = {
       cbp: { type: 'string', description: 'Absolute path to the .cbp (defaults to the active project)' },
       ops: { type: 'array', description: 'Edit operations (see section=schema)', items: { type: 'object' } },
       dryRun: { type: 'boolean', description: 'Validate and preview without writing' },
-      format: { type: 'string', enum: ['canonical', 'preserve'], description: 'Write format (default canonical)' },
+      format: { type: 'string', enum: [...WRITE_FORMATS], description: 'Write format (default canonical)' },
       allowScripts: { type: 'boolean', description: 'Required to edit build scripts / pre-post commands' },
       force: { type: 'boolean', description: 'Overwrite even if the file was modified externally' },
     },
@@ -169,8 +215,9 @@ const projectEdit: ToolDefinition = {
   },
   async handler(ctx, input) {
     const cbp = resolveCbp(ctx, input);
+    if (!Array.isArray(input.ops)) fail('invalid-input', 'ops must be an array of edit operations', { got: input.ops });
     const ops = input.ops as EditOp[];
-    const format = (input.format as WriteFormat) ?? 'canonical';
+    const format = requireWriteFormat(input.format);
     const dryRun = input.dryRun === true;
 
     // preserve：只有 compile/link 定点改写，直接对磁盘文本操作
@@ -249,6 +296,9 @@ function structuralTool(
       required: ['action'],
     },
     async handler(ctx, input) {
+      if (typeof input.action !== 'string' || !actionEnum.includes(input.action)) {
+        fail('invalid-input', `Unknown action: ${String(input.action)}`, { allowed: actionEnum });
+      }
       const cbp = resolveCbp(ctx, input);
       const op = toOp(input);
       const guard = captureSignature(cbp);
@@ -322,18 +372,24 @@ const build: ToolDefinition = {
   },
   async handler(ctx, input) {
     const cbp = resolveCbp(ctx, input);
-    const mode = (input.mode as BuildMode) ?? 'build';
+    const rawMode = input.mode;
+    if (rawMode !== undefined && !['build', 'rebuild', 'clean'].includes(String(rawMode))) {
+      fail('invalid-input', `Unknown build mode: ${String(rawMode)}`, { allowed: ['build', 'rebuild', 'clean'] });
+    }
+    const mode = (rawMode as BuildMode | undefined) ?? 'build';
+    const target = optionalText(input, 'target');
+    const timeoutMs = optionalNumber(input, 'timeoutMs', { min: 0 });
     if (input.dryRun === true) {
       const project = await ctx.loadProject(cbp);
-      const target = selectBuildTarget(project, typeof input.target === 'string' ? input.target : undefined);
-      return { ok: true, dryRun: true, cbp, target, mode, targets: project.buildTargets.map((t) => t.title) };
+      const resolved = selectBuildTarget(project, target);
+      return { ok: true, dryRun: true, cbp, target: resolved, mode, targets: project.buildTargets.map((t) => t.title) };
     }
     if (ctx.isBuildInProgress?.()) fail('build-busy', 'A build is already running');
     const outcome = await ctx.build({
       cbp,
-      target: typeof input.target === 'string' ? input.target : undefined,
+      target,
       mode,
-      timeoutMs: typeof input.timeoutMs === 'number' ? input.timeoutMs : undefined,
+      timeoutMs,
     });
     return {
       ok: outcome.ok,
@@ -361,9 +417,14 @@ const buildStatus: ToolDefinition = {
   async handler(ctx, input) {
     const summary = ctx.lastBuild?.();
     if (!summary) fail('no-build', 'No build has been run in this session yet', { hint: 'Run codeblocks_build first.' });
-    const severity = (input.severity as string) ?? 'all';
-    const tail = typeof input.tail === 'number' && input.tail > 0 ? input.tail : 0;
-    const cbp = typeof input.cbp === 'string' ? path.resolve(input.cbp) : undefined;
+    const rawSeverity = input.severity;
+    if (rawSeverity !== undefined && !['error', 'warning', 'all'].includes(String(rawSeverity))) {
+      fail('invalid-input', `Unknown severity: ${String(rawSeverity)}`, { allowed: ['error', 'warning', 'all'] });
+    }
+    const severity = (rawSeverity as string | undefined) ?? 'all';
+    const tail = optionalNumber(input, 'tail', { min: 0, integer: true }) ?? 0;
+    const cbpInput = optionalText(input, 'cbp');
+    const cbp = cbpInput ? path.resolve(cbpInput) : undefined;
     const projects = summary!.projects
       .filter((p) => !cbp || p.projectName === path.basename(path.dirname(cbp)))
       .map((p) => ({
@@ -394,11 +455,11 @@ const run: ToolDefinition = {
     const cbp = resolveCbp(ctx, input);
     const req: RunRequest = {
       cbp,
-      target: typeof input.target === 'string' ? input.target : undefined,
+      target: optionalText(input, 'target'),
       args: typeof input.args === 'string' ? input.args : undefined,
-      cwd: typeof input.cwd === 'string' ? input.cwd : undefined,
+      cwd: optionalText(input, 'cwd'),
       // 未显式指定时用默认上限，避免死循环程序永久占住工具调用（显式 0 = 不限时）
-      timeoutMs: typeof input.timeoutMs === 'number' ? input.timeoutMs : DEFAULT_RUN_TIMEOUT_MS,
+      timeoutMs: optionalNumber(input, 'timeoutMs', { min: 0 }) ?? DEFAULT_RUN_TIMEOUT_MS,
     };
     return runProject(req, { compiler: ctx.compiler });
   },
@@ -437,29 +498,41 @@ const debug: ToolDefinition = {
     const bridge = ctx.debug!;
     // 两种传输（DAP / gdb MI）形状不同 ⇒ 统一归一化后再返回（见 api/debugShapes.ts）
     const norm = (kind: string, value: unknown): unknown => normalizeDebugResult(kind, value);
+    // 运行期参数校验：LM schema 的 enum/type 不会约束 CLI/MCP
+    const target = optionalText(input, 'target');
+    const args = typeof input.args === 'string' ? input.args : undefined;
+    const timeoutMs = optionalNumber(input, 'timeoutMs', { min: 0 });
+    const frameId = optionalNumber(input, 'frameId', { min: 0, integer: true });
+    const linesInput = input.lines;
+    if (linesInput !== undefined && (!Array.isArray(linesInput) || linesInput.some((n) => typeof n !== 'number' || !Number.isInteger(n) || n < 1))) {
+      fail('invalid-input', 'lines must be an array of positive integers', { got: linesInput });
+    }
+    const lines = (linesInput as number[] | undefined) ?? [];
+    if (input.kind !== undefined && !['next', 'stepIn', 'stepOut'].includes(String(input.kind))) {
+      fail('invalid-input', `Unknown step kind: ${String(input.kind)}`, { allowed: ['next', 'stepIn', 'stepOut'] });
+    }
     switch (action) {
       case 'start':
         return norm('start', await bridge.start({
           cbp: resolveCbp(ctx, input),
-          target: typeof input.target === 'string' ? input.target : undefined,
-          args: typeof input.args === 'string' ? input.args : undefined,
+          target,
+          args,
           stopOnEntry: input.stopOnEntry === true,
-          timeoutMs: typeof input.timeoutMs === 'number' ? input.timeoutMs : undefined,
+          timeoutMs,
         }));
       case 'stop': return norm('stop', await bridge.stop());
       case 'run': {
-        const file = typeof input.file === 'string' ? input.file : undefined;
-        const lines = Array.isArray(input.lines) ? (input.lines as number[]) : [];
+        const file = optionalText(input, 'file');
         // 断点统一由 start 应用：CLI/MCP 的调试桥在 start 之前没有会话，
         // 先 setBreakpoints 会直接报 not-running（宿主侧则会在 startDebugging 前预置）。
         const started = await bridge.start({
           cbp: resolveCbp(ctx, input),
-          target: typeof input.target === 'string' ? input.target : undefined,
-          args: typeof input.args === 'string' ? input.args : undefined,
+          target,
+          args,
           stopOnEntry: input.stopOnEntry === true,
           file,
           lines,
-          timeoutMs: typeof input.timeoutMs === 'number' ? input.timeoutMs : undefined,
+          timeoutMs,
         });
         const stack = input.includeStack === false ? undefined : await bridge.stack().catch(() => undefined);
         const variables = input.includeVariables === false ? undefined : await bridge.variables().catch(() => undefined);
@@ -469,24 +542,28 @@ const debug: ToolDefinition = {
           variables: variables === undefined ? undefined : norm('variables', variables),
         };
       }
-      case 'breakpoints':
+      case 'breakpoints': {
+        const file = optionalText(input, 'file');
+        if (!file) fail('invalid-input', 'file is required for breakpoints', { hint: 'Pass an absolute source file path.' });
         return norm('breakpoints', await bridge.setBreakpoints({
-          cbp: typeof input.cbp === 'string' ? input.cbp : activeCbp(ctx),
-          file: String(input.file ?? ''),
-          lines: Array.isArray(input.lines) ? (input.lines as number[]) : [],
+          cbp: optionalText(input, 'cbp') ?? activeCbp(ctx),
+          file: file!,
+          lines,
         }));
+      }
       case 'state': return norm('state', await bridge.state());
       case 'stack': return norm('stack', await bridge.stack());
       case 'variables':
-        return norm('variables', await bridge.variables({ frameId: typeof input.frameId === 'number' ? input.frameId : undefined }));
-      case 'evaluate':
-        return norm('evaluate', await bridge.evaluate({ expression: String(input.expression ?? ''), frameId: typeof input.frameId === 'number' ? input.frameId : undefined }));
-      case 'continue': return norm('continue', await bridge.continue({
-        timeoutMs: typeof input.timeoutMs === 'number' ? input.timeoutMs : undefined,
-      }));
+        return norm('variables', await bridge.variables({ frameId }));
+      case 'evaluate': {
+        const expression = typeof input.expression === 'string' ? input.expression : '';
+        if (!expression.trim()) fail('invalid-input', 'expression is required for evaluate');
+        return norm('evaluate', await bridge.evaluate({ expression, frameId }));
+      }
+      case 'continue': return norm('continue', await bridge.continue({ timeoutMs }));
       case 'step': return norm('step', await bridge.step({
-        kind: (input.kind as 'next' | 'stepIn' | 'stepOut') ?? 'next',
-        timeoutMs: typeof input.timeoutMs === 'number' ? input.timeoutMs : undefined,
+        kind: (input.kind as 'next' | 'stepIn' | 'stepOut' | undefined) ?? 'next',
+        timeoutMs,
       }));
       default: fail('invalid-input', `Unknown debug action: ${action}`);
     }
@@ -509,6 +586,9 @@ const compiler: ToolDefinition = {
   },
   async handler(ctx, input) {
     const action = String(input.action);
+    if (action !== 'list' && action !== 'info' && action !== 'set') {
+      fail('invalid-input', `Unknown compiler action: ${action}`, { allowed: ['list', 'info', 'set'] });
+    }
     if (action === 'list') {
       const dir = ctx.compiler.resourcesDir;
       let ids: string[] = [];
@@ -524,7 +604,15 @@ const compiler: ToolDefinition = {
       return { resourcesDir: dir, compilers: ids, configured: ctx.settings.get<string>('compilerId', 'gcc') };
     }
     if (action === 'info') {
-      const id = typeof input.compilerId === 'string' ? input.compilerId : ctx.settings.get<string>('compilerId', 'gcc');
+      const id = optionalText(input, 'compilerId') ?? ctx.settings.get<string>('compilerId', 'gcc');
+      // 未注册 id 必须报错：getCompiler 会用默认工具链合成一个实例，看起来「存在且版本正常」
+      const registered = typeof ctx.compiler.isRegisteredCompiler === 'function' ? ctx.compiler.isRegisteredCompiler(id) : true;
+      if (!registered) {
+        fail('invalid-input', `Unknown compiler id: ${id} — use action=list to see available compiler ids, or set codeblocks.compilerId.`, {
+          hint: 'Use action=list to see available compiler ids, or set codeblocks.compilerId.',
+          configured: ctx.settings.get<string>('compilerId', 'gcc'),
+        });
+      }
       const c = ctx.compiler.getCompiler(id);
       return {
         compilerId: id,
@@ -551,9 +639,9 @@ const exportTool: ToolDefinition = {
     type: 'object',
     properties: {
       cbp: { type: 'string', description: 'Absolute path to the .cbp (defaults to the active project)' },
-      kind: { type: 'string', enum: ['makefile', 'compile_commands', 'commands'] },
+      kind: { type: 'string', enum: [...EXPORT_KINDS] },
       target: { type: 'string', description: 'Target title' },
-      out: { type: 'string', description: 'Output file (makefile) or directory (compile_commands)' },
+      out: { type: 'string', description: 'Output file (makefile) or directory (compile_commands); must stay inside the project directory' },
     },
     required: ['kind'],
   },
@@ -562,8 +650,8 @@ const exportTool: ToolDefinition = {
     return exportProject({
       cbp,
       kind: input.kind as ExportKind,
-      target: typeof input.target === 'string' ? input.target : undefined,
-      out: typeof input.out === 'string' ? input.out : undefined,
+      target: optionalText(input, 'target'),
+      out: optionalText(input, 'out'),
     }, { compiler: ctx.compiler, output: ctx.output, systemIncludes: ctx.systemIncludes });
   },
 };
@@ -585,6 +673,9 @@ const workspace: ToolDefinition = {
   },
   async handler(ctx, input) {
     const action = String(input.action);
+    if (!['info', 'deps', 'open', 'close', 'setActive', 'list'].includes(action)) {
+      fail('invalid-input', `Unknown workspace action: ${action}`, { allowed: ['info', 'deps', 'open', 'close', 'setActive', 'list'] });
+    }
     if (action === 'list') return { projects: ctx.listOpenProjects?.() ?? [] };
     if (action === 'open' || action === 'close' || action === 'setActive') {
       if (!ctx.openProject && !ctx.setActiveProject) fail('unsupported', 'Project management is only available in the VS Code extension');
@@ -594,18 +685,14 @@ const workspace: ToolDefinition = {
       await ctx.setActiveProject?.(cbp);
       return { ok: true, active: cbp };
     }
-    const wsPath = typeof input.workspace === 'string' ? input.workspace : undefined;
+    const wsPath = optionalText(input, 'workspace');
     if (!wsPath) fail('invalid-input', 'A .workspace path is required');
     if (action === 'info') return workspaceSnapshot(loadWorkspace(wsPath!));
     // deps：project / dependencies 都接受绝对路径（相对路径按 workspace 目录解析），
     // 落盘统一写成 workspace 相对路径（Code::Blocks 的 <Project filename> 语义，跨机器可移植）。
-    const project = typeof input.project === 'string' ? input.project : undefined;
+    const project = optionalText(input, 'project');
     if (!project) fail('invalid-input', 'A project path is required for deps');
-    const depsInput = input.dependencies;
-    // 类型错误必须显式报错：静默按 [] 处理会清空工程依赖（数据丢失）
-    if (depsInput !== undefined && (!Array.isArray(depsInput) || depsInput.some((d) => typeof d !== 'string'))) {
-      fail('invalid-input', 'dependencies must be an array of project paths');
-    }
+    const depsInput = optionalStringArray(input, 'dependencies');
     const ws = loadWorkspace(wsPath!);
     const normAbs = (p: string): string => path.resolve(p).replace(/\\/g, '/').toLowerCase();
     const relOf = (p: string): string | undefined => {

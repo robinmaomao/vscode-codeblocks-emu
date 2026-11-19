@@ -43,6 +43,16 @@ class ThemeIcon { constructor(id) { this.id = id; } }
 class ThemeColor { constructor(id) { this.id = id; } }
 const QuickPickItemKind = { Separator: -1, Default: 0 };
 class MarkdownString { constructor(value) { this.value = value; } appendText(t) { this.value += t; return this; } appendMarkdown(t) { this.value += t; return this; } appendCodeblock(t, lang) { this.value += '```' + (lang || '') + '\n' + t + '\n```'; return this; } }
+class ShellExecution { constructor(command, options) { this.command = command; this.options = options; } }
+class Task {
+  constructor(definition, scope, name, source, execution, problemMatchers) {
+    Object.assign(this, { definition, scope, name, source, execution, problemMatchers });
+  }
+}
+const TaskScope = { Global: 1, Workspace: 2, Folder: 3 };
+const TaskGroup = { Build: { id: 'build' }, Test: { id: 'test' }, Clean: { id: 'clean' }, Rebuild: { id: 'rebuild' } };
+const TaskRevealKind = { Always: 1, Silent: 2, Never: 3 };
+const TaskPanelKind = { Shared: 1, Dedicated: 2, New: 3 };
 
 class Position { constructor(line, character) { this.line = line; this.character = character; } }
 class Range { constructor(a, b, c, d) { Object.assign(this, typeof a === 'number' ? { start: new Position(a, b), end: new Position(c, d) } : { start: a, end: b }); } }
@@ -88,6 +98,12 @@ function createVscodeMock(opts = {}) {
   const installedExtensions = new Map();
   /** 命令处理器注册表：commandId → 处理器数组（供测试直接调用） */
   const commandHandlers = new Map();
+  /** 集成终端列表（createTerminal 记录；同名终端回收断言用） */
+  const terminals = [];
+  /** 已执行任务（executeTask 记录；任务化编译回归用） */
+  const taskExecutions = [];
+  const taskEndListeners = [];
+  const debugStarts = [];
 
   const makeWebview = (kind, title, column, options) => {
     const msgListeners = [];
@@ -245,6 +261,7 @@ function createVscodeMock(opts = {}) {
     window: {
       activeTextEditor: undefined,
       visibleTextEditors: [],
+      terminals,
       createWebviewPanel: (kind, title, column, options) => (opts.captureWebviews === false ? fallback('WebviewPanel')() : makeWebview(kind, title, column, options)),
       createOutputChannel: (name) => {
         const ch = { name, lines: [], append: (t) => ch.lines.push(t), appendLine: (t) => ch.lines.push(t), replace: () => {}, clear: () => { ch.lines = []; }, show: () => {}, hide: () => {}, dispose: () => {}, log: noop, warn: noop, error: noop, debug: noop, trace: noop, info: noop };
@@ -257,7 +274,21 @@ function createVscodeMock(opts = {}) {
         return item;
       },
       createTreeView: () => ({ onDidChangeVisibility: () => new Disposable(), onDidChangeSelection: () => new Disposable(), reveal: () => Promise.resolve(), dispose: noop, badge: undefined }),
-      createTerminal: () => ({ sendText: noop, show: noop, hide: noop, dispose: noop, processId: Promise.resolve(0) }),
+      createTerminal: (options) => {
+        const term = {
+          name: options?.name ?? 'mock-terminal',
+          sendText: noop,
+          show: noop,
+          hide: noop,
+          processId: Promise.resolve(0),
+          dispose: () => {
+            const i = terminals.indexOf(term);
+            if (i >= 0) terminals.splice(i, 1);
+          },
+        };
+        terminals.push(term);
+        return term;
+      },
       createTextEditorDecorationType: () => ({ dispose: noop, key: 'mock' }),
       createQuickPick: () => ({ items: [], selectedItems: [], value: '', placeholder: '', title: '', activeItems: [], ignoreFocusOut: false, onDidChangeValue: () => new Disposable(), onDidChangeSelection: () => new Disposable(), onDidAccept: () => new Disposable(), onDidHide: () => new Disposable(), show: noop, hide: noop, dispose: noop }),
       createInputBox: () => ({ value: '', placeholder: '', title: '', onDidChangeValue: () => new Disposable(), onDidAccept: () => new Disposable(), onDidHide: () => new Disposable(), show: noop, hide: noop, dispose: noop }),
@@ -303,7 +334,7 @@ function createVscodeMock(opts = {}) {
       registerDebugAdapterDescriptorFactory: () => new Disposable(),
       registerDebugConfigurationProvider: () => new Disposable(),
       registerDebugAdapterTrackerFactory: () => new Disposable(),
-      startDebugging: () => Promise.resolve(true),
+      startDebugging: (folder, config) => { debugStarts.push({ folder, config }); return Promise.resolve(true); },
       stopDebugging: () => Promise.resolve(),
       activeDebugSession: undefined,
       breakpoints: [],
@@ -311,7 +342,36 @@ function createVscodeMock(opts = {}) {
       onDidStartDebugSession: () => new Disposable(), onDidTerminateDebugSession: () => new Disposable(),
       onDidReceiveDebugSessionCustomEvent: () => new Disposable(),
     },
-    tasks: { registerTaskProvider: () => new Disposable(), fetchTasks: () => Promise.resolve([]), executeTask: () => Promise.resolve({}) },
+    Task,
+    ShellExecution,
+    TaskScope,
+    TaskGroup,
+    TaskRevealKind,
+    TaskPanelKind,
+    tasks: {
+      Task,
+      ShellExecution,
+      TaskScope,
+      TaskGroup,
+      TaskRevealKind,
+      TaskPanelKind,
+      TaskRevealKind,
+      TaskPanelKind,
+      registerTaskProvider: () => new Disposable(),
+      fetchTasks: () => Promise.resolve(taskExecutions.map((t) => t.task)),
+      executeTask: (task) => {
+        const execution = { task, terminate: noop };
+        taskExecutions.push(execution);
+        return Promise.resolve(execution);
+      },
+      onDidEndTaskProcess: (listener) => {
+        taskEndListeners.push(listener);
+        return new Disposable(() => {
+          const i = taskEndListeners.indexOf(listener);
+          if (i >= 0) taskEndListeners.splice(i, 1);
+        });
+      },
+    },
     extensions_: undefined,
     comments: { createCommentController: () => ({ dispose: noop, createCommentThread: () => ({ dispose: noop, replies: [] }), commentingRangeProvider: undefined, options: {} }) },
     notebooks: { registerNotebookSerializer: () => new Disposable() },
@@ -329,7 +389,11 @@ function createVscodeMock(opts = {}) {
   });
 
   return {
-    vscode: proxied, webviews, channels, warnings, infos, configStore, configUpdates, fileWatchers, commandHandlers, findFilesCalls, statusBarItems,
+    vscode: proxied, webviews, channels, warnings, infos, configStore, configUpdates, fileWatchers, commandHandlers, findFilesCalls, statusBarItems, taskExecutions, debugStarts,
+    /** 测试用：派发任务结束事件（exitCode 0 触发“编译后询问运行”路径） */
+    emitTaskEnd(execution, exitCode) {
+      for (const l of [...taskEndListeners]) l({ execution, exitCode });
+    },
     /** 测试用：向 .cbp 监视器派发事件（kind: create | change | delete） */
     emitFileEvent(kind, fsPath) {
       const target = fileWatchers.find((w) => String(w.pattern || '').includes('.cbp'));

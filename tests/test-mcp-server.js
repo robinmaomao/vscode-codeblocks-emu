@@ -47,6 +47,20 @@ function check(name, cond, got) {
   const unknown = await client.callTool({ name: 'codeblocks_unknown', arguments: {} });
   check('M6 未知工具报错', unknown.isError === true && /Unknown tool/.test(unknown.content?.[0]?.text ?? ''));
 
+  // ---------- M11–M14 运行期校验（schema enum 不会约束 MCP 客户端） ----------
+  const badSection = await client.callTool({ name: 'codeblocks_project_read', arguments: { cbp: CBP, section: 'nope' } });
+  check('M11 非法 section → invalid-input', badSection.isError === true && /invalid-input/.test(badSection.content?.[0]?.text ?? ''),
+    (badSection.content?.[0]?.text ?? '').slice(0, 160));
+  const badKind = await client.callTool({ name: 'codeblocks_export', arguments: { cbp: CBP, kind: 'nope' } });
+  check('M12 非法 export kind → invalid-input', badKind.isError === true && /invalid-input/.test(badKind.content?.[0]?.text ?? ''),
+    (badKind.content?.[0]?.text ?? '').slice(0, 160));
+  const badCompiler = await client.callTool({ name: 'codeblocks_compiler', arguments: { action: 'info', compilerId: 'nope' } });
+  check('M13 未知编译器 id → invalid-input', badCompiler.isError === true && /invalid-input/.test(badCompiler.content?.[0]?.text ?? ''),
+    (badCompiler.content?.[0]?.text ?? '').slice(0, 160));
+  const badTimeout = await client.callTool({ name: 'codeblocks_build', arguments: { cbp: CBP, dryRun: true, timeoutMs: 'abc' } });
+  check('M14 timeoutMs 非数字 → invalid-input', badTimeout.isError === true && /invalid-input/.test(badTimeout.content?.[0]?.text ?? ''),
+    (badTimeout.content?.[0]?.text ?? '').slice(0, 160));
+
   await client.close();
 
   /** 用给定工作区设置启动一个独立 server（cwd 指向临时工作区，隔离用户设置） */

@@ -161,6 +161,16 @@ export interface EditOutcome {
 /** 写盘格式：canonical = 规范化整体重写；preserve = 仅定点改写（不支持时自动降级） */
 export type WriteFormat = 'canonical' | 'preserve';
 
+/** 写盘格式枚举（运行期校验与 LM schema 共用，防止 CLI/MCP 绕过 enum） */
+export const WRITE_FORMATS: readonly WriteFormat[] = ['canonical', 'preserve'];
+
+/** 校验写盘格式：未知值 → invalid-input（不再静默回退 canonical） */
+export function requireWriteFormat(value: unknown): WriteFormat {
+  if (value === undefined || value === null || value === '') return 'canonical';
+  if (value === 'canonical' || value === 'preserve') return value;
+  fail('invalid-input', `Unknown write format: ${String(value)}`, { allowed: [...WRITE_FORMATS] });
+}
+
 // ———— 字段白名单 ————
 
 const PROJECT_FIELDS: FieldSpec[] = [
