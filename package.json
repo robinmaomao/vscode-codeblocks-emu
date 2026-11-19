@@ -2,7 +2,7 @@
   "name": "codeblocks-vscode",
   "displayName": "%extension.displayName%",
   "description": "%extension.description%",
-  "version": "0.9.1",
+  "version": "0.9.2",
   "icon": "resources/icon.png",
   "publisher": "robinmaomao",
   "author": {
@@ -19,6 +19,12 @@
   },
   "engines": {
     "vscode": "^1.102.0"
+  },
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": false,
+      "description": "%capabilities.untrustedWorkspaces.description%"
+    }
   },
   "categories": [
     "Programming Languages",
@@ -2752,11 +2758,11 @@
             },
             "cwd": {
               "type": "string",
-              "description": "Override the working directory"
+              "description": "Override the working directory (relative paths resolve against the project directory)"
             },
             "timeoutMs": {
               "type": "integer",
-              "description": "Kill the program after this many milliseconds"
+              "description": "Kill the program after this many milliseconds (default 120000; 0 = no limit)"
             }
           }
         }
@@ -2830,6 +2836,18 @@
                 "stepOut"
               ],
               "description": "Step kind"
+            },
+            "timeoutMs": {
+              "type": "integer",
+              "description": "start/run/continue/step: how long to wait for the program to stop (default 30000)"
+            },
+            "includeStack": {
+              "type": "boolean",
+              "description": "run: also return the stack trace (default true)"
+            },
+            "includeVariables": {
+              "type": "boolean",
+              "description": "run: also return the top-frame variables (default true)"
             }
           },
           "required": [
@@ -2936,7 +2954,7 @@
             },
             "project": {
               "type": "string",
-              "description": "Project path the dependencies belong to (deps)"
+              "description": "Project the dependencies belong to (absolute or workspace-relative path)"
             },
             "cbp": {
               "type": "string",
@@ -2947,7 +2965,7 @@
               "items": {
                 "type": "string"
               },
-              "description": "Dependency project paths (deps)"
+              "description": "Dependency project paths (absolute or workspace-relative; written back as relative)"
             }
           },
           "required": [

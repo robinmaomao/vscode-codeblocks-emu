@@ -333,5 +333,6 @@
   "tool.codeblocks_export.userDescription": "导出 Makefile、compile_commands.json 或编译命令",
   "tool.codeblocks_workspace.displayName": "管理工作区与工程依赖",
   "tool.codeblocks_workspace.userDescription": "读取 .workspace 并编辑工程间依赖",
-  "mcp.codeblocks.label": "Code::Blocks（本地工程服务）"
+  "mcp.codeblocks.label": "Code::Blocks（本地工程服务）",
+  "capabilities.untrustedWorkspaces.description": "Code::Blocks 会调用工具链、执行工程里的 Makefile 与构建脚本，并启动调试器。请先信任该工作区。"
 }

@@ -2,7 +2,7 @@
 
 > 语言：**中文** ｜ [English](./usage.en.md)
 >
-> 版本：0.9.1 ｜ 本扩展为 Code::Blocks 核心功能的原生移植，直接驱动 GCC / GDB，**不依赖** `tasks.json` / `launch.json`。
+> 版本：0.9.2 ｜ 本扩展为 Code::Blocks 核心功能的原生移植，直接驱动 GCC / GDB，**不依赖** `tasks.json` / `launch.json`。
 
 ---
 
@@ -51,7 +51,7 @@ Code::Blocks for VS Code 是一个「迷你 IDE 内核」：直接解析 `.cbp` 
 ### 2.1 从 VSIX 安装
 
 ```powershell
-code --install-extension codeblocks-vscode-0.9.1.vsix --force
+code --install-extension codeblocks-vscode-0.9.2.vsix --force
 ```
 
 ### 2.2 从源码构建
@@ -59,7 +59,7 @@ code --install-extension codeblocks-vscode-0.9.1.vsix --force
 ```powershell
 npm install
 npm run package
-code --install-extension codeblocks-vscode-0.9.1.vsix --force
+code --install-extension codeblocks-vscode-0.9.2.vsix --force
 ```
 
 > `npm run package` = `vsce package`（打包前自动执行 `vscode:prepublish` 钩子 = `tsc` 编译（`dist/`，本地测试用）+ **esbuild 单文件打包**（`bundle/extension.js`，发布入口））；
@@ -779,7 +779,7 @@ Build Log 视图位于**底部 Panel**（打开方式：`Ctrl+J` 后选择「Bui
 | 设置项 | 默认值 | 说明 |
 |--------|--------|------|
 | `codeblocks.agent.enabled` | `true` | Agent 控制总闸：关闭后 11 个 Language Model Tools 不注册、内嵌 MCP server 不暴露；未受信任工作区一律按关闭处理。切换即时生效（独立的 `cb-cli` 不受影响） |
-| `codeblocks.agent.readOnly` | `false` | 只读模式：只放行 `project_read` / `build_status` / `compiler list,info` / `workspace info,deps,list` / `debug state`，其余返回 `read-only` |
+| `codeblocks.agent.readOnly` | `false` | 只读模式：只放行 `project_read` / `build_status` / `compiler list,info` / `workspace info,deps,list` / `debug state,stack,variables`，其余返回 `read-only` |
 
 ---
 
@@ -1028,12 +1028,15 @@ A：**已全覆盖**（0.8.132 批次 2，2026-11 菜单优化后同步）。构
 > 详情与决策见 [未实现功能待办](../dev/backlog.md) §2（明确不移植清单）。
 > 提醒：以上扩展为社区/厂商产品，请自行评估安装；本扩展不内置或捆绑它们。
 
-## 17. 0.9.1 缺陷修复
+## 17. 0.9.2 缺陷修复
 
-- **clangd 重启单飞**：上一次 `clangd.restart` 未结束时到达的重启请求改为「结束后补跑一次」，不再并发排期——避免慢重启（等客户端启动最长 20s + 稳定期 + 撞车重试）叠加后再触发 `command 'clangd.applyFix' already exists` 弹窗。
-- **跳过留痕**：未安装 clangd 扩展 / 扩展未激活 / 语言客户端已停止时输出明确日志，不再出现「日志说在重启、实际没动作」。
-- **有限重试**：客户端迟迟未就绪时按 2s / 4s 重试最多 2 次，避免一次必要的重启被静默丢弃；手动重启与停用扩展会清理未到期重试。
-- **文案对齐**：启动恢复期间「仅配置变化」的跳过日志改为如实描述（不再声称 clangd 仍在启动）。
+- **构建目标**：显式指定当前平台不支持的目标现在直接报错（`unsupported`），不再「静默成功」；`build_status` 无构建记录时返回 `no-build`。
+- **构建不再挂起**：Agent / CLI 构建不再等待「是否排除构建产物」的通知（无人应答会让构建永久挂起、`timeoutMs` 失效）。
+- **运行目录**：`run` 的 `cwd` 相对路径按工程目录解析，不再受 VS Code 进程工作目录影响。
+- **调试一致性**：Copilot / MCP / CLI 三端的 `state` / `stack` / `variables` 响应统一形状；帧同时给出 `level` 与 `id`，`variables` / `evaluate` 支持 `frameId`；`setBreakpoints` 为替换语义；`stop` 后断点与等待器清理干净；gdb 启动失败会回收进程并报 `compiler-missing`。
+- **工程编辑更严格**：`buildTargets` 引用未知目标、`weight` 超出 0–100、重名目标 / 文件、重命名冲突均报 `invalid-input`；编辑失败不再留下「改了一半」的内存状态。
+- **导出安全**：`makefile` 默认输出 `Makefile.cb`（不会覆盖工程自带 `Makefile`）；`out` 相对路径按工程目录解析；`compile_commands.json` 默认写入工程内 `.cb-tools/`。
+- **CLI**：`--json` 下失败也输出 JSON；退出码覆盖 `invalid-input` / `unsupported` / `compiler-missing` / `no-build` 等；`debug` 支持 `--timeout`。
 - **清单不变**：命令 136 / 设置 93 / 视图 6 / 键位 34。
 
 ## 18. 0.9.0 新增与行为变更

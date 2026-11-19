@@ -49,17 +49,17 @@ debug it, stop at main and print the local variables.
 
 | Tool | Main arguments | Purpose |
 |---|---|---|
-| `codeblocks_project_read` | `cbp?`, `section=summary\|targets\|files\|options\|schema\|all`, `target?` | Read the project model; `section=schema` returns the editable field catalog (works without a project) |
+| `codeblocks_project_read` | `cbp?`, `section=summary\|targets\|files\|options\|schema\|all`, `target?` | Read the project model; `section=schema` returns the editable field catalog (works without a project); an unknown `target` fails with `invalid-input` plus the candidate list |
 | `codeblocks_project_edit` | `ops[]`, `dryRun?`, `format=canonical\|preserve`, `allowScripts?`, `force?` | Incremental edits; returns `changed[]` and `warnings[]` |
 | `codeblocks_project_file` | `action=add\|remove\|rename`, `file`, `targets?`, `to?` | Add/remove/rename project files |
 | `codeblocks_project_target` | `action=add\|remove\|rename`, `title`, `copyFrom?`, `targetType?` | Add/remove/rename build targets |
-| `codeblocks_build` | `cbp?`, `target?`, `mode=build\|rebuild\|clean`, `timeoutMs?`, `dryRun?` | Build and return structured diagnostics |
-| `codeblocks_build_status` | `cbp?`, `severity?`, `tail?` | Last build summary (diagnostics/stats/commands) |
-| `codeblocks_run` | `cbp?`, `target?`, `args?`, `cwd?`, `timeoutMs?` | Run the target, capture output and exit code (non-interactive) |
-| `codeblocks_debug` | `action=start\|stop\|breakpoints\|state\|stack\|variables\|evaluate\|continue\|step\|run` | Debug control; `run` = start + breakpoints + stack/locals in one call |
+| `codeblocks_build` | `cbp?`, `target?`, `mode=build\|rebuild\|clean`, `timeoutMs?`, `dryRun?` | Build and return structured diagnostics; `target` must exist on the project (otherwise `invalid-input` with the candidate list), a target that does not support the current platform returns `unsupported`, and `timeoutMs` cancels immediately (including makefile `make`) |
+| `codeblocks_build_status` | `cbp?`, `severity?`, `tail?` | Last build summary (diagnostics/stats/commands); `no-build` when nothing has been built in this session |
+| `codeblocks_run` | `cbp?`, `target?`, `args?`, `cwd?`, `timeoutMs?` | Run the target, capture output and exit code (non-interactive); a relative `cwd` is resolved against the **project directory**; `timeoutMs` defaults to **120000**, `0` means no limit |
+| `codeblocks_debug` | `action=start\|stop\|breakpoints\|state\|stack\|variables\|evaluate\|continue\|step\|run`, `timeoutMs?` | Debug control; `run` = start + breakpoints + stack/locals in one call (`includeStack` / `includeVariables` can turn the last two off to save tokens); `timeoutMs` bounds the wait for the program to stop (default 30000) for `start` / `run` / `continue` / `step`; `breakpoints` **replaces** the breakpoints of that file (the host may pre-set them before start, CLI/MCP must `start` first), and `run` applies its breakpoints through `start` |
 | `codeblocks_compiler` | `action=list\|info`, `compilerId?` | List compilers / resolve program paths |
-| `codeblocks_export` | `kind=makefile\|compile_commands\|commands`, `out?` | Export build information |
-| `codeblocks_workspace` | `action=info\|deps\|list\|open\|close\|setActive` | `.workspace` and multi-project management |
+| `codeblocks_export` | `kind=makefile\|compile_commands\|commands`, `out?` | Export build information; defaults to `<project>/Makefile.cb` and `<project>/.cb-tools/compile_commands/`, and a relative `out` is resolved against the project directory; an `out` that matches the project Makefile (`<Option makefile>`) is refused |
+| `codeblocks_workspace` | `action=info\|deps\|list\|open\|close\|setActive` | `.workspace` and multi-project management; `deps` accepts absolute `project` / `dependencies` paths and writes them back workspace-relative (portable across machines); projects outside the workspace fail with `invalid-input` |
 
 Every tool accepts `cbp`; when omitted the active project is used.
 
@@ -83,6 +83,8 @@ Every tool accepts `cbp`; when omitted the active project is used.
 Rules:
 
 - **Field whitelist**: unknown fields fail with `invalid-input` instead of being ignored; see `section=schema`.
+- **Runtime type checks**: a non-array `targets`, non-numeric `weight`, non-string `title` etc. also fail with `invalid-input` (never an uncaught exception).
+- **Duplicate guard**: `renameFile` refuses a destination that already exists in the project (no duplicate `<Unit>`), and `addFile` compares names case-insensitively on Windows.
 - **Array fields**: `op=add/remove` take a single string; `op=set` replaces the whole array.
 - **Script fields** (`commandsBeforeBuild`, `commandsAfterBuild`, `buildScripts`, `makeCommands`,
   `customBuildCommands`) require `allowScripts: true`.
@@ -120,6 +122,11 @@ The file must already exist on disk; omitting `targets` means "belongs to all ta
 { "severity": "error", "file": "E:/proj/src/a.c", "line": 12, "column": 5, "message": "..." }
 ```
 
+> `summary` describes **this** call only. On early exits (project not found, unsupported platform,
+> no build target, build mutex) it returns `ok:false` with at most one synthesized entry, so
+> diagnostics from a previous build are never reported as this build's result. Use
+> `codeblocks_build_status` for history.
+
 For the exact command lines use `codeblocks_build_status` or `codeblocks_export { kind: "commands" }`.
 
 ### 4.4 Run and debug
@@ -133,6 +140,28 @@ codeblocks_debug { action: "continue" }
 
 `codeblocks_run` is non-interactive (captures stdout/stderr); use the integrated terminal for programs
 that need stdin.
+
+#### Debug response shapes (identical across transports)
+
+`state` / `stack` / `variables` / `evaluate` / `start` are normalized — the in-editor DAP bridge and the
+CLI/MCP gdb backend return the same shape, so the model never has to switch fields per transport:
+
+| action | Shape |
+|---|---|
+| `state` | `{ active, stopped?, reason?, threadId?, id?, name?, type? }` |
+| `stack` | `{ threadId?, frames: [{ id?, level?, name?, file?, line?, column?, address? }] }` |
+| `variables` | `{ frameId?, scopes: [{ name, variables: [{ name, value, type?, children? }] }] }` (gdb only exposes the current frame ⇒ a single `Locals` scope) |
+| `evaluate` | `{ expression, result, type? }` |
+| `start` | `{ ok, session?, program?, cwd?, stopped?, reason?, threadId? }` |
+
+Notes:
+
+- `frameId` works in all three transports (CLI/MCP run `-stack-select-frame` first); CLI frames expose `level` as `id` too, so "pass `stack.frames[].id` as `frameId`" is valid everywhere.
+- `continue` / `step` differ **semantically**: CLI/MCP (gdb) block until the program stops again (up to 30s by default, adjustable with `timeoutMs`) and return `stopped/reason/threadId`, while the in-editor (DAP) bridge returns `{ ok, threadId }` immediately — use `state` afterwards (`timeoutMs` only affects the CLI/MCP wait).
+- CLI/MCP `stopOnEntry` is approximated by a breakpoint on `main`, not DAP's entry stop.
+- When GDB is missing, CLI/MCP return `compiler-missing` (the hint names `codeblocks.debug.gdbPath`); the CLI exit code is 4.
+- `codeblocks_build`'s `timeoutMs` starts at the **build phase** (opening/parsing the project is not counted).
+- `codeblocks_export` defaults: `kind=makefile` → `<project>/Makefile.cb` (**never** overwrites the project's real Makefile); `kind=compile_commands` → `<project>/.cb-tools/compile_commands/`. A relative `out` is resolved against the **project directory**; consider ignoring `.cb-tools/`.
 
 ---
 
@@ -152,7 +181,11 @@ node bundle/cb-cli.js compiler info --compiler-id gcc --json
 Conventions:
 
 - **stdout carries only the result** (pure JSON with `--json`); build logs and warnings go to **stderr**.
-- Exit codes: `0` ok, `2` usage, `3` validation/input, `4` build or run failure, `5` write/project-not-found.
+  With `--json` a failure also prints `{ "ok": false, "error": { "code", "message", "details"? } }` on stdout (stderr keeps the text).
+- Exit codes: `0` ok, `1` unclassified, `2` usage, `3` validation/permission (including `no-build`, `read-only`, `disabled`),
+  `4` build or run failure (including `unsupported`, `timeout`), `5` write failure / project or workspace not found.
+- `run` uses `--timeout` with a **120000ms** default (2 minutes); `--timeout 0` means no limit. `debug` also accepts `--timeout` (budget for the program to stop, default 30000ms) plus
+  `--file` / `--lines` / `--expression` / `--frame` / `--kind` / `--stop-on-entry`; see `cb-cli --help` for the full list.
 - Settings resolution matches the extension: user `settings.json` -> workspace `.vscode/settings.json` -> `CB_*` env vars
   (`CB_COMPILER_ID`, `CB_MASTER_PATH`, `CB_COMPILER_PROGRAMS`, `CB_MAX_REPORTED_ERRORS`, `CB_UI_LANGUAGE`).
 - Message language follows `codeblocks.ui.language` (`auto` resolves to English without a host): set
@@ -166,6 +199,12 @@ Conventions:
 
 The extension contributes an MCP provider. **MCP: List Servers** should list `Code::Blocks`; start it and
 the tools become available in Chat.
+
+> The server is launched with `process.execPath` (no `node` on PATH required) and its **cwd is set to the
+> first workspace folder**, because `cb-mcp.js` walks up from `process.cwd()` to find
+> `.vscode/settings.json`. That is what makes workspace-level `codeblocks.agent.enabled` /
+> `codeblocks.agent.readOnly` effective; without an explicit cwd the launcher's directory wins and the
+> workspace settings are ignored.
 
 ### 6.2 Other clients
 
@@ -181,8 +220,22 @@ the tools become available in Chat.
 }
 ```
 
+> Launch external clients **from the project directory** (or set their cwd to it), otherwise only the
+> user-level `codeblocks.agent.*` settings are visible. A standalone process also cannot query VS Code's
+> workspace trust: "untrusted workspaces are forced off" only applies to the LM Tools / MCP definition
+> exposed by VS Code. External clients must decide for themselves whether the workspace is trustworthy.
+
 Behaviour: identical tool names/arguments as section 3; failures return `isError: true` with a JSON body;
-logs go to stderr only (stdout is the protocol channel).
+logs go to stderr only (stdout is the protocol channel). `tools/list` includes
+`annotations.title` and `annotations.readOnlyHint` (same source as the read-only allow-list) for client
+display and approval.
+
+### 6.3 Workspace trust (Restricted Mode)
+
+`package.json` declares `capabilities.untrustedWorkspaces.supported: false`: **the extension does not
+activate at all in an untrusted workspace.** That is deliberate — it runs toolchains, executes Makefiles
+and build scripts from the workspace, and starts debuggers, which is all "running workspace code". Use
+**Workspaces: Manage Workspace Trust** to trust the workspace when you need these features.
 
 ---
 
@@ -193,7 +246,7 @@ Two settings in `settings.json` (both apply **immediately, no reload**):
 | Setting | Default | Behaviour |
 |---|---|---|
 | `codeblocks.agent.enabled` | `true` | Master switch. When off, the 11 Language Model Tools are **not registered** (Copilot cannot see or call them) and the bundled MCP server is not exposed; an externally launched `cb-mcp.js` also refuses calls (`disabled`). **Untrusted workspaces are always treated as off.** The standalone `cb-cli` is not affected. |
-| `codeblocks.agent.readOnly` | `false` | Read-only mode. Only `project_read` / `build_status` / `compiler list,info` / `workspace info,deps,list` / `debug state` are allowed; everything else fails with `read-only` and project bytes stay unchanged. |
+| `codeblocks.agent.readOnly` | `false` | Read-only mode. Only `project_read` / `build_status` / `compiler list,info` / `workspace info,deps,list` / `debug state,stack,variables` are allowed; everything else fails with `read-only` and project bytes stay unchanged. |
 
 ```jsonc
 // .vscode/settings.json
@@ -216,6 +269,7 @@ Two settings in `settings.json` (both apply **immediately, no reload**):
 | Gate | Behaviour |
 |---|---|
 | Master switch | `codeblocks.agent.enabled` (above); untrusted workspaces are forced off |
+| Workspace trust | `capabilities.untrustedWorkspaces.supported: false` (see the end of section 6): in Restricted Mode the extension does not activate, so builds/runs/debugging and the agent tools are all unavailable; after trusting the workspace the master switch above decides |
 | Read-only mode | `codeblocks.agent.readOnly` (above), enforced centrally in `invokeTool` |
 | Tool enablement | Per-tool toggles in the VS Code **Tools** picker |
 | Approval | Governed by VS Code permission levels; edits return before/after |

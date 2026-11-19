@@ -24,6 +24,12 @@ export interface PlanMcpServerOptions {
   execPath: string;
   label?: string;
   version?: string;
+  /**
+   * 服务器进程的工作目录（首个工作区文件夹）。
+   * `cb-mcp.js` 以 `process.cwd()` 为锚点向上找 `.vscode/settings.json`，
+   * 不显式设置时由启动方（VS Code 进程 / 外部客户端）决定，工作区级开关会失效。
+   */
+  cwd?: string;
 }
 
 export interface McpServerPlan {
@@ -31,6 +37,7 @@ export interface McpServerPlan {
   command: string;
   args: string[];
   version?: string;
+  cwd?: string;
 }
 
 /**
@@ -44,6 +51,7 @@ export function planMcpServer(opts: PlanMcpServerOptions): McpServerPlan | undef
     command: opts.execPath,
     args: [opts.script],
     version: opts.version,
+    cwd: opts.cwd || undefined,
   };
 }
 
@@ -72,10 +80,13 @@ export function registerCodeblocksMcpProvider(
         script,
         execPath: process.execPath,
         version,
+        cwd: vscode.workspace.workspaceFolders?.[0]?.uri.fsPath,
       });
-      return plan
-        ? [new vscode.McpStdioServerDefinition(plan.label, plan.command, plan.args, undefined, plan.version)]
-        : [];
+      if (!plan) return [];
+      const definition = new vscode.McpStdioServerDefinition(plan.label, plan.command, plan.args, undefined, plan.version);
+      // 以工作区为 cwd：cb-mcp.js 用 process.cwd() 向上找工作区设置（agent 开关 / 只读）
+      if (plan.cwd) definition.cwd = vscode.Uri.file(plan.cwd);
+      return [definition];
     },
   });
 }

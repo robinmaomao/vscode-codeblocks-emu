@@ -79,6 +79,38 @@ fs.writeFileSync(badOps, '[{"op":"set","scope":"project","field":"nope","value":
 const badEdit = run(['edit', cbp, '--ops-file', badOps, '--json']);
 check('C11 非法字段 exit 3', badEdit.code === 3, { code: badEdit.code, stderr: badEdit.stderr.slice(0, 160) });
 
+// ---------- 失败时的机器可读输出（--json 时 stdout 仍是 JSON） ----------
+let missingJson;
+try { missingJson = JSON.parse(missing.stdout); } catch { missingJson = undefined; }
+check('C17 --json 失败时 stdout 仍是 { ok:false, error.code }',
+  !!missingJson && missingJson.ok === false && !!missingJson.error && missingJson.error.code === 'project-not-found',
+  missing.stdout.slice(0, 160));
+
+// ---------- 平台守卫：显式指定「当前平台不支持」的目标必须报错，不能静默返回成功 ----------
+{
+  const platDir = path.join(ROOT, '.cb-tools', 'agent-control', 'tmp-cli-platform');
+  fs.rmSync(platDir, { recursive: true, force: true });
+  fs.mkdirSync(platDir, { recursive: true });
+  for (const entry of fs.readdirSync(SRC)) {
+    const from = path.join(SRC, entry);
+    if (fs.statSync(from).isFile()) fs.copyFileSync(from, path.join(platDir, entry));
+  }
+  const platCbp = path.join(platDir, 'hello-cb.cbp');
+  // 与当前平台互斥的平台位掩码（spMac=1 / spUnix=2 / spWindows=4）
+  const platMask = process.platform === 'win32' ? 0x02 : 0x04;
+  const platOpsFile = path.join(platDir, 'ops.json');
+  fs.writeFileSync(platOpsFile, JSON.stringify([
+    { op: 'set', scope: 'target', target: 'Debug', field: 'platforms', value: platMask },
+    { op: 'set', scope: 'target', target: 'Release', field: 'platforms', value: platMask },
+  ]));
+  const platEdit = run(['edit', platCbp, '--ops-file', platOpsFile, '--json']);
+  check('C18 平台位掩码可写回', platEdit.code === 0 && JSON.parse(platEdit.stdout).written === true, platEdit.stderr.slice(0, 200));
+  const platBuild = run(['build', platCbp, '--target', 'Debug', '--json']);
+  check('C19 平台不支持的目标 → exit 4 且错误码 unsupported',
+    platBuild.code === 4 && /unsupported:/.test(platBuild.stderr), { code: platBuild.code, stderr: platBuild.stderr.slice(0, 200) });
+  fs.rmSync(platDir, { recursive: true, force: true });
+}
+
 // ---------- 运行时语言：CB_UI_LANGUAGE 决定 i18n 文案 ----------
 const brokenCbp = path.join(TMP, 'broken.cbp');
 fs.writeFileSync(brokenCbp, '<?xml version="1.0"?><foo></foo>');

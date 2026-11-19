@@ -4,7 +4,8 @@
  *
  * 设计约束：
  *  - stdout 只输出结果（`--json` 时是纯 JSON）；构建日志与警告全部走 stderr。
- *  - 退出码：0 成功 / 2 用法 / 3 参数校验 / 4 构建或运行失败 / 5 写盘与外部修改。
+ *  - 退出码：0 成功 / 1 未归类 / 2 用法 / 3 参数校验 / 4 构建或运行失败 / 5 写盘与外部修改。
+ *  - `--json` 时失败也会在 stdout 输出 `{ ok: false, error: { code, message, details? } }`（stderr 仍保留文本，便于人读）。
  *  - src 内禁止 console.*（仓库约定），统一 process.stdout.write / process.stderr.write。
  */
 import { asControlError, ControlError } from '../api/types';
@@ -24,7 +25,7 @@ Usage:
   cb-cli <command> [options]
 
 Commands:
-  show <cbp>                       Read the project model (--section summary|targets|files|options|all)
+  show <cbp>                       Read the project model (--section summary|targets|files|options|schema|all, --target)
   schema                           Print the editable field schema
   edit <cbp> --ops <json>          Apply edits (--ops-file <file> to read JSON from a file)
   add-file <cbp> <file>            Add a source file (--targets Debug,Release, --no-compile, --no-link)
@@ -33,22 +34,38 @@ Commands:
   add-target <cbp> <title>         Add a target (--copy-from Debug, --type 0..5)
   remove-target <cbp> <title>      Remove a target
   rename-target <cbp> <from> <to>  Rename a target
-  build <cbp>                      Build (--rebuild | --clean, --target, --timeout)
+  build <cbp>                      Build (--rebuild | --clean, --target, --timeout, --dry-run)
   run <cbp>                        Run the built target (--target, --args, --cwd, --timeout)
   export <cbp> --kind <kind>       makefile | compile_commands | commands (--target, --out)
   compiler <list|info>             Inspect compilers (--compiler-id)
-  workspace <info|deps|list>       Inspect a .workspace or edit project dependencies
-  debug <action>                   Debug control (start|stop|breakpoints|state|stack|variables|evaluate|continue|step)
+  workspace <info|deps|list>       Inspect a .workspace or edit project dependencies (--workspace, --project)
+  debug <action>                   Debug control: start|run|stop|breakpoints|state|stack|variables|evaluate|continue|step
+                                   (--file, --lines 1,2, --expression, --frame, --kind next|stepIn|stepOut, --stop-on-entry, --timeout)
 
 Options:
-  --json                           Machine-readable output on stdout
+  --cbp <path>                     Target .cbp (same as the positional argument)
+  --json                           Machine-readable output on stdout (errors included)
   --dry-run                        Validate only (edit/build)
   --format canonical|preserve      Write format (default canonical)
   --allow-scripts                  Allow editing build scripts / pre-post commands
   --force                          Overwrite even if modified externally
   --section <name>                 Project read section
   --target <title>                 Build target
-  --timeout <ms>                   Timeout for build/run
+  --targets <a,b>                  Target membership (add-file)
+  --copy-from <title>              Copy settings from this target (add-target)
+  --type <0..5>                    Target type (add-target)
+  --args <text>                    Program arguments (run/debug)
+  --cwd <dir>                      Working directory, relative to the project (run)
+  --kind <name>                    Export kind / debug step kind
+  --out <path>                     Export output (relative to the project)
+  --timeout <ms>                   Timeout for build/run (run default 120000, 0 = no limit); debug: wait-for-stop budget
+  --lines <n,n>                    Breakpoint lines (debug breakpoints)
+  --file <path>                    Source file (debug breakpoints)
+  --expression <expr>              Expression to evaluate (debug)
+  --frame <id>                     Stack frame id (debug variables/evaluate)
+  --stop-on-entry                  Break at main (debug start/run)
+  --workspace <path>               .workspace path (workspace commands)
+  --project <path|title>           Project for workspace dependency edits
   --ops <json> / --ops-file <file> Edit operations
   --help, -h                       Show this help
 `;
@@ -100,6 +117,9 @@ function out(text: string): void {
   process.stdout.write(text.endsWith('\n') ? text : text + '\n');
 }
 
+/** `--json` 时失败也要给出机器可读结果（stdout），由 main 在解析参数后置位 */
+let jsonMode = false;
+
 function print(result: unknown, json: boolean): void {
   if (json) { out(JSON.stringify(result, null, 2)); return; }
   if (result && typeof result === 'object') {
@@ -126,7 +146,10 @@ function print(result: unknown, json: boolean): void {
 function exitCodeFor(err: ControlError): number {
   switch (err.code) {
     case 'usage': return 2;
-    case 'invalid-input': return 3;
+    case 'invalid-input':
+    case 'no-build':
+    case 'read-only':
+    case 'disabled': return 3;
     case 'build-failed':
     case 'build-busy':
     case 'unsupported':
@@ -136,13 +159,15 @@ function exitCodeFor(err: ControlError): number {
     case 'external-modified':
     case 'io-error':
     case 'project-not-found':
-    case 'workspace-not-found': return 5;
+    case 'workspace-not-found':
+    case 'not-open': return 5;
     default: return 1;
   }
 }
 
 async function main(): Promise<void> {
   const parsed = parseArgs(process.argv.slice(2));
+  jsonMode = parsed.json;
   if (parsed.flags.help || parsed.flags.h || !parsed.command) {
     out(USAGE);
     process.exit(parsed.command ? 0 : 2);
@@ -297,6 +322,7 @@ async function main(): Promise<void> {
         frameId: flagNumber(parsed, 'frame'),
         kind: flagString(parsed, 'kind'),
         stopOnEntry: parsed.flags['stop-on-entry'] === true,
+        timeoutMs: flagNumber(parsed, 'timeout'),
       });
       break;
 
@@ -311,6 +337,12 @@ async function main(): Promise<void> {
 
 main().catch((err) => {
   const e = asControlError(err);
+  if (jsonMode) {
+    try {
+      const payload = { ok: false, error: { code: e.code, message: e.message, ...(e.details === undefined ? {} : { details: e.details }) } };
+      process.stdout.write(JSON.stringify(payload, null, 2) + '\n');
+    } catch { /* 忽略序列化失败：stderr 仍会给出文本 */ }
+  }
   process.stderr.write(`${e.code}: ${e.message}\n`);
   if (e.details !== undefined) {
     try { process.stderr.write(JSON.stringify(e.details, null, 2) + '\n'); } catch { /* 忽略序列化失败 */ }

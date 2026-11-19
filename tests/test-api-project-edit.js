@@ -4,7 +4,7 @@ const path = require('path');
 const { ProjectParser } = require('../dist/model/parser');
 const { projectSnapshot, workspaceSnapshot } = require('../dist/api/projectQuery');
 const { editProject } = require('../dist/api/projectService');
-const { applyEdits, isPreserveCapable } = require('../dist/api/projectEdit');
+const { applyEdits, applyUnitOptionToText, isPreserveCapable } = require('../dist/api/projectEdit');
 const { loadWorkspace } = require('../dist/api/projectStore');
 
 const ROOT = path.resolve(__dirname, '..');
@@ -114,6 +114,15 @@ check('V4 allowScripts 放行', allowed.changed.length === 1);
 expectFail('V5 不存在的目标报错', () => applyEdits(p2, [{ op: 'set', scope: 'target', target: 'Nope', field: 'outputFilename', value: 'x' }]), 'invalid-input');
 expectFail('V6 不存在的文件报错', () => applyEdits(p2, [{ op: 'set', scope: 'file', file: 'nope.c', field: 'compile', value: false }]), 'invalid-input');
 expectFail('V7 新增不存在的文件报错', () => applyEdits(p2, [{ op: 'addFile', file: 'ghost.c' }]), 'invalid-input');
+// 运行时类型校验（MCP/CLI 的 JSON 入参没有 TS 类型兜底，不能变成 TypeError → io-error）
+expectFail('V8 addTarget.title 非字符串报错', () => applyEdits(p2, [{ op: 'addTarget', title: 42 }]), 'invalid-input');
+expectFail('V9 addVirtualTarget.targets 非数组报错', () => applyEdits(p2, [{ op: 'addVirtualTarget', alias: 'VT', targets: 'Debug' }]), 'invalid-input');
+expectFail('V10 addFile.targets 非数组报错', () => applyEdits(p2, [{ op: 'addFile', file: 'util.c', targets: 'Debug' }]), 'invalid-input');
+expectFail('V11 addFile.weight 非数字报错', () => applyEdits(p2, [{ op: 'addFile', file: 'util.c', weight: 'x' }]), 'invalid-input');
+expectFail('V14 addFile.weight 越界（>100）报错', () => applyEdits(p2, [{ op: 'addFile', file: 'util.c', weight: 500 }]), 'invalid-input');
+expectFail('V15 文件归属引用未知目标报错', () => applyEdits(p2, [{ op: 'set', scope: 'file', file: 'main.c', field: 'buildTargets', value: ['NoSuchTarget'] }]), 'invalid-input');
+expectFail('V12 未知 scope 报错', () => applyEdits(p2, [{ op: 'set', scope: 'targt', field: 'title', value: 'x' }]), 'invalid-input');
+expectFail('V13 renameFile 目标已存在报错', () => applyEdits(p2, [{ op: 'renameFile', file: 'util.c', to: 'main.c' }]), 'invalid-input');
 
 // dryRun 不写盘
 const beforeDry = fs.readFileSync(cbp, 'utf8');
@@ -135,6 +144,35 @@ check('P5 preserve 恢复为自闭合', rpBack.ok && fs.readFileSync(pcbp, 'utf8
 // preserve 遇到不支持的操作 → 自动降级 canonical 并告警
 const rFallback = editProject(pcbp, [{ op: 'set', scope: 'project', field: 'title', value: 'fallback' }], { format: 'preserve' });
 check('P6 不支持的操作降级 canonical', rFallback.ok && rFallback.format === 'canonical' && rFallback.warnings.length === 1, rFallback.warnings);
+
+// preserve：含 XML 特殊字符的路径必须按转义形式匹配并回写（磁盘上是 &amp; / &lt; / &quot;）
+{
+  const text = '<?xml version="1.0" encoding="UTF-8" standalone="yes" ?>\n'
+    + '<CodeBlocks_project_file>\n\t<Project>\n\t\t<Unit filename="a&amp;b.c">\n\t\t\t<Option compile="1" />\n\t\t</Unit>\n'
+    + '\t\t<Unit filename="c&lt;d.c" />\n\t</Project>\n</CodeBlocks_project_file>\n';
+  const off = applyUnitOptionToText(text, 'a&b.c', 'compile', false);
+  check('P7 转义路径：禁用写入 compile="0" 且保留转义',
+    off.changed && off.text.includes('filename="a&amp;b.c"') && off.text.includes('<Option compile="0" />'), off.text.slice(0, 120));
+  const on = applyUnitOptionToText(off.text, 'a&b.c', 'compile', true);
+  check('P8 转义路径：启用恢复自闭合', on.changed && on.text.includes('<Unit filename="a&amp;b.c" />'), on.text.slice(0, 120));
+  const lt = applyUnitOptionToText(text, 'c<d.c', 'link', false);
+  check('P9 转义路径：自闭合 → 成对节点', lt.changed && lt.text.includes('filename="c&lt;d.c">') && lt.text.includes('<Option link="0" />'), lt.text.slice(0, 160));
+  // 规范化：`\` 与 `./` 前缀按文件名匹配
+  const norm = applyUnitOptionToText(text, '.\\a&b.c', 'compile', false);
+  check('P10 反斜杠/前缀规范化后命中', norm.changed, norm);
+  let missing = false;
+  try { applyUnitOptionToText(text, 'nope.c', 'compile', false); } catch (err) { missing = err.code === 'invalid-input'; }
+  check('P11 不存在的文件报 invalid-input', missing);
+}
+
+// preserve + dryRun：返回预览文本且不写盘
+{
+  const beforeDry = fs.readFileSync(pcbp, 'utf8');
+  const dryP = editProject(pcbp, [{ op: 'set', scope: 'file', file: 'main.c', field: 'compile', value: false }], { format: 'preserve', dryRun: true });
+  check('P12 preserve dryRun 返回 preview 且不写盘',
+    dryP.ok === true && dryP.written === false && typeof dryP.preview === 'string' && dryP.preview.includes('<Option compile="0" />')
+    && fs.readFileSync(pcbp, 'utf8') === beforeDry, { written: dryP.written, hasPreview: typeof dryP.preview === 'string' });
+}
 
 // 清理
 fs.rmSync(TMP, { recursive: true, force: true });

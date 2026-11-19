@@ -3,6 +3,20 @@
 本文件记录**正式版**里程碑；近期 dev 迭代的逐轮发布说明见 [`docs/release/`](./docs/release/)（`0.8.xx-dev.md`），
 `0.8.76`–`0.8.128` 的 dev 说明已合并归档到 [`docs/release/archive/`](./docs/release/archive/)；版本号与维护约定见 [`docs/release/00-index.md`](./docs/release/00-index.md)。
 
+## 0.9.2 — 2026-11-19
+
+> 补丁版：0.9.0 合入 Agent 控制面后的九轮复查修复（构建 / 运行 / 调试 / 工程编辑跨端一致性）。
+
+- **构建**：显式指定「当前平台不支持」的目标由静默成功改为 `unsupported` 失败（`targetPlatformSupported` 供守卫与早退共用，虚拟目标按成员并集判定）；`build_status` 无构建时错误码 `no-build`；clean 统一走 `cleanProjectTarget`（make 分支补 `Make:` 日志、`code === null` 记为失败）；make 已最新时不再递增自动版本号。
+- **挂起（P1）**：agent 构建路径的产物排除通知改为 `{ notify: 'interactive' }`，无人应答时不再永久 `await`（此前会让 `build` 挂起且 `timeoutMs` 失效）。
+- **运行**：`cwd` 相对路径按**工程目录**解析（此前按宿主进程 cwd，常为 `C:\Windows\System32`）；默认超时 `DEFAULT_RUN_TIMEOUT_MS`（120s）。
+- **调试**：`state/stack/variables/evaluate/start/breakpoints` 三端响应统一归一化（`src/api/debugShapes.ts`），gdb 帧 `level` 兼作 `id`；`variables`/`evaluate` 支持 `frameId`；`setBreakpoints` 改为替换语义（多余断点 `-break-delete`）；`stop`/`dispose` 清理断点与等待器；`start` 失败回收 gdb（`ENOENT` → `compiler-missing`，CLI 退出码 4）；`continue`/`step` 在断点处不再返回旧的停止状态，支持 `timeoutMs`。
+- **工程编辑**：`buildTargets` 引用未知目标 → `invalid-input`；`addFile.weight` 限 0–100；目标名与 `file.buildTargets` 去重、类型校验；`renameFile` 重名拒绝；`preserve` 模式 XML 转义与路径规范化；`loadForEdit` / `projectService` 改深拷贝，应用失败不再污染宿主内存模型。
+- **工程读取**：`project_read` 未知 `target` → `invalid-input`；`uniqueFiles` 按平台大小写归一。
+- **导出**：`makefile` 默认写 `Makefile.cb`（显式 `out` 指向工程 Makefile 时拒绝）并原子写；`compile_commands` 默认目录与 `out` 按工程目录解析；`systemIncludes` 贯通导出。
+- **Agent / CLI / MCP**：只读白名单补 `debug` 的 `state`/`stack`/`variables`；CLI `--json` 失败亦输出 JSON、退出码全量映射（1/3/4/5 + `no-build`）、USAGE 补全、`debug` 透传 `--timeout`；MCP provider 声明 `cwd`、`tools/list` 增加 `annotations`；`capabilities.untrustedWorkspaces.supported=false`。
+- **编译器**：C/C++ 语言标准参数抽为 `compiler/languageFlags.ts` 并纳入编译器缓存键（切换标准即时生效）。
+- 验证：契约 3/3（44 + 6 + 745）、无头 **TOTAL=244 / FAIL=0 / SKIP=1**、E2E 7/7（新增 CLI 调试真实 gdb 8 断言）、视觉 26/26、性能 13/13、打包 16 断言、宿主 37/37；清单不变（命令 136 / 设置 93 / 视图 6 / 键位 34 / LM Tools 11）。
 ## 0.9.1 — 2026-11-19
 
 > 补丁版：clangd 重启路径可靠性修复（合并 0.9.0 后复查发现）。

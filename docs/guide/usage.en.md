@@ -1,7 +1,7 @@
 # Code::Blocks for VS Code — Usage Guide
 
 > Language: **English** ｜ [中文](./usage.md)
-> Version: 0.9.1 ｜ Native port of Code::Blocks core features to VS Code, driving GCC / GDB directly, **without** `tasks.json` / `launch.json`.
+> Version: 0.9.2 ｜ Native port of Code::Blocks core features to VS Code, driving GCC / GDB directly, **without** `tasks.json` / `launch.json`.
 
 ---
 
@@ -50,7 +50,7 @@ Code::Blocks for VS Code is a "mini IDE kernel": it parses `.cbp` / `.workspace`
 ### 2.1 Install from VSIX
 
 ```powershell
-code --install-extension codeblocks-vscode-0.9.1.vsix --force
+code --install-extension codeblocks-vscode-0.9.2.vsix --force
 ```
 
 ### 2.2 Build from source
@@ -58,7 +58,7 @@ code --install-extension codeblocks-vscode-0.9.1.vsix --force
 ```powershell
 npm install
 npm run package
-code --install-extension codeblocks-vscode-0.9.1.vsix --force
+code --install-extension codeblocks-vscode-0.9.2.vsix --force
 ```
 
 > `npm run package` = `vsce package` (before packaging, the `vscode:prepublish` hook runs `tsc` compilation (`dist/`, for local testing) + the **esbuild single-file bundle** (`bundle/extension.js`, the release entry));
@@ -777,7 +777,7 @@ Note: keybindings are **user-level** (shared across windows); combinations taken
 | Setting | Default | Description |
 |--------|--------|------|
 | `codeblocks.agent.enabled` | `true` | Master switch: when off, the 11 Language Model Tools are not registered and the embedded MCP server is not exposed; untrusted workspaces are always treated as off. Applies immediately (the standalone `cb-cli` is not affected) |
-| `codeblocks.agent.readOnly` | `false` | Read-only mode: only `project_read` / `build_status` / `compiler list,info` / `workspace info,deps,list` / `debug state` are allowed; everything else fails with `read-only` |
+| `codeblocks.agent.readOnly` | `false` | Read-only mode: only `project_read` / `build_status` / `compiler list,info` / `workspace info,deps,list` / `debug state,stack,variables` are allowed; everything else fails with `read-only` |
 
 ---
 
@@ -1026,12 +1026,15 @@ The Code::Blocks features below were assessed as **not to be re-implemented in t
 > For details and the decision record, see the [unimplemented-feature backlog](../dev/backlog.md) §2 (not-ported list).
 > Reminder: the extensions above are community/vendor products; evaluate them before installing. This extension neither bundles nor ships them.
 
-## 17. Bug fixes in 0.9.1
+## 17. Bug fixes in 0.9.2
 
-- **clangd restart single-flight**: a request that arrives while a `clangd.restart` is still in progress is now queued as a trailing run instead of being scheduled concurrently — a slow restart (waiting for the client up to 20s + settle + race retry) can no longer overlap the next one and re-trigger `command 'clangd.applyFix' already exists`.
-- **Skip is logged**: clear log lines when the clangd extension is not installed / not activated / the language client is stopped, so "restarting clangd…" is never printed without a matching action.
-- **Bounded retry**: when the client never becomes ready, retry after 2s / 4s (max 2 times) instead of silently dropping a needed restart; manual restart and deactivate clear pending retries.
-- **Accurate wording**: the config-only skip during startup restore no longer claims clangd is still starting.
+- **Build targets**: explicitly selecting a target the current platform does not support now fails with `unsupported` instead of silently "succeeding"; `build_status` returns `no-build` when no build has run.
+- **No more hung builds**: Agent / CLI builds no longer wait for the "exclude build outputs?" notification, which could hang forever when nobody answered (and defeat `timeoutMs`).
+- **Run directory**: a relative `cwd` for `run` resolves against the project directory, not the VS Code process working directory.
+- **Debug consistency**: `state` / `stack` / `variables` responses share one shape across Copilot / MCP / CLI; frames expose both `level` and `id`, `variables` / `evaluate` accept `frameId`; `setBreakpoints` replaces the previous set; `stop` clears breakpoints and waiters; a failed gdb start reaps the process and reports `compiler-missing`.
+- **Stricter project edits**: `buildTargets` referencing an unknown target, `weight` outside 0–100, duplicate targets / files and conflicting renames are rejected with `invalid-input`; a failed edit no longer leaves a half-applied in-memory model.
+- **Safer export**: `makefile` defaults to `Makefile.cb` (never overwrites the project's own `Makefile`); relative `out` paths resolve against the project directory; `compile_commands.json` defaults to `.cb-tools/` inside the project.
+- **CLI**: `--json` also prints JSON on failure; exit codes cover `invalid-input` / `unsupported` / `compiler-missing` / `no-build`; `debug` honours `--timeout`.
 - **Unchanged inventory**: 136 commands / 93 settings / 6 views / 34 keybindings.
 
 ## 18. What's new in 0.9.0

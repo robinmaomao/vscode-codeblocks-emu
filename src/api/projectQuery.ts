@@ -181,10 +181,12 @@ export function workspaceSnapshot(ws: Workspace): Record<string, unknown> {
 }
 
 function uniqueFiles(files: ProjectFile[]): ProjectFile[] {
+  // 大小写敏感性跟随平台：Linux/macOS 上 `A.c` 与 `a.c` 是两个文件，不能合并
+  const fold = process.platform === 'win32';
   const seen = new Set<string>();
   const out: ProjectFile[] = [];
   for (const f of files) {
-    const key = f.relativeFilename.toLowerCase();
+    const key = fold ? f.relativeFilename.toLowerCase() : f.relativeFilename;
     if (seen.has(key)) continue;
     seen.add(key);
     out.push(f);

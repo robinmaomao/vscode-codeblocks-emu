@@ -26,13 +26,17 @@ export function isAgentReadOnly(settings: AgentSettingsLike): boolean {
  * 只读模式下放行的工具与动作。
  * `true` = 整个工具只读；数组 = 仅列出的 `action` 只读。
  * 未列出的工具（project_edit / project_file / project_target / build / run / export）在只读模式下一律拒绝。
+ *
+ * 调试：`state` / `stack` / `variables` 都是纯查询（不改变被调试进程状态）；
+ * `evaluate` 可能调用函数产生副作用（GDB `-data-evaluate-expression` 会真正执行），
+ * `start` / `stop` / `breakpoints` / `continue` / `step` 都会改变进程状态 —— 全部保持拒绝。
  */
 const READ_ONLY_RULES: Readonly<Record<string, true | readonly string[]>> = {
   codeblocks_project_read: true,
   codeblocks_build_status: true,
   codeblocks_compiler: ['list', 'info'],
   codeblocks_workspace: ['info', 'deps', 'list'],
-  codeblocks_debug: ['state'],
+  codeblocks_debug: ['state', 'stack', 'variables'],
 };
 
 /** 判定一次工具调用在只读模式下是否放行 */

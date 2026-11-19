@@ -12,6 +12,8 @@
 import * as vscode from 'vscode';
 import * as i18n from '../i18n';
 import type { BuildOptionsCompilerOption } from '../ui/buildOptionsView';
+import { languageFlagsKey, normalizeLanguageFlags, pickLanguageFlags } from './languageFlags';
+import type { CompilerLanguageFlags } from './languageFlags';
 
 export const CUSTOM_FLAGS_SETTING = 'compiler.customFlags';
 export const FLAG_OVERRIDES_SETTING = 'compiler.flagOverrides';
@@ -32,10 +34,7 @@ export interface CompilerFlagOverrides {
   removed: string[];
 }
 
-export interface CompilerLanguageFlags {
-  cOnly: string[];
-  cppOnly: string[];
-}
+export type { CompilerLanguageFlags };
 
 export interface CompilerFlagStores {
   custom: Record<string, CompilerFlagEntry[]>;
@@ -105,20 +104,7 @@ function cleanOverrides(value: unknown): Record<string, CompilerFlagOverrides> {
 }
 
 function cleanLanguage(value: unknown): Record<string, CompilerLanguageFlags> {
-  const store: Record<string, CompilerLanguageFlags> = {};
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return store;
-  const norm = (input: unknown): string[] =>
-    Array.isArray(input)
-      ? Array.from(new Set(input.map((x) => String(x).trim()).filter(Boolean)))
-      : [];
-  for (const [compilerId, raw] of Object.entries(value as Record<string, unknown>)) {
-    if (!raw || typeof raw !== 'object') continue;
-    const src = raw as Record<string, unknown>;
-    const cOnly = norm(src.cOnly);
-    const cppOnly = norm(src.cppOnly);
-    if (cOnly.length || cppOnly.length) store[compilerId] = { cOnly, cppOnly };
-  }
-  return store;
+  return normalizeLanguageFlags(value);
 }
 
 export function readCompilerFlagStores(): CompilerFlagStores {
@@ -185,15 +171,12 @@ export function readLanguageFlags(
   fallback: CompilerLanguageFlags,
   stores: CompilerFlagStores = readCompilerFlagStores(),
 ): CompilerLanguageFlags {
-  const stored = stores.language[compilerId];
-  return stored ? { cOnly: [...stored.cOnly], cppOnly: [...stored.cppOnly] } : { cOnly: [...fallback.cOnly], cppOnly: [...fallback.cppOnly] };
+  return pickLanguageFlags(compilerId, fallback, stores.language);
 }
 
 /** 编译器缓存键用签名（无覆盖时为空串，保持旧键行为） */
 export function languageFlagsSignature(compilerId: string, stores: CompilerFlagStores = readCompilerFlagStores()): string {
-  const stored = stores.language[compilerId];
-  if (!stored) return '';
-  return `${compilerId}\u0001${stored.cOnly.join(' ')}\u0001${stored.cppOnly.join(' ')}`;
+  return languageFlagsKey(compilerId, stores.language);
 }
 
 async function persist(key: string, value: unknown): Promise<string | undefined> {

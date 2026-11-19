@@ -41,6 +41,21 @@ const providers = pkg.contributes?.mcpServerDefinitionProviders || [];
 check('M1 声明了 MCP provider', providers.length === 1 && providers[0].id === 'codeblocks', providers);
 check('M2 provider label 走 nls', /^%[A-Za-z0-9_.-]+%$/.test(providers[0]?.label || ''), providers[0]?.label);
 
+const { planMcpServer } = require('../dist/mcp/provider');
+const planBase = { enabled: true, scriptExists: true, script: 'C:/x/bundle/cb-mcp.js', execPath: 'C:/x/Code.exe' };
+const planWithCwd = planMcpServer({ ...planBase, cwd: 'C:/work' });
+check('M3 planMcpServer 透传 cwd（工作区级设置锚点）', planWithCwd?.cwd === 'C:/work', planWithCwd);
+check('M4 planMcpServer 未给工作区时 cwd 为空', planMcpServer({ ...planBase }).cwd === undefined, planMcpServer({ ...planBase }));
+check('M5 planMcpServer 关闭时不暴露', planMcpServer({ ...planBase, enabled: false }) === undefined);
+
+const capabilities = pkg.capabilities || {};
+check('M6 声明 capabilities.untrustedWorkspaces.supported:false（Restricted Mode 整体不激活）',
+  capabilities.untrustedWorkspaces?.supported === false, capabilities.untrustedWorkspaces);
+const nlsEn = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.nls.json'), 'utf-8'));
+check('M7 trust 说明走 nls 且非空',
+  typeof nlsEn['capabilities.untrustedWorkspaces.description'] === 'string'
+  && nlsEn['capabilities.untrustedWorkspaces.description'].trim().length > 0);
+
 const scripts = pkg.scripts || {};
 check('B1 bundle:cli 使用 --external:vscode', String(scripts['bundle:cli']).includes('--external:vscode') && String(scripts['bundle:cli']).includes('bundle/cb-cli.js'));
 check('B2 bundle:mcp 使用 --external:vscode', String(scripts['bundle:mcp']).includes('--external:vscode') && String(scripts['bundle:mcp']).includes('bundle/cb-mcp.js'));

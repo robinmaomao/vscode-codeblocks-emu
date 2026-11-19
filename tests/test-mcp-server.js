@@ -30,6 +30,10 @@ function check(name, cond, got) {
   check('M1 握手并列出工具', names.length === 11, names);
   check('M2 关键工具存在', ['codeblocks_project_read', 'codeblocks_project_edit', 'codeblocks_build', 'codeblocks_debug'].every((n) => names.includes(n)), names);
   check('M3 工具带 JSON Schema', list.tools.every((t) => t.inputSchema && t.inputSchema.type === 'object'));
+  const withTitle = list.tools.filter((t) => typeof t.annotations?.title === 'string' && t.annotations.title.length > 0);
+  check('M3a 工具带 annotations.title', withTitle.length === names.length, withTitle.length);
+  const roHints = list.tools.filter((t) => t.annotations?.readOnlyHint === true).map((t) => t.name).sort();
+  check('M3b readOnlyHint 只标注整体只读的工具', JSON.stringify(roHints) === JSON.stringify(['codeblocks_build_status', 'codeblocks_project_read']), roHints);
 
   const ok = await client.callTool({ name: 'codeblocks_project_read', arguments: { cbp: CBP, section: 'summary' } });
   const text = ok.content?.[0]?.text ?? '';

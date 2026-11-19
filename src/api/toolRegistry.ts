@@ -7,18 +7,20 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import type { Project } from '../model/types';
+import type { Compiler } from '../compiler/compiler';
 import type { BuildCancelHandle } from '../build/cancelToken';
 import type { BuildLogSummary } from '../build/buildSummary';
 import { applyEdits, applyUnitOptionToText, isPreserveCapable } from './projectEdit';
 import { projectSnapshot, QuerySection, workspaceSnapshot } from './projectQuery';
 import { buildProject, BuildMode, BuildOutcome, BuildRequest, selectBuildTarget } from './buildService';
-import { runProject, RunOutcome, RunRequest } from './runService';
+import { runProject, RunOutcome, RunRequest, DEFAULT_RUN_TIMEOUT_MS } from './runService';
 import { exportProject, ExportKind, ExportOutcome } from './exportService';
 import { captureSignature, loadWorkspace, readProjectText, requireCbpPath, signatureChanged, updateWorkspaceDependencies, writeTextAtomic } from './projectStore';
 import type { CompilerProvider } from './compilerService';
 import type { CompilerSettingsLike } from '../compiler/compilerFactory';
 import type { CbOutput } from '../build/cbChannel';
 import { ControlError, EditChange, EditOp, fail, WriteFormat } from './types';
+import { normalizeDebugResult } from './debugShapes';
 import { isReadOnlyToolCall, READ_ONLY_HINT } from './agentPolicy';
 
 export interface OpenProjectInfo {
@@ -29,15 +31,15 @@ export interface OpenProjectInfo {
 
 /** 调试桥（扩展内用 vscode.debug；CLI/MCP 用 debugService） */
 export interface DebugBridge {
-  start(req: { cbp?: string; target?: string; args?: string; stopOnEntry?: boolean; file?: string; lines?: number[] }): Promise<unknown>;
+  start(req: { cbp?: string; target?: string; args?: string; stopOnEntry?: boolean; file?: string; lines?: number[]; timeoutMs?: number }): Promise<unknown>;
   stop(): Promise<unknown>;
   setBreakpoints(req: { cbp?: string; file: string; lines: number[] }): Promise<unknown>;
   state(): Promise<unknown>;
   stack(): Promise<unknown>;
   variables(req?: { frameId?: number }): Promise<unknown>;
   evaluate(req: { expression: string; frameId?: number }): Promise<unknown>;
-  continue(): Promise<unknown>;
-  step(req: { kind: 'next' | 'stepIn' | 'stepOut' }): Promise<unknown>;
+  continue(req?: { timeoutMs?: number }): Promise<unknown>;
+  step(req: { kind: 'next' | 'stepIn' | 'stepOut'; timeoutMs?: number }): Promise<unknown>;
 }
 
 /** 工具执行上下文 */
@@ -67,6 +69,12 @@ export interface ToolContext {
   debug?: DebugBridge;
   /** 只读模式（LM Tools / MCP 按设置注入；CLI 不注入 ⇒ 行为不变） */
   readOnly?: boolean;
+  /**
+   * 编译器系统 include 路径（可选；扩展用 `queryCompilerSystemIncludes` 提供）。
+   * 导出 compile_commands 时补齐 `-isystem`，与 UI 的「生成 compile_commands」保持一致；
+   * CLI/MCP 不提供时退化为旧行为（不补系统头）。
+   */
+  systemIncludes?: (project: Project, compiler: Compiler) => string[];
 }
 
 export interface ToolInputSchema {
@@ -102,7 +110,10 @@ export function resolveCbp(ctx: ToolContext, input: Record<string, unknown>): st
 }
 
 async function loadForEdit(ctx: ToolContext, cbp: string): Promise<Project> {
-  return ctx.loadProject(cbp);
+  // 编辑在**副本**上进行：applyEdits 是就地修改，若中途校验失败（如第 2 个 op 非法），
+  // 宿主的已打开工程（ctx.loadProject 返回内存实例）会被写入一半的改动。
+  const project = await ctx.loadProject(cbp);
+  return JSON.parse(JSON.stringify(project)) as Project;
 }
 
 // ———— 工具实现 ————
@@ -127,6 +138,13 @@ const projectRead: ToolDefinition = {
     const cbp = resolveCbp(ctx, input);
     const target = typeof input.target === 'string' ? input.target : undefined;
     const project = await ctx.loadProject(cbp);
+    // 未知 target 必须显式报错：返回 { ok:true, error } 会让只检查 ok 的 agent 误判成功
+    if (target && !project.buildTargets.some((t) => t.title === target)) {
+      fail('invalid-input', `Target not found: ${target}`, {
+        targets: project.buildTargets.map((t) => t.title),
+        hint: 'Use section=targets to list target titles; a virtual target cannot be used as a filter.',
+      });
+    }
     return { cbp, ...projectSnapshot(project, { section, target }) };
   },
 };
@@ -176,7 +194,7 @@ const projectEdit: ToolDefinition = {
         writeTextAtomic(cbp, next, encoding);
         await ctx.reloadProject?.(cbp);
       }
-      return { ok: true, cbp, format, written: !dryRun && next !== text, changed, warnings: [] };
+      return { ok: true, cbp, format, written: !dryRun && next !== text, changed, warnings: [], ...(dryRun ? { preview: next } : {}) };
     }
 
     // 先取签名再读盘：读盘与写盘之间文件被外部改动 ⇒ signatureChanged 命中
@@ -342,7 +360,7 @@ const buildStatus: ToolDefinition = {
   },
   async handler(ctx, input) {
     const summary = ctx.lastBuild?.();
-    if (!summary) fail('unsupported', 'No build has been run in this session yet');
+    if (!summary) fail('no-build', 'No build has been run in this session yet', { hint: 'Run codeblocks_build first.' });
     const severity = (input.severity as string) ?? 'all';
     const tail = typeof input.tail === 'number' && input.tail > 0 ? input.tail : 0;
     const cbp = typeof input.cbp === 'string' ? path.resolve(input.cbp) : undefined;
@@ -368,8 +386,8 @@ const run: ToolDefinition = {
       cbp: { type: 'string', description: 'Absolute path to the .cbp (defaults to the active project)' },
       target: { type: 'string', description: 'Target title' },
       args: { type: 'string', description: 'Override the execution arguments' },
-      cwd: { type: 'string', description: 'Override the working directory' },
-      timeoutMs: { type: 'integer', description: 'Kill the program after this many milliseconds' },
+      cwd: { type: 'string', description: 'Override the working directory (relative paths resolve against the project directory)' },
+      timeoutMs: { type: 'integer', description: 'Kill the program after this many milliseconds (default 120000; 0 = no limit)' },
     },
   },
   async handler(ctx, input): Promise<RunOutcome> {
@@ -379,7 +397,8 @@ const run: ToolDefinition = {
       target: typeof input.target === 'string' ? input.target : undefined,
       args: typeof input.args === 'string' ? input.args : undefined,
       cwd: typeof input.cwd === 'string' ? input.cwd : undefined,
-      timeoutMs: typeof input.timeoutMs === 'number' ? input.timeoutMs : undefined,
+      // 未显式指定时用默认上限，避免死循环程序永久占住工具调用（显式 0 = 不限时）
+      timeoutMs: typeof input.timeoutMs === 'number' ? input.timeoutMs : DEFAULT_RUN_TIMEOUT_MS,
     };
     return runProject(req, { compiler: ctx.compiler });
   },
@@ -406,6 +425,9 @@ const debug: ToolDefinition = {
       frameId: { type: 'integer', description: 'Stack frame id (variables/evaluate)' },
       expression: { type: 'string', description: 'Expression to evaluate' },
       kind: { type: 'string', enum: ['next', 'stepIn', 'stepOut'], description: 'Step kind' },
+      timeoutMs: { type: 'integer', description: 'start/run/continue/step: how long to wait for the program to stop (default 30000)' },
+      includeStack: { type: 'boolean', description: 'run: also return the stack trace (default true)' },
+      includeVariables: { type: 'boolean', description: 'run: also return the top-frame variables (default true)' },
     },
     required: ['action'],
   },
@@ -413,19 +435,23 @@ const debug: ToolDefinition = {
     if (!ctx.debug) fail('unsupported', 'Debug control is not available in this transport');
     const action = String(input.action);
     const bridge = ctx.debug!;
+    // 两种传输（DAP / gdb MI）形状不同 ⇒ 统一归一化后再返回（见 api/debugShapes.ts）
+    const norm = (kind: string, value: unknown): unknown => normalizeDebugResult(kind, value);
     switch (action) {
       case 'start':
-        return bridge.start({
+        return norm('start', await bridge.start({
           cbp: resolveCbp(ctx, input),
           target: typeof input.target === 'string' ? input.target : undefined,
           args: typeof input.args === 'string' ? input.args : undefined,
           stopOnEntry: input.stopOnEntry === true,
-        });
-      case 'stop': return bridge.stop();
+          timeoutMs: typeof input.timeoutMs === 'number' ? input.timeoutMs : undefined,
+        }));
+      case 'stop': return norm('stop', await bridge.stop());
       case 'run': {
         const file = typeof input.file === 'string' ? input.file : undefined;
         const lines = Array.isArray(input.lines) ? (input.lines as number[]) : [];
-        if (file && lines.length) await bridge.setBreakpoints({ file, lines });
+        // 断点统一由 start 应用：CLI/MCP 的调试桥在 start 之前没有会话，
+        // 先 setBreakpoints 会直接报 not-running（宿主侧则会在 startDebugging 前预置）。
         const started = await bridge.start({
           cbp: resolveCbp(ctx, input),
           target: typeof input.target === 'string' ? input.target : undefined,
@@ -433,24 +459,35 @@ const debug: ToolDefinition = {
           stopOnEntry: input.stopOnEntry === true,
           file,
           lines,
+          timeoutMs: typeof input.timeoutMs === 'number' ? input.timeoutMs : undefined,
         });
         const stack = input.includeStack === false ? undefined : await bridge.stack().catch(() => undefined);
         const variables = input.includeVariables === false ? undefined : await bridge.variables().catch(() => undefined);
-        return { start: started, stack, variables };
+        return {
+          start: norm('start', started),
+          stack: stack === undefined ? undefined : norm('stack', stack),
+          variables: variables === undefined ? undefined : norm('variables', variables),
+        };
       }
       case 'breakpoints':
-        return bridge.setBreakpoints({
+        return norm('breakpoints', await bridge.setBreakpoints({
           cbp: typeof input.cbp === 'string' ? input.cbp : activeCbp(ctx),
           file: String(input.file ?? ''),
           lines: Array.isArray(input.lines) ? (input.lines as number[]) : [],
-        });
-      case 'state': return bridge.state();
-      case 'stack': return bridge.stack();
-      case 'variables': return bridge.variables({ frameId: typeof input.frameId === 'number' ? input.frameId : undefined });
+        }));
+      case 'state': return norm('state', await bridge.state());
+      case 'stack': return norm('stack', await bridge.stack());
+      case 'variables':
+        return norm('variables', await bridge.variables({ frameId: typeof input.frameId === 'number' ? input.frameId : undefined }));
       case 'evaluate':
-        return bridge.evaluate({ expression: String(input.expression ?? ''), frameId: typeof input.frameId === 'number' ? input.frameId : undefined });
-      case 'continue': return bridge.continue();
-      case 'step': return bridge.step({ kind: (input.kind as 'next' | 'stepIn' | 'stepOut') ?? 'next' });
+        return norm('evaluate', await bridge.evaluate({ expression: String(input.expression ?? ''), frameId: typeof input.frameId === 'number' ? input.frameId : undefined }));
+      case 'continue': return norm('continue', await bridge.continue({
+        timeoutMs: typeof input.timeoutMs === 'number' ? input.timeoutMs : undefined,
+      }));
+      case 'step': return norm('step', await bridge.step({
+        kind: (input.kind as 'next' | 'stepIn' | 'stepOut') ?? 'next',
+        timeoutMs: typeof input.timeoutMs === 'number' ? input.timeoutMs : undefined,
+      }));
       default: fail('invalid-input', `Unknown debug action: ${action}`);
     }
   },
@@ -527,7 +564,7 @@ const exportTool: ToolDefinition = {
       kind: input.kind as ExportKind,
       target: typeof input.target === 'string' ? input.target : undefined,
       out: typeof input.out === 'string' ? input.out : undefined,
-    }, { compiler: ctx.compiler, output: ctx.output });
+    }, { compiler: ctx.compiler, output: ctx.output, systemIncludes: ctx.systemIncludes });
   },
 };
 
@@ -540,9 +577,9 @@ const workspace: ToolDefinition = {
     properties: {
       action: { type: 'string', enum: ['info', 'deps', 'open', 'close', 'setActive', 'list'] },
       workspace: { type: 'string', description: 'Absolute path to the .workspace (info/deps)' },
-      project: { type: 'string', description: 'Project path the dependencies belong to (deps)' },
+      project: { type: 'string', description: 'Project the dependencies belong to (absolute or workspace-relative path)' },
       cbp: { type: 'string', description: 'Project path (open/close/setActive)' },
-      dependencies: { type: 'array', items: { type: 'string' }, description: 'Dependency project paths (deps)' },
+      dependencies: { type: 'array', items: { type: 'string' }, description: 'Dependency project paths (absolute or workspace-relative; written back as relative)' },
     },
     required: ['action'],
   },
@@ -560,13 +597,33 @@ const workspace: ToolDefinition = {
     const wsPath = typeof input.workspace === 'string' ? input.workspace : undefined;
     if (!wsPath) fail('invalid-input', 'A .workspace path is required');
     if (action === 'info') return workspaceSnapshot(loadWorkspace(wsPath!));
-    // deps
+    // deps：project / dependencies 都接受绝对路径（相对路径按 workspace 目录解析），
+    // 落盘统一写成 workspace 相对路径（Code::Blocks 的 <Project filename> 语义，跨机器可移植）。
     const project = typeof input.project === 'string' ? input.project : undefined;
     if (!project) fail('invalid-input', 'A project path is required for deps');
-    const deps = Array.isArray(input.dependencies) ? (input.dependencies as string[]) : [];
-    const ok = updateWorkspaceDependencies(wsPath!, project!, deps);
+    const depsInput = input.dependencies;
+    // 类型错误必须显式报错：静默按 [] 处理会清空工程依赖（数据丢失）
+    if (depsInput !== undefined && (!Array.isArray(depsInput) || depsInput.some((d) => typeof d !== 'string'))) {
+      fail('invalid-input', 'dependencies must be an array of project paths');
+    }
+    const ws = loadWorkspace(wsPath!);
+    const normAbs = (p: string): string => path.resolve(p).replace(/\\/g, '/').toLowerCase();
+    const relOf = (p: string): string | undefined => {
+      const abs = path.isAbsolute(p) ? path.resolve(p) : path.resolve(ws.basePath, p);
+      return ws.projectPaths.find((rel) => normAbs(path.join(ws.basePath, rel)) === normAbs(abs));
+    };
+    const targetRel = relOf(project!);
+    if (!targetRel) {
+      fail('invalid-input', `Project not found in the workspace: ${project}`, { projects: ws.projectPaths });
+    }
+    const deps = ((depsInput as string[] | undefined) ?? []).map((d) => {
+      const rel = relOf(d);
+      if (!rel) fail('invalid-input', `Dependency project is not part of the workspace: ${d}`, { projects: ws.projectPaths });
+      return rel;
+    });
+    const ok = updateWorkspaceDependencies(wsPath!, targetRel!, deps);
     if (!ok) fail('invalid-input', `Project not found in the workspace: ${project}`);
-    return { ok: true, workspace: path.resolve(wsPath!), project: path.resolve(project!), dependencies: deps };
+    return { ok: true, workspace: path.resolve(wsPath!), project: targetRel, dependencies: deps };
   },
 };
 

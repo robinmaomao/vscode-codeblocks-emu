@@ -52,10 +52,10 @@ export function editProject(cbp: string, ops: EditOp[], opts: EditProjectOptions
       }
       writeTextAtomic(cbp, next, encoding);
     }
-    return { ok: true, cbp, format, written: !opts.dryRun && next !== text, changed, warnings: [] };
+    return { ok: true, cbp, format, written: !opts.dryRun && next !== text, changed, warnings: [], preview: opts.dryRun ? next : undefined };
   }
 
-  const project: Project = loadProject(cbp);
+  const project: Project = JSON.parse(JSON.stringify(loadProject(cbp))) as Project;
   const outcome = applyEdits(project, ops, { allowScripts: opts.allowScripts });
   const warnings = [...outcome.warnings];
   if (format === 'preserve' && !isPreserveCapable(ops)) {

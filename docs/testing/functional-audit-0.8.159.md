@@ -714,7 +714,7 @@
 | clangd 重启合并 vs 重启判定 | `tools/clangdRestart.ts` 同时导出 coalescer 与 `decideClangdRestart` | 单元 `test-clangd-restart` + `-decision` + `-startup-restore` |
 
 **回归结果（0.9.0）**：契约 3/3（44 + 6 + 745）、无头 **227**（FAIL=0 / SKIP=1）、E2E **7/7**（含 CLI 构建 7）、
-视觉 26/26、性能 13/13、打包 16 断言、宿主 **33/33（VS Code 1.102.0）**。详见 [0.9.0 测试报告](./test-report-0.9.1.md)。
+视觉 26/26、性能 13/13、打包 16 断言、宿主 **33/33（VS Code 1.102.0）**。详见 [0.9.0 测试报告](./test-report-0.9.2.md)。
 
 **清单变化**：设置 91 → **93**（新增第 10 分区 `codeblocks.agent`），`engines.vscode` 1.85 → **1.102**，
 命令 136 / 键位 34 / 视图 6 不变。

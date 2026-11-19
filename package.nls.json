@@ -333,5 +333,6 @@
   "tool.codeblocks_export.userDescription": "Export Makefile or compile database",
   "tool.codeblocks_workspace.displayName": "Code::Blocks: Workspace",
   "tool.codeblocks_workspace.userDescription": "Inspect workspaces and dependencies",
-  "mcp.codeblocks.label": "Code::Blocks (local project server)"
+  "mcp.codeblocks.label": "Code::Blocks (local project server)",
+  "capabilities.untrustedWorkspaces.description": "Code::Blocks builds, runs and debugs workspace code (compilers, Makefiles, build scripts) and exposes the agent control surface. Trust the workspace to enable it."
 }
