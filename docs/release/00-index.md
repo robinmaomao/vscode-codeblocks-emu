@@ -38,6 +38,7 @@
 | [0.8.157.md](./0.8.157.md) | AutoVersioning/Profiler 正确性、编译器元数据加载与 CB 全量 XML、OpenWatcom/Cygwin/MSYS2/TDM/D/Fortran 探测 |
 | [0.8.158.md](./0.8.158.md) | Profiler 命令拆分（`features/profilerCommands.ts`）与架构收敛 |
 | [0.8.159.md](./0.8.159.md) | 项目管理菜单拆分（`features/projectManager.ts`）与架构收敛 |
+| [0.8.160.md](./0.8.160.md) | 独立功能审计修复轮：新建工程覆盖保护、HeaderGuard 仅头文件、`#include` 系统头跳转、TODO 扫描器按语言识别注释、构建日志/调试门控本地化、工程名校验（F-02/F-03 未执行） |
 
 ## 分支预发布版本（branch prerelease）
 

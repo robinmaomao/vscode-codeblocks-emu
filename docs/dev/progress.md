@@ -67,7 +67,7 @@ npm.cmd run compile
 npm.cmd run package
 
 # 安装（版本号以 package.json 为准）
-code --install-extension "codeblocks-vscode-0.8.159.vsix" --force
+code --install-extension "codeblocks-vscode-0.8.160.vsix" --force
 
 # 全量回归测试
 npm.cmd test
@@ -131,8 +131,9 @@ npm.cmd test
 | [0.8.157](../release/0.8.157.md) | AutoVersioning/Profiler 正确性（mtime 跳过、构建会话去重、do_auto_increment、SVN、旧 gmon 拒绝、`--separate-files` 回退）、编译器元数据加载与 CB 全量 XML、OpenWatcom/Cygwin/MSYS2/TDM/D/Fortran 探测 |
 | [0.8.158](../release/0.8.158.md) | Profiler 命令编排从 `extension.ts` 拆到 `features/profilerCommands.ts`，依赖注入 + 回归守卫；无用户可见行为变化 |
 | [0.8.159](../release/0.8.159.md) | 项目管理 QuickPick 从 `extension.ts` 拆到 `features/projectManager.ts`，依赖注入 + 回归守卫；无用户可见行为变化 |
+| [0.8.160](../release/0.8.160.md) | 功能审计修复轮：新建工程覆盖保护、HeaderGuard 仅头文件、`#include` 系统头跳转、TODO 扫描器按语言识别注释、构建日志/调试门控本地化、工程名校验；`test:contract` 通过且无头脚本补断言（F-02/F-03 按决定不执行） |
 
-> 当前版本 **0.8.159**（体验版；发布说明见 [release/0.8.159.md](../release/0.8.159.md)，上一版见 [release/0.8.158.md](../release/0.8.158.md)）；测试报告见 [test-report-0.8.159.md](../testing/test-report-0.8.159.md)；无头回归见 `npm test`（`TOTAL=212 FAIL=0 SKIP=1`，另有契约 / E2E / 视觉 / 性能 / 打包 / 宿主分层，见 [测试方案](../testing/strategy.md)）。
+> 当前版本 **0.8.160**（体验版；发布说明见 [release/0.8.160.md](../release/0.8.160.md)，上一版见 [release/0.8.159.md](../release/0.8.159.md)）；测试报告见 [test-report-0.8.160.md](../testing/test-report-0.8.160.md)；无头回归见 `npm test`（`TOTAL=217 FAIL=0 SKIP=1`，另有契约 / E2E / 视觉 / 性能 / 打包 / 宿主分层，见 [测试方案](../testing/strategy.md)）。
 
 ## 文档：GitHub Release 页面格式统一
 
