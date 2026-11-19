@@ -89,3 +89,15 @@ console.log('目标:', reparse.buildTargets.map((t) => `${t.title}(type=${t.targ
 console.log('文件归属:');
 for (const f of reparse.files) console.log('  ', f.relativeFilename, '->', f.buildTargets);
 fs.unlinkSync(tmp);
+
+let pass = 0, fail = 0;
+function check(name, cond, got, want) {
+  if (cond) { pass++; console.log('OK   ' + name); }
+  else { fail++; console.log(`FAIL ${name}  got=${JSON.stringify(got)}${want !== undefined ? ' want=' + JSON.stringify(want) : ''}`); }
+}
+check('目标增删改', reparse.buildTargets.length === 2 && reparse.buildTargets[0].title === 'Debug2' && reparse.buildTargets[1].title === 'Release2', reparse.buildTargets.map((t) => t.title));
+const norm = (p) => String(p).replace(/\\/g, '/');
+check('目标输出/对象目录', norm(reparse.buildTargets[0].outputFilename) === 'bin/Debug/hello' && norm(reparse.buildTargets[1].outputFilename) === 'bin/Release2/hello' && norm(reparse.buildTargets[1].objectOutput) === 'obj/Release2/', reparse.buildTargets.map((t) => ({ out: t.outputFilename, obj: t.objectOutput })));
+check('文件归属同步到新目标', reparse.files.every((f) => JSON.stringify(f.buildTargets) === JSON.stringify(['Debug2', 'Release2'])), reparse.files.map((f) => ({ f: f.relativeFilename, t: f.buildTargets })));
+console.log(`目标编辑: ${pass} pass, ${fail} fail`);
+process.exit(fail ? 1 : 0);

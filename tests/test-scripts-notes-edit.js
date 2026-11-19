@@ -41,3 +41,15 @@ for (const f of reparse.files) {
   console.log(`${f.relativeFilename}: weight=${f.weight} vfolder=${JSON.stringify(f.virtualFolder)}`);
 }
 fs.unlinkSync(tmp);
+
+let pass = 0, fail = 0;
+function check(name, cond, got, want) {
+  if (cond) { pass++; console.log('OK   ' + name); }
+  else { fail++; console.log(`FAIL ${name}  got=${JSON.stringify(got)}${want !== undefined ? ' want=' + JSON.stringify(want) : ''}`); }
+}
+check('项目备注与显示开关', reparse.notes === '这是项目备注\n第二行' && reparse.showNotesOnLoad === true, { notes: reparse.notes, show: reparse.showNotesOnLoad });
+check('项目/目标构建脚本', JSON.stringify(reparse.buildScripts) === JSON.stringify(['prebuild.script', 'postbuild.script']) && JSON.stringify(reparse.buildTargets[0].buildScripts) === JSON.stringify(['debug.script']) && reparse.buildTargets[1].buildScripts.length === 0, { project: reparse.buildScripts, targets: reparse.buildTargets.map((t) => t.buildScripts) });
+const byRel = new Map(reparse.files.map((f) => [f.relativeFilename, f]));
+check('文件 weight / virtualFolder', byRel.get('main.c')?.weight === 10 && byRel.get('main.c')?.virtualFolder === 'Sources' && byRel.get('util.h')?.weight === 90 && byRel.get('util.h')?.virtualFolder === 'Headers', [...byRel.values()].map((f) => ({ f: f.relativeFilename, w: f.weight, v: f.virtualFolder })));
+console.log(`备注/脚本/weight: ${pass} pass, ${fail} fail`);
+process.exit(fail ? 1 : 0);

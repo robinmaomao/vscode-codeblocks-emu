@@ -22,6 +22,7 @@ Module._load = function (request, parent, isMain) {
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const i18n = require('../dist/i18n');
 const { ProjectParser } = require('../dist/model/parser.js');
 const { BuildEngine } = require('../dist/build/buildEngine.js');
 const { createGccCompiler } = require('../dist/compiler/compiler.js');
@@ -89,8 +90,8 @@ const skippedTitle = supportsCurrentPlatform(0x01) ? 'WinOnly' : 'MacOnly';
   check('无无效编译器错误条目（平台跳过不误报编译器）', !logs.some((l) => l.startsWith('e|') && l.includes('invalid')), logs.filter((l) => l.startsWith('e|')), '（无）');
 
   check('收尾行 Nothing to be done（NotifyJobDone 语义，含平台跳过）',
-    logs.includes('i|[Code::Blocks] Nothing to be done (all items are up-to-date).'),
-    logs.filter((l) => l.includes('Nothing')), 'i|[Code::Blocks] Nothing to be done (all items are up-to-date).');
+    logs.includes('i|' + i18n.t('[Code::Blocks] Nothing to be done (all items are up-to-date).')),
+    logs.filter((l) => l.includes('Nothing')), 'i|' + i18n.t('[Code::Blocks] Nothing to be done (all items are up-to-date).'));
 
   check('被跳过目标不打印 Build banner', !logs.some((l) => l.includes(`Build: ${skippedTitle}`)), logs.filter((l) => l.includes('Build:')), undefined);
 

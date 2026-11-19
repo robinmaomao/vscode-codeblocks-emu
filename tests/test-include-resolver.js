@@ -1,6 +1,6 @@
 // 验证第三轮 R11：#include 指令解析与搜索顺序（当前文件目录 → include 目录）
 const path = require('path');
-const { parseIncludeDirective, resolveIncludePath } = require('../dist/tools/includeResolver.js');
+const { findProjectIncludeFile, parseIncludeDirective, resolveIncludePath } = require('../dist/tools/includeResolver.js');
 
 let pass = 0, fail = 0;
 function check(name, cond, got, want) {
@@ -41,6 +41,23 @@ check('名称含 / 归一', resolveIncludePath({ name: 'sub/deep.h', quoted: fal
 let calls = 0;
 resolveIncludePath({ name: 'x.h', quoted: true }, F, [I1, I1], () => { calls++; return false; });
 check('目录去重（当前目录 + 重复目录 = 2 次探测）', calls === 2, calls);
+
+// 工程文件后缀匹配（F-05，对齐 CB IsSuffixOfPath）
+const projectFiles = [
+  { relativeFilename: 'src/util.h', absolutePath: path.resolve('/proj/src/util.h') },
+  { relativeFilename: 'src/myutil.h', absolutePath: path.resolve('/proj/src/myutil.h') },
+  { relativeFilename: 'include/api.h' },
+];
+hit = findProjectIncludeFile(projectFiles, path.resolve('/proj'), 'util.h', () => true);
+check('工程后缀：src/util.h 命中 util.h', hit === path.resolve('/proj/src/util.h'), hit);
+hit = findProjectIncludeFile(projectFiles, path.resolve('/proj'), 'myutil.h', () => true);
+check('工程后缀：不误命中 myutil.h', hit === path.resolve('/proj/src/myutil.h'), hit);
+hit = findProjectIncludeFile(projectFiles, path.resolve('/proj'), 'API.H', () => true);
+check('工程后缀：Windows 大小写不敏感', process.platform !== 'win32' || hit === path.resolve('/proj/include/api.h'), hit);
+hit = findProjectIncludeFile(projectFiles, path.resolve('/proj'), 'api.h', (p) => p === path.resolve('/proj/include/api.h'));
+check('工程后缀：无 absolutePath 时回退 basePath', hit === path.resolve('/proj/include/api.h'), hit);
+hit = findProjectIncludeFile(projectFiles, path.resolve('/proj'), 'nothere.h', () => true);
+check('工程后缀：未命中 → undefined', hit === undefined, hit);
 
 console.log(`include 解析: ${pass} pass, ${fail} fail`);
 process.exit(fail ? 1 : 0);

@@ -22,6 +22,7 @@ Module._load = function (request, parent, isMain) {
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const i18n = require('../dist/i18n');
 const { ProjectParser } = require('../dist/model/parser.js');
 const { BuildEngine } = require('../dist/build/buildEngine.js');
 const { createGccCompiler } = require('../dist/compiler/compiler.js');
@@ -33,7 +34,7 @@ function check(name, cond, extra) {
 }
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-const hasNothing = (log) => log.some((l) => l.includes('Nothing to be done'));
+const hasNothing = (log) => log.some((l) => l.includes(i18n.t('[Code::Blocks] Nothing to be done (all items are up-to-date).')));
 const hasWarn = (log) => log.some((l) => l.includes("Can't read file's timestamp"));
 const compiledNames = (log) => log.filter((l) => l.includes('[Compiled]')).map((l) => l.match(/\d+-\d+\s+(\S+)\s/)?.[1] ?? l);
 

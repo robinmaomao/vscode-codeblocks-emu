@@ -27,6 +27,8 @@ docs/
     strategy.md            分层测试方案
     coverage-matrix.md     测试覆盖矩阵（自动生成）
     test-report-<ver>.md   当前版本测试报告（滚动更新）
+    functional-audit-<ver>.md 独立功能审计报告（逐项证据/缺陷/修复建议）
+    functional-audit-<ver>-ledger.md 功能审计逐项台账（命令/设置/键位/DAP/菜单）
     manual-acceptance.md   手工验收清单
     performance-baseline.md 性能基准（自动生成）
   release/                 逐版本发布说明（见 00-index.md）
@@ -57,6 +59,7 @@ docs/
 | [testing/strategy.md](./testing/strategy.md) | 分层测试体系（L-1…L5 + CI）：覆盖范围、运行方式、环境约束、工具链安装 |
 | [testing/coverage-matrix.md](./testing/coverage-matrix.md) | 命令/视图/设置/键位/语言语法/DAP 能力逐项覆盖台账（`npm run coverage:matrix` 生成） |
 | [testing/test-report-0.8.159.md](./testing/test-report-0.8.159.md) | 当前版本的测试执行报告（滚动更新）：分层结果、覆盖台账、本版变更与缺陷处置 |
+| [testing/functional-audit-0.8.159.md](./testing/functional-audit-0.8.159.md) | **独立功能审计报告**：136 命令 / 91 设置 / 34 键位 / 30 DAP 的逐项证据、覆盖真实性、S1–S3 缺陷与修复建议（附录 [台账](./testing/functional-audit-0.8.159-ledger.md)） |
 | [testing/test-report-0.8.139-full.md](./testing/test-report-0.8.139-full.md) | 0.8.139 完整独立复核：七层结果、失败/SKIP 取证、ccache 与短路径专项、性能明细 |
 | [testing/manual-acceptance.md](./testing/manual-acceptance.md) | 需人工 GUI 会话执行的验收项与留档要求（自动化不可覆盖的交互） |
 | [testing/performance-baseline.md](./testing/performance-baseline.md) | 微基准 + 真实构建的性能数据与预算（`npm run perf:report` 更新，含趋势） |

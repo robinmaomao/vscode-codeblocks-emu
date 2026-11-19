@@ -14,7 +14,7 @@ import { ProjectParser, WorkspaceParser } from './model/parser';
 import { Project, BuildTarget, ProjectFile, TargetType, CommandType, Workspace, OptionsRelation, OptionsRelationType, LinkerExecutableOption, supportsCurrentPlatform, PLATFORM_ALL, MakeCommandsMap } from './model/types';
 import { serializeProject } from './model/projectWriter';
 import { createProjectFromTemplate, PROJECT_TEMPLATES } from './project/newProject';
-import { instantiateUserTemplate, listUserTemplates, saveAsUserTemplate } from './project/userTemplates';
+import { getUserTemplate, instantiateUserTemplate, isValidProjectName, listUserTemplates, saveAsUserTemplate } from './project/userTemplates';
 import { Compiler } from './compiler/compiler';
 import { queryCompilerVersionString } from './compiler/compilerVersion';
 import { CompilerRegistryDeps, findRegisteredCompilerId, resolveEffectiveCompilerId } from './compiler/compilerRegistry';
@@ -92,7 +92,7 @@ import { createDebugConfigurationProviders, DebugConfigProviderHost, DerivedLaun
 import { RegistersTreeProvider } from './ui/registersTreeProvider';
 import { scanTodos } from './tools/todoScanner';
 import { Bookmark, toggleBookmark, nextBookmark, prevBookmark, locateBookmarkLineInDocument } from './tools/bookmarks';
-import { parseIncludeDirective, resolveIncludePath } from './tools/includeResolver';
+import { findProjectIncludeFile, parseIncludeDirective, resolveIncludePath } from './tools/includeResolver';
 import { countFiles, isSourceFile } from './tools/codeStats';
 import { formatActiveDocument } from './tools/astyle';
 import {
@@ -1225,9 +1225,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       const confirm = await vscode.window.showWarningMessage(
         i18n.t('Remove project "{0}" from the sidebar? (files on disk are not deleted)', path.basename(path.dirname(filename))),
         { modal: true },
-        'Remove',
+        i18n.t('Remove'),
       );
-      if (confirm !== 'Remove') return;
+      if (confirm !== i18n.t('Remove')) return;
       removeProject(filename);
     }),
   );
@@ -1513,9 +1513,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       const confirm = await vscode.window.showWarningMessage(
         i18n.t('Delete the virtual folder "{0}" (including subfolders)? {1} of its files will be moved back to the project root; files on disk are not deleted.', folder, count),
         { modal: true },
-        'Delete',
+        i18n.t('Delete'),
       );
-      if (confirm !== 'Delete') return;
+      if (confirm !== i18n.t('Delete')) return;
       const res = deleteVirtualFolder(project, folder);
       outputChannel.info(
         logT('[Code::Blocks] Virtual folder deleted: {0} ({1} entry(ies), {2} file(s) moved back to the root)', folder, res.changedFolders, res.affectedFiles),
@@ -2152,8 +2152,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         vscode.window.showInformationMessage(i18n.t('No bookmarks'));
         return;
       }
-      const ok = await vscode.window.showWarningMessage(i18n.t('Clear all {0} bookmarks?', bookmarks.length), { modal: true }, 'Clear');
-      if (ok !== 'Clear') return;
+      const ok = await vscode.window.showWarningMessage(i18n.t('Clear all {0} bookmarks?', bookmarks.length), { modal: true }, i18n.t('Clear'));
+      if (ok !== i18n.t('Clear')) return;
       bookmarks = [];
       await persistBookmarks();
       // P1 复核修复：统一走 refreshBookmarkDecorations（空书签时清理装饰并同步 bookmarkDecoratedDocs 标记）
@@ -3433,6 +3433,19 @@ async function pickCompiler(): Promise<string | undefined> {
   return picked?.label ?? defaultId;
 }
 
+/** 覆盖确认（默认保留现有文件，对齐 Code::Blocks 向导的逐文件确认） */
+async function confirmOverwrite(pathLabel: string): Promise<boolean> {
+  const overwrite = i18n.t('Overwrite');
+  const keep = i18n.t('Keep Existing');
+  const choice = await vscode.window.showWarningMessage(
+    i18n.t('"{0}" already exists. Overwrite it?', pathLabel),
+    { modal: true },
+    overwrite,
+    keep,
+  );
+  return choice === overwrite;
+}
+
 /** 新建工程向导（模板选择 → 名称 → 目录 → 编译器 → 生成 .cbp + 骨架文件 → 打开） */
 async function createNewProject(): Promise<void> {
   // 1. 选择模板（用户模板置顶，对齐 CB File → New 的 From template… 入口）
@@ -3455,11 +3468,7 @@ async function createNewProject(): Promise<void> {
   const name = await vscode.window.showInputBox({
     prompt: i18n.t('Enter the project name'),
     placeHolder: 'my-project',
-    validateInput: (v) => {
-      if (!v.trim()) return i18n.t('Project name cannot be empty');
-      if (/[<>:"/\\|?*\x00-\x1f]/.test(v)) return i18n.t('Project name contains invalid characters');
-      return undefined;
-    },
+    validateInput: (v) => isValidProjectName(v),
   });
   if (!name?.trim()) return;
 
@@ -3483,13 +3492,28 @@ async function createNewProject(): Promise<void> {
   const compilerId = await pickCompiler();
   if (!compilerId) return;
 
-  // 5. 生成模型并落盘
+  // 5. 生成模型并落盘（已存在的 .cbp / 骨架文件逐个确认，默认保留）
   const { project, projectDir } = createProjectFromTemplate(name.trim(), basePath, tpl, compilerId);
+  const overwriteSkeleton = new Set<string>();
+  if (fs.existsSync(project.filename)) {
+    if (!(await confirmOverwrite(project.filename))) {
+      vscode.window.showInformationMessage(i18n.t('Project creation cancelled: the existing project file was kept.'));
+      return;
+    }
+  }
+  for (const f of tpl.skeleton) {
+    const target = path.join(projectDir, f.name);
+    if (!fs.existsSync(target)) continue;
+    if (await confirmOverwrite(f.name)) overwriteSkeleton.add(f.name);
+    else outputChannel.info(logT('[Code::Blocks] Kept existing file: {0}', f.name));
+  }
   try {
     fs.mkdirSync(projectDir, { recursive: true });
-    // 骨架源文件
+    // 骨架源文件（保留的文件不覆盖）
     for (const f of tpl.skeleton) {
-      writeFileAtomicSync(path.join(projectDir, f.name), f.content, 'utf-8');
+      const target = path.join(projectDir, f.name);
+      if (fs.existsSync(target) && !overwriteSkeleton.has(f.name)) continue;
+      writeFileAtomicSync(target, f.content, 'utf-8');
     }
     // .cbp
     const xml = serializeProject(project);
@@ -3544,11 +3568,7 @@ async function createProjectFromUserTemplate(templateId: string): Promise<void> 
   const name = await vscode.window.showInputBox({
     prompt: i18n.t('Enter the project name (from template)'),
     placeHolder: 'my-project',
-    validateInput: (v) => {
-      if (!v.trim()) return i18n.t('Project name cannot be empty');
-      if (/[<>:"/\\|?*\x00-\x1f]/.test(v)) return i18n.t('Project name contains invalid characters');
-      return undefined;
-    },
+    validateInput: (v) => isValidProjectName(v),
   });
   if (!name?.trim()) return;
   const basePath = await pickBaseDir(i18n.t('Select the project directory'));
@@ -3556,8 +3576,29 @@ async function createProjectFromUserTemplate(templateId: string): Promise<void> 
     vscode.window.showWarningMessage(i18n.t('Open a workspace folder first, or choose a directory'));
     return;
   }
+  const root = userTemplateRoot();
+  const manifest = getUserTemplate(root, templateId);
+  if (!manifest) {
+    vscode.window.showErrorMessage(i18n.t('Template not found: {0}', templateId));
+    return;
+  }
+  const projectDir = path.join(basePath, name.trim());
+  const cbpPath = path.join(projectDir, `${name.trim()}.cbp`);
+  if (fs.existsSync(cbpPath) && !(await confirmOverwrite(cbpPath))) {
+    vscode.window.showInformationMessage(i18n.t('Project creation cancelled: the existing project file was kept.'));
+    return;
+  }
+  const overwriteFiles = new Set<string>();
+  for (const rel of manifest.files ?? []) {
+    if (!fs.existsSync(path.join(projectDir, rel))) continue;
+    if (await confirmOverwrite(rel)) overwriteFiles.add(rel);
+    else outputChannel.info(logT('[Code::Blocks] Kept existing file: {0}', rel));
+  }
   try {
-    const res = instantiateUserTemplate(userTemplateRoot(), templateId, name.trim(), basePath);
+    const res = instantiateUserTemplate(root, templateId, name.trim(), basePath, {
+      overwriteCbp: true,
+      overwriteFile: (rel) => overwriteFiles.has(rel),
+    });
     outputChannel.info(
       logT('[Code::Blocks] Project created from the template: {0} → {1} ({2} skeleton file(s)', res.manifest.name, res.cbpPath, res.copiedFiles) +
         logT('{0})', res.missingFiles.length ? logT(', missing {0}', res.missingFiles.length) : ''),
@@ -4134,9 +4175,9 @@ async function exportTargetAsProject(targetTitleArg?: unknown, projectFilenameAr
   const confirm = await vscode.window.showWarningMessage(
     i18n.t('Export target "{0}" as a standalone project? (only files belonging to that target are included)', targetTitle),
     { modal: true },
-    'Export',
+    i18n.t('Export'),
   );
-  if (confirm !== 'Export') return;
+  if (confirm !== i18n.t('Export')) return;
   await saveAllBeforeBuild();
   const safe = targetTitle.replace(/[^\w.-]+/g, '_');
   const base = path.basename(project.filename, path.extname(project.filename));
@@ -5852,9 +5893,9 @@ async function removeFilesFromProject(project: Project): Promise<void> {
   const confirm = await vscode.window.showWarningMessage(
     i18n.t('Remove {0} file(s) from project "{1}"? (the files on disk are kept)', picks.length, project.title),
     { modal: true },
-    'Remove',
+    i18n.t('Remove'),
   );
-  if (confirm !== 'Remove') return;
+  if (confirm !== i18n.t('Remove')) return;
 
   const failed: string[] = [];
   for (const pick of picks) {
@@ -5879,9 +5920,9 @@ async function removeFileFromProject(project: Project, file: ProjectFile): Promi
   const confirm = await vscode.window.showWarningMessage(
     i18n.t('Remove file "{1}" from project "{0}"? (the file on disk is kept)', path.basename(path.dirname(project.filename)), path.basename(file.relativeFilename)),
     { modal: true },
-    'Remove',
+    i18n.t('Remove'),
   );
-  if (confirm !== 'Remove') return;
+  if (confirm !== i18n.t('Remove')) return;
 
   try {
     removeUnitFromCbp(project.filename, file.relativeFilename);
@@ -6167,9 +6208,9 @@ async function renameProjectFile(project: Project, file: ProjectFile): Promise<v
     const confirm = await vscode.window.showWarningMessage(
       i18n.t('This file is open in an editor; save and close it before renaming. Continue?'),
       { modal: true },
-      'Continue',
+      i18n.t('Continue'),
     );
-    if (confirm !== 'Continue') return;
+    if (confirm !== i18n.t('Continue')) return;
     for (const doc of docs) {
       try {
         if (doc.isDirty) await doc.save();
@@ -6944,7 +6985,12 @@ async function showTodoList(): Promise<void> {
   // R12：关键字可由设置自定义（codeblocks.todo.keywords）
   const cfg = vscode.workspace.getConfiguration('codeblocks');
   const keywords = (cfg.get<string[]>('todo.keywords', TODO_KEYWORDS_DEFAULT) ?? []).map((k) => String(k).trim()).filter(Boolean);
-  const todos = scanTodos(files, keywords.length ? { startStrings: keywords, allowedTypes: keywords } : undefined);
+  const effectiveKeywords = keywords.length ? keywords : TODO_KEYWORDS_DEFAULT;
+  const todos = scanTodos(files, {
+    startStrings: effectiveKeywords,
+    allowedTypes: effectiveKeywords,
+    asmHashComment: cfg.get<boolean>('editor.asmHashComment', false),
+  });
 
   if (todos.length === 0) {
     vscode.window.showInformationMessage(i18n.t('No TODO/FIXME/NOTE markers in the project'));
@@ -7050,6 +7096,7 @@ async function openIncludeFileCmd(): Promise<void> {
   }
   const fromDir = path.dirname(ed.document.uri.fsPath);
   const dirs: string[] = [];
+  const projectFiles: { relativeFilename: string; absolutePath?: string }[] = [];
   const project = activeProject;
   if (project) {
     const target = project.buildTargets.find((t) => t.title === getSelectedTarget(project)) ?? project.buildTargets[0];
@@ -7068,8 +7115,16 @@ async function openIncludeFileCmd(): Promise<void> {
         dirs.push(path.isAbsolute(expanded) ? expanded : path.join(project.basePath, expanded));
       }
     }
+    // CB 的 Open include file 会追加工件自身路径；尖括号形式再并入编译器系统头目录
+    projectFiles.push(...project.files.map((f) => ({ relativeFilename: f.relativeFilename, absolutePath: f.absolutePath })));
+    if (!directive.quoted) {
+      const cPath = resolveCompilerProgram(compiler.programs.C, compiler.masterPath);
+      const cppPath = resolveCompilerProgram(compiler.programs.CPP, compiler.masterPath);
+      for (const d of queryCompilerSystemIncludes(cPath, cppPath)) dirs.push(d);
+    }
   }
-  const hit = resolveIncludePath(directive, fromDir, dirs, fs.existsSync);
+  let hit = resolveIncludePath(directive, fromDir, dirs, fs.existsSync);
+  if (!hit) hit = findProjectIncludeFile(projectFiles, project?.basePath ?? fromDir, directive.name);
   if (!hit) {
     vscode.window.showWarningMessage(i18n.t('Include file not found: {0} (searched {1} directories)', directive.name, (directive.quoted ? 1 : 0) + dirs.length));
     return;
@@ -7309,15 +7364,15 @@ async function stopDebuggerIfRunning(): Promise<boolean> {
   const session = vscode.debug.activeDebugSession;
   if (!session) return true;
   const choice = await vscode.window.showWarningMessage(
-    'The debugger must be stopped to do a (re-)build.\nDo you want to stop the debugger now?',
+    i18n.t('The debugger must be stopped to do a (re-)build.\nDo you want to stop the debugger now?'),
     { modal: true },
     i18n.t('Stop Debugging and Build'),
   );
   if (choice !== i18n.t('Stop Debugging and Build')) {
-    outputChannel.info('[Code::Blocks] Aborting (re-)build.');
+    outputChannel.info(logT('[Code::Blocks] Aborting (re-)build.'));
     return false;
   }
-  outputChannel.info('[Code::Blocks] Stopping debugger...');
+  outputChannel.info(logT('[Code::Blocks] Stopping debugger...'));
   await vscode.debug.stopDebugging(session);
   return true;
 }
@@ -7865,7 +7920,7 @@ async function buildOneProject(project: Project, targetTitle: string, rebuild: b
       const askCwd = project.executionDir ? path.resolve(project.basePath, project.executionDir) : project.basePath;
       const askCode = await runMakeAskRebuild(askCmd, askCwd, cancel);
       if (askCode === 0) {
-        outputChannel.info(`[Code::Blocks] Target '${targetTitle}' is up to date. Nothing to be done.`);
+        outputChannel.info(logT("[Code::Blocks] Target '{0}' is up to date. Nothing to be done.", targetTitle));
         return true;
       }
     }
@@ -8144,6 +8199,10 @@ async function insertHeaderGuardInActiveEditor(): Promise<void> {
     return;
   }
   const doc = editor.document;
+  if (!/\.(h|hh|hpp|hxx)$/i.test(doc.uri.fsPath)) {
+    vscode.window.showWarningMessage(i18n.t('Header guard is only available for header files (.h / .hh / .hpp / .hxx)'));
+    return;
+  }
   const text = doc.getText();
   const updated = applyHeaderGuard(doc.uri.fsPath, text, headerGuardStyle());
   if (updated === null) {
@@ -8952,7 +9011,7 @@ function runMakeAskRebuild(askCmd: string, cwd: string, cancel?: BuildCancelHand
 async function runMakeBuild(project: Project, command: string, targetTitle: string): Promise<boolean> {
   const compiler = getCompiler(project.compilerId);
   outputChannel.show(true);
-  outputChannel.info(`[Code::Blocks] Make: ${command}`);
+  outputChannel.info(logT('[Code::Blocks] Make: {0}', command));
   const cwd = project.executionDir ? path.resolve(project.basePath, project.executionDir) : project.basePath;
   const cancelSource = new BuildCancelSource();
   currentBuildCancel = cancelSource;
@@ -9388,7 +9447,7 @@ async function run(): Promise<void> {
         const tried = renderTriedCompilerPaths(triedCompilerPaths(runCompiler));
         if (tried) outputChannel.error(tried);
       }
-      outputChannel.error('Run aborted...');
+      outputChannel.error(logT('Run aborted...'));
       return;
     }
   }
@@ -9407,7 +9466,7 @@ async function run(): Promise<void> {
       ? replaceCbMacros(target.hostApplication, { vars, customVars: project.customVariables ?? {} })
       : '';
     if (!host) {
-      vscode.window.showErrorMessage('You must select a host application to "run" a library...');
+      vscode.window.showErrorMessage(i18n.t('You must select a host application to "run" a library...'));
       return;
     }
     // 对齐 compilergcc.cpp:2046：Run host in terminal 未勾选时直接启动，不建终端
@@ -9509,7 +9568,7 @@ async function deriveDebugLaunchConfig(targetTitle?: string): Promise<DerivedLau
     const host = target.hostApplication
       ? replaceCbMacros(target.hostApplication, { vars, customVars: project.customVariables ?? {} })
       : '';
-    if (!host) return { error: 'You must select a host application to "run" a library...' };
+    if (!host) return { error: i18n.t('You must select a host application to "run" a library...') };
     if (!fs.existsSync(host)) return { error: i18n.t('The host program does not exist — build first ({0})', host) };
     program = host;
   } else {

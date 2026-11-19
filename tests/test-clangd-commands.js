@@ -5,6 +5,7 @@
 // 前置：tests/_harness/extensionActivation.js（补桩 + 假 context + 对话框脚本化）
 // 安全：把 LOCALAPPDATA / XDG_CONFIG_HOME 指到临时目录，绝不触碰真实用户的 clangd 配置
 const path = require('path');
+const i18n = require('../dist/i18n');
 const fs = require('fs');
 const os = require('os');
 
@@ -150,7 +151,7 @@ function writeCbp(dir, fileName, title) {
     updates);
 
   // ---------- 8) 无活动工程：给出提示、不弹选择 ----------
-  app.setWarningButton('Remove'); // removeProject 的确认对话框
+  app.setWarningButton(i18n.t('Remove')); // removeProject 的确认对话框
   await app.invoke('codeblocks.removeProject', { project: { filename: cbp } });
   const promptsBefore = records.quickPickPrompts.length;
   const warnsBefore = mock.warnings.length;

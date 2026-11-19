@@ -9,6 +9,7 @@
 //  - cleanFile 会真实删除对象文件（不调用外部编译器）；其余命令不触发编译。
 //  - 局部补桩见「configuration.update」注释（mock 的 update 是 no-op，这里补上写入 configStore 的语义）。
 const path = require('path');
+const i18n = require('../dist/i18n');
 const fs = require('fs');
 const os = require('os');
 const { activate } = require('./_harness/extensionActivation');
@@ -175,11 +176,11 @@ function writeFixture(dir) {
   const beforeCancel = rawCbp();
   await app.invoke('codeblocks.removeFile', fileNode('main.c'));
   const hasUnitAfterCancel = rawCbp() === beforeCancel && /<Unit filename="main\.c"/.test(rawCbp());
-  const hasRemoveDialog = records.warningButtons.some((w) => /中移除文件 "main\.c"/.test(w.message) && w.buttons.includes('Remove'));
+  const hasRemoveDialog = records.warningButtons.some((w) => /中移除文件 "main\.c"/.test(w.message) && w.buttons.includes(i18n.t('Remove')));
   check('removeFile：确认框取消时 Unit 保留',
     hasUnitAfterCancel && hasRemoveDialog,
     { hasUnitAfterCancel, hasRemoveDialog, lastWarning: records.warningButtons.slice(-1) }, 'Unit 保留 + Remove 确认');
-  app.setWarningButton('Remove');
+  app.setWarningButton(i18n.t('Remove'));
   await app.invoke('codeblocks.removeFile', fileNode('main.c'));
   check('removeFile：Unit 从 .cbp 移除（其余文件保留）',
     !/filename="main\.c"/.test(rawCbp()) && reparsed().files.map((f) => f.relativeFilename).join(',') === 'helper.c',

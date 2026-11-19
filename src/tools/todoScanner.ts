@@ -5,6 +5,7 @@
  * 在源码注释中查找 TODO/FIXME/NOTE 等标记。
  */
 import * as fs from 'fs';
+import * as path from 'path';
 
 export interface TodoItem {
   type: string;       // TODO / FIXME / NOTE ...
@@ -21,6 +22,44 @@ export interface TodoOptions {
   startStrings: string[];
   /** 允许的类型（与 startStrings 对应） */
   allowedTypes: string[];
+  /** .asm/.s 是否使用 GAS 原生 `#` 行注释（对应 codeblocks.editor.asmHashComment） */
+  asmHashComment?: boolean;
+}
+
+interface CommentSyntax {
+  /** 行注释起始符（按行内最早出现者判定） */
+  line: string[];
+  /** 仅允许出现在行首（允许缩进与可选 `@`）的注释起始符，大小写不敏感 */
+  lineAtStart?: string[];
+  /** 块注释起止符 */
+  block?: [string, string];
+  /** 汇编 `#` 模式下跳过 C 预处理器指令（.S 经 cpp 时 `#define TODO` 不是注释） */
+  hashDirectiveGuard?: boolean;
+}
+
+/** 按文件扩展名选择注释语法；未知扩展名保持 C/C++ 风格默认行为 */
+function commentSyntaxFor(filename: string, opts: TodoOptions): CommentSyntax {
+  const ext = path.extname(String(filename ?? '')).toLowerCase();
+  switch (ext) {
+    case '.ld':
+    case '.lcf':
+      // GNU ld 原生行注释是 #；保留 // 以兼容 F-02 修复前的既有行为
+      return { line: ['#', '//'], block: ['/*', '*/'] };
+    case '.xm':
+      return { line: ['#', '//'] };
+    case '.asm':
+    case '.s':
+      return {
+        line: opts.asmHashComment === true ? ['#', '//'] : ['//'],
+        block: ['/*', '*/'],
+        hashDirectiveGuard: opts.asmHashComment === true,
+      };
+    case '.bat':
+    case '.cmd':
+      return { line: [], lineAtStart: ['REM', '::'] };
+    default:
+      return { line: ['//'], block: ['/*', '*/'] };
+  }
 }
 
 const DEFAULT_TODO_OPTIONS: TodoOptions = {
@@ -40,6 +79,7 @@ export function parseBufferForTodos(
 ): TodoItem[] {
   const items: TodoItem[] = [];
   const { startStrings, allowedTypes } = opts;
+  const syntax = commentSyntaxFor(filename, opts);
 
   // 预处理：行号映射
   const lines = buffer.split(/\r?\n/);
@@ -50,14 +90,14 @@ export function parseBufferForTodos(
     // 只在注释中出现才算（含行内注释）；支持跨行块注释
     let commentText: string;
     if (inBlockComment) {
-      const end = line.indexOf('*/');
+      const end = syntax.block ? line.indexOf(syntax.block[1]) : -1;
       commentText = end >= 0 ? line.slice(0, end) : line;
       if (end >= 0) inBlockComment = false;
     } else {
-      const commentPos = findCommentStart(line);
+      const commentPos = findCommentStart(line, syntax);
       if (commentPos < 0) continue;
       commentText = line.slice(commentPos);
-      if (commentText.startsWith('/*') && !commentText.includes('*/')) {
+      if (syntax.block && commentText.startsWith(syntax.block[0]) && !commentText.includes(syntax.block[1])) {
         inBlockComment = true;
       }
     }
@@ -117,14 +157,29 @@ export function parseBufferForTodos(
   return items;
 }
 
-/** 查找注释起始位置（// 或 /*），未在注释中返回 -1 */
-function findCommentStart(line: string): number {
-  const lineComment = line.indexOf('//');
-  const blockComment = line.indexOf('/*');
-  if (lineComment >= 0 && blockComment >= 0) {
-    return Math.min(lineComment, blockComment);
+/** 查找注释起始位置；按文件语言选择 `//`、`#`、`REM`/`::` 或 `/*` */
+function findCommentStart(line: string, syntax: CommentSyntax): number {
+  const candidates: number[] = [];
+  for (const token of syntax.line) {
+    if (syntax.hashDirectiveGuard && token === '#'
+      && /^\s*#\s*(?:include|define|if|ifdef|ifndef|elif|else|endif|undef|pragma|error|warning|line)\b/i.test(line)) {
+      continue;
+    }
+    const idx = line.indexOf(token);
+    if (idx >= 0) candidates.push(idx);
   }
-  return lineComment >= 0 ? lineComment : blockComment;
+  for (const token of syntax.lineAtStart ?? []) {
+    const pattern = token === '::'
+      ? /^\s*@?\s*::/
+      : new RegExp(`^\\s*@?\\s*${token}\\b`, 'i');
+    const match = pattern.exec(line);
+    if (match) candidates.push(match.index + match[0].length - token.length);
+  }
+  if (syntax.block) {
+    const idx = line.indexOf(syntax.block[0]);
+    if (idx >= 0) candidates.push(idx);
+  }
+  return candidates.length ? Math.min(...candidates) : -1;
 }
 
 function isDateLike(s: string): boolean {

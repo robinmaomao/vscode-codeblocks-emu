@@ -526,7 +526,7 @@ Build Log 视图位于**底部 Panel**（打开方式：`Ctrl+J` 后选择「Bui
 | 命令 | 说明 |
 |------|------|
 | `Code::Blocks: Code Statistics` | 统计代码 / 注释 / 空行 / 总行数 |
-| `Code::Blocks: TODO List` | 扫描 TODO / FIXME / NOTE / HACK / XXX（含优先级、用户、日期；关键字可由 `codeblocks.todo.keywords` 自定义） |
+| `Code::Blocks: TODO List` | 扫描 TODO / FIXME / NOTE / HACK / XXX（含优先级、用户、日期；按语言识别 `//`、`/* */`、`#`、`REM`/`::`；汇编 `#` 由 `codeblocks.editor.asmHashComment` 控制；关键字可由 `codeblocks.todo.keywords` 自定义） |
 | `Code::Blocks: Add TODO Item…` | 在当前行下方插入 TODO 注释（类型 / 用户名 / 内容，对齐 CB todo 插件 Add Todo item） |
 | `Code::Blocks: Toggle Bookmark` / `Previous·Next Bookmark` / `Clear All Bookmarks` | 书签（对齐 CB Edit → Bookmarks；`Alt+K` 切换 / `Alt+H` 上一个 / `Alt+L` 下一个；概览尺标记；按工作区存储，行漂移时按文本回找） |
 | `Code::Blocks: Open Include File` | 打开光标处 `#include` 指向的文件（当前文件目录 → 目标 include 搜索目录；对齐 CB Open include file） |
@@ -651,7 +651,7 @@ Build Log 视图位于**底部 Panel**（打开方式：`Ctrl+J` 后选择「Bui
 - `auto` 的判定：显示语言以 `zh` 开头（`zh-cn` / `zh-tw` / `zh-hans`…）→ 中文；其它一律英文（`zh-tw`/`zh-hk` 目前按简体处理）。
 - 切换命令（`Code::Blocks: Switch UI Language…`）提供三态选择、标注当前模式，并在切换后提示「命令标题/设置界面需重载窗口」+ 一键重载。
 - **已打开的 WebView 面板**：切换语言后只刷新标题，正文与标签在下次打开时按新语言渲染（避免丢弃工程属性面板里未保存的编辑）。
-- **覆盖范围（0.8.132 起已全覆盖）**：构建日志、树视图节点、调试提示、clangd/键位/统计工具文案、菜单标签、三个 WebView 面板内部字段均双语；
+- **覆盖范围（0.8.132 起已全覆盖）**：构建日志、树视图节点、调试提示、clangd/键位/统计工具文案、菜单标签、五个 WebView 面（工程属性 / 构建选项 / 运行目标 / 快捷键 / 工程搜索）内部字段均双语；
   唯一例外是 `codeblocks.log.english=true` 时构建日志被强制英文（与 `ui.language` 无关，见 §14 FAQ）。
 
 ### 13.1 编译器与工具链
@@ -983,7 +983,7 @@ A：两者管不同东西，互不覆盖：
 即：想让**日志永远是英文**（对照 CB 输出排错）→ 开 `codeblocks.log.english`；想让**界面和日志一起变** → 只改 `ui.language`。
 
 **Q：构建日志（输出通道）现在中英都覆盖了吗？**
-A：**已全覆盖**（0.8.132 批次 2，2026-11 菜单优化后同步）。构建引擎日志、树视图节点、调试层提示、clangd/键位/统计工具提示、状态栏菜单全部菜单标签（当前 168 项）、三个 WebView 面板的内部字段都随 `ui.language` 双语；
+A：**已全覆盖**（0.8.132 批次 2，2026-11 菜单优化后同步）。构建引擎日志、树视图节点、调试层提示、clangd/键位/统计工具提示、状态栏菜单全部菜单标签（当前 186 项）、五个 WebView 面（工程属性 / 构建选项 / 运行目标 / 快捷键 / 工程搜索）的内部字段都随 `ui.language` 双语；
 唯一例外是 `codeblocks.log.english=true` 时日志被强制英文（见上一条）。发现漏翻请按 [国际化](../dev/i18n.md) §6 的守卫自查。
 
 ---

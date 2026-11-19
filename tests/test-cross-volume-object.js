@@ -25,6 +25,7 @@ Module._load = function (request, parent, isMain) {
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const i18n = require('../dist/i18n');
 const { ProjectParser } = require('../dist/model/parser.js');
 const { BuildEngine } = require('../dist/build/buildEngine.js');
 const { createGccCompiler } = require('../dist/compiler/compiler.js');
@@ -160,7 +161,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   await sleep(60);
   log.length = 0;
   const r2 = await e2.build('Debug', {});
-  check('E4 无修改再构建 → Nothing to be done（跨卷增量正确）', r2 === true && log.some((l) => l.includes('Nothing to be done')), { r2 });
+  check('E4 无修改再构建 → Nothing to be done（跨卷增量正确）', r2 === true && log.some((l) => l.includes(i18n.t('[Code::Blocks] Nothing to be done (all items are up-to-date).'))), { r2 });
   e2.cleanFile('Debug', xmainUnix);
   check('E5 Clean 删除跨卷对象文件', !fs.existsSync(xobjAbs), xobjAbs);
 

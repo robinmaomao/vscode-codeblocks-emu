@@ -22,6 +22,7 @@ Module._load = function (request, parent, isMain) {
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const i18n = require('../dist/i18n');
 const { ProjectParser } = require('../dist/model/parser.js');
 const { BuildEngine } = require('../dist/build/buildEngine.js');
 const { createGccCompiler } = require('../dist/compiler/compiler.js');
@@ -110,8 +111,8 @@ const engine = new BuildEngine(project, compiler, out, resolver);
   const skip = logs.find((l) => l.includes('Skipping...'));
   check('Skipping... 为独立错误条目', skip === 'e|Skipping...', skip, 'e|Skipping...');
   check('收尾行 Nothing to be done（P3-B）',
-    logs.includes('i|[Code::Blocks] Nothing to be done (all items are up-to-date).'),
-    logs.filter((l) => l.includes('Nothing')), 'i|[Code::Blocks] Nothing to be done (all items are up-to-date).');
+    logs.includes('i|' + i18n.t('[Code::Blocks] Nothing to be done (all items are up-to-date).')),
+    logs.filter((l) => l.includes('Nothing')), 'i|' + i18n.t('[Code::Blocks] Nothing to be done (all items are up-to-date).'));
   const badBanner = logs.find((l) => l.includes('Build: Bad'));
   check('无效目标不打印 Build banner', !badBanner, badBanner, undefined);
 

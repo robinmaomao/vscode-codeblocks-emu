@@ -524,7 +524,7 @@ Build succeeded / failed (root, showing elapsed time · N errors · N warnings)
 | Command | Description |
 |------|------|
 | `Code::Blocks: Code Statistics` | Count code / comment / blank / total lines |
-| `Code::Blocks: TODO List` | Scan TODO / FIXME / NOTE / HACK / XXX (including priority, user, date; keywords can be customized with `codeblocks.todo.keywords`) |
+| `Code::Blocks: TODO List` | Scan TODO / FIXME / NOTE / HACK / XXX (including priority, user, date; comment syntax is language-aware: `//`, `/* */`, `#`, `REM`/`::`; assembly `#` follows `codeblocks.editor.asmHashComment`; keywords can be customized with `codeblocks.todo.keywords`) |
 | `Code::Blocks: Add TODO Item…` | Insert a TODO comment below the current line (type / user name / content, aligned with the CB todo plugin Add Todo item) |
 | `Code::Blocks: Toggle Bookmark` / `Previous·Next Bookmark` / `Clear All Bookmarks` | Bookmarks (aligned with CB Edit → Bookmarks; `Alt+K` toggle / `Alt+H` previous / `Alt+L` next; overview ruler markers; stored per workspace, and when lines drift the bookmark is found again by text) |
 | `Code::Blocks: Open Include File` | Open the file the `#include` under the cursor points to (current file directory → target include search directories; aligned with CB Open include file) |
@@ -649,7 +649,7 @@ Note: keybindings are **user-level** (shared across windows); combinations taken
 - How `auto` decides: the display language starts with `zh` (`zh-cn` / `zh-tw` / `zh-hans`…) → Chinese; anything else → English (`zh-tw`/`zh-hk` are currently treated as Simplified Chinese).
 - The switch command (`Code::Blocks: Switch UI Language…`) offers a three-state choice, marks the current mode, and after switching shows "command titles/settings UI need a window reload" + a one-click reload.
 - **Already open WebView panels**: after a language switch only the title is refreshed, while the body and tabs render in the new language the next time they are opened (so unsaved edits in the Project properties panel are not discarded).
-- **Coverage (full since 0.8.132)**: build logs, tree view nodes, debug hints, clangd/keybinding/statistics tool text, menu labels and the internal fields of the three WebView panels are all bilingual;
+- **Coverage (full since 0.8.132)**: build logs, tree view nodes, debug hints, clangd/keybinding/statistics tool text, menu labels and the internal fields of the five WebView surfaces (project properties / build options / run targets / keybindings / project search) are all bilingual;
   the only exception is that with `codeblocks.log.english=true` the build log is forced to English (independent of `ui.language`; see §14 FAQ).
 
 ### 13.1 Compiler and toolchain
@@ -982,7 +982,7 @@ A: They control different things and never override each other:
 That is: if you want the **log to always be English** (to compare against CB output while troubleshooting) → enable `codeblocks.log.english`; if you want **UI and log to change together** → change only `ui.language`.
 
 **Q: Is the build log (Output channel) fully bilingual now?**
-A: **Fully covered** (0.8.132 batch 2, synced after the 2026-11 menu cleanup). Build engine logs, tree view nodes, debug layer hints, clangd/keybinding/statistics tool hints, all status bar menu labels (168 items at present) and the internal fields of the three WebView panels all follow `ui.language` and are bilingual;
+A: **Fully covered** (0.8.132 batch 2, synced after the 2026-11 menu cleanup). Build engine logs, tree view nodes, debug layer hints, clangd/keybinding/statistics tool hints, all status bar menu labels (186 items at present) and the internal fields of the five WebView surfaces (project properties / build options / run targets / keybindings / project search) all follow `ui.language` and are bilingual;
 the only exception is that with `codeblocks.log.english=true` the log is forced to English (see the previous item). If you find a missing translation, run the guard check in [Internationalization](../dev/i18n.md) §6.
 
 ---

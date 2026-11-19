@@ -830,7 +830,7 @@ export class BuildEngine {
       // 收尾行对齐 NotifyJobDone（compilergcc.cpp:4123-4140）：任务列表为空（平台/无效编译器跳过）→ "Nothing to be done (all items are up-to-date)."
       // 保护性差异（P3-B）：CB 日志到此为止（内部同样按失败返回）；扩展随后照常输出失败行/汇总，便于 VS Code 端明确失败原因
       if (invalidCompilerSkipped > 0 || platformSkipped > 0 || missingOutputSkipped > 0) {
-        this.output.info('[Code::Blocks] Nothing to be done (all items are up-to-date).');
+        this.output.info(logT('[Code::Blocks] Nothing to be done (all items are up-to-date).'));
       }
       vscode.window.showWarningMessage(logT('No buildable targets'));
       this.emitBuildProfile();
@@ -1741,7 +1741,7 @@ export class BuildEngine {
         const linkInputForce = this.linkInputsOutdated(target, outAbs) !== null;
         // CB 条目计数强制（对齐 directcommands.cpp:585）：过期但无可执行命令 / 源缺失的编译文件同样产生条目 → 强制链接/打包
         if (!externalForce && !linkInputForce && staleNoopFiles.length === 0 && missingSourceFiles.length === 0) {
-          this.output.info('[Code::Blocks] Nothing to be done (all items are up-to-date).');
+          this.output.info(logT('[Code::Blocks] Nothing to be done (all items are up-to-date).'));
           // 目标已最新（hasCommands=false）：仅当 alwaysRunPostBuildSteps 为真时才执行 post-build（对齐 CodeBlocks）
           if (!(await this.runPostBuild(target, macroVars, expandScriptMacros, false, options))) {
             if (options.cancel?.isCancelled()) {
@@ -1813,7 +1813,7 @@ export class BuildEngine {
     if (target.targetType !== TargetType.StaticLib && target.targetType !== TargetType.CommandsOnly) {
       // 对齐 GetTargetLinkCommands：无可链接对象文件 → 跳过链接阶段（即使输出缺失也不链接）
       if (linkFiles.length === 0 && resFiles.length === 0) {
-        this.output.info('[Code::Blocks] Linking stage skipped (build target has no object files to link)');
+        this.output.info(logT('[Code::Blocks] Linking stage skipped (build target has no object files to link)'));
       } else {
         // 链接对象 = 所有参与链接的标准源文件对象（不论本次是否重编译）
         // （custom.ld → custom.o 是链接脚本、custom.xm → customxm.o 是资源，均不参与链接）
@@ -1933,7 +1933,7 @@ export class BuildEngine {
     } else if (target.targetType === TargetType.StaticLib) {
       // 对齐 GetTargetLinkCommands：无可链接对象文件 → 跳过打包阶段
       if (linkFiles.length === 0 && resFiles.length === 0) {
-        this.output.info('[Code::Blocks] Linking stage skipped (build target has no object files to link)');
+        this.output.info(logT('[Code::Blocks] Linking stage skipped (build target has no object files to link)'));
       } else {
         // 静态库用 ar 打包（对齐 Code::Blocks LinkStatic 模板，含 $lib_linker 引号与多行命令拆分）
         // 逐对象加引号（同链接阶段，对齐 pfDetails::Update 的 QuoteStringIfNeeded）；

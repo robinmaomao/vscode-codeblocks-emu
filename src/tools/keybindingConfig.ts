@@ -54,7 +54,7 @@ export const MANAGED_KEYBINDINGS: ManagedKeybinding[] = [
   { id: 'searchProjectFiles', label: i18n.t('Project search (files)'), command: 'codeblocks.searchProjectFiles', defaults: ['ctrl+alt+p'], group: 'builtin' },
   // ---- alias：外部命令别名 ----
   { id: 'aliasGotoFile', label: i18n.t('Goto File (Alt+G → Quick Open)'), command: 'workbench.action.quickOpen', defaults: ['alt+g'], group: 'alias' },
-  { id: 'aliasReplaceInFiles', label: 'Replace in Files', command: 'workbench.action.replaceInFiles', when: '!inSearchEditor', defaults: ['ctrl+shift+r'], group: 'alias' },
+  { id: 'aliasReplaceInFiles', label: i18n.t('Replace in Files'), command: 'workbench.action.replaceInFiles', when: '!inSearchEditor', defaults: ['ctrl+shift+r'], group: 'alias' },
   { id: 'aliasSelectNextMatch', label: i18n.t('Select Next Occurrence'), command: 'editor.action.addSelectionToNextFindMatch', when: 'editorTextFocus', defaults: ['ctrl+e'], group: 'alias' },
   // ---- cbStyle：CB 保真模式门控（cbStyle 开关保留为批量启用） ----
   { id: 'cbToggleBreakpoint', label: i18n.t('[CB] Toggle breakpoint'), command: 'editor.debug.action.toggleBreakpoint', when: `${CB_STYLE_WHEN} && editorTextFocus`, defaults: ['f5'], group: 'cbStyle' },

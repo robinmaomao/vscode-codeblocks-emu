@@ -59,21 +59,15 @@ const hasExitGate = (text) => /process\.exit\s*\(/.test(text) || /process\.exitC
 
 /** 冻结清单：历史脚本（逐条 PASS/FAIL 输出，无「N pass, M fail」可摘行）——只允许缩小，不允许新增 */
 const GRANDFATHER_NO_TALLY = new Set([
-  'test-ar-quote.js', 'test-categorize-sim.js', 'test-deps-cache.js', 'test-dirs-settings-edit.js',
-  'test-drive-case.js', 'test-file-edit.js', 'test-html-syntax.js', 'test-implib-roundtrip.js',
-  'test-keybinding-panel-html.js', 'test-link-static.js', 'test-lru.js', 'test-makecommands.js',
-  'test-native-sep.js', 'test-newproject.js', 'test-options-edit.js', 'test-parse-cache.js',
-  'test-relation-extracommands-edit.js', 'test-resp-file.js', 'test-roundtrip-notes.js',
-  'test-scripts-notes-edit.js', 'test-static-prefix.js', 'test-target-edit.js', 'test-tree-lazy.js',
-  'test-tree-lazy2.js', 'test-unit-options.js', 'test-vfolder-sim.js', 'test-vfolder.js',
-  'test-virtualtarget-edit.js', 'test-weight-sort.js', 'test-workspace-deps.js',
+  'test-ar-quote.js', 'test-categorize-sim.js', 'test-deps-cache.js',
+  'test-drive-case.js', 'test-html-syntax.js', 'test-implib-roundtrip.js',
+  'test-link-static.js', 'test-lru.js', 'test-makecommands.js',
+  'test-native-sep.js', 'test-newproject.js', 'test-parse-cache.js',
+  'test-resp-file.js', 'test-roundtrip-notes.js', 'test-tree-lazy.js',
+  'test-tree-lazy2.js', 'test-unit-options.js', 'test-weight-sort.js', 'test-workspace-deps.js',
 ]);
 /** 冻结清单：无退出码门控的历史脚本（只打印给人看）——只允许缩小，不允许新增 */
-const GRANDFATHER_NO_EXIT = new Set([
-  'test-dirs-settings-edit.js', 'test-file-edit.js', 'test-options-edit.js',
-  'test-relation-extracommands-edit.js', 'test-scripts-notes-edit.js', 'test-static-prefix.js',
-  'test-target-edit.js', 'test-vfolder-sim.js', 'test-vfolder.js', 'test-virtualtarget-edit.js',
-]);
+const GRANDFATHER_NO_EXIT = new Set([]);
 
 /** 探针工程白名单：手写视觉 fixture 有意含 `D:/…` 值（覆盖 SDK/search_path 渲染），
  *  仅豁免「入库文件不得含本机绝对路径」；「序列化不新增绝对路径」对它仍然生效 */

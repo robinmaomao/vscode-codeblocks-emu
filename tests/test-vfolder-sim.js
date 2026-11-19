@@ -84,3 +84,17 @@ function dump(nodes, indent) {
 console.log('=== 树结构 ===');
 dump([...rootDirs, ...rootFiles], '');
 fs.unlinkSync(tmp);
+
+let pass = 0, fail = 0;
+function check(name, cond, got, want) {
+  if (cond) { pass++; console.log('OK   ' + name); }
+  else { fail++; console.log(`FAIL ${name}  got=${JSON.stringify(got)}${want !== undefined ? ' want=' + JSON.stringify(want) : ''}`); }
+}
+const headers = rootDirs.find((n) => n.name === 'Headers');
+const sources = rootDirs.find((n) => n.name === 'Sources');
+check('虚拟文件夹根节点', !!headers && !!sources && rootDirs.length === 2, rootDirs.map((n) => n.name));
+check('Headers 下 foo.h', headers && headers.children.some((c) => c.name === 'foo.h' && c.kind === 'file'), headers && headers.children);
+check('Sources 下 bar.c / Generated/gen.c', sources && sources.children.some((c) => c.name === 'bar.c') && sources.children.some((c) => c.name === 'Generated' && c.children.some((g) => g.name === 'gen.c')), sources && sources.children);
+check('无虚拟文件夹的 main.c 留在根', rootFiles.some((f) => f.name === 'main.c'), rootFiles.map((f) => f.name));
+console.log(`虚拟文件夹树: ${pass} pass, ${fail} fail`);
+process.exit(fail ? 1 : 0);
