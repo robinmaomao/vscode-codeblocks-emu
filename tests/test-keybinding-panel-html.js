@@ -28,10 +28,17 @@ const sm = html.match(/<script(?:\s+nonce="[^"]*")?>([\s\S]*?)<\/script>/);
 if (!sm) { console.error('未找到 <script>'); process.exit(1); }
 const script = sm[1];
 
+let pass = 0, fail = 0;
+function check(name, cond, got, want) {
+  if (cond) { pass++; console.log('OK   ' + name); }
+  else { fail++; console.log(`FAIL ${name}  got=${JSON.stringify(got)}${want !== undefined ? ' want=' + JSON.stringify(want) : ''}`); }
+}
 try {
   new Function(script);
-  console.log('keybindingPanel script 语法 OK');
-  process.exit(0);
+  check('keybindingPanel script 语法 OK', true);
+  check('面板包含数据/路径/应用入口', html.includes('keybindings.json') && html.includes('Build') && /apply/i.test(script), { path: html.includes('keybindings.json'), label: html.includes('Build'), apply: /apply/i.test(script) });
+  console.log(`keybindingPanel HTML: ${pass} pass, ${fail} fail`);
+  process.exit(fail ? 1 : 0);
 } catch (err) {
   console.error('script 语法错误:', err.message);
   const lines = script.split('\n');

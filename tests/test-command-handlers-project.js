@@ -8,6 +8,7 @@
 //  - 全程不进入真实构建（BuildEngine / 外部 gcc）：构建类命令只驱动早退与互斥分支；
 //    互斥分支用局部的 withProgress 打桩制造「构建进行中」，随后以 CancellationError 释放锁。
 const path = require('path');
+const i18n = require('../dist/i18n');
 const fs = require('fs');
 const os = require('os');
 const { activate } = require('./_harness/extensionActivation');
@@ -136,10 +137,10 @@ function writeCbp(dir, fileName, title, withTargets = true) {
     JSON.stringify(order()) === JSON.stringify([cbpA, cbpB]) && countOut(/已移除项目/) === 0,
     { order: order(), removed: countOut(/已移除项目/) }, '保留');
   check('removeProject：弹出 modal 确认（消息含工程目录名 + Remove 按钮）',
-    records.warningButtons.some((w) => /确定从侧边栏移除项目 "proj-b"/.test(w.message) && w.buttons.includes('Remove')),
+    records.warningButtons.some((w) => /确定从侧边栏移除项目 "proj-b"/.test(w.message) && w.buttons.includes(i18n.t('Remove'))),
     records.warningButtons.map((w) => w.buttons).slice(-2), "['Remove']");
 
-  app.setWarningButton('Remove');
+  app.setWarningButton(i18n.t('Remove'));
   await app.invoke('codeblocks.removeProject', { project: { filename: cbpB } });
   check('removeProject：确认后从打开列表移除（顺序只余 A）',
     JSON.stringify(order()) === JSON.stringify([cbpA]), order(), [cbpA]);
@@ -219,7 +220,7 @@ function writeCbp(dir, fileName, title, withTargets = true) {
   await app.invoke('codeblocks.setActiveProject', cbpA);
   const saveAllBeforeExport = records.saveAll;
   app.setQuickPick({ label: 'Release', description: '输出: bin/Release/app-a' });
-  app.setWarningButton('Export');
+  app.setWarningButton(i18n.t('Export'));
   const exported = path.join(tmp, 'exported-app-a.cbp');
   app.setSaveDialog(exported);
   await app.invoke('codeblocks.exportTargetAsProject');
@@ -229,7 +230,7 @@ function writeCbp(dir, fileName, title, withTargets = true) {
     /title="Release"/.test(xml) && !/title="Debug"/.test(xml), (xml.match(/<Target[^>]*>/g) || []).slice(0, 3), '仅 Release');
   check('exportTargetAsProject：QuickPick 列出可导出目标 + 确认按钮为 Export',
     records.quickPickPrompts.some((q) => q.options && q.options.placeHolder === '选择要导出的构建目标' && q.items.includes('Release'))
-    && records.warningButtons.some((w) => /把目标 "Release" 导出为独立工程/.test(w.message) && w.buttons.includes('Export')),
+    && records.warningButtons.some((w) => /把目标 "Release" 导出为独立工程/.test(w.message) && w.buttons.includes(i18n.t('Export'))),
     records.quickPickPrompts.slice(-1), '目标选择 + Export');
   check('exportTargetAsProject：导出前保存全部文件',
     records.saveAll > saveAllBeforeExport, records.saveAll - saveAllBeforeExport, '≥1');

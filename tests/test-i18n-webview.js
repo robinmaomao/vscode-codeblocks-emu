@@ -38,6 +38,7 @@ async function main() {
   const { KeybindingPanel } = require('../dist/ui/keybindingPanel.js');
   const { buildOptionsPage } = require('../dist/ui/buildOptionsView.js');
   const { buildProjectSearchViewHtml } = require('../dist/ui/projectSearchViewHtml.js');
+  const { runTargetsPage } = require('../dist/ui/runTargetsPanel.js');
 
   const project = new ProjectParser().parse(FIXTURE);
   const uri = mock.vscode.Uri.file(ROOT);
@@ -109,6 +110,12 @@ async function main() {
     out.keybindings = mock.webviews[mock.webviews.length - 1].webview.html;
     out.compilerOptions = buildOptionsHtml();
     out.search = buildProjectSearchViewHtml();
+    out.runTargets = runTargetsPage({
+      projectTitle: 'demo',
+      commonTopLevelPath: 'C:/demo',
+      targets: [{ title: 'Debug', executionParameters: '', hostApplication: '', runHostApplicationInTerminal: false }],
+      defaultExecuteTarget: 'Debug',
+    });
     return out;
   }
 
@@ -128,6 +135,7 @@ async function main() {
     zh.keybindings.includes('快捷键') && zh.keybindings.includes('全部重置') && zh.keybindings.includes('检查冲突'));
   check('A4 编译选项面板：中文标签在位', zh.compilerOptions.includes('保存') && zh.compilerOptions.includes('保存并关闭'));
   check('A5 工程搜索视图：中文标签在位', zh.search.includes('搜索历史') && zh.search.includes('保留历史') && zh.search.includes('所有工程'));
+  check('A6 运行目标面板：中文标签在位', zh.runTargets.includes('目标：') && zh.runTargets.includes('程序参数：') && zh.runTargets.includes('在终端中运行宿主程序'));
 
   // ---- B. 英文态 ----
   check('B1 工程属性面板：英文态 lang=en', en.props.includes('lang="en"'), en.props.match(/lang="[^"]*"/)?.[0]);
@@ -138,6 +146,7 @@ async function main() {
   check('B4 编译选项面板：英文标签在位',
     en.compilerOptions.includes('"save":"Save"') && en.compilerOptions.includes('"saveClose":"Save and Close"'));
   check('B5 工程搜索视图：英文标签在位', en.search.includes('Search History') && en.search.includes('Keep history') && en.search.includes('All projects'));
+  check('B7 运行目标面板：英文标签在位', en.runTargets.includes('Target:') && en.runTargets.includes('Program arguments:') && en.runTargets.includes('Run host in terminal'));
 
   const leftovers = {};
   for (const [id, html] of Object.entries(en)) leftovers[id] = [...new Set(cjkRuns(html))];
@@ -153,11 +162,12 @@ async function main() {
   const tags = (s) => (s.match(/<[a-zA-Z][^>]*>/g) || []).length;
   check('C1 中英两态标签数量一致（无标记损失）',
     tags(zh.props) === tags(en.props) && tags(zh.keybindings) === tags(en.keybindings)
-    && tags(zh.compilerOptions) === tags(en.compilerOptions) && tags(zh.search) === tags(en.search),
-    { zhProps: tags(zh.props), enProps: tags(en.props), zhKb: tags(zh.keybindings), enKb: tags(en.keybindings), zhSearch: tags(zh.search), enSearch: tags(en.search) });
+    && tags(zh.compilerOptions) === tags(en.compilerOptions) && tags(zh.search) === tags(en.search)
+    && tags(zh.runTargets) === tags(en.runTargets),
+    { zhProps: tags(zh.props), enProps: tags(en.props), zhKb: tags(zh.keybindings), enKb: tags(en.keybindings), zhSearch: tags(zh.search), enSearch: tags(en.search), zhRun: tags(zh.runTargets), enRun: tags(en.runTargets) });
   check('C2 输出无插桩泄漏（不含 i18n.tr( 源码片段）',
     ![...Object.values(zh), ...Object.values(en)].some((h) => h.includes('i18n.tr(')));
-  check('C3 英文态无未替换的 ${} 模板残留', !en.props.includes('${') && !en.keybindings.includes('${') && !en.search.includes('${'));
+  check('C3 英文态无未替换的 ${} 模板残留', !en.props.includes('${') && !en.keybindings.includes('${') && !en.search.includes('${') && !en.runTargets.includes('${'));
 
   // ---- C4. 渲染后的内联脚本必须能编译（英文译文含撇号/引号会截断 '...' 字符串，导致整个面板脚本不执行） ----
   {

@@ -67,3 +67,14 @@ console.log(cmd2);
 console.log('--- outputFilename=bin/Debug/demo.a（有扩展无 lib 前缀） ---');
 const cmd3 = generate('bin/Debug/demo.a');
 console.log(cmd3);
+
+let pass = 0, fail = 0;
+function check(name, cond, got, want) {
+  if (cond) { pass++; console.log('OK   ' + name); }
+  else { fail++; console.log(`FAIL ${name}  got=${JSON.stringify(got)}${want !== undefined ? ' want=' + JSON.stringify(want) : ''}`); }
+}
+check('无 lib 前缀 → 补 libdemo.a', cmd1.includes('libdemo.a'), cmd1);
+check('已有 lib 前缀 → 不重复', cmd2.includes('libdemo.a') && !cmd2.includes('liblibdemo.a'), cmd2);
+check('有扩展无 lib 前缀 → 补 libdemo.a', cmd3.includes('libdemo.a') && !cmd3.includes('libdemo.a.a'), cmd3);
+console.log(`静态库输出前缀: ${pass} pass, ${fail} fail`);
+process.exit(fail ? 1 : 0);

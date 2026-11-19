@@ -39,3 +39,13 @@ for (const t of reparse.buildTargets) {
   console.log(`${t.title}:`, JSON.stringify({ c: t.compilerOptions, l: t.linkerOptions, libs: t.linkLibs }));
 }
 fs.unlinkSync(tmp);
+
+let pass = 0, fail = 0;
+function check(name, cond, got, want) {
+  if (cond) { pass++; console.log('OK   ' + name); }
+  else { fail++; console.log(`FAIL ${name}  got=${JSON.stringify(got)}${want !== undefined ? ' want=' + JSON.stringify(want) : ''}`); }
+}
+check('项目级选项', JSON.stringify(reparse.compilerOptions) === JSON.stringify(['-std=c11']) && JSON.stringify(reparse.linkerOptions) === JSON.stringify(['-s']) && JSON.stringify(reparse.linkLibs) === JSON.stringify(['m']), { c: reparse.compilerOptions, l: reparse.linkerOptions, libs: reparse.linkLibs });
+check('目标级选项', JSON.stringify(reparse.buildTargets[0].compilerOptions) === JSON.stringify(['-g', '-Wall']) && JSON.stringify(reparse.buildTargets[0].linkerOptions) === JSON.stringify(['-T', 'link.ld']) && JSON.stringify(reparse.buildTargets[1].compilerOptions) === JSON.stringify(['-O2']), reparse.buildTargets.map((t) => ({ c: t.compilerOptions, l: t.linkerOptions, libs: t.linkLibs })));
+console.log(`编译/链接选项编辑: ${pass} pass, ${fail} fail`);
+process.exit(fail ? 1 : 0);

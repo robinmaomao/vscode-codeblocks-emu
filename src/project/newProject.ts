@@ -181,42 +181,42 @@ const OPENCV_README = i18n.t('OpenCV template notes (aligned with the Code::Bloc
 export const PROJECT_TEMPLATES: ProjectTemplate[] = [
   {
     id: 'console-cpp',
-    label: 'Console application (C++)',
+    label: i18n.t('Console application (C++)'),
     description: i18n.t('Console application (C++, main.cpp)'),
     targetType: TargetType.ConsoleOnly,
     skeleton: [{ name: 'main.cpp', content: CONSOLE_MAIN_CPP }],
   },
   {
     id: 'console-c',
-    label: 'Console application (C)',
+    label: i18n.t('Console application (C)'),
     description: i18n.t('Console application (C, main.c)'),
     targetType: TargetType.ConsoleOnly,
     skeleton: [{ name: 'main.c', content: CONSOLE_MAIN_C }],
   },
   {
     id: 'static',
-    label: 'Static library',
+    label: i18n.t('Static library'),
     description: i18n.t('Static library (.a)'),
     targetType: TargetType.StaticLib,
     skeleton: [],
   },
   {
     id: 'shared',
-    label: 'Shared library',
+    label: i18n.t('Shared library'),
     description: i18n.t('Shared library (.so/.dll)'),
     targetType: TargetType.DynamicLib,
     skeleton: [],
   },
   {
     id: 'empty',
-    label: 'Empty project',
+    label: i18n.t('Empty project'),
     description: i18n.t('Empty project'),
     targetType: TargetType.ConsoleOnly,
     skeleton: [],
   },
   {
     id: 'glfw',
-    label: 'GLFW application (C)',
+    label: i18n.t('GLFW application (C)'),
     description: i18n.t('Graphics window application (GLFW; adjust include/libs to your install path; see the template notes)'),
     targetType: TargetType.ConsoleOnly,
     includeDirs: ['include'],
@@ -228,7 +228,7 @@ export const PROJECT_TEMPLATES: ProjectTemplate[] = [
   },
   {
     id: 'sdl2',
-    label: 'SDL2 application (C)',
+    label: i18n.t('SDL2 application (C)'),
     description: i18n.t('SDL2 window application (MinGW: -lmingw32 -lSDL2main -lSDL2)'),
     targetType: TargetType.ConsoleOnly,
     includeDirs: ['include'],
@@ -240,7 +240,7 @@ export const PROJECT_TEMPLATES: ProjectTemplate[] = [
   },
   {
     id: 'wxwidgets',
-    label: 'wxWidgets application (C++)',
+    label: i18n.t('wxWidgets application (C++)'),
     description: i18n.t('Minimal wxWidgets skeleton (adjust link library names to your wx version; see the template notes)'),
     targetType: TargetType.ConsoleOnly,
     compilerOptions: ['-std=c++17'],
@@ -252,7 +252,7 @@ export const PROJECT_TEMPLATES: ProjectTemplate[] = [
   },
   {
     id: 'qt',
-    label: 'Qt Widgets application (C++)',
+    label: i18n.t('Qt Widgets application (C++)'),
     description: i18n.t('Minimal Qt6 Widgets application (Qt include/lib directories required; moc notes in the template)'),
     targetType: TargetType.ConsoleOnly,
     compilerOptions: ['-std=c++17'],
@@ -264,7 +264,7 @@ export const PROJECT_TEMPLATES: ProjectTemplate[] = [
   },
   {
     id: 'avr',
-    label: 'AVR application (C, avr-gcc)',
+    label: i18n.t('AVR application (C, avr-gcc)'),
     description: i18n.t('AVR bare-metal application (atmega328p; -mmcu/-DF_CPU can be changed for your chip)'),
     targetType: TargetType.ConsoleOnly,
     compilerOptions: ['-mmcu=atmega328p', '-DF_CPU=16000000UL', '-Os'],
@@ -275,7 +275,7 @@ export const PROJECT_TEMPLATES: ProjectTemplate[] = [
   },
   {
     id: 'msp430',
-    label: 'MSP430 application (C, msp430-gcc)',
+    label: i18n.t('MSP430 application (C, msp430-gcc)'),
     description: i18n.t('MSP430 bare-metal application (msp430g2553; debug with msp430-gdb)'),
     targetType: TargetType.ConsoleOnly,
     compilerOptions: ['-mmcu=msp430g2553', '-Os'],
@@ -286,7 +286,7 @@ export const PROJECT_TEMPLATES: ProjectTemplate[] = [
   },
   {
     id: 'opencv',
-    label: 'OpenCV application (C++)',
+    label: i18n.t('OpenCV application (C++)'),
     description: i18n.t('OpenCV image window application (link libraries preset with OpenCV 4 MinGW names)'),
     targetType: TargetType.ConsoleOnly,
     compilerOptions: ['-std=c++17'],

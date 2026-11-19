@@ -175,6 +175,42 @@ for (const f of files) {
 }
 check('已完成本地化的文件无中文字面量（i18n.tr / i18n.t 全覆盖）', doneViolations.length === 0, doneViolations.slice(0, 10));
 
+// ---- 4c. UI 文案英文硬编码守卫：show*Message 的消息/按钮与模板 label 必须走 i18n ----
+// 背景：F-07/F-08/F-10（2026-11 审计）。中文守卫只能拦住中文字面量，拦不住英文 UI 文案。
+const ENGLISH_UI_API = new Set(['showInformationMessage', 'showWarningMessage', 'showErrorMessage']);
+const englishUiViolations = [];
+const labelGuardFiles = new Set(['project/newProject.ts', 'tools/keybindingConfig.ts']);
+for (const f of files) {
+  const rel = f.replace(/\\/g, '/').replace(SRC.replace(/\\/g, '/') + '/', '');
+  if (!I18N_DONE_FILES.includes(rel)) continue;
+  const text = fs.readFileSync(f, 'utf-8');
+  const sf = ts.createSourceFile(f, text, ts.ScriptTarget.ES2020, true, ts.ScriptKind.TS);
+  const visit = (node) => {
+    if (ts.isCallExpression(node)
+      && ts.isPropertyAccessExpression(node.expression)
+      && ENGLISH_UI_API.has(node.expression.name.text)) {
+      node.arguments.forEach((arg, index) => {
+        if (index > 0 && ts.isObjectLiteralExpression(arg)) return; // { modal: true }
+        if (!ts.isStringLiteral(arg) && !ts.isNoSubstitutionTemplateLiteral(arg)) return;
+        if (!/[A-Za-z]/.test(arg.text) || /[\u4e00-\u9fff]/.test(arg.text)) return;
+        const line = sf.getLineAndCharacterOfPosition(arg.getStart(sf)).line + 1;
+        englishUiViolations.push(`${rel}:${line}  ${index === 0 ? 'message' : 'button'} ${JSON.stringify(arg.text.slice(0, 60))}`);
+      });
+    }
+    if (labelGuardFiles.has(rel)
+      && ts.isPropertyAssignment(node)
+      && node.name.getText(sf) === 'label'
+      && (ts.isStringLiteral(node.initializer) || ts.isNoSubstitutionTemplateLiteral(node.initializer))
+      && /[A-Za-z]/.test(node.initializer.text)) {
+      const line = sf.getLineAndCharacterOfPosition(node.initializer.getStart(sf)).line + 1;
+      englishUiViolations.push(`${rel}:${line}  label ${JSON.stringify(node.initializer.text.slice(0, 60))}`);
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(sf);
+}
+check('UI 消息/按钮/模板 label 无英文硬编码（必须 i18n.t/logT）', englishUiViolations.length === 0, englishUiViolations.slice(0, 10));
+
 // ---- 5. 样例自检：确认检测器本身能捕获"裸 catch" ----
 {
   const sample = 'function f() { try { g(); } catch { } }';

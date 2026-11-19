@@ -3,6 +3,7 @@
 //        format（无 astyle 时的回退分支）、compileFileWithoutProject（三类早退 + Task 生成）
 // 前置：tests/_harness/extensionActivation.js（补桩 + 假 context + 对话框脚本化）
 const path = require('path');
+const i18n = require('../dist/i18n');
 const fs = require('fs');
 const os = require('os');
 const { activate } = require('./_harness/extensionActivation');
@@ -48,12 +49,12 @@ function check(name, cond, got, want) {
   let before = app.ctx.workspaceState.get('codeblocks.bookmarks', []);
   if (!before.length) { await app.invoke('codeblocks.bookmarks.toggle'); before = app.ctx.workspaceState.get('codeblocks.bookmarks', []); }
   check('BM clearAll 前置：存在书签', before.length >= 1, before.length, '≥1');
-  app.setWarningButton('Clear');
+  app.setWarningButton(i18n.t('Clear'));
   await app.invoke('codeblocks.bookmarks.clearAll');
   stored = app.ctx.workspaceState.get('codeblocks.bookmarks', []);
   check('BM clearAll 确认后清空', Array.isArray(stored) && stored.length === 0, stored, 0);
   check('BM clearAll 出现确认对话框（modal + Clear 按钮）',
-    records.warningButtons.some((w) => /书签/.test(w.message) && w.buttons.includes('Clear')),
+    records.warningButtons.some((w) => /书签/.test(w.message) && w.buttons.includes(i18n.t('Clear'))),
     records.warningButtons.map((w) => w.message).slice(0, 2), '含书签确认');
   check('BM clearAll 输出通道留痕', mock.channels.some((c) => c.lines.some((l) => /已清除全部书签/.test(l))), '≥1 行');
   const warningsBefore = records.warningButtons.length;
@@ -113,6 +114,21 @@ function check(name, cond, got, want) {
   check('compileFileWithoutProject 源文件路径不抛错（生成任务或给出提示）',
     compileErr === null && (records.tasks.length >= 1 || mock.warnings.length >= 1 || records.executeCommand.length >= 1),
     { compileErr, tasks: records.tasks.length, warnings: mock.warnings.length }, '任务或提示');
+
+  // ---------- insertHeaderGuard：仅头文件（F-04） ----------
+  app.setActiveEditor(src, srcText, 'c');
+  const guardWarnBefore = mock.warnings.length;
+  const guardEditsBefore = records.appliedEdits.length;
+  await app.invoke('codeblocks.insertHeaderGuard');
+  check('insertHeaderGuard 非头文件不编辑', records.appliedEdits.length === guardEditsBefore, records.appliedEdits.length - guardEditsBefore, 0);
+  check('insertHeaderGuard 非头文件给出提示', mock.warnings.slice(guardWarnBefore).some((m) => m === i18n.t('Header guard is only available for header files (.h / .hh / .hpp / .hxx)')), mock.warnings.slice(guardWarnBefore));
+
+  const hdr = path.join(tmp, 'demo.h');
+  fs.writeFileSync(hdr, 'int demo(void);\n', 'utf-8');
+  app.setActiveEditor(hdr, 'int demo(void);\n', 'cpp');
+  await app.invoke('codeblocks.insertHeaderGuard');
+  const guardEdit = records.appliedEdits[records.appliedEdits.length - 1];
+  check('insertHeaderGuard 头文件插入保护', !!guardEdit && guardEdit.edits.some((e) => e.kind === 'replace' && /#ifndef\s+_*DEMO_H_*/.test(e.newText)), guardEdit && guardEdit.edits);
 
   await app.deactivate().catch(() => undefined);
   console.log(`\n编辑类命令处理器回归: ${pass} pass, ${fail} fail${failures.length ? '  [' + failures.join(', ') + ']' : ''}`);

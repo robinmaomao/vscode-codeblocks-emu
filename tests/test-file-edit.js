@@ -54,3 +54,16 @@ for (const f of reparse.files) {
   console.log(`${f.relativeFilename}: var=${JSON.stringify(f.compilerVar)} compile=${f.compile} link=${f.link} targets=${JSON.stringify(f.buildTargets)} explicit=${f.explicitTargets} cmd=${JSON.stringify(f.customBuildCommands)}`);
 }
 fs.unlinkSync(tmp);
+
+let pass = 0, fail = 0;
+function check(name, cond, got, want) {
+  if (cond) { pass++; console.log('OK   ' + name); }
+  else { fail++; console.log(`FAIL ${name}  got=${JSON.stringify(got)}${want !== undefined ? ' want=' + JSON.stringify(want) : ''}`); }
+}
+const byRel = new Map(reparse.files.map((f) => [f.relativeFilename, f]));
+const mainC = byRel.get('main.c');
+const utilH = byRel.get('util.h');
+check('文件归属：main.c 编译关闭/仅 Debug', mainC && mainC.compilerVar === 'CC' && mainC.compile === false && JSON.stringify(mainC.buildTargets) === JSON.stringify(['Debug']) && mainC.explicitTargets === true, mainC && { cv: mainC.compilerVar, compile: mainC.compile, targets: mainC.buildTargets });
+check('文件归属：util.h 自定义命令', utilH && utilH.customBuildCommands?.gcc?.use === true && utilH.customBuildCommands.gcc.command === 'gcc -E $file', utilH && utilH.customBuildCommands);
+console.log(`文件归属编辑: ${pass} pass, ${fail} fail`);
+process.exit(fail ? 1 : 0);

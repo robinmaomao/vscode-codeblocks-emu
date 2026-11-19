@@ -27,6 +27,7 @@ Module._load = function (request, parent, isMain) {
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const i18n = require('../dist/i18n');
 const { ProjectParser } = require('../dist/model/parser.js');
 const { BuildEngine } = require('../dist/build/buildEngine.js');
 const { createGccCompiler } = require('../dist/compiler/compiler.js');
@@ -57,7 +58,7 @@ function makeEngine(project, sink) {
 }
 
 const compiledNames = (log) => log.filter((l) => l.includes('[Compiled]')).map((l) => l.match(/\d+-\d+\s+(\S+)\s/)?.[1] ?? l);
-const hasNothing = (log) => log.some((l) => l.includes('Nothing to be done'));
+const hasNothing = (log) => log.some((l) => l.includes(i18n.t('[Code::Blocks] Nothing to be done (all items are up-to-date).')));
 const hasLinked = (log) => log.some((l) => l.includes('Linking'));
 const hasRelinkMsg = (log) => log.some((l) => /Re-linking because|重新链接/.test(l));
 const hasRearkMsg = (log) => log.some((l) => /Re-archiving because|重新打包/.test(l));

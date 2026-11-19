@@ -33,3 +33,14 @@ const rdbg = reparse.buildTargets[0];
 console.log('Debug before/after:', JSON.stringify({ before: rdbg.commandsBeforeBuild, after: rdbg.commandsAfterBuild }));
 console.log('Debug relations:', JSON.stringify(rdbg.optionRelations));
 fs.unlinkSync(tmp);
+
+let pass = 0, fail = 0;
+function check(name, cond, got, want) {
+  if (cond) { pass++; console.log('OK   ' + name); }
+  else { fail++; console.log(`FAIL ${name}  got=${JSON.stringify(got)}${want !== undefined ? ' want=' + JSON.stringify(want) : ''}`); }
+}
+check('项目级 pre/post build 命令', JSON.stringify(reparse.commandsBeforeBuild) === JSON.stringify(['echo pre-build']) && JSON.stringify(reparse.commandsAfterBuild) === JSON.stringify(['echo post-build']), { before: reparse.commandsBeforeBuild, after: reparse.commandsAfterBuild });
+check('目标级 pre/post build 命令', JSON.stringify(rdbg.commandsBeforeBuild) === JSON.stringify(['echo dbg-pre']) && JSON.stringify(rdbg.commandsAfterBuild) === JSON.stringify(['echo dbg-post']), { before: rdbg.commandsBeforeBuild, after: rdbg.commandsAfterBuild });
+check('OptionsRelation 序列化', rdbg.optionRelations[OptionsRelationType.CompilerOptions] === 0 && rdbg.optionRelations[OptionsRelationType.LinkerOptions] === 2 && rdbg.optionRelations[OptionsRelationType.IncludeDirs] === 1, rdbg.optionRelations);
+console.log(`OptionsRelation/额外命令: ${pass} pass, ${fail} fail`);
+process.exit(fail ? 1 : 0);

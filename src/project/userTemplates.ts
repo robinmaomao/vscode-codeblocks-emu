@@ -222,6 +222,15 @@ export interface InstantiateResult {
   /** 实际落盘的骨架文件数（顺带统计缺失者） */
   copiedFiles: number;
   missingFiles: string[];
+  /** 目标已存在且按调用方要求保留的文件 */
+  skippedFiles: string[];
+}
+
+export interface InstantiateOptions {
+  /** 冲突文件是否覆盖（按清单中的相对路径）；未提供时保留现有文件 */
+  overwriteFile?: (rel: string) => boolean;
+  /** `<新工程名>.cbp` 已存在时是否覆盖；默认 false（抛错） */
+  overwriteCbp?: boolean;
 }
 
 /** 校验新工程名（与新建向导同一口径） */
@@ -229,6 +238,12 @@ export function isValidProjectName(name: string): string | undefined {
   const v = String(name ?? '');
   if (!v.trim()) return i18n.t('Project name cannot be empty');
   if (/[<>:"/\\|?*\x00-\x1f]/.test(v)) return i18n.t('Project name contains invalid characters');
+  if (v.trim() === '.' || v.trim() === '..') return i18n.t('Project name cannot be "." or ".."');
+  if (/[. ]$/.test(v)) return i18n.t('Project name cannot end with a dot or space');
+  // Windows 设备名不区分大小写，且带扩展名同样被占用（CON.txt 等价 CON）
+  if (/^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\..*)?$/i.test(v.trim())) {
+    return i18n.t('Project name is a reserved Windows device name');
+  }
   return undefined;
 }
 
@@ -238,6 +253,7 @@ export function instantiateUserTemplate(
   id: string,
   newName: string,
   basePath: string,
+  options: InstantiateOptions = {},
 ): InstantiateResult {
   const manifest = getUserTemplate(root, id);
   if (!manifest) throw new Error(i18n.t('Template not found: {0}', id));
@@ -246,21 +262,26 @@ export function instantiateUserTemplate(
   const name = newName.trim();
   const tplDir = path.join(root, manifest.id);
   const projectDir = path.join(basePath, name);
+  const cbpPath = path.join(projectDir, `${name}.cbp`);
+  if (fs.existsSync(cbpPath) && !options.overwriteCbp) {
+    throw new Error(i18n.t('The project file already exists: {0}', cbpPath));
+  }
   fs.mkdirSync(projectDir, { recursive: true });
 
   let copied = 0;
   const missing: string[] = [];
+  const skipped: string[] = [];
   for (const rel of manifest.files ?? []) {
     const src = path.join(tplDir, rel);
     if (!fs.existsSync(src)) { missing.push(rel); continue; }
     const dest = path.join(projectDir, rel);
+    if (fs.existsSync(dest) && !options.overwriteFile?.(rel)) { skipped.push(rel); continue; }
     fs.mkdirSync(path.dirname(dest), { recursive: true });
     fs.copyFileSync(src, dest);
     copied++;
   }
   const cbpSrc = path.join(tplDir, manifest.cbp);
   if (!fs.existsSync(cbpSrc)) throw new Error(i18n.t('Missing template project file: {0}', manifest.cbp));
-  const cbpPath = path.join(projectDir, `${name}.cbp`);
   fs.writeFileSync(cbpPath, applyTemplateNameToXml(readTemplateSourceCbp(cbpSrc), name), 'utf-8');
-  return { manifest, projectDir, cbpPath, copiedFiles: copied, missingFiles: missing };
+  return { manifest, projectDir, cbpPath, copiedFiles: copied, missingFiles: missing, skippedFiles: skipped };
 }

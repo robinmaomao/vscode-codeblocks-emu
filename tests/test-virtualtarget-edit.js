@@ -25,3 +25,12 @@ for (const vt of reparse.virtualTargets) {
   console.log(`${vt.title}: [${vt.targets.join(', ')}]`);
 }
 fs.unlinkSync(tmp);
+
+let pass = 0, fail = 0;
+function check(name, cond, got, want) {
+  if (cond) { pass++; console.log('OK   ' + name); }
+  else { fail++; console.log(`FAIL ${name}  got=${JSON.stringify(got)}${want !== undefined ? ' want=' + JSON.stringify(want) : ''}`); }
+}
+check('虚拟目标序列化', reparse.virtualTargets.length === 2 && reparse.virtualTargets[0].title === 'All' && JSON.stringify(reparse.virtualTargets[0].targets) === JSON.stringify(['Debug', 'Release']) && reparse.virtualTargets[1].title === 'Libs', reparse.virtualTargets);
+console.log(`虚拟目标编辑: ${pass} pass, ${fail} fail`);
+process.exit(fail ? 1 : 0);

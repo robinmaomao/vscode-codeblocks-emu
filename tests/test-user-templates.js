@@ -14,6 +14,7 @@ const {
   instantiateUserTemplate,
   listUserTemplates,
   getUserTemplate,
+  isValidProjectName,
   PROJECT_NAME_PLACEHOLDER,
 } = require('../dist/project/userTemplates.js');
 
@@ -112,6 +113,27 @@ check('实例化：未知模板报错', idErr.includes('模板不存在'), idErr
 let nameErr = '';
 try { instantiateUserTemplate(root, 'demo-starter', 'bad/name', outBase); } catch (e) { nameErr = e.message; }
 check('实例化：非法工程名报错', nameErr.includes('非法字符'), nameErr);
+
+// ---- 工程名校验（F-13） ----
+check('工程名：拒绝 .', !!isValidProjectName('.'), isValidProjectName('.'));
+check('工程名：拒绝 ..', !!isValidProjectName('..'), isValidProjectName('..'));
+check('工程名：拒绝结尾点', !!isValidProjectName('app.'), isValidProjectName('app.'));
+check('工程名：拒绝结尾空格', !!isValidProjectName('app '), isValidProjectName('app '));
+check('工程名：拒绝 Windows 设备名', !!isValidProjectName('CON') && !!isValidProjectName('con.txt'), [isValidProjectName('CON'), isValidProjectName('con.txt')]);
+check('工程名：允许内部点', isValidProjectName('app.v1') === undefined, isValidProjectName('app.v1'));
+
+// ---- 覆盖保护（F-01） ----
+const conflictBase = path.join(tmp, 'conflict');
+const first = instantiateUserTemplate(root, 'demo-starter', 'app3', conflictBase);
+fs.writeFileSync(path.join(first.projectDir, 'main.c'), 'OLD-MAIN\n', 'utf-8');
+const second = instantiateUserTemplate(root, 'demo-starter', 'app3', conflictBase, { overwriteCbp: true });
+check('覆盖保护：默认保留已有骨架文件', fs.readFileSync(path.join(second.projectDir, 'main.c'), 'utf-8') === 'OLD-MAIN\n', fs.readFileSync(path.join(second.projectDir, 'main.c'), 'utf-8'));
+check('覆盖保护：记录被保留文件', second.skippedFiles.includes('main.c'), second.skippedFiles);
+const third = instantiateUserTemplate(root, 'demo-starter', 'app3', conflictBase, { overwriteCbp: true, overwriteFile: () => true });
+check('覆盖保护：确认后覆盖骨架文件', fs.readFileSync(path.join(third.projectDir, 'main.c'), 'utf-8').includes('main()'), fs.readFileSync(path.join(third.projectDir, 'main.c'), 'utf-8'));
+let cbpErr = '';
+try { instantiateUserTemplate(root, 'demo-starter', 'app3', conflictBase); } catch (e) { cbpErr = e.message; }
+check('覆盖保护：.cbp 已存在且未确认时报错', cbpErr.includes('工程文件已存在'), cbpErr);
 
 console.log(`用户模板测试: ${pass} pass, ${fail} fail`);
 process.exit(fail ? 1 : 0);

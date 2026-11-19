@@ -12,6 +12,7 @@
 // 前置：tests/_harness/extensionActivation.js（可激活 mock + emitConfigChange 派发设置变更事件）
 // 安全：LOCALAPPDATA / XDG_CONFIG_HOME 指到临时目录，绝不触碰真实用户的 clangd 配置
 const path = require('path');
+const i18n = require('../dist/i18n');
 const fs = require('fs');
 const os = require('os');
 
@@ -187,7 +188,7 @@ const sameItems = (got, want) => JSON.stringify(got) === JSON.stringify(want);
   // ---------- 8) 无已打开工程：设置变更只跳过、不写配置（无作用域可写） ----------
   const linesBefore = channel ? channel.lines.length : 0;
   const cfgBefore = readCfg();
-  app.setWarningButton('Remove');
+  app.setWarningButton(i18n.t('Remove'));
   await app.invoke('codeblocks.removeProject');
   app.setConfig('codeblocks.clangd.suppressedWarnings', ['-Wunused-function', '-Wempty-body', '-Wshould-not-be-written']);
   mock.emitConfigChange('codeblocks.clangd.suppressedWarnings');
@@ -278,7 +279,7 @@ const sameItems = (got, want) => JSON.stringify(got) === JSON.stringify(want);
   await new Promise((r) => setTimeout(r, 300));
   check('G4 值未变化时不重复弹窗', app.records.warningButtons.length === warnBase4b, null);
   // 从未写过片段（无工程可生成 + 配置目录为空）→ 静默，不打扰用户
-  app.setWarningButton('Remove');
+  app.setWarningButton(i18n.t('Remove'));
   await app.invoke('codeblocks.removeProject');
   const savedEnv = { LOCALAPPDATA: process.env.LOCALAPPDATA, XDG_CONFIG_HOME: process.env.XDG_CONFIG_HOME };
   process.env.LOCALAPPDATA = path.join(tmpRoot, 'empty-appdata');
@@ -304,7 +305,7 @@ const sameItems = (got, want) => JSON.stringify(got) === JSON.stringify(want);
   mock.setInstalledExtension('llvm-vs-code-extensions.vscode-clangd', { id: 'llvm-vs-code-extensions.vscode-clangd', isActive: true });
   app.vscode.window.visibleTextEditors = []; // 没有任何 C/C++ 编辑器（状态栏打开工程的典型情况）
   app.vscode.window.activeTextEditor = undefined;
-  app.setWarningButton('Remove');
+  app.setWarningButton(i18n.t('Remove'));
   await app.invoke('codeblocks.removeProject'); // 回到"未打开任何工程"（等价于弹窗被取消的状态）
   app.records.executeCommand.length = 0;
   const linesBefore13 = channel ? channel.lines.length : 0;

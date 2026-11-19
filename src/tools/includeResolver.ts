@@ -23,6 +23,34 @@ export function parseIncludeDirective(line: string): IncludeDirective | undefine
   return { name, quoted: m[1] === '"' };
 }
 
+export interface ProjectIncludeFile {
+  relativeFilename: string;
+  absolutePath?: string;
+}
+
+/**
+ * 在工程文件列表中按路径后缀定位头文件（对齐 CB `IsSuffixOfPath`）：
+ * `util.h` 可命中 `src/util.h`，但不会误命中 `myutil.h`。
+ */
+export function findProjectIncludeFile(
+  files: readonly ProjectIncludeFile[],
+  basePath: string,
+  name: string,
+  exists: (p: string) => boolean = () => true,
+): string | undefined {
+  const target = name.replace(/\\/g, '/').replace(/^\.\//, '');
+  if (!target) return undefined;
+  const lower = process.platform === 'win32' ? target.toLowerCase() : target;
+  for (const f of files ?? []) {
+    const rel = String(f.relativeFilename ?? '').replace(/\\/g, '/');
+    const relCmp = process.platform === 'win32' ? rel.toLowerCase() : rel;
+    if (relCmp !== lower && !relCmp.endsWith('/' + lower)) continue;
+    const abs = f.absolutePath || path.join(basePath, f.relativeFilename);
+    if (exists(abs)) return abs;
+  }
+  return undefined;
+}
+
 /**
  * 按搜索顺序解析包含文件路径：
  * 引号形式 → 当前文件目录优先；随后依次尝试各 include 目录（调用方负责宏展开与去重）。
