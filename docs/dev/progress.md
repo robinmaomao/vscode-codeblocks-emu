@@ -67,7 +67,7 @@ npm.cmd run compile
 npm.cmd run package
 
 # 安装（版本号以 package.json 为准）
-code --install-extension "codeblocks-vscode-0.9.1.vsix" --force
+code --install-extension "codeblocks-vscode-0.9.2.vsix" --force
 
 # 全量回归测试
 npm.cmd test
@@ -135,8 +135,9 @@ npm.cmd test
 | [0.8.160](../release/0.8.160.md) | 功能审计修复轮：新建工程覆盖保护、HeaderGuard 仅头文件、`#include` 系统头跳转、TODO 扫描器按语言识别注释、构建日志/调试门控本地化、工程名校验；`test:contract` 通过且无头脚本补断言（F-02/F-03 按决定不执行） |
 | [0.9.0](../release/0.9.0.md) | 合入 Agent 控制面（LM Tools 11 + MCP provider + CLI）：构建内核下沉 `build/buildProject.ts` 由 UI/Agent 共用；`engines.vscode` → `^1.102.0`；设置 +2（第 10 分区 Agent） |
 | [0.9.1](../release/0.9.1.md) | clangd 重启路径修复：合并器改单飞（不并发叠加）、跳过留痕、客户端未就绪时有限重试、跳过文案对齐 |
+| [0.9.2](../release/0.9.2.md) | 合并后九轮复查：目标平台守卫与 `no-build`、构建不再被通知挂起、调试响应归一化 / 断点替换、编辑深拷贝、导出保护、CLI 退出码与 JSON、只读白名单补 debug |
 
-> 当前版本 **0.9.1**（正式版；发布说明见 [release/0.9.1.md](../release/0.9.1.md)，上一版见 [release/0.9.0.md](../release/0.9.0.md)）；测试报告见 [test-report-0.9.1.md](../testing/test-report-0.9.1.md)；无头回归见 `npm test`（另有契约 / E2E / 视觉 / 性能 / 打包 / 宿主分层，见 [测试方案](../testing/strategy.md)）。
+> 当前版本 **0.9.2**（正式版；发布说明见 [release/0.9.2.md](../release/0.9.2.md)，上一版见 [release/0.9.1.md](../release/0.9.1.md)）；测试报告见 [test-report-0.9.2.md](../testing/test-report-0.9.2.md)；无头回归见 `npm test`（另有契约 / E2E / 视觉 / 性能 / 打包 / 宿主分层，见 [测试方案](../testing/strategy.md)）。
 
 ## 文档：GitHub Release 页面格式统一
 

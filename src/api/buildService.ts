@@ -3,7 +3,7 @@
  */
 import { supportsCurrentPlatform } from '../model/types';
 import { applyGeneratedFiles } from '../build/generatedFiles';
-import { buildProjectTarget, cleanProjectTarget, BuildProjectDeps } from '../build/buildProject';
+import { buildProjectTarget, cleanProjectTarget, targetPlatformSupported, BuildProjectDeps } from '../build/buildProject';
 import { BuildCancelSource } from '../build/cancelToken';
 import type { BuildCancelHandle } from '../build/cancelToken';
 import type { BuildDiagnosticsBudget, BuildLogProject, BuildLogSummary } from '../build/buildSummary';
@@ -54,10 +54,33 @@ export function selectBuildTarget(project: ReturnType<typeof loadProject>, reque
   return fallback!.title;
 }
 
+/**
+ * 平台守卫：构建内核把「目标不支持当前平台」当作「跳过并成功」（UI 语义）。
+ * CLI / MCP / Agent 若照此拿到 `ok: true` + 空摘要，会误判成构建成功 —— 调用方先显式报错。
+ *
+ * 判定与 `buildProjectTarget` 共用 `targetPlatformSupported`（虚拟目标按成员并集）。
+ */
+export function assertTargetRunnable(project: ReturnType<typeof loadProject>, targetTitle: string): void {
+  if (targetPlatformSupported(project, targetTitle)) return;
+  const available = project.buildTargets.filter((t) => supportsCurrentPlatform(t.platforms)).map((t) => t.title);
+  const virtual = project.virtualTargets.find((v) => v.title === targetTitle);
+  if (virtual) {
+    fail('unsupported', `Virtual target "${targetTitle}" has no targets for the current platform (${process.platform})`, {
+      hint: 'Pick a target that supports this platform.',
+      targets: available,
+    });
+  }
+  fail('unsupported', `Target "${targetTitle}" does not support the current platform (${process.platform})`, {
+    hint: 'Pick a target that supports this platform, or add one in Code::Blocks.',
+    targets: available,
+  });
+}
+
 /** 构建 / 重建 / 清理单个工程 */
 export async function buildProject(req: BuildRequest, deps: BuildServiceDeps): Promise<BuildOutcome> {
   const project = loadProject(req.cbp);
   const target = selectBuildTarget(project, req.target);
+  assertTargetRunnable(project, target);
   const mode: BuildMode = req.mode ?? 'build';
 
   // 与 UI 一致：生成文件先并入模型（编译器 XML 的 gen 属性）

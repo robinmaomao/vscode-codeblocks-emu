@@ -162,8 +162,11 @@ check('B4 空串不产生 glob', excludeGlobsFor('').length === 0, excludeGlobsF
   // 所有会写/删产物的入口都要先排除：Build / Build Workspace / Clean / Clean Workspace /
   // 单工程 Build（右键）/ 单文件编译 / Rebuild All。
   // 清理会批量删除产物，同样触发全工作区枚举；单工程/单文件路径不经过主 Build 命令，最容易漏。
-  const calls = (extJs.match(/await autoExcludeBuildOutputs\(\)/g) || []).length;
+  const calls = (extJs.match(/await autoExcludeBuildOutputs\(/g) || []).length;
   check('E6 全部构建/清理入口均调用（build/buildWorkspace/clean/cleanWorkspace/单工程/单文件/Rebuild All）', calls >= 7, calls, '>=7');
+  // agent 调用（interactive=false）必须静默：该函数会 await 一条通知，无人点击时永不 resolve
+  check('E6b 单工程构建按 interactive 决定是否通知（agent 静默，避免工具调用挂起）',
+    /autoExcludeBuildOutputs\(\{ notify: interactive \}\)/.test(extJs), null);
   // 打开工程时静默预排除：历史产物目录里的 .o 会在启动扫描/下次构建时触发枚举
   check('E7 打开工程即静默预排除（notify:false 分支）',
     /autoExcludeBuildOutputs\(\{ notify: false \}\)/.test(extJs) && extJs.includes('opts?.notify === false'), null);

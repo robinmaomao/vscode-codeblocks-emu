@@ -83,6 +83,8 @@ const getter = (map) => ({ get: (k, d) => (Object.prototype.hasOwnProperty.call(
     ['codeblocks_workspace', { action: 'deps' }],
     ['codeblocks_workspace', { action: 'list' }],
     ['codeblocks_debug', { action: 'state' }],
+    ['codeblocks_debug', { action: 'stack' }],
+    ['codeblocks_debug', { action: 'variables' }],
   ];
   const denied = [
     ['codeblocks_project_edit', {}],
@@ -98,11 +100,13 @@ const getter = (map) => ({ get: (k, d) => (Object.prototype.hasOwnProperty.call(
     ['codeblocks_debug', { action: 'start' }],
     ['codeblocks_debug', { action: 'breakpoints' }],
     ['codeblocks_debug', { action: 'evaluate' }],
+    ['codeblocks_debug', { action: 'continue' }],
+    ['codeblocks_debug', { action: 'step' }],
   ];
   const allowedBad = allowed.filter(([n, i]) => !policy.isReadOnlyToolCall(n, i));
   const deniedBad = denied.filter(([n, i]) => policy.isReadOnlyToolCall(n, i));
-  check('B9 只读白名单放行 8 种查询调用', allowedBad.length === 0, allowedBad);
-  check('B10 只读模式拒绝 13 种写/执行调用', deniedBad.length === 0, deniedBad);
+  check('B9 只读白名单放行 10 种查询调用', allowedBad.length === 0, allowedBad);
+  check('B10 只读模式拒绝 15 种写/执行调用', deniedBad.length === 0, deniedBad);
   check('B11 白名单外的工具默认拒绝', policy.isReadOnlyToolCall('codeblocks_unknown', {}) === false);
   check('B12 提示文案包含设置键',
     policy.READ_ONLY_HINT.includes('codeblocks.agent.readOnly') && policy.AGENT_DISABLED_HINT.includes('codeblocks.agent.enabled'),
@@ -164,6 +168,9 @@ async function expectCode(label, code, fn) {
   await expectCode('C4 只读：build 被拒', 'read-only', () => registry.invokeTool(ro, 'codeblocks_build', { cbp }));
   await expectCode('C5 只读：compiler set 被拒', 'read-only', () => registry.invokeTool(ro, 'codeblocks_compiler', { action: 'set', compilerId: 'gcc' }));
   await expectCode('C6 只读：workspace open 被拒', 'read-only', () => registry.invokeTool(ro, 'codeblocks_workspace', { action: 'open', project: cbp }));
+  // 只读放行 debug 的纯查询动作（本 ctx 无调试桥 → 走到 unsupported，说明没被 read-only 拦截）
+  await expectCode('C6b 只读：debug stack 放行（无会话 → unsupported）', 'unsupported', () => registry.invokeTool(ro, 'codeblocks_debug', { action: 'stack' }));
+  await expectCode('C6c 只读：debug evaluate 仍被拒（可能调用函数）', 'read-only', () => registry.invokeTool(ro, 'codeblocks_debug', { action: 'evaluate' }));
 
   const after = fs.readFileSync(cbp, 'utf-8');
   check('C7 只读期间工程文件字节不变', before === after);

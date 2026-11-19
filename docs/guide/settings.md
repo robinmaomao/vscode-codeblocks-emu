@@ -208,7 +208,7 @@
 | 设置项 | 类型 | 默认值 | 作用域 | 说明 |
 |--------|------|--------|--------|------|
 | `codeblocks.agent.enabled` | boolean | `true` |  | Agent 控制总闸：关闭后 11 个 Language Model Tools 不再注册、内嵌 MCP server 不暴露（已在运行的 MCP server 也拒绝调用）。**未受信任的工作区一律按关闭处理**。切换即时生效，无需重载窗口；独立的 `cb-cli` 不受影响。 |
-| `codeblocks.agent.readOnly` | boolean | `false` |  | 只读模式：仅放行 `project_read`、`build_status`、`compiler list/info`、`workspace info/deps/list` 与 `debug state`；改工程、构建、运行、调试一律返回 `read-only`。即时生效。 |
+| `codeblocks.agent.readOnly` | boolean | `false` |  | 只读模式：仅放行 `project_read`、`build_status`、`compiler list/info`、`workspace info/deps/list` 与 `debug state/stack/variables`；改工程、构建、运行、调试一律返回 `read-only`。即时生效。 |
 
 示例：
 

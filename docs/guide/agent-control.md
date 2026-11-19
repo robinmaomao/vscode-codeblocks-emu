@@ -48,17 +48,17 @@
 
 | 工具 | 主要参数 | 说明 |
 |---|---|---|
-| `codeblocks_project_read` | `cbp?`、`section=summary\|targets\|files\|options\|schema\|all`、`target?` | 读取工程模型；`section=schema` 返回**可编辑字段目录**（不需要工程） |
+| `codeblocks_project_read` | `cbp?`、`section=summary\|targets\|files\|options\|schema\|all`、`target?` | 读取工程模型；`section=schema` 返回**可编辑字段目录**（不需要工程）；未知 `target` 返回 `invalid-input` 并列出可选目标 |
 | `codeblocks_project_edit` | `ops[]`、`dryRun?`、`format=canonical\|preserve`、`allowScripts?`、`force?` | 增量编辑；返回 `changed[]` 与 `warnings[]` |
 | `codeblocks_project_file` | `action=add\|remove\|rename`、`file`、`targets?`、`to?` | 工程内文件增删改 |
 | `codeblocks_project_target` | `action=add\|remove\|rename`、`title`、`copyFrom?`、`targetType?` | 构建目标增删改 |
-| `codeblocks_build` | `cbp?`、`target?`、`mode=build\|rebuild\|clean`、`timeoutMs?`、`dryRun?` | 构建并返回结构化诊断 |
-| `codeblocks_build_status` | `cbp?`、`severity?`、`tail?` | 最近一次构建摘要（诊断/统计/实际命令） |
-| `codeblocks_run` | `cbp?`、`target?`、`args?`、`cwd?`、`timeoutMs?` | 运行目标并捕获输出与退出码（非交互） |
-| `codeblocks_debug` | `action=start\|stop\|breakpoints\|state\|stack\|variables\|evaluate\|continue\|step\|run` | 调试控制；`run` = 启动 + 断点 + 返回栈/变量 |
+| `codeblocks_build` | `cbp?`、`target?`、`mode=build\|rebuild\|clean`、`timeoutMs?`、`dryRun?` | 构建并返回结构化诊断；`target` 必须是工程里存在的目标（否则 `invalid-input` 并列出可选目标），目标不支持当前平台时返回 `unsupported`，`timeoutMs` 到点立即取消（含 makefile 的 `make`） |
+| `codeblocks_build_status` | `cbp?`、`severity?`、`tail?` | 最近一次构建摘要（诊断/统计/实际命令）；本次会话还没构建过 → `no-build` |
+| `codeblocks_run` | `cbp?`、`target?`、`args?`、`cwd?`、`timeoutMs?` | 运行目标并捕获输出与退出码（非交互）；`cwd` 的相对路径按**工程目录**解析；`timeoutMs` 缺省 **120000**，显式 `0` = 不限时 |
+| `codeblocks_debug` | `action=start\|stop\|breakpoints\|state\|stack\|variables\|evaluate\|continue\|step\|run`、`timeoutMs?` | 调试控制；`run` = 启动 + 断点 + 返回栈/变量（`includeStack` / `includeVariables` 可关掉这两项以省 token）；`timeoutMs` = 等程序停下（命中断点/退出）的预算，默认 30000，作用于 `start` / `run` / `continue` / `step`；`breakpoints` **替换**该文件的断点（宿主可在 start 前预置，CLI/MCP 需先 `start`），`run` 的断点随 `start` 一次性应用 |
 | `codeblocks_compiler` | `action=list\|info`、`compilerId?` | 列出可用编译器、解析实际程序路径 |
-| `codeblocks_export` | `kind=makefile\|compile_commands\|commands`、`out?` | 导出构建信息 |
-| `codeblocks_workspace` | `action=info\|deps\|list\|open\|close\|setActive` | `.workspace` 与多工程管理 |
+| `codeblocks_export` | `kind=makefile\|compile_commands\|commands`、`out?` | 导出构建信息；默认写 `<工程>/Makefile.cb` 与 `<工程>/.cb-tools/compile_commands/`，`out` 相对工程目录解析；`out` 命中工程声明的 Makefile（`<Option makefile>`）时拒绝覆盖 |
+| `codeblocks_workspace` | `action=info\|deps\|list\|open\|close\|setActive` | `.workspace` 与多工程管理；`deps` 的 `project` / `dependencies` 接受绝对路径，写回时统一为 workspace 相对路径（跨机器可移植），不在 workspace 中的工程报 `invalid-input` |
 
 所有工具都接受 `cbp`；省略时使用**当前活动工程**。
 
@@ -85,6 +85,8 @@
 规则：
 
 - **字段白名单**：拼错或越权字段会直接报 `invalid-input`，不会静默忽略；可用字段见 `section=schema`。
+- **运行时类型校验**：`targets` 非数组、`weight` 非数字、`title` 非字符串等类型错误同样报 `invalid-input`（不会变成未捕获异常）。
+- **重名保护**：`renameFile` 的目标路径已在工程中时报错（不会写出重复 `<Unit>`）；`addFile` 的重名判断跟随平台大小写。
 - **数组字段**：`op=add/remove` 只接受单个字符串；`op=set` 替换整个数组。
 - **脚本类字段**（`commandsBeforeBuild` / `commandsAfterBuild` / `buildScripts` / `makeCommands` /
   `customBuildCommands`）需要显式 `allowScripts: true`——它们会执行任意命令。
@@ -122,6 +124,10 @@ codeblocks_project_file { action:"add", file:"src/new.c", targets:["Debug","Rele
 { "severity": "error", "file": "E:/proj/src/a.c", "line": 12, "column": 5, "message": "..." }
 ```
 
+> `summary` 只描述**本次**调用：早退（工程未找到 / 平台不支持 / 无构建目标 / 构建互斥）时返回
+> `ok:false` 且 `projects` 至多一条合成条目，不会把上一次构建的诊断当作本次结果。
+> 需要历史摘要时用 `codeblocks_build_status`。
+
 需要完整命令时用 `codeblocks_build_status`，或在构建前 `codeblocks_export { kind: "commands" }`。
 
 ### 4.4 运行与调试
@@ -134,6 +140,28 @@ codeblocks_debug { action: "continue" }
 ```
 
 `codeblocks_run` 是**非交互**的（捕获 stdout/stderr）；需要 stdin 的程序请在集成终端里运行。
+
+#### 调试响应形状（跨传输一致）
+
+`state` / `stack` / `variables` / `evaluate` / `start` 的返回已归一化——扩展内 DAP 桥与 CLI/MCP 的
+gdb 后端输出同一份形状，模型不必按传输切换字段：
+
+| action | 形状 |
+|---|---|
+| `state` | `{ active, stopped?, reason?, threadId?, id?, name?, type? }` |
+| `stack` | `{ threadId?, frames: [{ id?, level?, name?, file?, line?, column?, address? }] }` |
+| `variables` | `{ frameId?, scopes: [{ name, variables: [{ name, value, type?, children? }] }] }`（gdb 只有当前帧 ⇒ 单个 `Locals` 作用域） |
+| `evaluate` | `{ expression, result, type? }` |
+| `start` | `{ ok, session?, program?, cwd?, stopped?, reason?, threadId? }` |
+
+补充语义：
+
+- `frameId` 在三种传输下都生效（CLI/MCP 会先执行 `-stack-select-frame`）；CLI 的帧把 `level` 同时作为 `id` 暴露，因此「取 `stack.frames[].id` 传给 `frameId`」在两端都成立。
+- `continue` / `step` 的**语义不同**：CLI/MCP（gdb）会阻塞到程序再次停下（默认 ≤30s，可用 `timeoutMs` 调整）并返回 `stopped/reason/threadId`；扩展内（DAP）立即返回 `{ ok, threadId }`，后续状态请用 `state` 查询（`timeoutMs` 只影响 CLI/MCP 的等待）。
+- CLI/MCP 的 `stopOnEntry` 是「在 `main` 上下断点」的近似，不等同 DAP 的 entry 停顿。
+- CLI/MCP 找不到 GDB 时返回 `compiler-missing`（提示里带 `codeblocks.debug.gdbPath`）；CLI 退出码 4。
+- `codeblocks_build` 的 `timeoutMs` 从**构建阶段**开始计时（打开/解析工程的时间不计入）。
+- `codeblocks_export` 的默认落盘位置：`kind=makefile` → `<工程目录>/Makefile.cb`（**不会**覆盖工程里真正的 Makefile）；`kind=compile_commands` → `<工程目录>/.cb-tools/compile_commands/`。`out` 为相对路径时按**工程目录**解析；建议把 `.cb-tools/` 加入忽略列表。
 
 ---
 
@@ -161,8 +189,12 @@ node bundle/cb-cli.js compiler info --compiler-id gcc --json
 
 约定：
 
-- **stdout 只放结果**（`--json` 时是纯 JSON），构建日志与警告全部走 **stderr**；
-- 退出码：`0` 成功、`2` 用法错误、`3` 参数/校验错误、`4` 构建或运行失败、`5` 写盘 / 工程不存在；
+- **stdout 只放结果**（`--json` 时是纯 JSON）；构建日志与警告全部走 **stderr**；
+  `--json` 下失败也会在 stdout 给出 `{ "ok": false, "error": { "code", "message", "details"? } }`（stderr 同时保留文本）；
+- 退出码：`0` 成功、`1` 未归类、`2` 用法错误、`3` 参数/校验/权限（含 `no-build`、`read-only`、`disabled`）、
+  `4` 构建或运行失败（含 `unsupported`、`timeout`）、`5` 写盘 / 工程或工作区不存在；
+- `run` 的 `--timeout` 缺省 **120000ms**（2 分钟），显式 `--timeout 0` = 不限时；`debug` 也接受 `--timeout`（等程序停下/命中断点的预算，默认 30000ms）与
+  `--file` / `--lines` / `--expression` / `--frame` / `--kind` / `--stop-on-entry`；完整开关见 `cb-cli --help`；
 - 设置来源与扩展一致：用户 `settings.json` → 工作区 `.vscode/settings.json` → `CB_*` 环境变量
   （`CB_COMPILER_ID`、`CB_MASTER_PATH`、`CB_COMPILER_PROGRAMS`、`CB_MAX_REPORTED_ERRORS`、`CB_UI_LANGUAGE`）；
 - 文案语言跟随 `codeblocks.ui.language`（`auto` 时无宿主按英文）：`CB_UI_LANGUAGE=zh-cn` 可让错误提示与构建日志出中文，
@@ -178,6 +210,9 @@ node bundle/cb-cli.js compiler info --compiler-id gcc --json
 在 **MCP: List Servers** 里应能看到 `Code::Blocks`，启动后即可在 Chat 的 Tools 里选用它的工具。
 
 > 服务器用 `process.execPath` 启动，不需要本机 PATH 里有 `node`。
+> provider 会把服务器进程的 **cwd 设为第一个工作区文件夹**：`cb-mcp.js` 以 `process.cwd()` 为锚点
+> 向上查找 `.vscode/settings.json`，工作区级的 `codeblocks.agent.enabled` / `codeblocks.agent.readOnly`
+> 因此能生效（未设置 cwd 时由启动方的默认目录决定，工作区开关会失效）。
 
 ### 6.2 其它客户端（`.vscode/mcp.json` 或客户端配置）
 
@@ -193,11 +228,24 @@ node bundle/cb-cli.js compiler info --compiler-id gcc --json
 }
 ```
 
+> 外部客户端启动时请把 **cwd 设为工程目录**（或在该目录下启动），否则工作区级设置读不到，
+> 只有用户级 `settings.json` 里的 `codeblocks.agent.*` 会生效。
+> 另：独立进程无法查询 VS Code 的工作区信任状态，"未受信任工作区强制关闭"只对
+> VS Code 内暴露的 LM Tools / MCP 定义生效；外部客户端请自行确认工作区来源可信。
+
 协议行为：
 
 - 工具名/参数与本文第 3 节完全一致；
 - 工具失败返回 `isError: true` + `{ ok:false, error:{ code, message } }` 文本；
-- 日志只写 stderr（stdout 是协议通道）。
+- 日志只写 stderr（stdout 是协议通道）；
+- `tools/list` 会带 `annotations.title` 与 `annotations.readOnlyHint`（与只读白名单同源），便于客户端展示与审批。
+
+### 6.3 工作区信任（Restricted Mode）
+
+`package.json` 声明了 `capabilities.untrustedWorkspaces.supported: false`：
+**未受信任的工作区里扩展整体不激活**。这是刻意的——本扩展会调用工具链、执行工程里的
+Makefile / 构建脚本并启动调试器，都属于"运行工作区代码"。需要这些能力时请在
+**Workspaces: Manage Workspace Trust** 里信任该工作区。
 
 ---
 
@@ -208,7 +256,7 @@ node bundle/cb-cli.js compiler info --compiler-id gcc --json
 | 设置 | 默认 | 行为 |
 |---|---|---|
 | `codeblocks.agent.enabled` | `true` | 总闸。关闭后 11 个 Language Model Tools **不再注册**（Copilot 看不到也调不到），内嵌 MCP server 不再暴露；外部客户端直接启动的 `cb-mcp.js` 也会拒绝调用（`disabled`）。**未受信任的工作区一律按关闭处理**。独立的 `cb-cli` 不受影响。 |
-| `codeblocks.agent.readOnly` | `false` | 只读模式。只放行 `project_read` / `build_status` / `compiler list,info` / `workspace info,deps,list` / `debug state`；其余返回 `read-only`，工程文件字节不变。 |
+| `codeblocks.agent.readOnly` | `false` | 只读模式。只放行 `project_read` / `build_status` / `compiler list,info` / `workspace info,deps,list` / `debug state,stack,variables`；其余返回 `read-only`，工程文件字节不变。 |
 
 ```jsonc
 // .vscode/settings.json
@@ -230,7 +278,8 @@ node bundle/cb-cli.js compiler info --compiler-id gcc --json
 | 关卡 | 行为 |
 |---|---|
 | 总闸 | `codeblocks.agent.enabled`（见上表）；未受信任工作区强制关闭 |
-| 只读模式 | `codeblocks.agent.readOnly`（见上表），拦截在 `invokeTool` 统一入口 |
+| 工作区信任 | 扩展声明 `capabilities.untrustedWorkspaces.supported: false`（见第 6 节末），Restricted Mode 下扩展整体不激活，构建/运行/调试与 Agent 工具都不可用；信任工作区后按上面的总闸继续判定 |
+| 只读模式 | `codeblocks.agent.readOnly`（见上表），拦截在 `invokeTool` 统一入口；`debug` 只放行 `state` / `stack` / `variables`（`evaluate` 可能执行函数，仍拒绝） |
 | 工具启用 | VS Code 的 **Tools** 选择器逐个开关；也可在自定义 agent 里固定工具集 |
 | 审批 | 由 VS Code 的权限等级决定；写操作返回 before/after，便于复核 |
 | `dryRun` | `project_edit` / `build` 支持只校验不落盘 |

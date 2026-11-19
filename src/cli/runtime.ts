@@ -127,9 +127,9 @@ export function createRuntime(opts: CreateRuntimeOptions = {}): CliRuntime {
       setBreakpoints: async (req) => debuggerSession.setBreakpoints(asDebugRequest(req, 'breakpoints')),
       state: async () => debuggerSession.state(),
       stack: async () => debuggerSession.stack(),
-      variables: async () => debuggerSession.variables(),
+      variables: async (req) => debuggerSession.variables({ frameId: req?.frameId }),
       evaluate: async (req) => debuggerSession.evaluate(asDebugRequest(req, 'evaluate')),
-      continue: async () => debuggerSession.continue(),
+      continue: async (req) => debuggerSession.continue(req),
       step: async (req) => debuggerSession.step(asDebugRequest(req, 'step')),
     },
   };

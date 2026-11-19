@@ -15,6 +15,7 @@ export type ControlErrorCode =
   | 'external-modified'
   | 'build-busy'
   | 'build-failed'
+  | 'no-build'
   | 'compiler-missing'
   | 'unsupported'
   | 'timeout'

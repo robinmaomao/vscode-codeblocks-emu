@@ -8,6 +8,7 @@ import { CompilerOptionsLoader } from '../compiler/optionsLoader';
 import { CodeBlocksConfig } from '../compiler/codeblocksConfig';
 import { buildCompilerInstance, CompilerSettingsLike } from '../compiler/compilerFactory';
 import { BoundedMap, buildCompilerCacheKey } from '../compiler/compilerCache';
+import { languageFlagsKey, normalizeLanguageFlags, pickLanguageFlags } from '../compiler/languageFlags';
 import { resolveProgramsForCompiler } from '../compiler/compilerPrograms';
 import { CompilerRegistryDeps, findRegisteredCompilerId, resolveEffectiveCompilerId } from '../compiler/compilerRegistry';
 
@@ -35,6 +36,9 @@ export function createCompilerProvider(opts: CompilerProviderOptions): CompilerP
     // default.conf 损坏/不可读时按「无用户编译器」继续（与扩展启动路径一致）
   }
   const cache = new BoundedMap<string, Compiler>(24);
+  // 与宿主一致：「仅 C / 仅 C++ 参数」的用户覆盖必须先于编译器装配生效，
+  // 否则 CLI/MCP 构建会静默回落到 XML <Sort> 基线，产物与 UI 不同。
+  const languageStore = normalizeLanguageFlags(opts.settings.get<unknown>('compiler.languageFlags', {}));
 
   const registryDeps = (): CompilerRegistryDeps => ({
     configuredId: () => opts.settings.get<string>('compilerId', 'gcc'),
@@ -50,10 +54,14 @@ export function createCompilerProvider(opts: CompilerProviderOptions): CompilerP
       id,
       opts.settings.get<string>('compilerId', 'gcc'),
     );
-    const cacheKey = buildCompilerCacheKey(id, masterPath, programs);
+    const cacheKey = buildCompilerCacheKey(id, masterPath, programs, languageFlagsKey(id, languageStore));
     const cached = cache.get(cacheKey);
     if (cached) return cached;
-    const built = buildCompilerInstance(id, masterPath, opts.settings, { loader, codeBlocksConfig });
+    const built = buildCompilerInstance(id, masterPath, opts.settings, {
+      loader,
+      codeBlocksConfig,
+      languageFlags: (compilerId2, baseline) => pickLanguageFlags(compilerId2, baseline, languageStore),
+    });
     cache.set(cacheKey, built);
     return built;
   };

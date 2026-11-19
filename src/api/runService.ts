@@ -23,10 +23,17 @@ export interface RunRequest {
   target?: string;
   /** 覆盖目标里配置的执行参数 */
   args?: string;
-  /** 覆盖工作目录 */
+  /** 覆盖工作目录（相对路径按工程目录解析） */
   cwd?: string;
+  /** 超时（毫秒）；0 = 不限时。工具入口缺省用 DEFAULT_RUN_TIMEOUT_MS */
   timeoutMs?: number;
 }
+
+/**
+ * `codeblocks_run` 的默认超时：程序超过 2 分钟未退出即被终止（结果里 `timedOut: true`）。
+ * 显式传 `timeoutMs: 0` 表示不限时（长跑测试/服务型程序）。
+ */
+export const DEFAULT_RUN_TIMEOUT_MS = 120000;
 
 export interface RunServiceDeps {
   compiler: CompilerProvider;
@@ -84,7 +91,9 @@ export function resolveRunPlan(req: RunRequest, deps: RunServiceDeps): {
   const env: Record<string, string> = {};
   for (const ev of [...project.envVars, ...target.envVars]) env[ev.name] = ev.value;
   const args = req.args !== undefined ? req.args : (target.executionParameters ? expandMacros(target.executionParameters, vars) : '');
-  const cwd = req.cwd ? path.resolve(req.cwd) : resolveRunWorkingDir(project, target, vars);
+  // 相对路径按工程目录解析（与 export 的 out 一致）：宿主进程 cwd 可能是 System32，
+  // 若按进程 cwd 解析会让 `cwd: "build"` 指向完全无关的目录，且三端行为不一致。
+  const cwd = req.cwd ? path.resolve(project.basePath, req.cwd) : resolveRunWorkingDir(project, target, vars);
 
   const tt = target.targetType;
   if (tt === TargetType.DynamicLib || tt === TargetType.StaticLib || tt === TargetType.CommandsOnly) {

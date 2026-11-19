@@ -86,6 +86,11 @@
 | 2026-11-18 | 0.8.154 功能/健壮性批次 | G1/G2/T2/T3/T5/M2/M3/M6/M7 子集实施；原子写、单元路径 XML 转义、package.json i18n、Makefile CompileFile/DistClean 收口；P3（WebView CSP、模块拆分）仍待排期 |
 | 2026-11-19 | 0.8.157 AutoVersioning/Profiler | AutoVersioning 的 ChangesLog 只提供文本打开/创建（不移植 wxGrid）；SVN 查询失败只警告并生成空字段；`version.h` 内容不变不写。Profiler 拒绝旧 `gmon.out`，`gprof -A` 空 stdout 时回退 `--separate-files` |
 | 2026-11-19 | 0.9.0 合并 Agent 控制 | 以 `--no-ff` 合入 `feat/agent-control`：构建内核抽到 `build/buildProject.ts`（UI/CLI/MCP 共用一份），`engines.vscode` 抬到 `^1.102.0`；main 的审计修复（语言标志、缓存签名、自动版本号、可导航诊断、本地化日志）逐项移植回抽取后的模块 |
+| 2026-11-19 | 合并复查 R9（编辑副本 / 归属校验） | 工具编辑改在深拷贝上进行（`loadForEdit` / `projectService`），任一条 op 校验失败不再把宿主内存模型改一半；`file.buildTargets` 必须引用真实目标（否则 `invalid-input`）；`addFile.weight` 按字段白名单 0–100 校验；`addFile`/`addVirtualTarget` 的 `targets` 去重；`agentBuild` 互斥竞态返回 `build-busy` |
+| 2026-11-19 | 合并复查 R8（清理 / 调试启动 / 预览） | makefile Clean 的 spawn 失败（code=null）或被取消不再算成功；gdb 就绪失败回收进程，`ENOENT` 映射 `compiler-missing` + `debug.gdbPath` 提示；preserve + dryRun 返回 preview；`build_status` 合并摘要的 `truncated` 归一为布尔；新增真实 gdb 的 `test-e2e-cli-debug`（`debug run` = 启动 + 断点 + 栈/变量） |
+| 2026-11-19 | 合并复查 R7（构建平台判定 / 等待器） | 平台判定抽成 `targetPlatformSupported`（虚拟目标按成员并集），`buildProjectTarget` 早退与 `assertTargetRunnable` 共用，修掉「首个成员不支持 → 整组静默跳过」；`debug start/continue/step` 的停止等待器在命令发送失败时先吞掉 rejection，避免 30s 后 unhandled rejection |
+| 2026-11-19 | 合并复查 R5（调试状态机） | `continue`/`step` 先把 `stopped` 置 false 再等停止（断点处不再立即返回旧状态）；`start` 中途失败回收 gdb 会话（不再永久「已在运行」）；`stop`/`dispose` 清空 reason/threadId/断点跟踪；CLI `setBreakpoints` 改「替换该文件」并跟踪断点号（与宿主一致）；`debug run` 的断点统一由 `start` 应用（CLI 先 setBreakpoints 会 not-running）；`continue`/`step` 支持 `timeoutMs` |
+| 2026-11-19 | 合并复查 R3-06 / R3-07 | 只读白名单放开 `debug stack` / `variables`（纯查询；`evaluate` 会真实执行函数，仍拒绝）；`codeblocks_run` 增加默认超时 **120000ms**（显式 `0` = 不限时），避免死循环程序永久占住工具调用 |
 
 ## 3. 仍开放项
 

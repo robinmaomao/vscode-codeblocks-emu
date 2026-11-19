@@ -36,12 +36,15 @@ import { ProjectPropertiesPanel, TargetEditData, FileEditData, BuildOptionsEditD
 import { applyProjectCodeCompletionSearchPaths, parseProjectCodeCompletionSearchPaths } from './model/projectCodeCompletionExtensions';
 import { ProjectTreeProvider } from './ui/projectTreeProvider';
 import { registerStatusBarMenu, MenuDynamicData } from './ui/statusBarMenu';
-import { BuildLogTreeProvider, BuildLogProject, BuildLogDiagnostic } from './ui/buildLogTreeProvider';
-import { buildProjectTarget } from './build/buildProject';
-import type { BuildDiagnosticsBudget, BuildLogSummary } from './build/buildSummary';
+import { BuildLogTreeProvider } from './ui/buildLogTreeProvider';
+import { buildProjectTarget, cleanProjectTarget, getMakeCommand, runMakeBuildCommand } from './build/buildProject';
+import type { BuildProjectResult } from './build/buildProject';
+import type { BuildDiagnosticsBudget, BuildLogDiagnostic, BuildLogProject, BuildLogSummary } from './build/buildSummary';
 import type { ToolContext as AgentToolContext } from './api/toolRegistry';
 import type { CompilerProvider } from './api/compilerService';
 import type { BuildOutcome, BuildRequest } from './api/buildService';
+import { selectBuildTarget, assertTargetRunnable } from './api/buildService';
+import { resolveRunWorkingDir } from './api/runService';
 import { ControlError } from './api/types';
 import { registerLanguageModelTools } from './lm/tools';
 import { registerCodeblocksMcpProvider } from './mcp/provider';
@@ -219,6 +222,13 @@ let lastBuildMeta: LastBuildMeta | undefined;
 let extContext: vscode.ExtensionContext | undefined;
 /** 当前一次构建累积的项目摘要（供 Build Log 视图） */
 const currentBuildProjects: BuildLogProject[] = [];
+/**
+ * 本次构建中「不写入 Build Log 视图」的项目摘要（makefile 模式）。
+ * Build Log 保持既有 UI 行为不渲染它们，但 `codeblocks_build_status` 需要能看到本次结果。
+ */
+const currentBuildExtraProjects: BuildLogProject[] = [];
+/** 最近一次构建中未写进 Build Log 的摘要（makefile 模式；供 build_status 合并展示） */
+let lastBuildExtraProjects: BuildLogProject[] = [];
 /** 本次构建的诊断预算（跨项目累计；maxReportedErrors 截断判断） */
 const buildDiagnosticsBudget: BuildDiagnosticsBudget = { errorCount: 0, truncated: false };
 /** 当前构建的取消源（「停止构建」命令与通知取消按钮共用） */
@@ -514,6 +524,11 @@ function summarizeAgentBuild(
 /**
  * agent 构建：复用 UI 构建路径（Build Log / Problems / 状态栏可见），
  * 但跳过所有模态确认（Rebuild / 停止调试），并支持超时取消。
+ *
+ * 关键约束：
+ *  - 取消源必须先于任何 `await` 创建，否则「超时」在构建真正开始前触发会变成空操作；
+ *  - 目标必须显式解析（未知目标 → `invalid-input`），不能静默构建「当前选中」目标；
+ *  - 摘要取自本次构建的产出（不再读全局「上一次构建」摘要）。
  */
 async function agentBuild(req: BuildRequest): Promise<BuildOutcome> {
   const cbp = path.resolve(req.cbp);
@@ -523,45 +538,100 @@ async function agentBuild(req: BuildRequest): Promise<BuildOutcome> {
     project = openProjects.find((p) => normPath(p.filename) === normPath(cbp));
   }
   if (!project) throw new ControlError('project-not-found', `Project not found: ${cbp}`);
-  const targetTitle = req.target
-    ?? getSelectedTarget(project)
-    ?? project.buildTargets.find((t) => supportsCurrentPlatform(t.platforms))?.title;
-  if (!targetTitle) throw new ControlError('unsupported', 'The project has no build targets');
+  // 与 CLI/MCP 同一份目标解析：显式 target 不存在时抛 invalid-input（含可选目标列表）
+  const targetTitle = selectBuildTarget(project, req.target);
+  assertTargetRunnable(project, targetTitle);
   const startMs = Date.now();
 
-  if (req.mode === 'clean') {
-    if (buildInProgress) throw new ControlError('build-busy', 'A build is already running');
-    buildInProgress = true;
-    try {
-      await stopDebuggerIfRunning(false);
-      await saveAllBeforeBuild();
-      await autoExcludeBuildOutputs({ notify: false });
-      const cancelSource = new BuildCancelSource();
-      currentBuildCancel = cancelSource;
-      await cleanTargets(project, targetTitle);
-      return { ok: true, target: targetTitle, summary: summarizeAgentBuild(project, targetTitle, true, startMs, []), timedOut: false };
-    } finally {
-      buildInProgress = false;
-      currentBuildCancel = undefined;
-      flushPendingClangdRestart();
-    }
-  }
-
+  const cancelSource = new BuildCancelSource();
+  const timeoutMs = req.timeoutMs && req.timeoutMs > 0 ? req.timeoutMs : 0;
   let timedOut = false;
-  const timer = req.timeoutMs && req.timeoutMs > 0
+  const timer = timeoutMs
     ? setTimeout(() => {
         timedOut = true;
-        currentBuildCancel?.cancel();
-      }, req.timeoutMs)
+        cancelSource.cancel();
+      }, timeoutMs)
     : undefined;
+
   try {
-    const ok = await buildSingleProject(project.filename, req.mode === 'rebuild', { interactive: false });
-    const summary = buildLogTreeProvider?.getSummary()
-      ?? summarizeAgentBuild(project, targetTitle, ok, startMs, []);
+    if (req.mode === 'clean') {
+      if (!claimBuildMutex()) throw new ControlError('build-busy', 'A build is already running');
+      try {
+        await stopDebuggerIfRunning(false);
+        await saveAllBeforeBuild();
+        await autoExcludeBuildOutputs({ notify: false });
+        currentBuildCancel = cancelSource;
+        const result = await cleanTargets(project, targetTitle, cancelSource);
+        // clean 不产出新诊断：「截断」标记沿用全局会是上一次构建的遗留值，这里显式清零
+        return { ok: result.ok && !timedOut, target: targetTitle, summary: summarizeProducedBuild(result.summary, timedOut, false), timedOut };
+      } finally {
+        buildInProgress = false;
+        currentBuildCancel = undefined;
+        flushPendingClangdRestart();
+      }
+    }
+
+    let produced: BuildLogProject | undefined;
+    // 竞态兜底：invokeTool 的预检与 claimBuildMutex 之间可能被并发构建插队，
+    // 这里再判一次，让工具拿到明确的 build-busy 而不是「无原因的失败」
+    if (buildInProgress) throw new ControlError('build-busy', 'A build is already running');
+    const ok = await buildSingleProject(project.filename, req.mode === 'rebuild', {
+      interactive: false,
+      cancelSource,
+      targetOverride: targetTitle,
+      onSummary: (summary) => {
+        produced = summary;
+      },
+    });
+    // 互斥竞态兜底：预检通过后被并发构建插队时，给出明确 build-busy 而不是「无原因的失败」
+    if (!ok && !produced && !timedOut && buildInProgress) {
+      throw new ControlError('build-busy', 'A build is already running');
+    }
+    const summary = produced
+      ? summarizeProducedBuild(produced, timedOut)
+      : summarizeAgentBuild(project, targetTitle, false, startMs, []);
     return { ok: ok && !timedOut, target: targetTitle, summary, timedOut };
   } finally {
     if (timer) clearTimeout(timer);
   }
+}
+
+/** 用本次构建产出的项目摘要合成整体摘要（与 api/buildService 的语义一致） */
+function summarizeProducedBuild(entry: BuildLogProject, timedOut: boolean, truncated = buildDiagnosticsBudget.truncated): BuildLogSummary {
+  const errorCount = entry.diagnostics.filter((d) => d.severity === 'error').length;
+  const warningCount = entry.diagnostics.filter((d) => d.severity === 'warning').length;
+  return {
+    success: entry.success && !timedOut,
+    durationMs: entry.durationMs,
+    startTime: entry.startTime,
+    projects: [entry],
+    errorCount,
+    warningCount,
+    truncated,
+  };
+}
+
+/**
+ * 最近一次构建摘要（`codeblocks_build_status` 用）。
+ * Build Log 视图只渲染 currentBuildProjects；makefile 模式的摘要在 lastBuildExtraProjects 里，
+ * 这里合并成一份对外的「最近构建」视图（同一项目不会重复）。
+ */
+function lastBuildSummary(): BuildLogSummary | undefined {
+  const base = buildLogTreeProvider?.getSummary();
+  const extras = lastBuildExtraProjects;
+  if (!extras.length) return base;
+  const projects = [...(base?.projects ?? []), ...extras];
+  const errorCount = projects.reduce((n, p) => n + p.diagnostics.filter((d) => d.severity === 'error').length, 0);
+  const warningCount = projects.reduce((n, p) => n + p.diagnostics.filter((d) => d.severity === 'warning').length, 0);
+  return {
+    success: base?.success ?? extras.every((p) => p.success),
+    durationMs: base?.durationMs ?? Math.max(...extras.map((p) => p.durationMs)),
+    startTime: base?.startTime ?? extras[0]?.startTime,
+    projects,
+    errorCount,
+    warningCount,
+    truncated: base?.truncated ?? false,
+  };
 }
 
 /** 扩展侧调试桥：通过 vscode.debug + DAP customRequest 控制会话 */
@@ -582,9 +652,21 @@ function createAgentDebugBridge(): NonNullable<AgentToolContext['debug']> {
     const res = await s.customRequest('stackTrace', { threadId, startFrame: 0, levels: 1 }) as { stackFrames?: Array<{ id: number }> };
     return { threadId, frameId: res?.stackFrames?.[0]?.id };
   };
+  /** 替换该文件的断点（DAP 的 breakpoints 是编辑器级全局状态，start 之前也可预置） */
+  const applySourceBreakpoints = (file: string, lines: number[]): { file: string; lines: number[] } => {
+    const uri = vscode.Uri.file(file);
+    const existing = vscode.debug.breakpoints.filter((bp) =>
+      bp instanceof vscode.SourceBreakpoint && normPath(bp.location.uri.fsPath) === normPath(uri.fsPath));
+    if (existing.length) vscode.debug.removeBreakpoints(existing);
+    const added = lines
+      .filter((l) => Number.isInteger(l) && l > 0)
+      .map((l) => new vscode.SourceBreakpoint(new vscode.Location(uri, new vscode.Position(l - 1, 0))));
+    if (added.length) vscode.debug.addBreakpoints(added);
+    return { file: uri.fsPath, lines };
+  };
 
   return {
-    async start({ cbp, target, args, stopOnEntry }) {
+    async start({ cbp, target, args, stopOnEntry, file, lines }) {
       const filename = cbp ? path.resolve(cbp) : activeProject?.filename;
       if (!filename) throw new ControlError('invalid-input', 'No project selected for debugging');
       if (!openProjects.some((p) => normPath(p.filename) === normPath(filename))) await openProject(filename);
@@ -595,6 +677,8 @@ function createAgentDebugBridge(): NonNullable<AgentToolContext['debug']> {
       const config = { ...derived.config } as vscode.DebugConfiguration;
       if (args !== undefined) config.args = splitCommandLine(args);
       if (stopOnEntry === true) config.stopOnEntry = true;
+      // run 动作把断点随 start 一起传入：DAP 必须在 startDebugging 之前预置
+      if (file && lines && lines.length) applySourceBreakpoints(file, lines);
       const ok = await vscode.debug.startDebugging(undefined, config);
       if (!ok) throw new ControlError('unsupported', 'Failed to start the debug session');
       // 等待会话真正就绪（startDebugging 返回后 activeDebugSession 可能尚未赋值）
@@ -611,15 +695,7 @@ function createAgentDebugBridge(): NonNullable<AgentToolContext['debug']> {
     },
     async setBreakpoints({ file, lines }) {
       if (!file) throw new ControlError('invalid-input', 'An absolute source file path is required');
-      const uri = vscode.Uri.file(file);
-      const existing = vscode.debug.breakpoints.filter((bp) =>
-        bp instanceof vscode.SourceBreakpoint && normPath(bp.location.uri.fsPath) === normPath(uri.fsPath));
-      if (existing.length) vscode.debug.removeBreakpoints(existing);
-      const added = lines
-        .filter((l) => Number.isInteger(l) && l > 0)
-        .map((l) => new vscode.SourceBreakpoint(new vscode.Location(uri, new vscode.Position(l - 1, 0))));
-      if (added.length) vscode.debug.addBreakpoints(added);
-      return { ok: true, file: uri.fsPath, lines };
+      return { ok: true, ...applySourceBreakpoints(file, lines) };
     },
     async state() {
       const s = vscode.debug.activeDebugSession;
@@ -737,10 +813,16 @@ function createAgentToolContext(): AgentToolContext {
       removeProject(cbp);
     },
     build: agentBuild,
-    lastBuild: () => buildLogTreeProvider?.getSummary(),
+    lastBuild: () => lastBuildSummary(),
     isBuildInProgress: () => buildInProgress,
     get cancelBuild() {
       return currentBuildCancel;
+    },
+    // compile_commands 导出补齐编译器系统头（与 UI 的「生成 compile_commands」同源）
+    systemIncludes: (_project, compiler) => {
+      const cPath = resolveCompilerProgram(compiler.programs.C, compiler.masterPath);
+      const cppPath = resolveCompilerProgram(compiler.programs.CPP, compiler.masterPath);
+      return cPath || cppPath ? queryCompilerSystemIncludes(cPath, cppPath) : [];
     },
     debug: createAgentDebugBridge(),
   };
@@ -7990,6 +8072,7 @@ async function buildWorkspaceLocked(rebuild: boolean, clearLog: boolean): Promis
 
   const buildStartMs = Date.now();
   currentBuildProjects.length = 0;
+  currentBuildExtraProjects.length = 0;
   buildDiagnosticsBudget.errorCount = 0;
   buildDiagnosticsBudget.truncated = false;
 
@@ -8066,8 +8149,20 @@ async function buildWorkspaceLocked(rebuild: boolean, clearLog: boolean): Promis
   return allOk && !cancelled;
 }
 
+/** `buildSingleProject` 的调用方选项（UI 命令不传 = 全部默认） */
+interface BuildSingleProjectOptions {
+  /** false = agent 调用：跳过模态确认 */
+  interactive?: boolean;
+  /** 调用方自建取消源（agent 超时用；必须在任何 await 之前就存在，否则超时可能空转） */
+  cancelSource?: BuildCancelSource;
+  /** 覆盖构建目标（agent 显式 target：构建它，而不是「当前选中」目标） */
+  targetOverride?: string;
+  /** 本次构建产出的项目摘要（含 makefile / 早退分支；agent 用它合成返回摘要） */
+  onSummary?: (summary: BuildLogProject) => void;
+}
+
 /** 构建单个项目（右键菜单的 Build/Rebuild 与主 Build 命令使用，对齐 CB 单活动项目 Build） */
-async function buildSingleProject(filename: string, rebuild: boolean, opts: { interactive?: boolean } = {}): Promise<boolean> {
+async function buildSingleProject(filename: string, rebuild: boolean, opts: BuildSingleProjectOptions = {}): Promise<boolean> {
   // 构建互斥：置位必须先于任何 await（D-15，防止同 tick 双发并发双跑）
   if (!claimBuildMutex()) return false;
   try {
@@ -8080,12 +8175,15 @@ async function buildSingleProject(filename: string, rebuild: boolean, opts: { in
 }
 
 /** 构建单个项目主体（互斥已由 buildSingleProject 占有） */
-async function buildSingleProjectLocked(filename: string, rebuild: boolean, opts: { interactive?: boolean } = {}): Promise<boolean> {
+async function buildSingleProjectLocked(filename: string, rebuild: boolean, opts: BuildSingleProjectOptions = {}): Promise<boolean> {
   const interactive = opts.interactive !== false;
+  // 超时可能在构建真正开始前就触发（前序步骤都要 await）：每个检查点都提前收尾
+  if (opts.cancelSource?.isCancelled()) return false;
   // 对齐 DoBuild:2897：构建前须先停止调试会话
   if (!(await stopDebuggerIfRunning(interactive))) {
     return false;
   }
+  if (opts.cancelSource?.isCancelled()) return false;
 
   // Rebuild 前由用户确认（对齐 Code::Blocks 的 Rebuild 确认对话框）；agent 调用时跳过
   if (rebuild && interactive && !(await confirmRebuild())) {
@@ -8097,12 +8195,17 @@ async function buildSingleProjectLocked(filename: string, rebuild: boolean, opts
     vscode.window.showWarningMessage(i18n.t('Project not found'));
     return false;
   }
-  // 单工程编译时，活动工程也切换为该工程（状态栏 / 后续构建 / clangd 随之更新）
-  setActiveProject(project, { persist: true });
+  // 单工程编译时，活动工程也切换为该工程（状态栏 / 后续构建 / clangd 随之更新）；
+  // agent 构建不持久化活动工程（不因一次工具调用改写用户的工作区状态）
+  setActiveProject(project, { persist: interactive });
   await saveAllBeforeBuild();
+  if (opts.cancelSource?.isCancelled()) return false;
   // 右键「Build/Rebuild」不经过主 Build 命令：这里同样要先排除产物目录，
   // 否则单工程构建写出的 .o/.objs 仍会触发 VS Code 的全工作区枚举（rg 风暴）。
-  await autoExcludeBuildOutputs();
+  // agent 调用（interactive=false）必须静默：该函数在新增排除项后会 await 一条通知，
+  // 无人点击时永远不 resolve ⇒ 工具调用与 timeoutMs 都会失效。
+  await autoExcludeBuildOutputs({ notify: interactive });
+  if (opts.cancelSource?.isCancelled()) return false;
 
   // 项目级平台过滤（对齐 compilergcc.cpp:2724）
   if (!supportsCurrentPlatform(project.platforms)) {
@@ -8111,7 +8214,9 @@ async function buildSingleProjectLocked(filename: string, rebuild: boolean, opts
     return false;
   }
 
-  const targetTitle = getSelectedTarget(project) ?? project.buildTargets.find((t) => supportsCurrentPlatform(t.platforms))?.title;
+  const targetTitle = opts.targetOverride
+    ?? getSelectedTarget(project)
+    ?? project.buildTargets.find((t) => supportsCurrentPlatform(t.platforms))?.title;
   if (!targetTitle) {
     vscode.window.showWarningMessage(i18n.t('The project has no build targets'));
     return false;
@@ -8127,6 +8232,7 @@ async function buildSingleProjectLocked(filename: string, rebuild: boolean, opts
 
   const buildStartMs = Date.now();
   currentBuildProjects.length = 0;
+  currentBuildExtraProjects.length = 0;
   buildDiagnosticsBudget.errorCount = 0;
   buildDiagnosticsBudget.truncated = false;
 
@@ -8136,12 +8242,12 @@ async function buildSingleProjectLocked(filename: string, rebuild: boolean, opts
     ok = await vscode.window.withProgress(
       { location: vscode.ProgressLocation.Notification, title: i18n.t('Code::Blocks {0} in progress...', rebuild ? i18n.t('Rebuild') : i18n.t('Build')), cancellable: true },
       async (progress, token) => {
-        const cancelSource = new BuildCancelSource();
+        const cancelSource = opts.cancelSource ?? new BuildCancelSource();
         currentBuildCancel = cancelSource;
         token.onCancellationRequested(() => cancelSource.cancel());
         try {
           progress.report({ message: project.title });
-          return await buildOneProject(project, targetTitle, rebuild, cancelSource);
+          return await buildOneProject(project, targetTitle, rebuild, cancelSource, opts.onSummary);
         } finally {
           // D-16：「停止构建」命令走 cancelSource.cancel()，不会抛 CancellationError ⇒ 必须从取消源判定，
           // 否则 cancelled 恒为 false，取消会被上报成「❌ 构建失败 · 0 错误 · 0 警告」（与通道里的「构建已取消」矛盾）
@@ -8208,7 +8314,7 @@ async function buildSingleFileLocked(project: Project, file: ProjectFile): Promi
 
   // Makefile 项目：单文件编译走 <MakeCommands><CompileFile>（对齐 CB GetMakeCommandFor）
   if (project.makefileIsCustom) {
-    const cmd = getMakeCommand(project, target, 'compileFile');
+    const cmd = getMakeCommand(project, target, 'compileFile', (id) => getCompiler(id));
     if (!cmd) {
       vscode.window.showInformationMessage(
         i18n.t('This project uses a custom Makefile but has no CompileFile command; configure it in Build options or use Build'),
@@ -8217,7 +8323,7 @@ async function buildSingleFileLocked(project: Project, file: ProjectFile): Promi
     }
     outputChannel.clear();
     outputChannel.show(true);
-    await runMakeBuild(project, cmd, target.title);
+    await runMakeBuild(project, cmd);
     return;
   }
 
@@ -8306,7 +8412,13 @@ async function cleanSingleFile(project: Project, file: ProjectFile): Promise<voi
  * 编译器解析、诊断发布（含可导航判定与 maxReportedErrors 截断计数）、自动版本号、输出通道与取消源。
  * 构建互斥（buildInProgress / currentBuildCancel）与诊断发布器生命期仍由调用方维护。
  */
-async function buildOneProject(project: Project, targetTitle: string, rebuild: boolean, cancel?: BuildCancelHandle): Promise<boolean> {
+async function buildOneProject(
+  project: Project,
+  targetTitle: string,
+  rebuild: boolean,
+  cancel?: BuildCancelHandle,
+  onSummary?: (summary: BuildLogProject) => void,
+): Promise<boolean> {
   const result = await buildProjectTarget(project, targetTitle, rebuild, {
     output: outputChannel,
     getCompiler: (id) => getCompiler(id),
@@ -8334,6 +8446,10 @@ async function buildOneProject(project: Project, targetTitle: string, rebuild: b
   });
 
   if (result.reportToUi) currentBuildProjects.push(result.summary);
+  // makefile 模式不写 Build Log 视图，但仍记录到本次构建摘要（build_status 可见）
+  if (!result.reportToUi && project.makefileIsCustom) currentBuildExtraProjects.push(result.summary);
+  // 本次构建的产出摘要（agent 构建用它，避免读到上一次构建的全局摘要）
+  onSummary?.(result.summary);
   if (!result.ok && !result.summary.cancelled) {
     outputChannel.error(logT('[Code::Blocks] Project "{0}" compile failed', project.title));
   }
@@ -9088,11 +9204,13 @@ async function finishBuildSummary(allOk: boolean, buildStartMs: number): Promise
     success: allOk,
     durationMs: Date.now() - buildStartMs,
     startTime: buildStartMs,
+    // Build Log 视图只渲染 currentBuildProjects；makefile 摘要另行保存，仅用于 build_status 查询
     projects: [...currentBuildProjects],
     errorCount,
     warningCount,
     truncated: buildDiagnosticsBudget.truncated,
   });
+  lastBuildExtraProjects = [...currentBuildExtraProjects];
   // 达到上限时提示（CodeBlocks "More errors follow but not being shown"）
   if (buildDiagnosticsBudget.truncated) {
     outputChannel.warn(logT('[Code::Blocks] Error limit reached; further errors are no longer shown (adjust codeblocks.maxReportedErrors in the settings)'));
@@ -9179,7 +9297,7 @@ async function distClean(): Promise<void> {
   }
   const targetTitle = getSelectedTarget(project) ?? project.buildTargets.find((t) => supportsCurrentPlatform(t.platforms))?.title;
   const target = project.buildTargets.find((t) => t.title === targetTitle);
-  const cmd = getMakeCommand(project, target, 'distClean');
+  const cmd = getMakeCommand(project, target, 'distClean', (id) => getCompiler(id));
   if (!cmd) {
     vscode.window.showWarningMessage(i18n.t('No DistClean command is configured in the project Make commands'));
     return;
@@ -9188,7 +9306,7 @@ async function distClean(): Promise<void> {
   try {
     outputChannel.clear();
     outputChannel.show(true);
-    await runMakeBuild(project, cmd, targetTitle ?? '');
+    await runMakeBuild(project, cmd);
   } finally {
     buildInProgress = false;
     currentBuildCancel = undefined;
@@ -9233,110 +9351,41 @@ async function confirmClean(scope: string): Promise<boolean> {
 }
 
 /** 清理选中目标（虚拟目标展开组逐个 cleanTarget）——对齐 ExpandTargets + bsTargetClean */
-async function cleanTargets(project: Project, targetTitle: string): Promise<void> {
-  const vt = project.virtualTargets.find((v) => v.title === targetTitle);
-  const titles: string[] = vt ? vt.targets : [targetTitle];
-  for (const title of titles) {
-    const target = project.buildTargets.find((t) => t.title === title);
-    if (!target) continue;
-    // makefile 项目模式：Clean 走 make clean（对齐 UseMake → DoCleanWithMake:2530-2531）
-    if (project.makefileIsCustom) {
-      const cleanCmd = getMakeCommand(project, target, 'clean');
-      if (cleanCmd) {
-        await runMakeBuild(project, cleanCmd, title);
-        continue;
-      }
-    }
-    const compiler = getCompiler(target.compilerId || project.compilerId);
-    new BuildEngine(project, compiler, outputChannel, (id) => resolveTargetCompiler(id)).cleanTarget(target);
+async function cleanTargets(project: Project, targetTitle: string, cancelSource?: BuildCancelSource): Promise<BuildProjectResult> {
+  const cancel = cancelSource ?? new BuildCancelSource();
+  currentBuildCancel = cancel;
+  try {
+    // 实现已下沉到 build/buildProject.ts（与 CLI/MCP 同一份），这里只注入宿主能力
+    return await cleanProjectTarget(project, targetTitle, {
+      output: outputChannel,
+      getCompiler: (id) => getCompiler(id),
+      resolveCompiler: (id) => resolveTargetCompiler(id),
+      budget: buildDiagnosticsBudget,
+      maxErrors: vscode.workspace.getConfiguration('codeblocks').get<number>('maxReportedErrors', 50),
+      collectDiagnostics: false,
+      cancel,
+    });
+  } finally {
+    currentBuildCancel = undefined;
+    // make clean 也可能推迟了 clangd 重启（buildInProgress 期间会自动 no-op）
+    flushPendingClangdRestart();
   }
 }
 
-/** makefile 项目模式：解析 make 命令（对齐 GetMakeCommandFor:2178-2197：目标优先项目，$makefile/$make/$target 替换 + ReplaceMacros） */
-function getMakeCommand(project: Project, target: BuildTarget | undefined, key: 'build' | 'compileFile' | 'clean' | 'distClean' | 'askRebuildNeeded' | 'silentBuild'): string | undefined {
-  const raw = (target?.makeCommands?.[key] ?? '') || project.makeCommands[key];
-  if (!raw) return undefined;
-  const compiler = getCompiler(target?.compilerId || project.compilerId);
-  const cmd = raw
-    .replace(/\$makefile/g, project.makefile || 'Makefile')
-    .replace(/\$make/g, compiler.programs.MAKE || 'make')
-    .replace(/\$target/g, target?.title ?? '');
-  const vars = { ...envVarMap(project.envVars, target?.envVars), ...cbBuiltinVars(project.basePath, target?.outputFilename ?? '', target?.title ?? '', target?.objectOutput ?? '', project.title, project.filename, compiler.masterPath) };
-  return replaceCbMacros(cmd, { vars, customVars: project.customVariables ?? {}, basePath: project.basePath });
-}
-
-/** makefile 项目模式：执行 make 命令（工作目录 = GetExecutionDir 语义：execution_dir 或项目根；退出码按 statusSuccess 判定） */
 /**
- * make askRebuildNeeded 异步执行（0=已最新）——审计修复：原 spawnSync 无超时同步阻塞主线程。
- * 行为保持：退出码 0 → 跳过构建；非 0 / 启动失败 / 超时(30s) / 被取消 → 返回 null，按“需构建”继续。
+ * makefile 项目模式：执行 make 命令（工作目录 = GetExecutionDir 语义：execution_dir 或项目根；退出码按 statusSuccess 判定）
+ * spawn/解码/退出码判定由 build/buildProject.ts 的 runMakeBuildCommand 统一实现。
  */
-function runMakeAskRebuild(askCmd: string, cwd: string, cancel?: BuildCancelHandle, timeoutMs = 30000): Promise<number | null> {
-  return new Promise((resolve) => {
-    let done = false;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const finish = (code: number | null): void => {
-      if (done) return;
-      done = true;
-      if (timer) clearTimeout(timer);
-      resolve(code);
-    };
-    let proc: ReturnType<typeof spawn>;
-    try {
-      proc = spawn(askCmd, { cwd, shell: true, windowsHide: true });
-    } catch {
-      resolve(null);
-      return;
-    }
-    timer = setTimeout(() => {
-      outputChannel.warn(logT('[Code::Blocks] make askRebuildNeeded timed out ({0}s), continuing as "rebuild needed"', Math.round(timeoutMs / 1000)));
-      try { proc.kill(); } catch { /* ignore */ }
-      finish(null);
-    }, timeoutMs);
-    cancel?.register(proc);
-    proc.on('error', () => finish(null));
-    proc.on('close', (code) => {
-      cancel?.unregister(proc);
-      finish(code);
-    });
-  });
-}
-
-async function runMakeBuild(project: Project, command: string, targetTitle: string): Promise<boolean> {
-  const compiler = getCompiler(project.compilerId);
-  outputChannel.show(true);
-  outputChannel.info(logT('[Code::Blocks] Make: {0}', command));
-  const cwd = project.executionDir ? path.resolve(project.basePath, project.executionDir) : project.basePath;
+async function runMakeBuild(project: Project, command: string): Promise<boolean> {
   const cancelSource = new BuildCancelSource();
   currentBuildCancel = cancelSource;
   buildInProgress = true;
   try {
-    const code = await new Promise<number | null>((resolve, reject) => {
-      const proc = spawn(command, { cwd, shell: true, windowsHide: true });
-      cancelSource.register(proc);
-      // stdout/stderr 各用独立行解码器：只在完整行上判定 UTF-8/GBK，避免分块把汉字拆成错字
-      const outDec = new OutputLineDecoder();
-      const errDec = new OutputLineDecoder();
-      const emit = (lines: string[]): void => {
-        for (const line of lines) if (line.trim()) outputChannel.info(line);
-      };
-      proc.stdout?.on('data', (b: Buffer) => emit(outDec.push(b).lines));
-      proc.stderr?.on('data', (b: Buffer) => emit(errDec.push(b).lines));
-      proc.on('error', (err) => {
-        outputChannel.error(logT('[Code::Blocks] Failed to execute: {0}', err.message));
-        reject(err);
-      });
-      proc.on('close', (c) => {
-        emit(outDec.flush().lines);
-        emit(errDec.flush().lines);
-        cancelSource.unregister(proc);
-        resolve(c);
-      });
+    return await runMakeBuildCommand(project, command, {
+      output: outputChannel,
+      getCompiler: (id) => getCompiler(id),
+      cancel: cancelSource,
     });
-    const ok = code !== null && code >= 0 && code <= (compiler.switches.statusSuccess ?? 0);
-    if (!ok) outputChannel.error(logT('[Code::Blocks] make failed (exit {0})', code));
-    return ok;
-  } catch {
-    return false;
   } finally {
     buildInProgress = false;
     currentBuildCancel = undefined;
@@ -9448,25 +9497,11 @@ async function rebuildWorkspace(): Promise<void> {
  * 运行工作目录 —— 对齐 CB Run() 的 m_CdRun = target->GetWorkingDir()（compilergcc.cpp:2020-2025 + compiletargetbase.cpp:190-201）：
  * working_dir 非空 → 环境变量展开（CB ReplaceEnvVars）→ 相对路径按项目根解析；
  * 为空且目标类型为控制台/可执行/动态库 → 输出文件所在目录；其余目标类型 → 项目根。
+ *
+ * 实现已下沉到 api/runService.ts（CLI/MCP `codeblocks_run` 共用），这里保持既有调用点签名。
  */
 function runWorkingDir(project: Project, target: BuildTarget, vars: Record<string, string>): string {
-  const tt = target.targetType;
-  if (tt !== TargetType.ConsoleOnly && tt !== TargetType.Executable && tt !== TargetType.DynamicLib) {
-    return project.basePath;
-  }
-  const wd = (target.workingDir ?? '').trim();
-  if (wd) {
-    const envExp = wd.replace(/\$\(([A-Za-z_][A-Za-z0-9_]*)\)/g, (_m, n: string) => process.env[n] ?? '');
-    return path.resolve(project.basePath, envExp);
-  }
-  // 默认：输出文件所在目录（GetOutputFilename → wxFileName::GetPath）
-  const expOut = replaceCbMacros(target.outputFilename, {
-    vars,
-    customVars: project.customVariables ?? {},
-  }).replace(/\\/g, '/');
-  const idx = expOut.lastIndexOf('/');
-  if (idx < 0) return project.basePath;
-  return path.resolve(project.basePath, expOut.slice(0, idx));
+  return resolveRunWorkingDir(project, target, vars);
 }
 
 /**

@@ -108,6 +108,8 @@ suite('宿主集成 · Agent 控制面', (t) => {
       );
       assert.strictEqual(build.ok, true, `构建失败：${JSON.stringify(build.summary && build.summary.errorCount)}`);
       assert.strictEqual(build.target, 'Debug');
+      assert.ok(Array.isArray(build.summary?.projects) && build.summary.projects.length === 1, '构建摘要缺少本次工程条目');
+      assert.strictEqual(build.summary.projects[0].targetName, 'Debug', '构建摘要不是本次目标');
       const built = await U.waitFor(() => (fs.existsSync(exePath) ? exePath : undefined), 20000);
       assert.ok(built, `构建结束但产物不存在：${exePath}`);
 
@@ -120,10 +122,147 @@ suite('宿主集成 · Agent 控制面', (t) => {
     }
   });
 
+  // ---- 目标校验：未知 target 必须报 invalid-input（不能静默构建「当前选中」目标） ----
+  t.test('codeblocks_build 未知 target → invalid-input', async (ctx) => {
+    const ws = U.workspaceDir();
+    if (!ws) {
+      console.log('SKIP 未知 target 校验：无工作区文件夹');
+      ctx.skip();
+    }
+    const projDir = path.join(ws, 'cb-agent-target-guard');
+    fs.rmSync(projDir, { recursive: true, force: true });
+    const cbp = U.copyHelloProject(projDir, 'hello-cb');
+    await U.setConfig('clangd.enabled', false);
+    try {
+      const data = await callTool('codeblocks_build', { cbp, target: 'NoSuchTarget' });
+      assert.strictEqual(data.ok, false, JSON.stringify(data).slice(0, 200));
+      assert.strictEqual(data.error?.code, 'invalid-input', JSON.stringify(data.error));
+      assert.ok(Array.isArray(data.error?.details?.targets) && data.error.details.targets.includes('Debug'), '缺少可选目标列表');
+    } finally {
+      fs.rmSync(projDir, { recursive: true, force: true });
+    }
+  });
+
+  // ---- 平台守卫：显式指定「当前平台不支持」的目标必须报 unsupported（不能静默返回成功） ----
+  t.test('codeblocks_build 平台不支持的目标 → unsupported', async (ctx) => {
+    const ws = U.workspaceDir();
+    if (!ws) {
+      console.log('SKIP 平台守卫：无工作区文件夹');
+      ctx.skip();
+    }
+    const projDir = path.join(ws, 'cb-agent-platform-guard');
+    fs.rmSync(projDir, { recursive: true, force: true });
+    const cbp = U.copyHelloProject(projDir, 'hello-cb');
+    await U.setConfig('clangd.enabled', false);
+    // 与当前平台互斥的平台位掩码（spMac=1 / spUnix=2 / spWindows=4）
+    const mask = process.platform === 'win32' ? 0x02 : 0x04;
+    try {
+      for (const title of ['Debug', 'Release']) {
+        const edit = await callTool('codeblocks_project_edit', {
+          cbp,
+          ops: [{ op: 'set', scope: 'target', target: title, field: 'platforms', value: mask }],
+        });
+        assert.strictEqual(edit.ok, true, JSON.stringify(edit).slice(0, 200));
+      }
+      const data = await callTool('codeblocks_build', { cbp, target: 'Debug' });
+      assert.strictEqual(data.ok, false, `平台不支持的目标被当成成功：${JSON.stringify(data).slice(0, 200)}`);
+      assert.strictEqual(data.error && data.error.code, 'unsupported', JSON.stringify(data.error));
+    } finally {
+      fs.rmSync(projDir, { recursive: true, force: true });
+    }
+  });
+
+  // ---- 超时：前序脚本卡住时也必须按 timeoutMs 取消（不能再等脚本自然结束） ----
+  t.test('codeblocks_build timeoutMs 在构建前脚本期间也能取消', async (ctx) => {
+    const ws = U.workspaceDir();
+    if (!ws) {
+      console.log('SKIP 超时取消：无工作区文件夹');
+      ctx.skip();
+    }
+    const projDir = path.join(ws, 'cb-agent-timeout');
+    fs.rmSync(projDir, { recursive: true, force: true });
+    const cbp = U.copyHelloProject(projDir, 'hello-cb');
+    await U.setConfig('clangd.enabled', false);
+    try {
+      const edit = await callTool('codeblocks_project_edit', {
+        cbp,
+        ops: [{
+          op: 'set',
+          scope: 'project',
+          field: 'commandsBeforeBuild',
+          value: ['node -e "setTimeout(()=>{},20000)"'],
+        }],
+        allowScripts: true,
+      });
+      assert.strictEqual(edit.ok, true, JSON.stringify(edit).slice(0, 200));
+
+      const t0 = Date.now();
+      const build = await U.withTimeout(
+        callTool('codeblocks_build', { cbp, target: 'Debug', timeoutMs: 1500 }),
+        170000,
+        'codeblocks_build(timeout)',
+      );
+      const elapsed = Date.now() - t0;
+      assert.strictEqual(build.timedOut, true, JSON.stringify(build).slice(0, 200));
+      assert.strictEqual(build.ok, false);
+      assert.ok(elapsed < 15000, `超时未生效：等待了 ${elapsed}ms`);
+    } finally {
+      fs.rmSync(projDir, { recursive: true, force: true });
+    }
+  });
+
+  // ---- makefile 项目：Build Log 不渲染，但 build_status 必须能查到本次摘要（R-07） ----
+  t.test('makefile 构建后 codeblocks_build_status 含本次摘要', async (ctx) => {
+    const ws = U.workspaceDir();
+    if (!ws) {
+      console.log('SKIP makefile 摘要：无工作区文件夹');
+      ctx.skip();
+    }
+    const projDir = path.join(ws, 'cb-agent-makefile');
+    fs.rmSync(projDir, { recursive: true, force: true });
+    fs.mkdirSync(projDir, { recursive: true });
+    const cbp = path.join(projDir, 'make-custom.cbp');
+    fs.writeFileSync(cbp, `<?xml version="1.0" encoding="UTF-8" standalone="yes" ?>
+<CodeBlocks_project_file>
+	<FileVersion major="1" minor="6" />
+	<Project>
+		<Option title="make-custom" />
+		<Option compiler="gcc" />
+		<Option makefile_is_custom="1" />
+		<Build>
+			<Target title="Debug">
+				<Option output="bin/demo" prefix_auto="1" extension_auto="1" />
+				<Option type="1" />
+				<Option compiler="gcc" />
+			</Target>
+		</Build>
+		<MakeCommands>
+			<Build command="node -e &quot;process.exit(0)&quot;" />
+			<AskRebuildNeeded command="node -e &quot;process.exit(0)&quot;" />
+		</MakeCommands>
+	</Project>
+</CodeBlocks_project_file>
+`, 'utf-8');
+    await U.setConfig('clangd.enabled', false);
+    try {
+      const dry = await U.withTimeout(callTool('codeblocks_build', { cbp, dryRun: true }), 30000, 'makefile dryRun');
+      assert.strictEqual(dry.target, 'Debug', JSON.stringify(dry).slice(0, 200));
+      const build = await U.withTimeout(callTool('codeblocks_build', { cbp, timeoutMs: 30000 }), 120000, 'makefile build');
+      assert.strictEqual(build.ok, true, JSON.stringify(build).slice(0, 200));
+      const status = await callTool('codeblocks_build_status', { cbp });
+      assert.ok(Array.isArray(status.projects) && status.projects.length === 1, `Build status 缺少 makefile 摘要：${JSON.stringify(status).slice(0, 200)}`);
+      assert.strictEqual(status.projects[0].targetName, 'Debug');
+    } finally {
+      fs.rmSync(projDir, { recursive: true, force: true });
+    }
+  });
+
   // ---- 调试桥：无会话时的状态语义（扩展侧 vscode.debug 接线） ----
   t.test('invokeTool codeblocks_debug：state=inactive / stop=not-running', async () => {
     const state = await callTool('codeblocks_debug', { action: 'state' });
     assert.strictEqual(state.active, false, `预期无活动会话：${JSON.stringify(state)}`);
+    // 归一化后无会话只应暴露 active（不泄漏传输层字段）
+    assert.deepStrictEqual(Object.keys(state), ['active'], `state 形状未归一化：${JSON.stringify(state)}`);
 
     const stopped = await callTool('codeblocks_debug', { action: 'stop' });
     assert.strictEqual(stopped.ok, false, '无会话 stop 应返回错误');

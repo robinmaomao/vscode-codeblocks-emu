@@ -27,7 +27,7 @@ async function main(): Promise<void> {
   const runtime = createRuntime({ echoBuildLog: true });
   const { TOOL_DEFINITIONS, invokeTool } = require('../api/toolRegistry') as typeof import('../api/toolRegistry');
   const { loadCodeblocksSettings } = require('../api/settingsReader') as typeof import('../api/settingsReader');
-  const { isAgentEnabled, isAgentReadOnly, AGENT_DISABLED_HINT } = require('../api/agentPolicy') as typeof import('../api/agentPolicy');
+  const { isAgentEnabled, isAgentReadOnly, isReadOnlyToolCall, AGENT_DISABLED_HINT } = require('../api/agentPolicy') as typeof import('../api/agentPolicy');
 
   // 每次请求重新读设置：外部客户端可能在 VS Code 未运行的情况下直接启动本 server，
   // 关闭开关 / 只读模式应当立即生效，而不是等进程重启。
@@ -57,6 +57,8 @@ async function main(): Promise<void> {
         name: t.name,
         description: t.description,
         inputSchema: t.inputSchema as unknown as { type: 'object'; properties?: Record<string, object> },
+        // 与 LM Tools 的 prepareInvocation 对齐：标题 + 只读提示，便于客户端做审批与展示
+        annotations: { title: t.title, readOnlyHint: isReadOnlyToolCall(t.name) },
       })),
     };
   });

@@ -33,6 +33,26 @@ export function normalizeRelativePath(p: string): string {
     .replace(/\/+$/, '');
 }
 
+/** 两条工程相对路径是否指向同一个文件（大小写按平台） */
+function sameRelPath(a: string, b: string): boolean {
+  const na = normalizeRelativePath(a);
+  const nb = normalizeRelativePath(b);
+  return process.platform === 'win32' ? na.toLowerCase() === nb.toLowerCase() : na === nb;
+}
+
+/** 运行时校验：MCP/CLI 的 JSON 入参没有类型系统兜底 */
+function requireString(value: unknown, what: string): string {
+  if (typeof value !== 'string' || !value.trim()) fail('invalid-input', `${what} must be a non-empty string`);
+  return value as string;
+}
+
+function requireStringArray(value: unknown, what: string): string[] {
+  if (!Array.isArray(value) || value.some((v) => typeof v !== 'string')) {
+    fail('invalid-input', `${what} must be an array of strings`);
+  }
+  return value as string[];
+}
+
 function findTarget(project: Project, title: string | undefined): BuildTarget {
   if (!title) fail('invalid-input', 'A target title is required for scope=target');
   const t = project.buildTargets.find((x) => x.title === title);
@@ -43,16 +63,12 @@ function findTarget(project: Project, title: string | undefined): BuildTarget {
 function findFile(project: Project, file: string | undefined): ProjectFile {
   if (!file) fail('invalid-input', 'A file path is required for scope=file');
   const rel = normalizeRelativePath(file);
-  const lower = process.platform === 'win32' ? rel.toLowerCase() : rel;
-  const match = project.files.find((f) => {
-    const candidate = normalizeRelativePath(f.relativeFilename);
-    return (process.platform === 'win32' ? candidate.toLowerCase() : candidate) === lower;
-  });
+  const match = project.files.find((f) => sameRelPath(f.relativeFilename, rel));
   if (match) return match;
   // 允许传绝对路径
   if (path.isAbsolute(file)) {
     const relFromBase = normalizeRelativePath(path.relative(project.basePath, file));
-    const alt = project.files.find((f) => normalizeRelativePath(f.relativeFilename) === relFromBase);
+    const alt = project.files.find((f) => sameRelPath(f.relativeFilename, relFromBase));
     if (alt) return alt;
   }
   fail('invalid-input', `File not found in project: ${rel}`, {
@@ -209,12 +225,17 @@ export function applyEdits(project: Project, ops: EditOp[], opts: EditOptions = 
         } else if (op.scope === 'file') {
           const file = findFile(project, op.file) as unknown as Record<string, unknown>;
           const change = applyFieldEdit(file, op, opts, `file[${normalizeRelativePath(op.file!)}].${op.field}`);
+          // 归属列表必须引用真实目标：拼错会写出悬空 target，构建时被静默跳过
+          if (op.field === 'buildTargets') {
+            const list = (file as unknown as ProjectFile).buildTargets;
+            if (Array.isArray(list)) for (const t of list) findTarget(project, t);
+          }
           if (change) {
             changed.push(change);
             // 显式设置归属列表 = 该文件从此按显式归属处理
             if (op.field === 'buildTargets') (file as unknown as ProjectFile).explicitTargets = true;
           }
-        } else {
+        } else if (op.scope === 'virtualTarget') {
           const vt = project.virtualTargets.find((v) => v.title === op.target || v.title === op.field);
           if (!vt) fail('invalid-input', `Virtual target not found: ${op.target ?? op.field}`);
           const before = vt!.targets;
@@ -229,11 +250,15 @@ export function applyEdits(project: Project, ops: EditOp[], opts: EditOptions = 
           if (JSON.stringify(before) !== JSON.stringify(vt!.targets)) {
             changed.push({ path: `virtualTarget[${vt!.title}].targets`, before, after: vt!.targets });
           }
+        } else {
+          fail('invalid-input', `Unknown scope: ${String((op as { scope: unknown }).scope)}`, {
+            scopes: ['project', 'target', 'file', 'virtualTarget'],
+          });
         }
         break;
       }
       case 'addTarget': {
-        ensureUniqueTargetTitle(project, op.title);
+        ensureUniqueTargetTitle(project, requireString(op.title, 'addTarget.title'));
         const source = op.copyFrom ? findTarget(project, op.copyFrom) : undefined;
         if (!source && project.buildTargets.length === 0) {
           fail('invalid-input', 'Cannot infer target settings: the project has no build targets');
@@ -279,12 +304,19 @@ export function applyEdits(project: Project, ops: EditOp[], opts: EditOptions = 
       case 'addFile': {
         const rel = normalizeRelativePath(op.file);
         if (!rel) fail('invalid-input', 'A file path is required');
-        if (project.files.some((f) => normalizeRelativePath(f.relativeFilename) === rel)) {
+        if (op.targets !== undefined) requireStringArray(op.targets, 'addFile.targets');
+        if (op.virtualFolder !== undefined && typeof op.virtualFolder !== 'string') {
+          fail('invalid-input', 'addFile.virtualFolder must be a string');
+        }
+        // weight 与字段白名单同源校验（0–100），否则 agent 能写出现场无法解释的排序权重
+        const weightSpec = fieldSpecs('file').find((s) => s.name === 'weight')!;
+        const weight = op.weight === undefined ? 50 : checkNumber(weightSpec, op.weight);
+        if (project.files.some((f) => sameRelPath(f.relativeFilename, rel))) {
           fail('invalid-input', `File already belongs to the project: ${rel}`);
         }
         const abs = path.resolve(project.basePath, rel);
         if (!fs.existsSync(abs)) fail('invalid-input', `File does not exist: ${abs}`);
-        const targets = (op.targets ?? []).map((t) => findTarget(project, t).title);
+        const targets = Array.from(new Set((op.targets ?? []).map((t) => findTarget(project, t).title)));
         // 未显式指定 = 属于所有目标（writer 以「目标数 == 项目目标数」判定隐式归属）
         const buildTargets = targets.length ? targets : project.buildTargets.map((t) => t.title);
         // 单个对象：project.files 与各 target.files 共享引用（否则后续字段编辑不会影响构建）
@@ -298,7 +330,7 @@ export function applyEdits(project: Project, ops: EditOp[], opts: EditOptions = 
           compile: op.compile !== false,
           link: op.link !== false,
           customBuildCommands: {},
-          weight: op.weight ?? 50,
+          weight,
           virtualFolder: op.virtualFolder ?? '',
           generatedFiles: [],
         };
@@ -323,6 +355,11 @@ export function applyEdits(project: Project, ops: EditOp[], opts: EditOptions = 
         const to = normalizeRelativePath(op.to);
         if (!to) fail('invalid-input', 'The new file path must not be empty');
         const file = findFile(project, rel);
+        if (project.files.some((f) => f !== file && sameRelPath(f.relativeFilename, to))) {
+          fail('invalid-input', `A file with that path already exists in the project: ${to}`, {
+            hint: 'Remove the other file entry first, or choose a different name.',
+          });
+        }
         const before = file.relativeFilename;
         file.relativeFilename = to;
         file.relativeToCommonTopLevelPath = to;
@@ -341,14 +378,14 @@ export function applyEdits(project: Project, ops: EditOp[], opts: EditOptions = 
         break;
       }
       case 'addVirtualTarget': {
-        if (!op.alias || !op.alias.trim()) fail('invalid-input', 'Virtual target alias must not be empty');
-        if (project.virtualTargets.some((v) => v.title === op.alias)) {
-          fail('invalid-input', `Virtual target already exists: ${op.alias}`);
+        const alias = requireString(op.alias, 'addVirtualTarget.alias');
+        if (project.virtualTargets.some((v) => v.title === alias)) {
+          fail('invalid-input', `Virtual target already exists: ${alias}`);
         }
-        const targets = op.targets.map((t) => findTarget(project, t).title);
-        const vt: VirtualBuildTarget = { title: op.alias, targets };
+        const targets = Array.from(new Set(requireStringArray(op.targets, 'addVirtualTarget.targets').map((t) => findTarget(project, t).title)));
+        const vt: VirtualBuildTarget = { title: alias, targets };
         project.virtualTargets.push(vt);
-        changed.push({ path: `virtualTarget[${op.alias}]`, after: { targets } });
+        changed.push({ path: `virtualTarget[${alias}]`, after: { targets } });
         break;
       }
       case 'removeVirtualTarget': {
@@ -376,9 +413,17 @@ function escapeRegExp(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
+/** 与 projectWriter 的 `esc()` 一致：磁盘上的 filename 是 XML 转义后的形式 */
+function escapeXmlAttr(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
 /**
  * 定点改写 `<Unit>` 的 `compile` / `link` 选项（保留文件其余字节）。
  * 语义对齐扩展内 `setUnitOptionInCbp`（D-09）：启用 = 删除该选项；禁用 = 写 "0"。
+ *
+ * 路径先规范化（`.\` → `/`、去 `./` 前缀），再按 **XML 转义后**的文件名匹配并回写：
+ * 含 `&`/`<`/`"` 的路径在磁盘上写作 `&amp;` 等，直接用原路径匹配会误报「文件不存在」。
  */
 export function applyUnitOptionToText(
   text: string,
@@ -386,7 +431,9 @@ export function applyUnitOptionToText(
   opt: 'compile' | 'link',
   enable: boolean,
 ): { text: string; changed: boolean } {
-  const escaped = escapeRegExp(relativeFilename);
+  const rel = normalizeRelativePath(relativeFilename);
+  const xmlName = escapeXmlAttr(rel);
+  const escaped = escapeRegExp(xmlName);
   const optPat = `<Option ${opt}="[01]"\\s*/>`;
   const pairedRe = new RegExp(`<Unit filename="${escaped}"\\s*>([\\s\\S]*?)</Unit>`, 'g');
   const selfCloseRe = new RegExp(`<Unit filename="${escaped}"\\s*/>`, 'g');
@@ -403,18 +450,18 @@ export function applyUnitOptionToText(
       newInner = enable ? inner : `\n\t\t\t<Option ${opt}="0" />${inner}`;
     }
     const newUnit = newInner.trim()
-      ? `<Unit filename="${relativeFilename}">${newInner}</Unit>`
-      : `<Unit filename="${relativeFilename}" />`;
+      ? `<Unit filename="${xmlName}">${newInner}</Unit>`
+      : `<Unit filename="${xmlName}" />`;
     const out = text.replace(pairedRe, newUnit);
     return { text: out, changed: out !== text };
   }
 
   if (selfCloseRe.test(text)) {
     if (enable) return { text, changed: false };
-    const newUnit = `<Unit filename="${relativeFilename}">\n\t\t\t<Option ${opt}="0" />\n\t\t</Unit>`;
+    const newUnit = `<Unit filename="${xmlName}">\n\t\t\t<Option ${opt}="0" />\n\t\t</Unit>`;
     const out = text.replace(selfCloseRe, newUnit);
     return { text: out, changed: out !== text };
   }
 
-  fail('invalid-input', `File "${relativeFilename}" not found in the .cbp`);
+  fail('invalid-input', `File "${rel}" not found in the .cbp`);
 }

@@ -81,6 +81,7 @@ function runShellCommand(
   output: CbOutput,
   cancel?: BuildCancelHandle,
   timeoutMs?: number,
+  onSpawnError?: (err: Error) => void,
 ): Promise<number | null> {
   return new Promise((resolve) => {
     let done = false;
@@ -112,7 +113,10 @@ function runShellCommand(
     };
     proc.stdout?.on('data', (b: Buffer) => emit(outDec.push(b).lines));
     proc.stderr?.on('data', (b: Buffer) => emit(errDec.push(b).lines));
-    proc.on('error', () => finish(null));
+    proc.on('error', (err: Error) => {
+      onSpawnError?.(err);
+      finish(null);
+    });
     proc.on('close', (code) => {
       emit(outDec.flush().lines);
       emit(errDec.flush().lines);
@@ -120,6 +124,29 @@ function runShellCommand(
       finish(code);
     });
   });
+}
+
+/**
+ * makefile 模式：执行一条 make 命令并写输出通道（CompileFile / Clean / DistClean 用）。
+ *
+ * 与 `buildProjectTarget` 里的 make 分支共用同一份 spawn/解码/退出码判定；
+ * 构建互斥、活动工程与 clangd 推迟重启由调用方负责。
+ */
+export async function runMakeBuildCommand(
+  project: Project,
+  command: string,
+  deps: Pick<BuildProjectDeps, 'output' | 'getCompiler' | 'cancel'>,
+): Promise<boolean> {
+  const compiler = deps.getCompiler(project.compilerId);
+  deps.output.show?.(true);
+  deps.output.info(logT('[Code::Blocks] Make: {0}', command));
+  const cwd = project.executionDir ? path.resolve(project.basePath, project.executionDir) : project.basePath;
+  const code = await runShellCommand(command, cwd, deps.output, deps.cancel, undefined, (err) => {
+    deps.output.error(logT('[Code::Blocks] Failed to execute: {0}', err.message));
+  });
+  const ok = code !== null && code >= 0 && code <= (compiler.switches.statusSuccess ?? 0);
+  if (!ok) deps.output.error(logT('[Code::Blocks] make failed (exit {0})', code));
+  return ok;
 }
 
 /** makefile 模式：askRebuildNeeded（0 = 已最新） */
@@ -176,9 +203,16 @@ export async function cleanProjectTarget(
     if (project.makefileIsCustom) {
       const cleanCmd = getMakeCommand(project, target, 'clean', deps.getCompiler);
       if (cleanCmd) {
+        // 与 Build/Rebuild 的 make 分支保持同样的可观测性：把实际执行的命令写进输出通道
+        deps.output.info(logT('[Code::Blocks] Make: {0}', cleanCmd));
         const cwd = project.executionDir ? path.resolve(project.basePath, project.executionDir) : project.basePath;
         const code = await runShellCommand(cleanCmd, cwd, deps.output, deps.cancel);
-        if (code !== null && (code < 0 || code > (deps.getCompiler(target.compilerId || project.compilerId).switches.statusSuccess ?? 0))) {
+        const statusSuccess = deps.getCompiler(target.compilerId || project.compilerId).switches.statusSuccess ?? 0;
+        if (code === null) {
+          // spawn 失败 / 超时 / 被取消：不能当成清理成功（此前会静默 ok:true）
+          deps.output.error(logT('[Code::Blocks] Failed to execute: {0}', cleanCmd));
+          ok = false;
+        } else if (code < 0 || code > statusSuccess) {
           ok = false;
         }
         continue;
@@ -205,6 +239,20 @@ function fileExists(file: string): boolean {
 }
 
 /**
+ * 目标在当前平台是否可构建。
+ *
+ * 虚拟目标只要**任一成员**支持当前平台就算可构建（引擎会逐个成员跳过不支持的）；
+ * 普通目标看自身。`buildProjectTarget` 的早退判定与 `buildService.assertTargetRunnable`
+ * 的守卫必须用同一份判定，否则会出现「守卫通过但整组被跳过」的假成功。
+ */
+export function targetPlatformSupported(project: Project, targetTitle: string): boolean {
+  const vt = project.virtualTargets.find((v) => v.title === targetTitle);
+  if (vt) return project.buildTargets.some((t) => vt.targets.includes(t.title) && supportsCurrentPlatform(t.platforms));
+  const target = project.buildTargets.find((t) => t.title === targetTitle);
+  return !!target && supportsCurrentPlatform(target.platforms);
+}
+
+/**
  * 构建单个项目的一个目标（支持虚拟目标展开）。
  *
  * 与既有 UI 行为逐项对齐：平台不支持 → 跳过并返回成功；makefile 模式走 make；
@@ -223,7 +271,8 @@ export async function buildProjectTarget(
     ? project.buildTargets.find((t) => vt.targets.includes(t.title))
     : project.buildTargets.find((t) => t.title === targetTitle);
 
-  if (!target || !supportsCurrentPlatform(target.platforms)) {
+  // 平台过滤按「虚拟目标成员的并集」判定：首个成员不支持时不能把整组静默跳过
+  if (!target || !targetPlatformSupported(project, targetTitle)) {
     deps.output.warn(logT('[Code::Blocks] Project "{0}" has no target "{1}" (or does not support the current platform), skipped', project.title, targetTitle));
     return {
       ok: true,
@@ -263,7 +312,7 @@ export async function buildProjectTarget(
       const askCode = await runMakeAskRebuild(askCmd, cwd, deps.output, deps.cancel, deps.askRebuildTimeoutMs);
       if (askCode === 0) {
         deps.output.info(logT("[Code::Blocks] Target '{0}' is up to date. Nothing to be done.", targetTitle));
-        await finishBuild(true);
+        // 保持 0.8.x 行为：make 认为「已最新」= 什么都没构建，不递增自动版本号
         return { ok: true, summary, reportToUi: false };
       }
     }
