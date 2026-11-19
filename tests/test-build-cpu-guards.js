@@ -24,8 +24,8 @@ check('A3 schedule 在构建中只登记：检查 buildInProgress',
   /function scheduleClangdRestart\(\)\s*\{\s*if \(buildInProgress\)/.test(ext), null);
 // 0.8.145 起自动重启统一走 clangdRestart 合并器（合并窗口 + 最小间隔 + 等客户端稳定），
 // 不允许再出现 `void restartClangd()` 直连；schedule 立即路径与 flush 各请求一次。
-check('A4 自动重启仅两个请求入口（schedule 立即路径 + flush），无直连重启',
-  (ext.match(/clangdRestart\.request\(\)/g) || []).length === 2
+check('A4 自动重启仅走合并器请求入口（schedule 立即路径 + flush + 有限重试），无直连重启',
+  (ext.match(/clangdRestart\.request\(\)/g) || []).length === 3
   && (ext.match(/void restartClangd\(\)/g) || []).length === 0,
   { request: (ext.match(/clangdRestart\.request\(\)/g) || []).length, direct: (ext.match(/void restartClangd\(\)/g) || []).length });
 check('A5 自动重启前等 clangd 客户端稳定（避免 applyFix 重复注册）',

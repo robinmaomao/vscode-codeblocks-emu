@@ -215,6 +215,8 @@ const sameItems = (got, want) => JSON.stringify(got) === JSON.stringify(want);
   const readDb = () => (dbPath() ? fs.readFileSync(dbPath(), 'utf-8') : '');
   // 已打开源文件（重启只为刷新已打开文件 ⇒ hasOpenSourceFile 依赖 visibleTextEditors）
   app.setActiveEditor(path.join(tmpRoot, 'proj', 'main.c'), 'int main(void) { return 0; }\n', 'c');
+  // 真实场景里 `clangd.restart` 命令由 clangd 扩展提供；2c 段验证过卸载流程，这里恢复成「扩展已安装且在跑」
+  mock.setInstalledExtension('llvm-vs-code-extensions.vscode-clangd', { id: 'llvm-vs-code-extensions.vscode-clangd', isActive: true });
   // 反证：把「切换活动工程」的重启开关关掉，编译器设置变化仍必须重启（不重启等于设置没生效）
   app.setConfig('codeblocks.clangd.restartOnActiveProjectSwitch', false);
   const compilerBar = mock.statusBarItems.filter((i) => /Compiler:/.test(i.text || '')).pop();

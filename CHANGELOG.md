@@ -3,6 +3,19 @@
 本文件记录**正式版**里程碑；近期 dev 迭代的逐轮发布说明见 [`docs/release/`](./docs/release/)（`0.8.xx-dev.md`），
 `0.8.76`–`0.8.128` 的 dev 说明已合并归档到 [`docs/release/archive/`](./docs/release/archive/)；版本号与维护约定见 [`docs/release/00-index.md`](./docs/release/00-index.md)。
 
+## 0.9.1 — 2026-11-19
+
+> 补丁版：clangd 重启路径可靠性修复（合并 0.9.0 后复查发现）。
+
+- **单飞（P2）**：`createClangdRestartCoalescer` 在一次 `restart` 未结束时不再并发排期，改为结束后补跑一次（尾随）；
+  避免慢重启（等 Starting 最长 20s + 稳定期 + 撞车重试）被下一次叠上来，再次触发 `command 'clangd.applyFix' already exists`。
+- **跳过留痕（P1）**：执行层在「未安装 clangd 扩展 / 扩展未激活 / 客户端已停止」时输出明确日志，不再与「正在重启」日志互相矛盾。
+- **有限重试（P4）**：客户端迟迟未就绪时按 2s / 4s 重试最多 2 次（`nextClangdRestartRetry`），不再静默丢弃一次必要重启；手动重启与停用扩展会清理未到期重试。
+- **文案对齐（P3）**：`skip-config-only` 日志改为「启动恢复期间仅配置变化」，不再声称 clangd 仍在启动。
+- **整洁（P5）**：模块分节注释、合并重复 import、`restartClangdReason` 复用 `ClangdRestartReason` 类型。
+- 回归：`test-clangd-restart`（29 断言）、`test-clangd-restart-decision`（21 断言）、`test-clangd-startup-restore`（A6+B6）；
+  命令/设置/键位/视图计数不变（136 / 93 / 34 / 6）。
+
 ## 0.9.0 — 2026-11-19
 
 > 正式版：合入 Agent 控制面（LM Tools / MCP / CLI），构建内核下沉为 UI 与 Agent 共用的唯一实现。

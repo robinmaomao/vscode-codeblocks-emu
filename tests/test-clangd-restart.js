@@ -5,11 +5,14 @@ const path = require('path');
 const {
   createClangdRestartCoalescer,
   waitForClangdRestartable,
+  nextClangdRestartRetry,
   CLANGD_CLIENT_STATE_RUNNING,
   CLANGD_CLIENT_STATE_STARTING,
   CLANGD_CLIENT_STATE_STOPPED,
   CLANGD_RESTART_DEBOUNCE_MS,
   CLANGD_RESTART_MIN_INTERVAL_MS,
+  CLANGD_RESTART_MAX_RETRIES,
+  CLANGD_RESTART_RETRY_DELAY_MS,
 } = require('../dist/tools/clangdRestart.js');
 
 let pass = 0, fail = 0;
@@ -220,6 +223,48 @@ check('默认最小间隔 >= 合并窗口', CLANGD_RESTART_MIN_INTERVAL_MS >= CL
       sleep: async () => { state = CLANGD_CLIENT_STATE_STOPPED; },
     });
     check('状态：稳定期内客户端停止 → 不再追加重启', ok === false && calls >= 2, { ok, calls });
+  }
+
+  // ---- 单飞：上一次 run 未结束时请求到达，不得并发叠加（P2 回归） ----
+  {
+    let calls = 0;
+    let active = 0;
+    let maxActive = 0;
+    let finishRun = () => {};
+    const clock = fakeTimers();
+    const coalescer = createClangdRestartCoalescer(() => {
+      calls++;
+      active++;
+      maxActive = Math.max(maxActive, active);
+      return new Promise((resolve) => {
+        finishRun = () => { active--; resolve(); };
+      });
+    }, { now: clock.now, setTimer: clock.setTimer, clearTimer: clock.clearTimer });
+
+    coalescer.request();
+    clock.advance(CLANGD_RESTART_DEBOUNCE_MS);
+    check('单飞：第一次执行已开始', calls === 1 && active === 1, { calls, active });
+
+    clock.advance(CLANGD_RESTART_MIN_INTERVAL_MS);
+    coalescer.request(); // 第一次仍未结束
+    clock.advance(CLANGD_RESTART_MIN_INTERVAL_MS * 2);
+    check('单飞：执行未结束时不再并发启动第二次', calls === 1 && maxActive === 1, { calls, maxActive });
+
+    finishRun();
+    await new Promise((resolve) => setImmediate(resolve));
+    clock.advance(CLANGD_RESTART_MIN_INTERVAL_MS * 2);
+    check('单飞：上一次结束后补跑尾随请求一次', calls === 2 && maxActive === 1, { calls, maxActive });
+  }
+
+  // ---- 有限重试策略：客户端迟迟未就绪时不无限重排、也不静默丢弃 ----
+  {
+    const first = nextClangdRestartRetry(0);
+    check('重试策略：第 1 次重试按基础间隔', first.retry === true && first.attempt === 1 && first.delayMs === CLANGD_RESTART_RETRY_DELAY_MS, first);
+    const second = nextClangdRestartRetry(1);
+    check('重试策略：第 2 次重试间隔递增', second.retry === true && second.attempt === 2 && second.delayMs === CLANGD_RESTART_RETRY_DELAY_MS * 2, second);
+    const exhausted = nextClangdRestartRetry(CLANGD_RESTART_MAX_RETRIES);
+    check('重试策略：达到上限后放弃', exhausted.retry === false && exhausted.delayMs === 0, exhausted);
+    check('重试上限为有限值', CLANGD_RESTART_MAX_RETRIES > 0 && CLANGD_RESTART_MAX_RETRIES <= 3, CLANGD_RESTART_MAX_RETRIES);
   }
 
   console.log(`\nclangd 重启合并: ${pass} pass, ${fail} fail`);
