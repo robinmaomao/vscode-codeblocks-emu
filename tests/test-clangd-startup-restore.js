@@ -151,8 +151,8 @@ async function runPhaseB(root) {
     app.records.executeCommand.filter((c) => c.id === 'clangd.restart').length === 0,
     app.records.executeCommand.map((c) => c.id));
   check('[B] 跳过重启时输出说明日志（可排查「为什么没重启」）',
-    count(/仍在启动中，本次仅配置变化，跳过重启/) === 1,
-    lines().filter((l) => /跳过重启/.test(l)));
+    count(/启动恢复期间仅配置变化，跳过 clangd 重启/) === 1,
+    lines().filter((l) => /跳过/.test(l)));
 
   await app.deactivate();
   console.log(`PHASE_B pass=${pass} fail=${fail}`);

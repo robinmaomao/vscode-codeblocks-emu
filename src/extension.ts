@@ -85,12 +85,16 @@ import { isCompilerUsable, renderInvalidCompilerMessage, renderTriedCompilerPath
 import { collectClangdEntries, writeClangdDatabase, CompileCommandEntry } from './build/compileCommands';
 import { DiagnosticPublisher } from './build/diagnosticPublisher';
 import { collectOutputDirs, excludeGlobsFor, mergeExcludePatterns } from './build/watcherExclude';
-import { decideClangdRestart } from './tools/clangdRestart';
 import { detectClangd, queryCompilerSystemIncludes, queryCompilerTarget, resolveCompilerProgram, updateClangdUserConfig, clangdUserConfigPath, clearClangdDetectionCache, extraConfigWarnings, findStaleClangdFragments, listManagedFragments, cleanStaleClangdFragments, readClangdUserConfigText, preferClangdSource } from './tools/clangd';
 import { ClangdInactiveRegionsWatcher } from './tools/clangdInactiveRegions';
 import {
+  CLANGD_CLIENT_STATE_STOPPED,
+  CLANGD_RESTART_MAX_RETRIES,
   CLANGD_RESTART_MIN_INTERVAL_MS,
+  ClangdRestartReason,
   createClangdRestartCoalescer,
+  decideClangdRestart,
+  nextClangdRestartRetry,
   waitForClangdRestartable,
 } from './tools/clangdRestart';
 import { SymbolIndex, registerFallbackIntelliSense } from './tools/codeCompletion';
@@ -290,7 +294,7 @@ let clangdGenPendingInteractive = false;
  *  - 'compiler'：编译器设置变化（compilerId / masterPath / compilerPrograms）——已打开文件的诊断/补全
  *    全部基于旧编译命令推导，必须重启才会按新编译器重新分析
  */
-let restartClangdReason: 'project' | 'compiler' | 'open' | undefined;
+let restartClangdReason: ClangdRestartReason | undefined;
 /** clangd.enabled 的上次取值（只在「开 → 关」时提醒既有片段仍在生效，避免其它设置变更重复弹窗） */
 let clangdEnabledLast = true;
 /** 修复 clangd 扩展 inactiveRegions 装饰在客户端重启后不再显示的问题 */
@@ -1340,8 +1344,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   // 手动重启 clangd（排查"改了配置/换了工程但 clangd 没重新分析"）
   context.subscriptions.push(
     vscode.commands.registerCommand('codeblocks.restartClangd', async () => {
-      // 手动重启优先：取消排队中的自动重启，避免同一个用户动作触发两次 clangd.restart
+      // 手动重启优先：取消排队中的自动重启与未到期的重试，避免同一个用户动作触发两次 clangd.restart
       clangdRestart.cancel();
+      clearClangdRestartRetry();
       if (!(await waitForClangdClientReady(getClangdLanguageClient(), true))) {
         vscode.window.showWarningMessage(i18n.t('clangd is still starting. Try again in a moment.'));
         return;
@@ -5087,14 +5092,57 @@ function waitForClangdClientReady(
 /**
  * 自动重启合并器：打开工程 / 切换活动工程 / 重新生成数据库常在同一秒内连续请求重启，
  * 合并为一次并保证最小间隔；执行前再等 clangd 客户端稳定，避免命令重复注册竞态。
+ *
+ * 单飞（见 tools/clangdRestart.ts）：上一次 restart 未结束时到达的请求**不会**并发排期，
+ * 而是等本次结束后补跑一次——否则一次慢重启（等 Starting 最长 20s + 稳定期 + 撞车重试）会被下一次叠上来。
+ * 执行层与判定层用同一套「重启有意义吗」的前提；不满足时留一行日志，避免"日志说在重启、实际没重启"。
  */
+let clangdRestartRetries = 0;
+let clangdRestartRetryTimer: ReturnType<typeof setTimeout> | undefined;
+
+/** 取消未到期的有限重试（手动重启 / 扩展停用时调用） */
+function clearClangdRestartRetry(): void {
+  clangdRestartRetries = 0;
+  if (clangdRestartRetryTimer) {
+    clearTimeout(clangdRestartRetryTimer);
+    clangdRestartRetryTimer = undefined;
+  }
+}
+
 const clangdRestart = createClangdRestartCoalescer(async () => {
+  // 未安装：clangd.restart 命令不存在，直接跳过并留痕（判定层的 hasConsumer 可能只因打开了源文件而为真）
+  const clangdExt = vscode.extensions.getExtension(CLANGD_EXTENSION_ID);
+  if (!clangdExt) {
+    outputChannel.info(logT('[Code::Blocks] clangd restart skipped: the clangd extension is not installed'));
+    return;
+  }
   // 已安装但未激活 = 服务器没在跑：此时执行 clangd.restart 会让 clangd 扩展在 activate 期间
   // 与命令调用各自创建一个客户端（→ applyFix 重复注册）。打开源文件会按新数据库/配置自然启动，故跳过。
-  const clangdExt = vscode.extensions.getExtension(CLANGD_EXTENSION_ID);
-  if (clangdExt && !clangdExt.isActive) return;
+  if (!clangdExt.isActive) {
+    outputChannel.info(logT('[Code::Blocks] clangd restart skipped: the clangd extension is idle (it starts on the next C/C++ file open and reads the new compile database / config then)'));
+    return;
+  }
   const client = getClangdLanguageClient();
-  if (!(await waitForClangdClientReady(client))) return;
+  if (clangdClientStateOf(client) === CLANGD_CLIENT_STATE_STOPPED) {
+    outputChannel.info(logT('[Code::Blocks] clangd restart skipped: the language client is stopped (it reads the new compile database / config when it starts again)'));
+    return;
+  }
+  if (!(await waitForClangdClientReady(client))) {
+    // 仍启动中 / 稳定期内又停止：有限重试，避免一次必要的重启被静默丢弃
+    const retry = nextClangdRestartRetry(clangdRestartRetries);
+    if (!retry.retry) {
+      outputChannel.warn(logT('[Code::Blocks] clangd restart skipped after {0} retr(y/ies): the language client never became ready', clangdRestartRetries));
+      return;
+    }
+    clangdRestartRetries = retry.attempt;
+    outputChannel.warn(logT('[Code::Blocks] clangd restart deferred ({0}/{1}); retrying in {2}s', retry.attempt, CLANGD_RESTART_MAX_RETRIES, Math.round(retry.delayMs / 1000)));
+    clangdRestartRetryTimer = setTimeout(() => {
+      clangdRestartRetryTimer = undefined;
+      clangdRestart.request();
+    }, retry.delayMs);
+    return;
+  }
+  clearClangdRestartRetry();
   await restartClangd();
 });
 
@@ -5805,7 +5853,7 @@ async function generateClangdForWorkspaceInternal(interactive: boolean): Promise
           : logT('[Code::Blocks] Active project switched; restarting clangd to refresh the open files'));
       scheduleClangdRestart();
     } else if (restartAction === 'skip-config-only') {
-      outputChannel.info(logT('[Code::Blocks] clangd is still starting after the window reload; only the config changed, so the restart is skipped (changes take effect immediately)'));
+      outputChannel.info(logT('[Code::Blocks] clangd restart skipped: only the configuration changed during the startup restore (clangd applies config changes immediately)'));
     }
   } catch (err) {
     vscode.window.showErrorMessage(i18n.t('Failed to generate compile_commands.json: {0}', (err as Error).message));
@@ -10031,4 +10079,6 @@ export function deactivate(): void {
   externalChangeRunning = false;
   if (outputChannel) outputChannel.dispose();
   if (diagnosticCollection) diagnosticCollection.dispose();
+  // 未到期的 clangd 重启重试：扩展停用后不得再回调（放在资源销毁之后，保持既有销毁顺序不变）
+  clearClangdRestartRetry();
 }

@@ -73,8 +73,14 @@ check('消费者缺失优先于恢复窗口判定：不产生「跳过」说明�
 const extSrc = require('fs').readFileSync(path.join(__dirname, '..', 'src', 'extension.ts'), 'utf-8');
 check('extension.ts 通过 decideClangdRestart 判定（逻辑集中在一处，可单测）',
   /decideClangdRestart\(\{/.test(extSrc) && /fromSessionRestore/.test(extSrc));
-check('跳过重启时输出可排查的日志（含 window reload 说明）',
-  /only the config changed, so the restart is skipped/.test(extSrc));
+check('跳过重启时输出可排查的日志（含 startup restore 说明）',
+  /only the configuration changed during the startup restore/.test(extSrc));
+check('执行层跳过时留痕（未安装 / 未激活 / 客户端已停止）',
+  /clangd restart skipped: the clangd extension is not installed/.test(extSrc)
+  && /clangd restart skipped: the clangd extension is idle/.test(extSrc)
+  && /clangd restart skipped: the language client is stopped/.test(extSrc));
+check('客户端迟迟未就绪时有限重试（不静默丢弃）',
+  /nextClangdRestartRetry\(/.test(extSrc) && /clangdRestartRetryTimer/.test(extSrc) && /clearClangdRestartRetry\(\)/.test(extSrc));
 check('启动恢复包在 withClangdBatch 内（多工程恢复只生成一次 clangd 配置）',
   /sessionRestoreInProgress = true;[\s\S]{0,400}?await withClangdBatch\(/.test(extSrc));
 check('批量打开期间只登记延后生成（不立即跑一次生成）',

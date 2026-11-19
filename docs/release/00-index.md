@@ -40,6 +40,7 @@
 | [0.8.159.md](./0.8.159.md) | 项目管理菜单拆分（`features/projectManager.ts`）与架构收敛 |
 | [0.8.160.md](./0.8.160.md) | 独立功能审计修复轮：新建工程覆盖保护、HeaderGuard 仅头文件、`#include` 系统头跳转、TODO 扫描器按语言识别注释、构建日志/调试门控本地化、工程名校验（F-02/F-03 未执行） |
 | [0.9.0.md](./0.9.0.md) | 正式版：合入 Agent 控制面（LM Tools 11 + MCP provider + CLI），构建内核下沉 `build/buildProject.ts` 由 UI/Agent 共用；`engines.vscode` → `^1.102.0`；设置 +2（第 10 分区 Agent） |
+| [0.9.1.md](./0.9.1.md) | 补丁版：clangd 重启路径修复（合并器单飞、跳过留痕、客户端未就绪有限重试、跳过文案对齐） |
 
 ## 分支预发布版本（branch prerelease）
 
