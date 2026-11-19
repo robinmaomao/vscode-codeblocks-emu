@@ -10,11 +10,12 @@
 | L-1 静态契约 | `tests/contract/` | 贡献点/激活事件/命令注册交叉校验、语言语法、调试器 schema、资源与版本一致性、NLS 键集合、**文档一致性**（覆盖矩阵汇总/性能基准条目/文档命令与相对链接/版本标记） | `npm run test:contract` |
 | L0 无头单元/集成 | `tests/test-*.js` | 解析/写回/命令行/宏/缓存/键位/书签/工具等 135+ 项（dist 层，无 VS Code 宿主） | `npm test` |
 | L1 真实工程 E2E | `tests/e2e/` | 真实工具链构建矩阵、工作区依赖、工具类功能（临时目录探针工程） | `npm run test:e2e` |
-| L2 真实宿主 | `tests/host/` | 用 `@vscode/test-electron` 启动**真实 VS Code**（默认下载 `engines.vscode` 最低版本 1.85.0，可用 `CB_VSCODE_PATH` 指向本机安装）驱动真实命令/视图/调试/设置写入 | `npm run test:host` |
+| L2 真实宿主 | `tests/host/` | 用 `@vscode/test-electron` 启动**真实 VS Code**（默认下载 `engines.vscode` 最低版本 1.102.0，可用 `CB_VSCODE_PATH` 指向本机安装）驱动真实命令/视图/调试/设置写入 | `npm run test:host` |
 | L3 像素视觉回归 | `tests/visual/` | 12 个 WebView HTML 面 × 2 主题 = 24 基线；pixelmatch 容差判定 | `npm run test:visual` |
 | L4 性能基准 | `tests/perf/` | 12 项微基准 + 真实构建耗时；硬预算 fail / 漂移 warn | `npm run test:perf` |
-| L5 打包与安装 | `tests/pack/` | VSIX 打包内容核对 + 隔离 user-data-dir 安装激活冒烟 | `npm run test:pack` |
-| L6 手工验收 | [手工验收清单](./manual-acceptance.md) | 拖拽排序、悬停菜单、原生 UI 截图留档等不可自动化项 | 人工 |
+| L5 打包与安装 | `tests/pack/` | VSIX 打包内容核对 + 隔离 user-data-dir 安装激活冒烟（含 Agent CLI/MCP bundle 与体积预算） | `npm run test:pack` |
+| L6 Agent / MCP | `tests/test-agent-policy.js`、`tests/test-api-project-edit.js`、`tests/test-api-settings-reader.js`、`tests/test-api-tool-guards.js`、`tests/test-api-build-service.js`、`tests/test-cli.js`、`tests/test-mcp-server.js`、`tests/test-ai-tools-contract.js`、`tests/e2e/test-e2e-cli-build.js`、`tests/host/suite/agent.tests.js` | 开关与只读白名单（含 MCP 暴露计划）、工程读改（含 query/preserve）、设置读取、写盘守卫（并发外部修改 / `build-busy`）、构建超时与清理、工具注册表契约、CLI 子进程与退出码（含 CLI 不受开关影响）、MCP 握手/调用/错误分支与关闭·只读门控、真实工具链 CLI 构建、宿主内 LM Tools 注册、开关切换与只读拦截 | `npm test` / `npm run test:e2e` / `npm run test:host` |
+| L7 手工验收 | [手工验收清单](./manual-acceptance.md) | 拖拽排序、悬停菜单、原生 UI 截图留档等不可自动化项 | 人工 |
 | CI | `.github/workflows/ci.yml` | windows-latest：契约 + 无头 + 打包冒烟必跑；E2E 按工具链门控；视觉/性能/宿主为手动可选作业（另有每周定时巡检）；npm 与 `.vscode-test` 缓存；覆盖矩阵汇总写入 job summary | GitHub Actions |
 
 一键串联：

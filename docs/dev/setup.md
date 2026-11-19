@@ -7,7 +7,7 @@
 ## 1. 前置条件
 
 - Windows 10/11 x64。
-- VS Code `>= 1.85`（仓库 `engines.vscode` 要求）。
+- VS Code `>= 1.102`（仓库 `engines.vscode` 要求）。
 - Git。
 - 可选：系统 Edge（视觉回归默认使用）；本机已安装时无需额外下载 Chromium。
 - 无需管理员权限：Node 与 w64devkit 都采用便携解压 + 用户 PATH。
@@ -161,7 +161,7 @@ code.cmd --extensionDevelopmentPath="." --disable-extensions --new-window
 
 ```powershell
 npm.cmd run package                                   # = vsce package（自动 compile + bundle + bundle:search）
-code.cmd --install-extension codeblocks-vscode-0.8.160.vsix --force
+code.cmd --install-extension codeblocks-vscode-0.9.0.vsix --force
 code.cmd --list-extensions --show-versions | Select-String codeblocks
 ```
 

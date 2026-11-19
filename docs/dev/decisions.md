@@ -37,6 +37,9 @@
 |---|---|---|---|
 | 审计 2.5 | 无 CI / Lint 门禁 | 最小 GitHub Actions（compile + 全量回归 + vsce 冒烟） | ✔ 已实施（0.8.129-dev：测试分层七层 + `.github/workflows/ci.yml`） |
 | 审计 3.2 | 巨型模块拆分 | 按域拆包（无功能影响，低优先） | ☐ 待确认（无排期） |
+| 审计 3.3 | 最低 VS Code 版本 1.85 限制 AI 能力接入 | 抬到 `^1.102.0`（LM Tools 稳定 + MCP GA）；`@types/vscode` 固定 1.102.0，避免误用更高版本 API | ✔ 已实施（feat/agent-control：Agent 全控制改造） |
+| 决策 A1 | Agent 如何写入 `.cbp` | 结构编辑走 canonical（`serializeProject`，语义可保证）；`compile`/`link` 保留定点改写（diff 最小）；CLI/工具用 `--format` 切换，默认 canonical | ✔ 已实施（feat/agent-control） |
+| 决策 A2 | 工具面与安全边界 | 11 个工具三端共用一份注册表；字段白名单 + `dryRun` + `external-modified` + `allowScripts` 门控；不新增命令/设置 | ✔ 已实施（feat/agent-control） |
 
 > 其余审计 P1–P3 已于 0.8.97-dev 实施；F1/F1b（0.8.95-dev）、F5/F8（0.8.94-dev）、N1/N3（0.8.110-dev）、
 > N2（0.8.109-dev + 0.8.113-dev）、N6（0.8.111-dev + 0.8.112-dev）、P1–P8/G1/G3（0.8.114-dev）、
@@ -78,8 +81,11 @@
 | 2026-10-12 | 候选缺陷 D-12/D-13/D-20 + 能力缺口 C-01 | 全部实施（随 0.8.129-dev） |
 | 2026-10-12 | 边界/异常 E2E 新发现 D-14…D-19 | 全部修复（随 0.8.129-dev） |
 | 2026-11-04 | 审计 2.5 复核 | 已由 0.8.129-dev 测试分层 + CI 落地，状态改为 ✔；仅审计 3.2 保持待确认 |
+| 2026-11-05 | Agent 控制分支版本号 | 功能分支用 semver 预发布后缀（不占用正式版号、可并存安装）；契约测试的版本正则同步支持 `-\w+` 后缀。分支版本 `0.8.143-agent-control`（已随 0.9.0 合入 main，版本号回到正式版） |
+| 2026-11-06 | Agent 控制设置开关 | 总闸 `codeblocks.agent.enabled` **默认开启**（保持既有行为）、作用域 = LM Tools + 内嵌 MCP（CLI 不受影响，避免 CI 被工作区设置意外锁死）；只读 `codeblocks.agent.readOnly` 用白名单（`project_read` / `build_status` / `compiler list,info` / `workspace info,deps,list` / `debug state`）；**未受信任工作区强制按关闭处理**；策略集中在 `src/api/agentPolicy.ts` 并由 `invokeTool()` 统一拦截 |
 | 2026-11-18 | 0.8.154 功能/健壮性批次 | G1/G2/T2/T3/T5/M2/M3/M6/M7 子集实施；原子写、单元路径 XML 转义、package.json i18n、Makefile CompileFile/DistClean 收口；P3（WebView CSP、模块拆分）仍待排期 |
 | 2026-11-19 | 0.8.157 AutoVersioning/Profiler | AutoVersioning 的 ChangesLog 只提供文本打开/创建（不移植 wxGrid）；SVN 查询失败只警告并生成空字段；`version.h` 内容不变不写。Profiler 拒绝旧 `gmon.out`，`gprof -A` 空 stdout 时回退 `--separate-files` |
+| 2026-11-19 | 0.9.0 合并 Agent 控制 | 以 `--no-ff` 合入 `feat/agent-control`：构建内核抽到 `build/buildProject.ts`（UI/CLI/MCP 共用一份），`engines.vscode` 抬到 `^1.102.0`；main 的审计修复（语言标志、缓存签名、自动版本号、可导航诊断、本地化日志）逐项移植回抽取后的模块 |
 
 ## 3. 仍开放项
 

@@ -7,7 +7,7 @@ This document describes how to set up the repository from scratch: Node.js, a na
 ## 1. Prerequisites
 
 - Windows 10/11 x64.
-- VS Code `>= 1.85` (the repository's `engines.vscode` requirement).
+- VS Code `>= 1.102` (the repository's `engines.vscode` requirement).
 - Git.
 - Optional: system Edge (visual regression uses it by default); no Chromium download is required when Edge is installed.
 - No administrator rights are required: Node and w64devkit are portable extractions with user-level PATH entries.
@@ -161,7 +161,7 @@ Manual smoke test:
 
 ```powershell
 npm.cmd run package                                   # = vsce package (auto compile + bundle + bundle:search)
-code.cmd --install-extension codeblocks-vscode-0.8.160.vsix --force
+code.cmd --install-extension codeblocks-vscode-0.9.0.vsix --force
 code.cmd --list-extensions --show-versions | Select-String codeblocks
 ```
 
