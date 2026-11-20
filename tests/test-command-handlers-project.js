@@ -206,6 +206,35 @@ function writeCbp(dir, fileName, title, withTargets = true) {
     { builds: countOut(/开始构建/), tasks: records.tasks.length },
     '确认提示 + 无构建');
 
+  // ---------- Rebuild 确认未决：不得占用构建互斥/显示“没有进行中的构建” ----------
+  {
+    const buildsBeforePending = countOut(/开始构建/);
+    const infosBeforePending = mock.infos.length;
+    const warningsBeforePending = mock.warnings.length;
+    let resolveConfirm;
+    const pendingConfirm = new Promise((resolve) => { resolveConfirm = resolve; });
+    const originalWarn = app.vscode.window.showWarningMessage;
+    app.vscode.window.showWarningMessage = (message, ...rest) =>
+      String(message).includes('重新构建') ? pendingConfirm : originalWarn(message, ...rest);
+    try {
+      const pending = app.invoke('codeblocks.rebuildProject', { project: { filename: cbpA } });
+      await new Promise((r) => setTimeout(r, 150));
+      // 确认框未决时再发一个 Build：应被构建前交互挡下（而不是先显示“构建中”）
+      await app.invoke('codeblocks.buildProject', { project: { filename: cbpA } });
+      const busyWarned = mock.warnings.slice(warningsBeforePending).some((m) => /已有构建正在进行/.test(m));
+      await app.invoke('codeblocks.build.stop');
+      const stopInfos = mock.infos.slice(infosBeforePending);
+      check('rebuildProject：确认未决时 Stop 提示等待确认（不再谎报“没有构建”）',
+        busyWarned && stopInfos.some((m) => /等待构建确认/.test(m)) && countOut(/开始构建/) === buildsBeforePending,
+        { busyWarned, stopInfos },
+        '构建前交互占位 + Stop 等待确认');
+      resolveConfirm(undefined);
+      await pending;
+    } finally {
+      app.vscode.window.showWarningMessage = originalWarn;
+    }
+  }
+
   // ---------- cleanProject：确认对话框取消 → 不清理 ----------
   if (channel()) channel().clear();
   app.setWarningButton(undefined);

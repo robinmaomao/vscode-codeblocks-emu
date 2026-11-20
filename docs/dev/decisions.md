@@ -40,6 +40,9 @@
 | 审计 3.3 | 最低 VS Code 版本 1.85 限制 AI 能力接入 | 抬到 `^1.102.0`（LM Tools 稳定 + MCP GA）；`@types/vscode` 固定 1.102.0，避免误用更高版本 API | ✔ 已实施（feat/agent-control：Agent 全控制改造） |
 | 决策 A1 | Agent 如何写入 `.cbp` | 结构编辑走 canonical（`serializeProject`，语义可保证）；`compile`/`link` 保留定点改写（diff 最小）；CLI/工具用 `--format` 切换，默认 canonical | ✔ 已实施（feat/agent-control） |
 | 决策 A2 | 工具面与安全边界 | 11 个工具三端共用一份注册表；字段白名单 + `dryRun` + `external-modified` + `allowScripts` 门控；不新增命令/设置 | ✔ 已实施（feat/agent-control） |
+| 决策 E3-1 | 构建确认与互斥锁顺序 | 停调试器 / Rebuild 确认前置（preflight），确认期间用 `buildPreflightInProgress` 占位；避免 `Building…` 挂起与 Stop 谎报 | ✔ 已实施（0.9.2 E3 修复轮） |
+| 决策 E3-2 | 外部修改检测疑似失效 | 先补诊断日志 + 真实宿主回归（`.cbp` 外部修改 → auto 重载）；多窗口/焦点模态观察保留人工复核，不先改产品逻辑 | ✔ 已实施（0.9.2 E3 修复轮，宿主 38/38） |
+| 决策 E3-3 | 工程树是否显示构建目标层级 | 保持现状：对齐 CB Manager，目标通过状态栏/右键/属性面板切换，不新增树层级 | ▣ 维持现状（既有设计） |
 
 > 其余审计 P1–P3 已于 0.8.97-dev 实施；F1/F1b（0.8.95-dev）、F5/F8（0.8.94-dev）、N1/N3（0.8.110-dev）、
 > N2（0.8.109-dev + 0.8.113-dev）、N6（0.8.111-dev + 0.8.112-dev）、P1–P8/G1/G3（0.8.114-dev）、
@@ -91,6 +94,7 @@
 | 2026-11-19 | 合并复查 R7（构建平台判定 / 等待器） | 平台判定抽成 `targetPlatformSupported`（虚拟目标按成员并集），`buildProjectTarget` 早退与 `assertTargetRunnable` 共用，修掉「首个成员不支持 → 整组静默跳过」；`debug start/continue/step` 的停止等待器在命令发送失败时先吞掉 rejection，避免 30s 后 unhandled rejection |
 | 2026-11-19 | 合并复查 R5（调试状态机） | `continue`/`step` 先把 `stopped` 置 false 再等停止（断点处不再立即返回旧状态）；`start` 中途失败回收 gdb 会话（不再永久「已在运行」）；`stop`/`dispose` 清空 reason/threadId/断点跟踪；CLI `setBreakpoints` 改「替换该文件」并跟踪断点号（与宿主一致）；`debug run` 的断点统一由 `start` 应用（CLI 先 setBreakpoints 会 not-running）；`continue`/`step` 支持 `timeoutMs` |
 | 2026-11-19 | 合并复查 R3-06 / R3-07 | 只读白名单放开 `debug stack` / `variables`（纯查询；`evaluate` 会真实执行函数，仍拒绝）；`codeblocks_run` 增加默认超时 **120000ms**（显式 `0` = 不限时），避免死循环程序永久占住工具调用 |
+| 2026-11-20 | E3 观察项处置 | Rebuild/停调试确认移到 `claimBuildMutex()` 之前（`runBuildPreflight`），确认期间 Stop 返回“等待构建确认”；外部修改检测补 `.cbp` 事件 / tracker / 焦点 / 问询日志并新增宿主回归；工程树不含 target 层级按既有设计维持 |
 
 ## 3. 仍开放项
 

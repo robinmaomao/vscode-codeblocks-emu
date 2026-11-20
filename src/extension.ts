@@ -236,6 +236,8 @@ const buildDiagnosticsBudget: BuildDiagnosticsBudget = { errorCount: 0, truncate
 let currentBuildCancel: BuildCancelSource | undefined;
 /** 构建进行中互斥标志（防止双开构建进程打架） */
 let buildInProgress = false;
+/** 构建前交互（停调试器 / Rebuild 确认）进行中：与真正的构建分开计数，避免状态栏误显示“构建中” */
+let buildPreflightInProgress = false;
 /**
  * 构建期间被推迟的 clangd 重启（见 scheduleClangdRestart）。
  * 构建中切换活动工程/改编译器会重建 compile_commands.json 并要求 clangd 重启；
@@ -2131,6 +2133,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   // 停止构建（编译随时停止）
   context.subscriptions.push(
     vscode.commands.registerCommand('codeblocks.build.stop', () => {
+      if (buildPreflightInProgress) {
+        vscode.window.showInformationMessage(i18n.t('Waiting for the build confirmation dialog to finish'));
+        return;
+      }
       if (!currentBuildCancel || currentBuildCancel.isCancelled()) {
         vscode.window.showInformationMessage(i18n.t('No build in progress'));
         return;
@@ -3493,7 +3499,9 @@ function handleProjectFileCreated(uri: vscode.Uri): void {
 /** .cbp 变更：只处理已打开的工程（未打开的工程无需重载，也不会触发工作区扫描） */
 function handleProjectFileChanged(uri: vscode.Uri): void {
   const file = uri.fsPath;
-  if (!openProjects.some((p) => normPath(p.filename) === normPath(file))) return;
+  const opened = openProjects.some((p) => normPath(p.filename) === normPath(file));
+  outputChannel?.info(logT('[Code::Blocks] .cbp change event: {0} (opened={1})', file, opened));
+  if (!opened) return;
   scheduleExternalChangeCheck(file);
 }
 
@@ -3555,10 +3563,25 @@ function scheduleExternalChangeCheck(file: string, delayMs = 200): void {
 function queueExternalChange(file: string): void {
   if (detectExternalChangeMode() === 'off') return;
   const project = openProjects.find((p) => normPath(p.filename) === normPath(file));
-  if (!project) return;
+  if (!project) {
+    outputChannel?.debug(logT('[Code::Blocks] External change ignored (project is not open): {0}', file));
+    return;
+  }
   // <Option check_files="0">：工程显式关闭外部修改检测（对齐 CB cbProject::GetCheckForExternallyModifiedFiles）
-  if (project.checkForExternallyModifiedFiles === false) return;
-  if (!projectChangeTracker.hasChanged(project.filename)) return;
+  if (project.checkForExternallyModifiedFiles === false) {
+    outputChannel?.debug(logT('[Code::Blocks] External change ignored (check_files=0): {0}', file));
+    return;
+  }
+  const changed = projectChangeTracker.hasChanged(project.filename);
+  outputChannel?.info(logT(
+    '[Code::Blocks] External change check: {0} (mode={1}, tracked={2}, changed={3})',
+    file,
+    detectExternalChangeMode(),
+    projectChangeTracker.isTracked(project.filename),
+    changed,
+  ));
+  if (!changed) return;
+  outputChannel?.info(logT('[Code::Blocks] External change detected: {0} (mode={1})', project.filename, detectExternalChangeMode()));
   pendingExternalChanges.add(normPath(project.filename));
   drainExternalChanges();
 }
@@ -3566,9 +3589,18 @@ function queueExternalChange(file: string): void {
 /** 窗口重新获得焦点：检查全部已打开工程（对齐 Code::Blocks 的应用激活时检查） */
 function checkExternallyModifiedProjects(): void {
   if (detectExternalChangeMode() === 'off') return;
+  let changedCount = 0;
   for (const p of [...openProjects]) {
     if (p.checkForExternallyModifiedFiles === false) continue;
-    if (projectChangeTracker.hasChanged(p.filename)) pendingExternalChanges.add(normPath(p.filename));
+    if (projectChangeTracker.hasChanged(p.filename)) {
+      pendingExternalChanges.add(normPath(p.filename));
+      changedCount++;
+    }
+  }
+  if (changedCount) {
+    outputChannel?.info(logT('[Code::Blocks] Window focus check found {0} externally modified project(s)', changedCount));
+  } else {
+    outputChannel?.debug(logT('[Code::Blocks] Window focus check: no external project changes ({0} open)', openProjects.length));
   }
   if (!pendingExternalChanges.size) return;
   drainExternalChanges();
@@ -3597,11 +3629,13 @@ function drainExternalChanges(): void {
         const reload = i18n.t('Reload');
         const reloadAll = i18n.t('Reload All');
         const ignore = i18n.t('Ignore');
+        outputChannel?.info(logT('[Code::Blocks] Asking to reload externally modified project: {0}', project.filename));
         const answer = await vscode.window.showWarningMessage(
           i18n.t('Project "{0}" was modified on disk. Reload it? (targets and files are re-read)', project.title),
           { modal: true },
           ...(hasMore ? [reload, reloadAll, ignore] : [reload, ignore]),
         );
+        outputChannel?.debug(logT('[Code::Blocks] External change answer: {0}', answer ?? 'dismissed'));
         if (answer === reload || answer === reloadAll) {
           const ok = await reloadProjectFromDisk(project.filename);
           if (ok && answer === reloadAll) {
@@ -7930,12 +7964,39 @@ function reportBuildResult(success: boolean, cancelled: boolean, buildStartMs: n
  * 同一 tick 内连续两次构建命令会双双通过检查 ⇒ 并发双跑（写同一 obj/exe，且 currentBuildCancel 被后者覆盖）。
  */
 function claimBuildMutex(): boolean {
-  if (buildInProgress) {
+  if (buildInProgress || buildPreflightInProgress) {
     vscode.window.showWarningMessage(i18n.t('A build is already running — wait for it to finish or stop it first'));
     return false;
   }
   buildInProgress = true;
   return true;
+}
+
+/** 构建前是否已有构建或构建前交互占用（入口预检用） */
+function buildBusy(): boolean {
+  return buildInProgress || buildPreflightInProgress;
+}
+
+/**
+ * 构建前交互：停调试器 + Rebuild 确认。
+ *
+ * 必须在 `claimBuildMutex()` **之前**执行：确认框/停调试器对话框期间若已置 `buildInProgress`，
+ * 状态栏会显示“Building…”，而 `currentBuildCancel` 尚未创建，Stop 只能提示“没有进行中的构建”。
+ * 单独用 `buildPreflightInProgress` 占位，既能阻止并发入口，又不会污染构建状态栏。
+ */
+async function runBuildPreflight(rebuild: boolean, interactive: boolean): Promise<boolean> {
+  if (buildPreflightInProgress) {
+    vscode.window.showWarningMessage(i18n.t('A build is already running — wait for it to finish or stop it first'));
+    return false;
+  }
+  buildPreflightInProgress = true;
+  try {
+    if (!(await stopDebuggerIfRunning(interactive))) return false;
+    if (rebuild && interactive && !(await confirmRebuild())) return false;
+    return true;
+  } finally {
+    buildPreflightInProgress = false;
+  }
 }
 
 /**
@@ -7996,8 +8057,8 @@ function publishBuildDiagnostic(uri: vscode.Uri, diag: vscode.Diagnostic): void 
 
 /** 主 Build —— 对齐 CB OnBuild：仅活动项目；多工程且无活动项目时询问（AskForActiveProject:1080） */
 async function build(rebuild: boolean): Promise<boolean> {
-  // 构建互斥：进行中时忽略新的构建命令（防止双开构建进程打架）
-  if (buildInProgress) {
+  // 构建互斥：进行中/构建前交互中时忽略新的构建命令（防止双开构建进程打架）
+  if (buildBusy()) {
     vscode.window.showWarningMessage(i18n.t('A build is already running — wait for it to finish or stop it first'));
     return false;
   }
@@ -8027,7 +8088,16 @@ async function build(rebuild: boolean): Promise<boolean> {
 
 /** Build Workspace —— 对齐 CB OnBuildWorkspace：全部工程选中目标，依赖拓扑排序 */
 async function buildWorkspace(rebuild: boolean, clearLog = true): Promise<boolean> {
-  // 构建互斥：进行中时忽略新的构建命令（防止双开构建进程打架）；置位必须先于任何 await（D-15）
+  // 构建互斥：进行中/构建前交互中时忽略新的构建命令；真正的互斥占位仍在 preflight 之后
+  if (buildBusy()) {
+    vscode.window.showWarningMessage(i18n.t('A build is already running — wait for it to finish or stop it first'));
+    return false;
+  }
+  if (openProjects.length === 0) {
+    vscode.window.showWarningMessage(i18n.t('Open a Code::Blocks project (.cbp) first'));
+    return false;
+  }
+  if (!(await runBuildPreflight(rebuild, true))) return false;
   if (!claimBuildMutex()) return false;
   try {
     return await buildWorkspaceLocked(rebuild, clearLog);
@@ -8039,20 +8109,10 @@ async function buildWorkspace(rebuild: boolean, clearLog = true): Promise<boolea
   }
 }
 
-/** Build Workspace 主体（互斥已由 buildWorkspace 占有） */
+/** Build Workspace 主体（互斥与构建前交互已由 buildWorkspace 处理） */
 async function buildWorkspaceLocked(rebuild: boolean, clearLog: boolean): Promise<boolean> {
   if (openProjects.length === 0) {
     vscode.window.showWarningMessage(i18n.t('Open a Code::Blocks project (.cbp) first'));
-    return false;
-  }
-
-  // 对齐 DoBuild:2897：构建/重建/清理前须先停止调试会话
-  if (!(await stopDebuggerIfRunning())) {
-    return false;
-  }
-
-  // Rebuild 前由用户确认（对齐 Code::Blocks 的 Rebuild 确认对话框）
-  if (rebuild && !(await confirmRebuild())) {
     return false;
   }
 
@@ -8165,7 +8225,18 @@ interface BuildSingleProjectOptions {
 
 /** 构建单个项目（右键菜单的 Build/Rebuild 与主 Build 命令使用，对齐 CB 单活动项目 Build） */
 async function buildSingleProject(filename: string, rebuild: boolean, opts: BuildSingleProjectOptions = {}): Promise<boolean> {
-  // 构建互斥：置位必须先于任何 await（D-15，防止同 tick 双发并发双跑）
+  const interactive = opts.interactive !== false;
+  if (buildBusy()) {
+    vscode.window.showWarningMessage(i18n.t('A build is already running — wait for it to finish or stop it first'));
+    return false;
+  }
+  // 先校验工程存在：避免为无效节点先弹停调试器/Rebuild 确认
+  if (!openProjects.some((p) => p.filename === filename)) {
+    vscode.window.showWarningMessage(i18n.t('Project not found'));
+    return false;
+  }
+  if (!(await runBuildPreflight(rebuild, interactive))) return false;
+  // 预检通过后再抢占真正的构建互斥；两步之间若被其它构建插入，claim 会拒绝
   if (!claimBuildMutex()) return false;
   try {
     return await buildSingleProjectLocked(filename, rebuild, opts);
@@ -8176,21 +8247,11 @@ async function buildSingleProject(filename: string, rebuild: boolean, opts: Buil
   }
 }
 
-/** 构建单个项目主体（互斥已由 buildSingleProject 占有） */
+/** 构建单个项目主体（互斥与构建前交互已由 buildSingleProject 处理） */
 async function buildSingleProjectLocked(filename: string, rebuild: boolean, opts: BuildSingleProjectOptions = {}): Promise<boolean> {
   const interactive = opts.interactive !== false;
   // 超时可能在构建真正开始前就触发（前序步骤都要 await）：每个检查点都提前收尾
   if (opts.cancelSource?.isCancelled()) return false;
-  // 对齐 DoBuild:2897：构建前须先停止调试会话
-  if (!(await stopDebuggerIfRunning(interactive))) {
-    return false;
-  }
-  if (opts.cancelSource?.isCancelled()) return false;
-
-  // Rebuild 前由用户确认（对齐 Code::Blocks 的 Rebuild 确认对话框）；agent 调用时跳过
-  if (rebuild && interactive && !(await confirmRebuild())) {
-    return false;
-  }
 
   const project = openProjects.find((p) => p.filename === filename);
   if (!project) {

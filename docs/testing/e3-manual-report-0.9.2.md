@@ -1,6 +1,6 @@
 # E3 手工验收记录（0.9.2）
 
-> 日期：2026-11-19
+> 日期：2026-11-19（2026-11-20 补充修复轮记录，见 §6）
 > 版本：`robinmaomao.codeblocks-vscode@0.9.2`（`.cb-tools/codeblocks-vscode-0.9.2.vsix`）
 > 方式：Computer Use 在本会话不可启用（`/computer on` 后仍返回 unattended 限制），改用**可复现的 GUI 自动化**：
 > 便携 VS Code 1.102.0（`.vscode-test/vscode-win32-x64-archive-1.102.0`）+ 独立临时 profile + 安装 0.9.2 VSIX，
@@ -98,14 +98,33 @@
 
 ## 4. 待人工复核 / 后续
 
+> 以下为 E3 当日原始记录；处置结果见 §6（Rebuild 已修复、外部检测已诊断 + 宿主回归、工程树维持现状）。
+
 1. **Rebuild 确认与构建互斥（优先级最高）**：在真实窗口（非 CDP 后台）执行 Rebuild，确认模态是否置前；若出现 `Building…` 但无模态且 Stop 无效，应把 `confirmRebuild()` 移到 `claimBuildMutex()` 之前，或让 Stop 在确认阶段可取消。当前仅记录现象，未改产品代码。
 2. **外部修改检测**：在普通用户 profile/非隐藏目录重复“外部改 `.cbp` → 切回 VS Code”，确认 watcher/焦点路径；若仍不弹，需要检查 `detect.checkExternalChanges` 与 watcher 排除。
 3. **工程树构建目标层级**：对照 Code::Blocks 手工清单确认是否需要在树中显示 target 节点；当前通过状态栏/右键切换目标。
 4. **原生对话框与拖拽手势**：Open/New 文件对话框、项目节点真实拖拽、悬停菜单为 OS/指针级交互，CDP 自动化不覆盖，保留人工抽查。
-5. **性能/窄面板/像素级视觉**：由 L3 视觉 26 基线、L4 性能 13 项、宿主 37 用例覆盖；人工只需抽查暗/亮主题与 500px 窄面板。
+5. **性能/窄面板/像素级视觉**：由 L3 视觉 26 基线、L4 性能 13 项、宿主 38 用例覆盖；人工只需抽查暗/亮主题与 500px 窄面板。
 
 ## 5. 结论
 
 - 0.9.2 的核心 GUI 链路（工程打开/多工程树、状态栏菜单、构建/运行、属性/构建选项/快捷键 WebView、真实 GDB 断点、语言切换、工程搜索）在便携 VS Code 1.102.0 中**可正常操作并产生预期结果**。
-- 未发现阻断级 GUI 缺陷；Rebuild 模态与外部修改检测两项需在真实窗口人工确认，已记录为观察项而非定论。
+- 未发现阻断级 GUI 缺陷；Rebuild 模态与外部修改检测两项需在真实窗口人工确认，已记录为观察项而非定论（后续处置见 §6）。
 - E3 的自动化证据可重复：临时 profile、安装 VSIX、`--remote-debugging-port` + Playwright CDP 脚本（`.cb-tools/audit-0.9.2/e3/driver.js`）。
+
+## 6. 修复轮（2026-11-20）
+
+用户确认后实施（未改变 E3 历史记录）：
+
+1. **Rebuild/Stop 状态不一致（已修复）**
+   - 根因：`buildSingleProject` / `buildWorkspace` 在 `claimBuildMutex()` 之后才等待“停调试器 / Rebuild 确认”模态；期间 `buildInProgress=true` 但 `currentBuildCancel` 尚未创建，状态栏显示 Building，Stop 误报“没有进行中的构建”。
+   - 修复：新增构建前交互 `runBuildPreflight()`，把停调试器与 Rebuild 确认移到互斥锁之前；用独立的 `buildPreflightInProgress` 占位阻止并发入口。Stop 在确认期间提示“正在等待构建确认对话框”。
+   - 回归：`test-command-handlers-project.js` 新增“确认未决时 Stop 提示等待确认、且不启动构建”断言；确认取消后互斥锁正常释放。
+2. **外部修改检测（诊断 + 宿主回归）**
+   - 新增输出通道诊断：`.cbp` 变更事件、打开状态、检测模式、tracker 是否跟踪/变化、焦点检查结果、询问/处理结果。
+   - 新增宿主用例 `tests/host/suite/external-change.tests.js`：真实 VS Code 中打开临时工程，外部追加 `.cbp` 后断言 `External change detected` 并自动重载（auto 模式）。宿主 38/38 通过。
+   - 结论：watcher + tracker + 重载链路正常；E3 未弹窗更可能是 CDP 自动化/多窗口焦点导致模态不可见，保留人工单窗口复核，不再按产品缺陷处理。
+3. **工程树构建目标层级（不实施）**
+   - 仓库既有设计明确“工程树对齐 CB Manager，不含目标层级”（见 `docs/dev/progress.md`），目标通过状态栏/右键/属性面板切换；维持现状。
+
+修复轮验证：`npm test` 233/0/1、`npm run test:contract` 3/0、`npm run test:host` 38/0；`docs/guide/agent-control*.md` 无需变更。
