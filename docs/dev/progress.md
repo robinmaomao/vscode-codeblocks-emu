@@ -141,6 +141,8 @@ npm.cmd test
 
 > **0.9.2 E3 GUI 验收**：Computer Use 不可用，改用便携 VS Code 1.102.0 + 独立 profile + 0.9.2 VSIX，通过 CDP/Playwright 驱动真实工作台完成工程树/9 大菜单/构建运行/属性与构建选项 WebView/快捷键面板/真实 GDB 断点/中英切换/工程搜索；记录 Rebuild 模态与外部修改检测两个待人工复核项。报告见 [e3-manual-report-0.9.2.md](../testing/e3-manual-report-0.9.2.md)。
 
+> **0.9.2 E3 修复轮**：用户确认后按“Rebuild 确认前置 / 外部修改先诊断 / 工程树保持现状”实施。构建入口新增 `runBuildPreflight()`，把停调试器与 Rebuild 确认移到构建互斥锁**之前**，确认期间 Stop 提示“等待构建确认”而不再谎报无构建；外部修改检测补 `.cbp` 事件、tracker、焦点、问询/处理诊断日志，并新增真实宿主 `tests/host/suite/external-change.tests.js`（外部改 `.cbp` → auto 重载）；工程树 target 层级确认为既有设计不实施。验证：无头 233/0/1、契约 3/0、宿主 38/0。
+
 > **0.9.2 全量逐项审计 + 修复轮**：E0–E4 证据分级覆盖 136 命令 / 93 设置 / 6 视图 / 34 键位 / 6 语言语法 / 30 DAP / 13 WebView 面 + Agent 11 工具 / CLI / MCP；命令入口冒烟 112→120 并新增分区守卫；发现并修复 D-01…D-13（P3 ×4 / P4 ×9，无 P1/P2）。修复含 Agent 三端运行期校验、`run` 退出码传播、`export out` 限定工程目录、mock Task/terminals，以及 36 条命令与 6 个设置的行为断言；无头 233/0/1、契约 3/0。报告见 [functional-audit-0.9.2.md](../testing/functional-audit-0.9.2.md)（§12 修复记录）。
 
 ## 文档：GitHub Release 页面格式统一
