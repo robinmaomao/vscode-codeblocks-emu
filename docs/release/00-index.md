@@ -42,6 +42,7 @@
 | [0.9.0.md](./0.9.0.md) | 正式版：合入 Agent 控制面（LM Tools 11 + MCP provider + CLI），构建内核下沉 `build/buildProject.ts` 由 UI/Agent 共用；`engines.vscode` → `^1.102.0`；设置 +2（第 10 分区 Agent） |
 | [0.9.1.md](./0.9.1.md) | 补丁版：clangd 重启路径修复（合并器单飞、跳过留痕、客户端未就绪有限重试、跳过文案对齐） |
 | [0.9.2.md](./0.9.2.md) | 补丁版：0.9.0 合并后九轮复查（目标平台守卫 / `no-build`、构建挂起、调试跨端归一化与断点替换、编辑深拷贝、导出保护、CLI 退出码与 JSON） |
+| [0.9.3.md](./0.9.3.md) | 功能版：Agent Skill、`@codeblocks`、Agent Status、工具确认文案、`agent.allowScripts` 脚本总闸、Agent 文档/recipes |
 
 ## 分支预发布版本（branch prerelease）
 

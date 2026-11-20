@@ -67,7 +67,7 @@ npm.cmd run compile
 npm.cmd run package
 
 # 安装（版本号以 package.json 为准）
-code --install-extension "codeblocks-vscode-0.9.2.vsix" --force
+code --install-extension "codeblocks-vscode-0.9.3.vsix" --force
 
 # 全量回归测试
 npm.cmd test
@@ -136,12 +136,15 @@ npm.cmd test
 | [0.9.0](../release/0.9.0.md) | 合入 Agent 控制面（LM Tools 11 + MCP provider + CLI）：构建内核下沉 `build/buildProject.ts` 由 UI/Agent 共用；`engines.vscode` → `^1.102.0`；设置 +2（第 10 分区 Agent） |
 | [0.9.1](../release/0.9.1.md) | clangd 重启路径修复：合并器改单飞（不并发叠加）、跳过留痕、客户端未就绪时有限重试、跳过文案对齐 |
 | [0.9.2](../release/0.9.2.md) | 合并后九轮复查：目标平台守卫与 `no-build`、构建不再被通知挂起、调试响应归一化 / 断点替换、编辑深拷贝、导出保护、CLI 退出码与 JSON、只读白名单补 debug |
+| [0.9.3](../release/0.9.3.md) | Agent 上手体验与安全护栏：内置 `codeblocks-project` Skill + 安装命令、`@codeblocks` participant、Agent Status、工具确认文案、`agent.allowScripts` 脚本总闸、Agent 文档/recipes |
 
-> 当前版本 **0.9.2**（正式版；发布说明见 [release/0.9.2.md](../release/0.9.2.md)，上一版见 [release/0.9.1.md](../release/0.9.1.md)）；测试报告见 [test-report-0.9.2.md](../testing/test-report-0.9.2.md)；无头回归见 `npm test`（另有契约 / E2E / 视觉 / 性能 / 打包 / 宿主分层，见 [测试方案](../testing/strategy.md)）。
+> 当前版本 **0.9.3**（功能版；发布说明见 [release/0.9.3.md](../release/0.9.3.md)，上一版见 [release/0.9.2.md](../release/0.9.2.md)）；测试报告见 [test-report-0.9.3.md](../testing/test-report-0.9.3.md)；无头回归见 `npm test`（另有契约 / E2E / 视觉 / 性能 / 打包 / 宿主分层，见 [测试方案](../testing/strategy.md)）。
 
 > **0.9.2 E3 GUI 验收**：Computer Use 不可用，改用便携 VS Code 1.102.0 + 独立 profile + 0.9.2 VSIX，通过 CDP/Playwright 驱动真实工作台完成工程树/9 大菜单/构建运行/属性与构建选项 WebView/快捷键面板/真实 GDB 断点/中英切换/工程搜索；记录 Rebuild 模态与外部修改检测两个待人工复核项。报告见 [e3-manual-report-0.9.2.md](../testing/e3-manual-report-0.9.2.md)。
 
 > **0.9.2 E3 修复轮**：用户确认后按“Rebuild 确认前置 / 外部修改先诊断 / 工程树保持现状”实施。构建入口新增 `runBuildPreflight()`，把停调试器与 Rebuild 确认移到构建互斥锁**之前**，确认期间 Stop 提示“等待构建确认”而不再谎报无构建；外部修改检测补 `.cbp` 事件、tracker、焦点、问询/处理诊断日志，并新增真实宿主 `tests/host/suite/external-change.tests.js`（外部改 `.cbp` → auto 重载）；工程树 target 层级确认为既有设计不实施。验证：无头 233/0/1、契约 3/0、宿主 38/0。
+
+> **0.9.3 Agent 体验与安全**：内置 `codeblocks-project` Skill（`contributes.chatSkills` + Install Agent Skill 命令）、`@codeblocks` participant（`/read` `/build` `/fix` `/debug` `/status` `/help`）、Agent Status 命令、工具确认文案、`codeblocks.agent.allowScripts` 脚本总闸（默认 false）；文档补 5 分钟上手/权限矩阵/CLI·MCP 路径/排障与 recipes。验证：无头 236/0/1、契约 3/0、宿主 38/38、打包 17 断言。
 
 > **0.9.2 全量逐项审计 + 修复轮**：E0–E4 证据分级覆盖 136 命令 / 93 设置 / 6 视图 / 34 键位 / 6 语言语法 / 30 DAP / 13 WebView 面 + Agent 11 工具 / CLI / MCP；命令入口冒烟 112→120 并新增分区守卫；发现并修复 D-01…D-13（P3 ×4 / P4 ×9，无 P1/P2）。修复含 Agent 三端运行期校验、`run` 退出码传播、`export out` 限定工程目录、mock Task/terminals，以及 36 条命令与 6 个设置的行为断言；无头 233/0/1、契约 3/0。报告见 [functional-audit-0.9.2.md](../testing/functional-audit-0.9.2.md)（§12 修复记录）。
 

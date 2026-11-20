@@ -2,7 +2,7 @@
 
 > 语言：**中文** ｜ [English](./usage.en.md)
 >
-> 版本：0.9.2 ｜ 本扩展为 Code::Blocks 核心功能的原生移植，直接驱动 GCC / GDB，**不依赖** `tasks.json` / `launch.json`。
+> 版本：0.9.3 ｜ 本扩展为 Code::Blocks 核心功能的原生移植，直接驱动 GCC / GDB，**不依赖** `tasks.json` / `launch.json`。
 
 ---
 
@@ -51,7 +51,7 @@ Code::Blocks for VS Code 是一个「迷你 IDE 内核」：直接解析 `.cbp` 
 ### 2.1 从 VSIX 安装
 
 ```powershell
-code --install-extension codeblocks-vscode-0.9.2.vsix --force
+code --install-extension codeblocks-vscode-0.9.3.vsix --force
 ```
 
 ### 2.2 从源码构建
@@ -59,7 +59,7 @@ code --install-extension codeblocks-vscode-0.9.2.vsix --force
 ```powershell
 npm install
 npm run package
-code --install-extension codeblocks-vscode-0.9.2.vsix --force
+code --install-extension codeblocks-vscode-0.9.3.vsix --force
 ```
 
 > `npm run package` = `vsce package`（打包前自动执行 `vscode:prepublish` 钩子 = `tsc` 编译（`dist/`，本地测试用）+ **esbuild 单文件打包**（`bundle/extension.js`，发布入口））；
@@ -776,10 +776,13 @@ Build Log 视图位于**底部 Panel**（打开方式：`Ctrl+J` 后选择「Bui
 
 ### 13.8 Agent（Copilot / MCP）
 
+> 5 分钟上手：信任工作区 → 打开 `.cbp` → Chat 切到 **Agent** 模式 → Configure Tools 勾选 `Code::Blocks` 工具 → 让 Agent 先 `project_read` 再改/构建。完整步骤、安全配置与排障见 [Agent 控制](./agent-control.md)；可复制工作流见 [Agent recipes](./agent-recipes.md)。
+
 | 设置项 | 默认值 | 说明 |
 |--------|--------|------|
 | `codeblocks.agent.enabled` | `true` | Agent 控制总闸：关闭后 11 个 Language Model Tools 不注册、内嵌 MCP server 不暴露；未受信任工作区一律按关闭处理。切换即时生效（独立的 `cb-cli` 不受影响） |
 | `codeblocks.agent.readOnly` | `false` | 只读模式：只放行 `project_read` / `build_status` / `compiler list,info` / `workspace info,deps,list` / `debug state,stack,variables`，其余返回 `read-only` |
+| `codeblocks.agent.allowScripts` | `false` | 全局脚本开关：LM Tools / MCP 修改 `commandsBeforeBuild`、`buildScripts` 等字段时，除单次 `allowScripts: true` 外还必须开启本设置。`cb-cli` 仍只认单次开关。即时生效 |
 
 ---
 
@@ -1027,6 +1030,16 @@ A：**已全覆盖**（0.8.132 批次 2，2026-11 菜单优化后同步）。构
 > Export Makefile 已移入 Build 菜单（对齐 CB `compiler_menu.xrc`）。
 > 详情与决策见 [未实现功能待办](../dev/backlog.md) §2（明确不移植清单）。
 > 提醒：以上扩展为社区/厂商产品，请自行评估安装；本扩展不内置或捆绑它们。
+
+## 16.1 0.9.3 新增（Agent 体验与安全）
+
+- **Agent Skill**：随包 `skills/codeblocks-project/SKILL.md`，通过 `contributes.chatSkills` 注册；**Code::Blocks: Install Agent Skill…** 可安装到工作区 `.github/skills/` 或用户 `~/.copilot/skills/`，已存在时确认覆盖。
+- **`@codeblocks` participant**：`/read` `/build` `/fix` `/debug` `/status` `/help` 确定性命令，复用同一 `invokeTool` 策略。
+- **Agent Status**：**Code::Blocks: Agent Status** 显示信任/总闸/只读/脚本策略/工具数/CLI/MCP/Skill 路径。
+- **确认文案**：写入、运行、调试变更、导出、工作区 open/close/setActive 前确认；只读与 `dryRun` 不打扰。
+- **脚本总闸**：`codeblocks.agent.allowScripts`（默认 `false`）与单次 `allowScripts: true` 同时满足才可改脚本字段；`cb-cli` 不受影响。
+- **文档**：Agent 指南补 5 分钟上手、权限矩阵、CLI/MCP 路径、排障与 Skill；新增 [Agent recipes](./agent-recipes.md)。
+- **清单**：命令 138 / 设置 94 / 视图 6 / 键位 34 / LM Tools 11 / MCP provider 1 / chat participant 1 / chat skill 1。
 
 ## 17. 0.9.2 缺陷修复
 

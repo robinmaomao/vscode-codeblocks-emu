@@ -1,6 +1,6 @@
 # Agent Control (Copilot / MCP / CLI)
 
-> Version: **0.8.143-agent-control** (pre-release build of `feat/agent-control`) | Requires VS Code **1.102.0+**
+> Version: **0.9.3** | Requires VS Code **1.102.0+**
 >
 > This page explains how AI agents (GitHub Copilot Chat agent mode) and any MCP client or shell
 > can fully control Code::Blocks projects through this extension: read/edit `.cbp`, build, rebuild,
@@ -22,9 +22,10 @@ All three share one implementation (`src/api/toolRegistry.ts`): identical argume
 
 ## 2. Quick start (Copilot Chat)
 
-1. Install and enable the extension, open a workspace containing a `.cbp`.
-2. Open Chat, switch to **Agent** mode, open **Configure Tools** and make sure the `Code::Blocks: ...` tools are enabled.
-3. Describe the task:
+1. Install and enable the extension, open a workspace containing a `.cbp`, and trust the workspace in **Workspaces: Manage Workspace Trust** (the extension is not activated in untrusted workspaces).
+2. Open Chat and switch to **Agent** mode (**Ask/Edit mode does not call these tools automatically**); open **Configure Tools** and make sure the `Code::Blocks: ...` tools are enabled.
+3. Do a read-only check first: ask the agent to call `codeblocks_project_read { section: "summary" }` and confirm it returns the project and targets.
+4. Describe the task:
 
 ```text
 Read test-project/hello-cb.cbp, add -std=c++17 to the Debug target compiler options,
@@ -93,6 +94,28 @@ Rules:
   for unsupported operations.
 - **External modification guard**: returns `external-modified` if the file changed during the edit;
   pass `force: true` to overwrite.
+- **Global script gate**: LM Tools / MCP also require `codeblocks.agent.allowScripts = true`; otherwise even
+  `allowScripts: true` fails with `invalid-input`. `cb-cli` is not affected by this setting.
+
+### 3.2 Permissions, confirmations and read-only matrix
+
+| Tool | Read | Write / execute | Allowed in read-only | Confirmation in VS Code |
+|---|---|---|---|---|
+| `project_read` / `build_status` | ✅ | — | ✅ | no |
+| `compiler list/info` | ✅ | — | ✅ | no |
+| `workspace info/deps/list` | ✅ | — | ✅ | no |
+| `debug state/stack/variables` | ✅ | — | ✅ | no |
+| `project_edit` | ✅ | writes `.cbp` | ❌ | yes unless `dryRun` |
+| `project_file` / `project_target` | ✅ | writes `.cbp` | ❌ | yes |
+| `build` | ✅ | runs build/scripts | ❌ | no (explicit build command) |
+| `run` | ✅ | runs the program | ❌ | yes |
+| `debug start/stop/breakpoints/evaluate/continue/step/run` | ✅ | controls the process | ❌ | yes |
+| `export` | ✅ | writes exported files | ❌ | yes |
+| `workspace open/close/setActive` | ✅ | changes open projects | ❌ | yes |
+
+> `build` executes the project Makefile / build scripts. Confirmations do not replace workspace trust and code review.
+> MCP `readOnlyHint` is a **whole-tool** annotation: only `project_read` / `build_status` are marked read-only;
+> `compiler` / `workspace` / `debug` have some read-only actions but are conservatively marked `false`.
 
 ---
 
@@ -169,6 +192,21 @@ Notes:
 
 Shipped as `<extension>/bundle/cb-cli.js`; in development use `node dist/cli/cb-cli.js`.
 
+Installed extension directory (Windows):
+
+```powershell
+# Version must match the installed extension
+$ext = "$env:USERPROFILE\.vscode\extensions\robinmaomao.codeblocks-vscode-0.9.3"
+node "$ext\bundle\cb-cli.js" --help
+```
+
+macOS / Linux:
+
+```bash
+ext="$HOME/.vscode/extensions/robinmaomao.codeblocks-vscode-0.9.3"
+node "$ext/bundle/cb-cli.js" --help
+```
+
 ```bash
 node bundle/cb-cli.js show app.cbp --section summary --json
 node bundle/cb-cli.js edit app.cbp --ops-file ops.json --format preserve --json
@@ -215,11 +253,14 @@ the tools become available in Chat.
     "codeblocks": {
       "type": "stdio",
       "command": "node",
-      "args": ["<extension>/bundle/cb-mcp.js"]
+      "args": ["C:/Users/<you>/.vscode/extensions/robinmaomao.codeblocks-vscode-0.9.3/bundle/cb-mcp.js"]
     }
   }
 }
 ```
+
+> On Windows use forward slashes or escaped backslashes. Set `cwd` to the project/workspace directory.
+> On macOS/Linux use `~/.vscode/extensions/robinmaomao.codeblocks-vscode-0.9.3/bundle/cb-mcp.js`.
 
 > Launch external clients **from the project directory** (or set their cwd to it), otherwise only the
 > user-level `codeblocks.agent.*` settings are visible. A standalone process also cannot query VS Code's
@@ -228,8 +269,8 @@ the tools become available in Chat.
 
 Behaviour: identical tool names/arguments as section 3; failures return `isError: true` with a JSON body;
 logs go to stderr only (stdout is the protocol channel). `tools/list` includes
-`annotations.title` and `annotations.readOnlyHint` (same source as the read-only allow-list) for client
-display and approval.
+`annotations.title` and `annotations.readOnlyHint` for client display and approval. The hint is tool-level:
+only tools that are entirely read-only are marked `true`; action-scoped tools are conservatively `false`.
 
 ### 6.3 Workspace trust (Restricted Mode)
 
@@ -242,18 +283,20 @@ and build scripts from the workspace, and starts debuggers, which is all "runnin
 
 ## 7. Switches and safety modes
 
-Two settings in `settings.json` (both apply **immediately, no reload**):
+Three settings in `settings.json` (all apply **immediately, no reload**):
 
 | Setting | Default | Behaviour |
 |---|---|---|
 | `codeblocks.agent.enabled` | `true` | Master switch. When off, the 11 Language Model Tools are **not registered** (Copilot cannot see or call them) and the bundled MCP server is not exposed; an externally launched `cb-mcp.js` also refuses calls (`disabled`). **Untrusted workspaces are always treated as off.** The standalone `cb-cli` is not affected. |
 | `codeblocks.agent.readOnly` | `false` | Read-only mode. Only `project_read` / `build_status` / `compiler list,info` / `workspace info,deps,list` / `debug state,stack,variables` are allowed; everything else fails with `read-only` and project bytes stay unchanged. |
+| `codeblocks.agent.allowScripts` | `false` | Script master gate. LM Tools / MCP may edit build scripts, pre/post-build commands and custom build commands only when this setting is on **and** the call passes `allowScripts: true`; otherwise `invalid-input`. `cb-cli` keeps its per-call flag. |
 
 ```jsonc
 // .vscode/settings.json
 {
   "codeblocks.agent.enabled": true,
-  "codeblocks.agent.readOnly": false
+  "codeblocks.agent.readOnly": false,
+  "codeblocks.agent.allowScripts": false
 }
 ```
 
@@ -272,6 +315,7 @@ Two settings in `settings.json` (both apply **immediately, no reload**):
 | Master switch | `codeblocks.agent.enabled` (above); untrusted workspaces are forced off |
 | Workspace trust | `capabilities.untrustedWorkspaces.supported: false` (see the end of section 6): in Restricted Mode the extension does not activate, so builds/runs/debugging and the agent tools are all unavailable; after trusting the workspace the master switch above decides |
 | Read-only mode | `codeblocks.agent.readOnly` (above), enforced centrally in `invokeTool` |
+| Script gate | `codeblocks.agent.allowScripts` (above): script fields require both the setting and `allowScripts: true` |
 | Tool enablement | Per-tool toggles in the VS Code **Tools** picker |
 | Approval | Governed by VS Code permission levels; edits return before/after |
 | `dryRun` | `project_edit` / `build` validate without writing |
@@ -296,12 +340,16 @@ Two settings in `settings.json` (both apply **immediately, no reload**):
 
 | Symptom | Fix |
 |---|---|
-| Tools do not appear in Chat | VS Code >= 1.102, Copilot Chat enabled, tools ticked in the picker, then reload the window |
+| Tools do not appear in Chat | VS Code >= 1.102, Copilot Chat enabled, **Chat is in Agent mode**, tools ticked in the picker, then reload the window (the tool-list snapshot can lag) |
+| `/codeblocks` skill does not appear | Check that the VS Code version supports extension-contributed Agent Skills; run **Code::Blocks: Install Agent Skill…** into the workspace/user profile, or copy `skills/codeblocks-project/SKILL.md` from the extension directory |
+| `@codeblocks` does not respond | Ensure the extension is active and the workspace is trusted; run `/status` |
 | `invalid-input: Unknown field` | Run `codeblocks_project_read { section: "schema" }` |
+| `invalid-input` mentioning the script policy | Enable `codeblocks.agent.allowScripts` and pass `allowScripts: true` |
 | `external-modified` | Reload the project in VS Code, or pass `force: true` |
 | Build skipped / `compiler-missing` | Check `codeblocks.compilerId`, `codeblocks.masterPath`, `codeblocks.compilerPrograms`; use `compiler info` in the CLI |
 | CLI cannot find the compiler | The CLI reads `.vscode/settings.json`; `CB_MASTER_PATH` also works |
-| MCP server fails to start | Ensure `<extension>/bundle/cb-mcp.js` exists; use `node` explicitly in external clients |
+| CLI cannot find the script | Run `codeblocks.agent.status` for the real `bundle/cb-cli.js` path, or check the extension version directory |
+| MCP server fails to start | Ensure `<extension>/bundle/cb-mcp.js` exists; use `node` with an absolute path in external clients and set cwd to the project |
 | No variables while debugging | Check `codeblocks_debug { action: "stack" }` / `state.stopped`; `run` returns stack and locals at once |
 
 ---
@@ -313,3 +361,31 @@ Two settings in `settings.json` (both apply **immediately, no reload**):
 - `codeblocks_build_status` in the CLI only reflects builds from the same process; use the return value of `codeblocks_build`.
 - Web extensions (`vscode.dev`) cannot use stdio MCP.
 - Registers / memory / disassembly debugging is only available inside the extension.
+- `@codeblocks` is a deterministic command wrapper (`/read` `/build` `/fix` `/debug` `/status` `/help`); it does not edit projects autonomously. Use Agent mode for autonomous edits.
+
+---
+
+## 12. Agent Skill and `@codeblocks`
+
+### 12.1 Bundled skill
+
+The extension ships `skills/codeblocks-project/SKILL.md` and registers it through `contributes.chatSkills`. VS Code versions that support extension-contributed skills discover it automatically; the model can load it when the request matches reading/editing `.cbp` projects, building, debugging or troubleshooting.
+
+- Invoke explicitly with `/codeblocks-project` in Chat.
+- The skill contains only workflow and guardrails (read first, schema, dryRun, build-fix loop, error recovery, script safety); it does not duplicate the full tool reference.
+- Older VS Code or external clients: run **Code::Blocks: Install Agent Skill…**, choose workspace (`.github/skills/codeblocks-project/SKILL.md`) or user profile (`~/.copilot/skills/codeblocks-project/SKILL.md`). Existing files are confirmed before overwrite.
+
+### 12.2 `@codeblocks` commands
+
+| Command | Purpose |
+|---|---|
+| `/read [target]` | Read the active project summary, optionally filtered by target |
+| `/build [target] [--rebuild\|--clean]` | Build, rebuild or clean |
+| `/fix` | Show structured errors from the latest build |
+| `/debug [state\|stack\|variables\|stop\|continue\|step [in\|out]]` | Inspect or control the debug session |
+| `/status` | Show switches, tool count and CLI/MCP/skill paths |
+| `/help` | Usage |
+
+> These commands do not use model reasoning; use Agent mode for the autonomous read → edit → build → fix loop.
+
+See [Agent recipes](./agent-recipes.en.md) for copy-paste examples.

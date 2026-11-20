@@ -183,6 +183,7 @@ suite('宿主集成 · Agent 控制面', (t) => {
     fs.rmSync(projDir, { recursive: true, force: true });
     const cbp = U.copyHelloProject(projDir, 'hello-cb');
     await U.setConfig('clangd.enabled', false);
+    await U.setConfig('agent.allowScripts', true);
     try {
       const edit = await callTool('codeblocks_project_edit', {
         cbp,
@@ -207,6 +208,7 @@ suite('宿主集成 · Agent 控制面', (t) => {
       assert.strictEqual(build.ok, false);
       assert.ok(elapsed < 15000, `超时未生效：等待了 ${elapsed}ms`);
     } finally {
+      await U.setConfig('agent.allowScripts', false).catch(() => undefined);
       fs.rmSync(projDir, { recursive: true, force: true });
     }
   });

@@ -7,6 +7,7 @@
  * 返回可注销的 `Disposable[]`：设置开关切换时由调用方整体 dispose 后重新注册（无需重载窗口）。
  */
 import * as vscode from 'vscode';
+import * as i18n from '../i18n';
 import { invokeTool, TOOL_DEFINITIONS, ToolContext } from '../api/toolRegistry';
 import { asControlError } from '../api/types';
 
@@ -20,6 +21,29 @@ export interface LmToolOptions {
 function toText(value: unknown): string {
   if (typeof value === 'string') return value;
   try { return JSON.stringify(value, null, 2); } catch { return String(value); }
+}
+
+/** 需要用户确认的工具调用（写入 / 执行 / 改变调试或工作区状态）。 */
+export function toolNeedsConfirmation(name: string, input: Record<string, unknown>): boolean {
+  switch (name) {
+    case 'codeblocks_project_edit':
+      return input.dryRun !== true;
+    case 'codeblocks_project_file':
+    case 'codeblocks_project_target':
+    case 'codeblocks_run':
+    case 'codeblocks_export':
+      return true;
+    case 'codeblocks_debug': {
+      const action = typeof input.action === 'string' ? input.action : '';
+      return ['start', 'stop', 'breakpoints', 'evaluate', 'continue', 'step', 'run'].includes(action);
+    }
+    case 'codeblocks_workspace': {
+      const action = typeof input.action === 'string' ? input.action : '';
+      return ['open', 'close', 'setActive'].includes(action);
+    }
+    default:
+      return false;
+  }
 }
 
 /** 注册全部工具；返回成功注册的句柄（宿主不支持时返回空数组） */
@@ -46,7 +70,16 @@ export function registerLanguageModelTools(toolContext: ToolContext, opts: LmToo
       prepareInvocation(options): vscode.PreparedToolInvocation {
         const input = options.input ?? {};
         const hint = typeof input.cbp === 'string' ? input.cbp : '';
-        return { invocationMessage: `${def.title}${hint ? `: ${hint}` : ''}` };
+        const result: vscode.PreparedToolInvocation = {
+          invocationMessage: `${def.title}${hint ? `: ${hint}` : ''}`,
+        };
+        if (toolNeedsConfirmation(def.name, input)) {
+          result.confirmationMessages = {
+            title: i18n.t('Confirm Code::Blocks tool call'),
+            message: i18n.t('The agent wants to run "{0}". This may modify files or execute code. Continue?', def.title),
+          };
+        }
+        return result;
       },
     };
     try {

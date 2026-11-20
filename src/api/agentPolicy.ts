@@ -23,6 +23,14 @@ export function isAgentReadOnly(settings: AgentSettingsLike): boolean {
 }
 
 /**
+ * 全局脚本开关：默认关闭；只有显式 true 才允许 Agent 修改构建脚本/前后命令。
+ * 独立的 cb-cli 不注入此策略，仍由单次 `allowScripts` 控制。
+ */
+export function isAgentScriptsAllowed(settings: AgentSettingsLike): boolean {
+  return settings.get<boolean>('agent.allowScripts', false) === true;
+}
+
+/**
  * 只读模式下放行的工具与动作。
  * `true` = 整个工具只读；数组 = 仅列出的 `action` 只读。
  * 未列出的工具（project_edit / project_file / project_target / build / run / export）在只读模式下一律拒绝。
@@ -50,6 +58,9 @@ export function isReadOnlyToolCall(name: string, input: Record<string, unknown> 
 
 /** 只读拒绝时的提示（含设置键，便于模型/用户自助解除） */
 export const READ_ONLY_HINT = 'Read-only mode is on: set codeblocks.agent.readOnly to false to allow changes.';
+
+/** 脚本总闸关闭时的提示 */
+export const SCRIPT_POLICY_HINT = 'Script editing is disabled: set codeblocks.agent.allowScripts to true and pass allowScripts: true for the specific edit.';
 
 /** 总闸关闭时的提示 */
 export const AGENT_DISABLED_HINT = 'Agent control is disabled: set codeblocks.agent.enabled to true (and trust the workspace) to expose the tools.';

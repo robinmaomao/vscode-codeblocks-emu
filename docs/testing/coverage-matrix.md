@@ -4,15 +4,15 @@
 > 判定口径：契约项 ID（命令/视图/设置键/键位/语言/语法/DAP 能力标记）在对应测试层源码中出现即计为命中；
 > 视觉层/性能层不引用命令 ID 字面量，按 `EXPLICIT_HITS`（面/引擎级覆盖）人工补充，明细见脚本内注释。
 > 列 `src` 表示实现存在（不算测试覆盖）；`契约/无头/E2E/视觉/性能/宿主` 为六个自动化测试层。
-> 数据来源：package.json v0.9.2 + tests/** + src/**
+> 数据来源：package.json v0.9.3 + tests/** + src/**
 
 ## 汇总
 
 | 契约项 | 总数 | 契约层 | 无头层 | E2E 层 | 视觉层 | 性能层 | 宿主层 | 未覆盖 | 覆盖率 |
 |--------|------|--------|--------|--------|--------|--------|--------|--------|--------|
-| 命令 | 136 | 3 | 127 | 4 | 12 | 5 | 39 | 0 | 100% |
+| 命令 | 138 | 3 | 130 | 4 | 12 | 5 | 40 | 0 | 100% |
 | 视图 | 6 | 2 | 6 | 1 | 1 | 0 | 5 | 0 | 100% |
-| 设置 | 93 | 93 | 81 | 15 | 0 | 1 | 7 | 0 | 100% |
+| 设置 | 94 | 94 | 88 | 15 | 0 | 1 | 7 | 0 | 100% |
 | 快捷键 | 34 | 3 | 32 | 2 | 4 | 2 | 12 | 0 | 100% |
 | 语言/语法 | 6 | 0 | 6 | 3 | 2 | 1 | 3 | 0 | 100% |
 | DAP 能力 | 30 | 0 | 1 | 30 | 0 | 0 | 5 | 0 | 100% |
@@ -37,8 +37,8 @@
 | 14 | `codeblocks.buildLog.toggleErrorsOnly` | Code::Blocks: 仅显示错误 (构建日志) | · | ✔ | · | ✔ | · | · | ✅ |
 | 15 | `codeblocks.buildLog.showAllMessages` | Code::Blocks: 显示全部消息 (构建日志) | · | ✔ | · | ✔ | · | ✔ | ✅ |
 | 16 | `codeblocks.buildLog.clearOutput` | Code::Blocks: 清空构建输出 | · | ✔ | · | ✔ | · | ✔ | ✅ |
-| 17 | `codeblocks.buildLog.copyMessage` | Code::Blocks: 复制诊断消息 | · | · | · | ✔ | · | · | ✅ |
-| 18 | `codeblocks.buildLog.copyDiagnostic` | Code::Blocks: 复制完整诊断 | · | · | · | ✔ | · | · | ✅ |
+| 17 | `codeblocks.buildLog.copyMessage` | Code::Blocks: 复制诊断消息 | · | ✔ | · | ✔ | · | · | ✅ |
+| 18 | `codeblocks.buildLog.copyDiagnostic` | Code::Blocks: 复制完整诊断 | · | ✔ | · | ✔ | · | · | ✅ |
 | 19 | `codeblocks.openRecentProject` | Code::Blocks: 打开最近工程 | · | ✔ | · | · | · | ✔ | ✅ |
 | 20 | `codeblocks.resetViewLayout` | Code::Blocks: 重置视图布局 | · | · | · | · | · | ✔ | ✅ |
 | 21 | `codeblocks.analysis.refresh` | Code::Blocks: 刷新分析 | · | · | · | · | · | ✔ | ✅ |
@@ -49,7 +49,7 @@
 | 26 | `codeblocks.cleanWorkspace` | Code::Blocks: 清理工作区 | · | ✔ | · | · | · | ✔ | ✅ |
 | 27 | `codeblocks.rebuildWorkspace` | Code::Blocks: 重新构建工作区 | · | ✔ | · | · | · | ✔ | ✅ |
 | 28 | `codeblocks.run` | Code::Blocks: 运行 | · | ✔ | · | ✔ | · | ✔ | ✅ |
-| 29 | `codeblocks.selectTarget` | Code::Blocks: 选择构建目标 | · | · | · | · | · | ✔ | ✅ |
+| 29 | `codeblocks.selectTarget` | Code::Blocks: 选择构建目标 | · | ✔ | · | · | · | ✔ | ✅ |
 | 30 | `codeblocks.selectProjectTarget` | Code::Blocks: 为该工程选择构建目标 | · | ✔ | · | · | · | ✔ | ✅ |
 | 31 | `codeblocks.detectCompilers` | Code::Blocks: 检测编译器 | · | ✔ | · | · | · | ✔ | ✅ |
 | 32 | `codeblocks.workspaceScanReport` | Code::Blocks: 工作区扫描报告 | · | ✔ | · | · | · | · | ✅ |
@@ -92,7 +92,7 @@
 | 69 | `codeblocks.moveProjectUp` | 上移 | · | ✔ | · | · | · | · | ✅ |
 | 70 | `codeblocks.moveProjectDown` | 下移 | · | ✔ | · | · | · | · | ✅ |
 | 71 | `codeblocks.removeProject` | 移除工程 | · | ✔ | · | · | · | · | ✅ |
-| 72 | `codeblocks.closeProject` | 关闭工程 | · | ✔ | · | · | · | · | ✅ |
+| 72 | `codeblocks.closeProject` | 关闭工程 | · | ✔ | · | · | · | ✔ | ✅ |
 | 73 | `codeblocks.saveProject` | 保存工程 | · | ✔ | · | · | · | · | ✅ |
 | 74 | `codeblocks.saveProjectAs` | Code::Blocks: 工程另存为... | · | ✔ | · | · | · | · | ✅ |
 | 75 | `codeblocks.saveWorkspace` | Code::Blocks: 保存工作区 | · | ✔ | · | · | · | · | ✅ |
@@ -137,9 +137,9 @@
 | 114 | `codeblocks.backtickCache` | Code::Blocks: 反引号缓存... | · | ✔ | · | · | · | · | ✅ |
 | 115 | `codeblocks.clearBacktickCache` | Code::Blocks: 清除反引号缓存 | · | ✔ | · | · | · | · | ✅ |
 | 116 | `codeblocks.keybindings.check` | Code::Blocks: 检查快捷键冲突 | · | · | · | · | · | ✔ | ✅ |
-| 117 | `codeblocks.keybindings.apply` | Code::Blocks: 应用快捷键 | · | ✔ | · | · | · | ✔ | ✅ |
+| 117 | `codeblocks.keybindings.apply` | Code::Blocks: 应用快捷键 | · | · | · | · | · | ✔ | ✅ |
 | 118 | `codeblocks.keybindings.configure` | Code::Blocks: 配置快捷键... | · | ✔ | · | · | · | · | ✅ |
-| 119 | `codeblocks.keybindings.reset` | Code::Blocks: 重置快捷键 | · | ✔ | · | · | · | ✔ | ✅ |
+| 119 | `codeblocks.keybindings.reset` | Code::Blocks: 重置快捷键 | · | · | · | · | · | ✔ | ✅ |
 | 120 | `codeblocks.keybindings.panel` | Code::Blocks: 快捷键设置 | · | ✔ | · | ✔ | · | ✔ | ✅ |
 | 121 | `codeblocks.keybindings.export` | Code::Blocks: 导出快捷键方案 | · | ✔ | · | · | · | · | ✅ |
 | 122 | `codeblocks.keybindings.import` | Code::Blocks: 导入快捷键方案 | · | ✔ | · | · | · | · | ✅ |
@@ -157,6 +157,8 @@
 | 134 | `codeblocks.debug.infoFiles` | Code::Blocks: 调试信息 · 目标与文件 | · | ✔ | · | · | · | ✔ | ✅ |
 | 135 | `codeblocks.debug.infoFloat` | Code::Blocks: 调试信息 · FPU 状态 | · | ✔ | · | · | · | · | ✅ |
 | 136 | `codeblocks.debug.infoSignals` | Code::Blocks: 调试信息 · 信号处理 | · | ✔ | · | · | · | · | ✅ |
+| 137 | `codeblocks.agent.status` | Code::Blocks: Agent 状态 | · | ✔ | · | · | · | · | ✅ |
+| 138 | `codeblocks.agent.installSkill` | Code::Blocks: 安装 Agent Skill… | · | ✔ | · | · | · | · | ✅ |
 
 未覆盖 0 项
 
@@ -178,15 +180,15 @@
 | # | 标识 | 标题 | 契约 | 无头 | E2E | 视觉 | 性能 | 宿主 | 状态 |
 |---|------|------|------|------|------|------|------|------|------|
 | 1 | `codeblocks.compilerId` |  | ✔ | ✔ | ✔ | · | · | · | ✅ |
-| 2 | `codeblocks.compiler.customFlags` |  | ✔ | · | · | · | · | · | ✅ |
-| 3 | `codeblocks.compiler.flagOverrides` |  | ✔ | · | · | · | · | · | ✅ |
+| 2 | `codeblocks.compiler.customFlags` |  | ✔ | ✔ | · | · | · | · | ✅ |
+| 3 | `codeblocks.compiler.flagOverrides` |  | ✔ | ✔ | · | · | · | · | ✅ |
 | 4 | `codeblocks.compiler.languageFlags` |  | ✔ | ✔ | · | · | · | · | ✅ |
 | 5 | `codeblocks.masterPath` |  | ✔ | ✔ | · | · | · | · | ✅ |
 | 6 | `codeblocks.compilerPrograms` |  | ✔ | ✔ | ✔ | · | · | ✔ | ✅ |
 | 7 | `codeblocks.saveBeforeBuild` |  | ✔ | ✔ | · | · | · | · | ✅ |
-| 8 | `codeblocks.noProjectCompile.useTaskTerminal` |  | ✔ | · | · | · | · | · | ✅ |
-| 9 | `codeblocks.profiler.gprofPath` |  | ✔ | · | · | · | · | · | ✅ |
-| 10 | `codeblocks.profiler.annotatedSource` |  | ✔ | · | · | · | · | · | ✅ |
+| 8 | `codeblocks.noProjectCompile.useTaskTerminal` |  | ✔ | ✔ | · | · | · | · | ✅ |
+| 9 | `codeblocks.profiler.gprofPath` |  | ✔ | ✔ | · | · | · | · | ✅ |
+| 10 | `codeblocks.profiler.annotatedSource` |  | ✔ | ✔ | · | · | · | · | ✅ |
 | 11 | `codeblocks.parallelJobs` |  | ✔ | ✔ | · | · | · | · | ✅ |
 | 12 | `codeblocks.build.compilerCache` |  | ✔ | ✔ | ✔ | · | · | · | ✅ |
 | 13 | `codeblocks.build.compilerCachePath` |  | ✔ | ✔ | ✔ | · | · | · | ✅ |
@@ -257,7 +259,7 @@
 | 78 | `codeblocks.ui.symbolsView` |  | ✔ | ✔ | · | · | · | · | ✅ |
 | 79 | `codeblocks.ui.recentProjectsLimit` |  | ✔ | ✔ | · | · | · | · | ✅ |
 | 80 | `codeblocks.ui.findFileOpen` |  | ✔ | ✔ | · | · | · | · | ✅ |
-| 81 | `codeblocks.search.scope` |  | ✔ | · | · | · | · | · | ✅ |
+| 81 | `codeblocks.search.scope` |  | ✔ | ✔ | · | · | · | · | ✅ |
 | 82 | `codeblocks.search.keepHistory` |  | ✔ | ✔ | · | · | · | · | ✅ |
 | 83 | `codeblocks.editor.autoHeaderGuard` |  | ✔ | ✔ | · | · | · | · | ✅ |
 | 84 | `codeblocks.editor.headerGuardStyle` |  | ✔ | ✔ | · | · | · | · | ✅ |
@@ -270,6 +272,7 @@
 | 91 | `codeblocks.keybindings.overrides` |  | ✔ | ✔ | · | · | · | · | ✅ |
 | 92 | `codeblocks.agent.enabled` |  | ✔ | ✔ | · | · | · | · | ✅ |
 | 93 | `codeblocks.agent.readOnly` |  | ✔ | ✔ | · | · | · | ✔ | ✅ |
+| 94 | `codeblocks.agent.allowScripts` |  | ✔ | ✔ | · | · | · | · | ✅ |
 
 未覆盖 0 项
 

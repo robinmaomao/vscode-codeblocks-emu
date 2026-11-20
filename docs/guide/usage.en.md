@@ -1,7 +1,7 @@
 # Code::Blocks for VS Code — Usage Guide
 
 > Language: **English** ｜ [中文](./usage.md)
-> Version: 0.9.2 ｜ Native port of Code::Blocks core features to VS Code, driving GCC / GDB directly, **without** `tasks.json` / `launch.json`.
+> Version: 0.9.3 ｜ Native port of Code::Blocks core features to VS Code, driving GCC / GDB directly, **without** `tasks.json` / `launch.json`.
 
 ---
 
@@ -50,7 +50,7 @@ Code::Blocks for VS Code is a "mini IDE kernel": it parses `.cbp` / `.workspace`
 ### 2.1 Install from VSIX
 
 ```powershell
-code --install-extension codeblocks-vscode-0.9.2.vsix --force
+code --install-extension codeblocks-vscode-0.9.3.vsix --force
 ```
 
 ### 2.2 Build from source
@@ -58,7 +58,7 @@ code --install-extension codeblocks-vscode-0.9.2.vsix --force
 ```powershell
 npm install
 npm run package
-code --install-extension codeblocks-vscode-0.9.2.vsix --force
+code --install-extension codeblocks-vscode-0.9.3.vsix --force
 ```
 
 > `npm run package` = `vsce package` (before packaging, the `vscode:prepublish` hook runs `tsc` compilation (`dist/`, for local testing) + the **esbuild single-file bundle** (`bundle/extension.js`, the release entry));
@@ -774,10 +774,13 @@ Note: keybindings are **user-level** (shared across windows); combinations taken
 
 ### 13.8 Agent (Copilot / MCP)
 
+> Five-minute start: trust the workspace → open a `.cbp` → switch Chat to **Agent** mode → enable the `Code::Blocks` tools in Configure Tools → ask the agent to `project_read` before editing/building. See [Agent control](./agent-control.en.md) for the full walkthrough, safety profiles and troubleshooting, and [Agent recipes](./agent-recipes.en.md) for copy-paste workflows.
+
 | Setting | Default | Description |
 |--------|--------|------|
 | `codeblocks.agent.enabled` | `true` | Master switch: when off, the 11 Language Model Tools are not registered and the embedded MCP server is not exposed; untrusted workspaces are always treated as off. Applies immediately (the standalone `cb-cli` is not affected) |
 | `codeblocks.agent.readOnly` | `false` | Read-only mode: only `project_read` / `build_status` / `compiler list,info` / `workspace info,deps,list` / `debug state,stack,variables` are allowed; everything else fails with `read-only` |
+| `codeblocks.agent.allowScripts` | `false` | Global script gate: LM Tools / MCP may edit `commandsBeforeBuild`, `buildScripts`, etc. only when this setting is on **and** the call passes `allowScripts: true`. `cb-cli` keeps its per-call flag. Applies immediately |
 
 ---
 
@@ -1025,6 +1028,16 @@ The Code::Blocks features below were assessed as **not to be re-implemented in t
 > T5 cross-library symbol search. Export Makefile now lives in the Build menu (matching CB `compiler_menu.xrc`).
 > For details and the decision record, see the [unimplemented-feature backlog](../dev/backlog.md) §2 (not-ported list).
 > Reminder: the extensions above are community/vendor products; evaluate them before installing. This extension neither bundles nor ships them.
+
+## 16.1 What's new in 0.9.3 (Agent experience and safety)
+
+- **Agent Skill**: ships `skills/codeblocks-project/SKILL.md` and registers it with `contributes.chatSkills`; **Code::Blocks: Install Agent Skill…** installs it into `.github/skills/` or `~/.copilot/skills/`, with overwrite confirmation.
+- **`@codeblocks` participant**: `/read` `/build` `/fix` `/debug` `/status` `/help` deterministic commands using the same `invokeTool` policy.
+- **Agent Status**: **Code::Blocks: Agent Status** shows trust/switches/tool count/CLI/MCP/skill paths.
+- **Confirmations**: writes, runs, debug mutations, exports and workspace open/close/setActive ask before running; read-only and `dryRun` calls do not.
+- **Script gate**: `codeblocks.agent.allowScripts` (default `false`) plus per-call `allowScripts: true`; `cb-cli` is unaffected.
+- **Docs**: Agent guide now covers five-minute onboarding, permission matrix, CLI/MCP paths, troubleshooting and the skill; new [Agent recipes](./agent-recipes.en.md).
+- **Inventory**: 138 commands / 94 settings / 6 views / 34 keybindings / 11 LM Tools / 1 MCP provider / 1 chat participant / 1 chat skill.
 
 ## 17. Bug fixes in 0.9.2
 
