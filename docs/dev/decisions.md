@@ -43,6 +43,11 @@
 | 决策 E3-1 | 构建确认与互斥锁顺序 | 停调试器 / Rebuild 确认前置（preflight），确认期间用 `buildPreflightInProgress` 占位；避免 `Building…` 挂起与 Stop 谎报 | ✔ 已实施（0.9.2 E3 修复轮） |
 | 决策 E3-2 | 外部修改检测疑似失效 | 先补诊断日志 + 真实宿主回归（`.cbp` 外部修改 → auto 重载）；多窗口/焦点模态观察保留人工复核，不先改产品逻辑 | ✔ 已实施（0.9.2 E3 修复轮，宿主 38/38） |
 | 决策 E3-3 | 工程树是否显示构建目标层级 | 保持现状：对齐 CB Manager，目标通过状态栏/右键/属性面板切换，不新增树层级 | ▣ 维持现状（既有设计） |
+| 决策 E3-4 | 是否内置 Agent Skill | 随包 `skills/codeblocks-project/SKILL.md` + `contributes.chatSkills`；另加安装命令兜底旧版 VS Code/外部客户端，不抬高 `engines.vscode` | ✔ 已实施（0.9.3） |
+| 决策 E3-5 | Agent 脚本权限 | 新增 `codeblocks.agent.allowScripts`（默认 false），与单次 `allowScripts: true` 双重门控；`cb-cli` 保持单次开关 | ✔ 已实施（0.9.3，行为变化） |
+| 决策 E3-6 | 是否新增 Chat participant | `@codeblocks` 只做确定性命令包装（`/read` `/build` `/fix` `/debug` `/status` `/help`），不替代 Agent 模式 | ✔ 已实施（0.9.3） |
+| 决策 E3-7 | 工具确认与 MCP hint | 写入/执行/调试/导出/工作区变更前确认；MCP `readOnlyHint` 只对整工具只读的 `project_read` / `build_status` 标 true | ✔ 已实施（0.9.3） |
+| 决策 E3-8 | Agent 变更审计/回滚 | 0.9.3 不做，拆到 0.10（需历史存储、恢复语义与安全边界设计） | ☐ 0.10 待排期 |
 
 > 其余审计 P1–P3 已于 0.8.97-dev 实施；F1/F1b（0.8.95-dev）、F5/F8（0.8.94-dev）、N1/N3（0.8.110-dev）、
 > N2（0.8.109-dev + 0.8.113-dev）、N6（0.8.111-dev + 0.8.112-dev）、P1–P8/G1/G3（0.8.114-dev）、

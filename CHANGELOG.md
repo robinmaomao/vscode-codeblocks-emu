@@ -3,6 +3,18 @@
 本文件记录**正式版**里程碑；近期 dev 迭代的逐轮发布说明见 [`docs/release/`](./docs/release/)（`0.8.xx-dev.md`），
 `0.8.76`–`0.8.128` 的 dev 说明已合并归档到 [`docs/release/archive/`](./docs/release/archive/)；版本号与维护约定见 [`docs/release/00-index.md`](./docs/release/00-index.md)。
 
+## 0.9.3 — 2026-11-20
+
+> 功能版：Agent 控制面上手体验与安全护栏（Agent Skill / `@codeblocks` / 确认文案 / 脚本总闸）。
+
+- **Agent Skill**：随包 `skills/codeblocks-project/SKILL.md` + `contributes.chatSkills`；新增 **Code::Blocks: Install Agent Skill…**，支持工作区 `.github/skills/` 与用户 `~/.copilot/skills/`，已存在时确认覆盖。
+- **`@codeblocks` Chat participant**：`/read` `/build` `/fix` `/debug` `/status` `/help`，复用 `invokeTool` 策略；不替代 Agent 模式的自主编辑。
+- **Agent 状态**：**Code::Blocks: Agent Status** 显示信任/总闸/只读/脚本策略/工具数/CLI/MCP/Skill 路径，可复制。
+- **确认文案**：写入、运行、调试变更、导出、工作区 open/close/setActive 前显示 `confirmationMessages`；只读与 `dryRun` 不打扰。
+- **安全**：新增 `codeblocks.agent.allowScripts`（默认 `false`），脚本字段需设置开启 + 单次 `allowScripts: true`；MCP `readOnlyHint` 明确为工具级保守标注。
+- **文档**：Agent 指南补 5 分钟上手、权限矩阵、CLI/MCP 路径、安全档、排障与 Skill；新增 `agent-recipes.md` / `.en.md`。
+- 清单：命令 138 / 设置 94 / 视图 6 / 键位 34 / LM Tools 11 / MCP provider 1 / chat participant 1 / chat skill 1。
+
 ## 0.9.2 — 2026-11-19
 
 > 补丁版：0.9.0 合入 Agent 控制面后的九轮复查修复（构建 / 运行 / 调试 / 工程编辑跨端一致性）。

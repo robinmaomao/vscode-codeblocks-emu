@@ -8,7 +8,7 @@
 | 层 | 目录 | 内容 | 运行方式 |
 |----|------|------|----------|
 | L-1 静态契约 | `tests/contract/` | 贡献点/激活事件/命令注册交叉校验、语言语法、调试器 schema、资源与版本一致性、NLS 键集合、**文档一致性**（覆盖矩阵汇总/性能基准条目/文档命令与相对链接/版本标记） | `npm run test:contract` |
-| L0 无头单元/集成 | `tests/test-*.js` | 解析/写回/命令行/宏/缓存/键位/书签/工具等 233 个脚本（dist 层，无 VS Code 宿主） | `npm test` |
+| L0 无头单元/集成 | `tests/test-*.js` | 解析/写回/命令行/宏/缓存/键位/书签/工具等 236 个脚本（dist 层，无 VS Code 宿主） | `npm test` |
 | L1 真实工程 E2E | `tests/e2e/` | 真实工具链构建矩阵、工作区依赖、工具类功能（临时目录探针工程） | `npm run test:e2e` |
 | L2 真实宿主 | `tests/host/` | 用 `@vscode/test-electron` 启动**真实 VS Code**（默认下载 `engines.vscode` 最低版本 1.102.0，可用 `CB_VSCODE_PATH` 指向本机安装）驱动真实命令/视图/调试/设置写入 | `npm run test:host` |
 | L3 像素视觉回归 | `tests/visual/` | 13 个 WebView HTML 面 × 2 主题 = 26 基线；pixelmatch 容差判定 | `npm run test:visual` |
@@ -156,7 +156,7 @@ node tests/run-all.js --group all --json out.json
 
 | 用例组 | 断言要点 |
 |--------|----------|
-| 激活与贡献面 | 扩展激活；**contributes 全表命令逐一注册（数量以 package.json 为准，当前 136 条）**；运行时内部命令（视图焦点/动态菜单）；5 个视图 `<viewId>.focus`；设置项默认值齐备（当前 93 项）；`ld/asm/xm` 语言注册 + 按扩展名正确关联语法 |
+| 激活与贡献面 | 扩展激活；**contributes 全表命令逐一注册（数量以 package.json 为准，当前 138 条）**；运行时内部命令（视图焦点/动态菜单）；5 个视图 `<viewId>.focus`；设置项默认值齐备（当前 94 项）；`ld/asm/xm` 语言注册 + 按扩展名正确关联语法 |
 | 无工程优雅降级 | 构建/运行类 9 条、面板工具类 16 条、调试辅助 4 条命令在「无工程/无会话」下均不抛异常 |
 | keybindings 托管写入 | `check`（QuickPick 场景自动关闭 UI）；`apply` 真实写入 `<user-data>/User/keybindings.json`（含覆盖键的正向条目 + 默认键移除规则）；`reset` 清理文件条目并清空设置 |
 | 仓库探针工程 | `test-project` 结构（3 个 `.cbp` + 1 个 `.workspace`）与调试目标产物存在性 |

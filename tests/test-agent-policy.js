@@ -42,14 +42,16 @@ const getter = (map) => ({ get: (k, d) => (Object.prototype.hasOwnProperty.call(
 
   const enabled = props['codeblocks.agent.enabled'];
   const readOnly = props['codeblocks.agent.readOnly'];
+  const allowScripts = props['codeblocks.agent.allowScripts'];
   check('A3 agent.enabled 为 boolean 且默认 true', enabled && enabled.type === 'boolean' && enabled.default === true, enabled && [enabled.type, enabled.default]);
   check('A4 agent.readOnly 为 boolean 且默认 false', readOnly && readOnly.type === 'boolean' && readOnly.default === false, readOnly && [readOnly.type, readOnly.default]);
+  check('A4b agent.allowScripts 为 boolean 且默认 false', allowScripts && allowScripts.type === 'boolean' && allowScripts.default === false, allowScripts && [allowScripts.type, allowScripts.default]);
 
-  const keys = ['agent.enabled', 'agent.readOnly'].flatMap((k) => {
+  const keys = ['agent.enabled', 'agent.readOnly', 'agent.allowScripts'].flatMap((k) => {
     const p = props['codeblocks.' + k];
     return [nlsOf(p.description), nlsOf(p.markdownDescription)].filter(Boolean);
   });
-  check('A5 设置描述为 nls 占位符（description + markdownDescription）', keys.length === 4, keys);
+  check('A5 设置描述为 nls 占位符（description + markdownDescription）', keys.length === 6, keys);
   check('A6 英文 nls 齐全且不含中文',
     keys.every((k) => typeof en[k] === 'string' && en[k].length > 0 && !/[\u4e00-\u9fff]/.test(en[k])),
     keys.filter((k) => !en[k] || /[\u4e00-\u9fff]/.test(en[k])));
@@ -57,8 +59,9 @@ const getter = (map) => ({ get: (k, d) => (Object.prototype.hasOwnProperty.call(
 
   for (const rel of ['docs/guide/settings.md', 'docs/guide/settings.en.md', 'docs/guide/agent-control.md', 'docs/guide/agent-control.en.md']) {
     const text = fs.readFileSync(path.join(ROOT, rel), 'utf-8');
-    check(`A8 ${rel} 覆盖两个设置键`,
-      text.includes('codeblocks.agent.enabled') && text.includes('codeblocks.agent.readOnly'), rel);
+    check(`A8 ${rel} 覆盖三个设置键`,
+      text.includes('codeblocks.agent.enabled') && text.includes('codeblocks.agent.readOnly')
+      && text.includes('codeblocks.agent.allowScripts'), rel);
   }
 }
 
@@ -73,6 +76,10 @@ const getter = (map) => ({ get: (k, d) => (Object.prototype.hasOwnProperty.call(
   check('B6 readOnly=true → true', policy.isAgentReadOnly(getter({ 'agent.readOnly': true })) === true);
   check('B7 readOnly=false → false', policy.isAgentReadOnly(getter({ 'agent.readOnly': false })) === false);
   check('B8 readOnly 非法值 → false', policy.isAgentReadOnly(getter({ 'agent.readOnly': 'yes' })) === false);
+
+  check('B9 allowScripts 缺省 → false', policy.isAgentScriptsAllowed(getter({})) === false);
+  check('B10 allowScripts=true → true', policy.isAgentScriptsAllowed(getter({ 'agent.allowScripts': true })) === true);
+  check('B11 allowScripts 非法值 → false', policy.isAgentScriptsAllowed(getter({ 'agent.allowScripts': 'yes' })) === false);
 
   const allowed = [
     ['codeblocks_project_read', {}],
@@ -105,10 +112,10 @@ const getter = (map) => ({ get: (k, d) => (Object.prototype.hasOwnProperty.call(
   ];
   const allowedBad = allowed.filter(([n, i]) => !policy.isReadOnlyToolCall(n, i));
   const deniedBad = denied.filter(([n, i]) => policy.isReadOnlyToolCall(n, i));
-  check('B9 只读白名单放行 10 种查询调用', allowedBad.length === 0, allowedBad);
-  check('B10 只读模式拒绝 15 种写/执行调用', deniedBad.length === 0, deniedBad);
-  check('B11 白名单外的工具默认拒绝', policy.isReadOnlyToolCall('codeblocks_unknown', {}) === false);
-  check('B12 提示文案包含设置键',
+  check('B12 只读白名单放行 10 种查询调用', allowedBad.length === 0, allowedBad);
+  check('B13 只读模式拒绝 15 种写/执行调用', deniedBad.length === 0, deniedBad);
+  check('B14 白名单外的工具默认拒绝', policy.isReadOnlyToolCall('codeblocks_unknown', {}) === false);
+  check('B15 提示文案包含设置键',
     policy.READ_ONLY_HINT.includes('codeblocks.agent.readOnly') && policy.AGENT_DISABLED_HINT.includes('codeblocks.agent.enabled'),
     [policy.READ_ONLY_HINT, policy.AGENT_DISABLED_HINT]);
 }
@@ -175,12 +182,24 @@ async function expectCode(label, code, fn) {
   const after = fs.readFileSync(cbp, 'utf-8');
   check('C7 只读期间工程文件字节不变', before === after);
 
+  await expectCode('C8 全局脚本关闭：显式 allowScripts 被拒', 'invalid-input', () => registry.invokeTool(
+    { ...ctxBase, allowScripts: false },
+    'codeblocks_project_edit',
+    { cbp, allowScripts: true, ops: [{ op: 'set', scope: 'project', field: 'title', value: 'script-gated' }] },
+  ));
+  const scriptAllowed = await registry.invokeTool(
+    { ...ctxBase, allowScripts: true },
+    'codeblocks_project_edit',
+    { cbp, allowScripts: true, ops: [{ op: 'set', scope: 'project', field: 'title', value: 'script-allowed' }] },
+  );
+  check('C9 全局脚本开启：显式 allowScripts 放行', scriptAllowed && scriptAllowed.written === true, scriptAllowed);
+
   const rw = { ...ctxBase };
   const edited = await registry.invokeTool(rw, 'codeblocks_project_edit', {
     cbp,
     ops: [{ op: 'set', scope: 'project', field: 'title', value: 'allowed' }],
   });
-  check('C8 非只读 ctx 仍可写（开关不误伤默认行为）', edited && edited.written === true && store.loadProject(cbp).title === 'allowed', edited);
+  check('C10 非只读 ctx 仍可写（开关不误伤默认行为）', edited && edited.written === true && store.loadProject(cbp).title === 'allowed', edited);
 
   // ---------- D. MCP 暴露计划 ----------
   const plan = (enabled, scriptExists) => provider.planMcpServer({

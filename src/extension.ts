@@ -48,7 +48,7 @@ import { resolveRunWorkingDir } from './api/runService';
 import { ControlError } from './api/types';
 import { registerLanguageModelTools } from './lm/tools';
 import { registerCodeblocksMcpProvider } from './mcp/provider';
-import { isAgentEnabled, isAgentReadOnly } from './api/agentPolicy';
+import { isAgentEnabled, isAgentReadOnly, isAgentScriptsAllowed } from './api/agentPolicy';
 import { normalizeBuildLogAutoFocusMode, maybeAutoFocusBuildLog } from './ui/buildLogFocus';
 import { openFileAtLocation } from './ui/openLocation';
 import { buildDiagnosticPathIndex, createDiagnosticResolver, isNavigableDiagnosticFile } from './build/diagnosticPath';
@@ -122,6 +122,8 @@ import {
 import { applyHeaderGuard } from './tools/headerGuard';
 import { tidyCommentBlock } from './tools/tidyComments';
 import { registerToolCommands } from './features/toolCommands';
+import { registerAgentSkillCommand } from './features/agentSkill';
+import { registerCodeblocksChatParticipant } from './chat/participant';
 import { registerDebugInstructionCommands } from './features/debugCommands';
 import { useTaskTerminalForNoProjectCompile } from './features/noProjectCompileSettings';
 import { runCapture } from './tools/profiler';
@@ -425,6 +427,8 @@ let agentToolContext: AgentToolContext | undefined;
 let agentToolsDisposables: vscode.Disposable[] = [];
 /** 当前注册时生效的只读标记（与设置不一致时需重建上下文） */
 let agentAppliedReadOnly: boolean | undefined;
+/** 当前注册时生效的脚本总闸（与设置不一致时需重建上下文） */
+let agentAppliedAllowScripts: boolean | undefined;
 /** MCP provider 的「定义已变化」事件（设置切换后通知宿主重新拉取） */
 const agentMcpChange = new vscode.EventEmitter<void>();
 
@@ -448,6 +452,7 @@ function disposeAgentTools(): void {
   agentToolsDisposables = [];
   agentToolContext = undefined;
   agentAppliedReadOnly = undefined;
+  agentAppliedAllowScripts = undefined;
 }
 
 /** 按当前设置注册 / 注销 Agent 控制面（可重入；切换即时生效） */
@@ -460,16 +465,19 @@ function applyAgentSurface(reason: string): void {
     return;
   }
   const readOnly = isAgentReadOnly(vscode.workspace.getConfiguration('codeblocks'));
-  // 只读切换也要重建上下文（readOnly 是注册时快照，不能只改设置）
-  if (!agentToolsDisposables.length || agentAppliedReadOnly !== readOnly) {
+  const allowScripts = isAgentScriptsAllowed(vscode.workspace.getConfiguration('codeblocks'));
+  // 只读/脚本策略切换也要重建上下文（注册时快照，不能只改设置）
+  if (!agentToolsDisposables.length || agentAppliedReadOnly !== readOnly || agentAppliedAllowScripts !== allowScripts) {
     disposeAgentTools();
     const ctx = createAgentToolContext();
     if (readOnly) ctx.readOnly = true;
+    ctx.allowScripts = allowScripts;
     agentToolContext = ctx;
     // 审计日志：每次工具调用一行（工具名 / 结果 / 耗时）
     agentToolsDisposables = registerLanguageModelTools(ctx, { log: (line) => outputChannel.info(line) });
     agentAppliedReadOnly = readOnly;
-    outputChannel.info(logT('[Code::Blocks] Agent control enabled: {0} tools (read-only={1})', agentToolsDisposables.length, readOnly));
+    agentAppliedAllowScripts = allowScripts;
+    outputChannel.info(logT('[Code::Blocks] Agent control enabled: {0} tools (read-only={1}, scripts={2})', agentToolsDisposables.length, readOnly, allowScripts));
   }
   agentMcpChange.fire();
 }
@@ -492,6 +500,32 @@ function initAgentSurface(context: vscode.ExtensionContext): void {
     context.subscriptions.push(vscode.workspace.onDidGrantWorkspaceTrust(() => applyAgentSurface('workspace trusted')));
   }
   applyAgentSurface('activation');
+}
+
+/** Agent 状态摘要（命令与 @codeblocks /status 共用） */
+function agentStatusText(context: vscode.ExtensionContext): string {
+  const cfg = vscode.workspace.getConfiguration('codeblocks');
+  const trusted = vscode.workspace.isTrusted;
+  const enabled = agentSurfaceAllowed();
+  const readOnly = isAgentReadOnly(cfg);
+  const allowScripts = isAgentScriptsAllowed(cfg);
+  const cli = path.join(context.extensionPath, 'bundle', 'cb-cli.js');
+  const mcp = path.join(context.extensionPath, 'bundle', 'cb-mcp.js');
+  const skill = path.join(context.extensionPath, 'skills', 'codeblocks-project', 'SKILL.md');
+  const exists = (p: string): string => (fs.existsSync(p) ? 'yes' : 'no');
+  return [
+    `### Code::Blocks Agent Status`,
+    '',
+    `- Workspace trusted: **${trusted ? 'yes' : 'no'}**`,
+    `- \`codeblocks.agent.enabled\`: **${cfg.get<boolean>('agent.enabled', true) ? 'true' : 'false'}**`,
+    `- \`codeblocks.agent.readOnly\`: **${readOnly ? 'true' : 'false'}**`,
+    `- \`codeblocks.agent.allowScripts\`: **${allowScripts ? 'true' : 'false'}**`,
+    `- Agent surface allowed: **${enabled ? 'yes' : 'no'}**`,
+    `- Registered LM tools: **${agentToolsDisposables.length}**`,
+    `- CLI bundle: \`${cli}\` (exists: ${exists(cli)})`,
+    `- MCP bundle: \`${mcp}\` (exists: ${exists(mcp)})`,
+    `- Bundled skill: \`${skill}\` (exists: ${exists(skill)})`,
+  ].join('\n');
 }
 
 /** 合成构建摘要（makefile 模式 / 清理路径没有 BuildEngine 统计时使用） */
@@ -2399,6 +2433,24 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   // 工具类命令（Copy Strings / Backtick Cache）—— 已拆到 features/toolCommands.ts
   registerToolCommands(context);
+  registerAgentSkillCommand(context);
+  context.subscriptions.push(
+    vscode.commands.registerCommand('codeblocks.agent.status', async () => {
+      const text = agentStatusText(context);
+      outputChannel.info(text);
+      const copy = i18n.t('Copy');
+      const answer = await vscode.window.showInformationMessage(
+        i18n.t('Code::Blocks Agent status written to the output channel.'),
+        copy,
+      );
+      if (answer === copy) await vscode.env.clipboard.writeText(text);
+    }),
+  );
+  registerCodeblocksChatParticipant(context, {
+    getContext: () => agentToolContext,
+    getStatus: () => agentStatusText(context),
+    log: (line) => outputChannel.info(line),
+  });
   registerDebugInstructionCommands(context, {
     getActiveAdapter: () => getActiveAdapter() ?? undefined,
     memoryChannel: () => memoryOutputChannel(),

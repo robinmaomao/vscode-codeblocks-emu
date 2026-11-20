@@ -75,6 +75,7 @@ async function main() {
     check('P1 清单包含编译器资源 XML', has(/^resources[\\/]compilers[\\/]options_gcc\.xml$/), null, 'options_gcc.xml');
     check('P1 清单包含 NLS 文件', has(/^package\.nls\.json$/) && has(/^package\.nls\.zh-cn\.json$/), null, '两个 NLS');
     check('P1 清单包含 README/LICENSE/CHANGELOG', has(/^README\.md$/) && has(/^LICENSE\.md$/) && has(/^CHANGELOG\.md$/), null, '三份文档');
+    check('P1 清单包含 Agent Skill 模板', has(/^skills[\\/]codeblocks-project[\\/]SKILL\.md$/), files.filter((f) => f.startsWith('skills/')).slice(0, 3), 'skills/codeblocks-project/SKILL.md');
     check('P1 清单**不含**测试与探针工程', !has(/^tests[\\/]/) && !has(/^test-project[\\/]/), files.filter((f) => /^tests|^test-project/.test(f)), []);
     check('P1 清单**不含**源码与 dist', !has(/^src[\\/]/) && !has(/^dist[\\/]/), files.filter((f) => /^src|^dist/.test(f)), []);
     check('P1 清单**不含** sourcemap', !files.some((f) => /\.map$/.test(f)), files.filter((f) => /\.map$/.test(f)).slice(0, 3), []);

@@ -27,7 +27,7 @@ async function main(): Promise<void> {
   const runtime = createRuntime({ echoBuildLog: true });
   const { TOOL_DEFINITIONS, invokeTool } = require('../api/toolRegistry') as typeof import('../api/toolRegistry');
   const { loadCodeblocksSettings } = require('../api/settingsReader') as typeof import('../api/settingsReader');
-  const { isAgentEnabled, isAgentReadOnly, isReadOnlyToolCall, AGENT_DISABLED_HINT } = require('../api/agentPolicy') as typeof import('../api/agentPolicy');
+  const { isAgentEnabled, isAgentReadOnly, isAgentScriptsAllowed, AGENT_DISABLED_HINT } = require('../api/agentPolicy') as typeof import('../api/agentPolicy');
 
   // 每次请求重新读设置：外部客户端可能在 VS Code 未运行的情况下直接启动本 server，
   // 关闭开关 / 只读模式应当立即生效，而不是等进程重启。
@@ -50,6 +50,8 @@ async function main(): Promise<void> {
     },
   );
 
+  const WHOLE_TOOL_READ_ONLY = new Set(['codeblocks_project_read', 'codeblocks_build_status']);
+
   server.setRequestHandler(ListToolsRequestSchema, () => {
     if (!isAgentEnabled(settingsNow())) return { tools: [] };
     return {
@@ -57,8 +59,9 @@ async function main(): Promise<void> {
         name: t.name,
         description: t.description,
         inputSchema: t.inputSchema as unknown as { type: 'object'; properties?: Record<string, object> },
-        // 与 LM Tools 的 prepareInvocation 对齐：标题 + 只读提示，便于客户端做审批与展示
-        annotations: { title: t.title, readOnlyHint: isReadOnlyToolCall(t.name) },
+        // MCP 的 readOnlyHint 是“整个工具”级：compiler/workspace/debug 只有部分 action 只读，
+        // 无法在单个 annotation 里表达，保守标 false；文档也按此口径说明。
+        annotations: { title: t.title, readOnlyHint: WHOLE_TOOL_READ_ONLY.has(t.name) },
       })),
     };
   });
@@ -76,7 +79,11 @@ async function main(): Promise<void> {
         content: [{ type: 'text' as const, text: `Unknown tool: ${name}. Available: ${TOOL_DEFINITIONS.map((t) => t.name).join(', ')}` }],
       };
     }
-    const ctx = isAgentReadOnly(settings) ? { ...runtime.context, readOnly: true } : runtime.context;
+    const ctx = {
+      ...runtime.context,
+      ...(isAgentReadOnly(settings) ? { readOnly: true } : {}),
+      allowScripts: isAgentScriptsAllowed(settings),
+    } as typeof runtime.context;
     try {
       const value = await invokeTool(ctx, name, (args ?? {}) as Record<string, unknown>);
       return { content: [{ type: 'text' as const, text: JSON.stringify(value, null, 2) }] };

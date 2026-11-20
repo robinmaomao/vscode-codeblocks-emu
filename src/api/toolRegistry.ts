@@ -21,7 +21,7 @@ import type { CompilerSettingsLike } from '../compiler/compilerFactory';
 import type { CbOutput } from '../build/cbChannel';
 import { ControlError, EditChange, EditOp, fail, requireWriteFormat, WRITE_FORMATS } from './types';
 import { normalizeDebugResult } from './debugShapes';
-import { isReadOnlyToolCall, READ_ONLY_HINT } from './agentPolicy';
+import { isReadOnlyToolCall, READ_ONLY_HINT, SCRIPT_POLICY_HINT } from './agentPolicy';
 
 export interface OpenProjectInfo {
   filename: string;
@@ -69,6 +69,8 @@ export interface ToolContext {
   debug?: DebugBridge;
   /** 只读模式（LM Tools / MCP 按设置注入；CLI 不注入 ⇒ 行为不变） */
   readOnly?: boolean;
+  /** 全局脚本策略（LM Tools / MCP 注入；false = 禁止脚本字段，CLI 不注入） */
+  allowScripts?: boolean;
   /**
    * 编译器系统 include 路径（可选；扩展用 `queryCompilerSystemIncludes` 提供）。
    * 导出 compile_commands 时补齐 `-isystem`，与 UI 的「生成 compile_commands」保持一致；
@@ -741,6 +743,12 @@ export async function invokeTool(ctx: ToolContext, name: string, input: Record<s
   const args = input ?? {};
   if (ctx.readOnly && !isReadOnlyToolCall(name, args)) {
     fail('read-only', `${name} is not allowed in read-only mode`, { hint: READ_ONLY_HINT, tool: name, action: args.action });
+  }
+  if (ctx.allowScripts === false && name === 'codeblocks_project_edit' && args.allowScripts === true) {
+    fail('invalid-input', 'Script editing is disabled by the global agent policy', {
+      hint: SCRIPT_POLICY_HINT,
+      setting: 'codeblocks.agent.allowScripts',
+    });
   }
   return tool!.handler(ctx, args);
 }

@@ -1,6 +1,6 @@
 # Agent 控制（Copilot / MCP / CLI）
 
-> 版本：**0.8.143-agent-control**（`feat/agent-control` 预发布构建） ｜ 需要 VS Code **1.102.0+**
+> 版本：**0.9.3** ｜ 需要 VS Code **1.102.0+**
 >
 > 本页说明如何让 AI agent（GitHub Copilot Chat 的 Agent 模式）以及任意 MCP 客户端 / 命令行
 > 完整控制本扩展的 Code::Blocks 工程：读取与修改 `.cbp`、构建/重建/清理、运行、调试。
@@ -21,9 +21,10 @@
 
 ## 2. 快速开始（Copilot Chat）
 
-1. 安装并启用扩展，打开包含 `.cbp` 的工作区；
-2. 打开 Chat，切到 **Agent** 模式，点 **Configure Tools** 确认 `Code::Blocks: …` 系列工具已启用；
-3. 直接描述任务，例如：
+1. 安装并启用扩展，打开包含 `.cbp` 的工作区，并在 **Workspaces: Manage Workspace Trust** 中信任工作区（未受信任工作区里扩展整体不激活）。
+2. 打开 Chat，切到 **Agent** 模式（**Ask/Edit 模式不会自动调用这些工具**），点 **Configure Tools** 确认 `Code::Blocks: …` 系列工具已启用。
+3. 先做一次只读验证：让 Agent 调 `codeblocks_project_read { section: "summary" }`，确认能返回工程与目标。
+4. 直接描述任务，例如：
 
 ```text
 读取 test-project/hello-cb.cbp，把 Debug 目标的编译器选项加上 -std=c++17，
@@ -95,6 +96,26 @@
   - `preserve`：只对 `file.compile` / `file.link` 做定点改写，保留其余字节（注释/缩进/属性顺序）；
     其它操作会自动降级为 canonical，并在 `warnings[]` 中说明。
 - **外部修改保护**：若 `.cbp` 在编辑期间被其它程序改写，返回 `external-modified`；确认要覆盖时传 `force: true`。
+- **全局脚本开关**：LM Tools / MCP 还要求 `codeblocks.agent.allowScripts = true`；否则即使传 `allowScripts: true` 也返回 `invalid-input`。`cb-cli` 不受该设置影响。
+
+### 3.2 权限、确认与只读矩阵
+
+| 工具 | 读 | 写 / 执行 | 只读模式放行 | 扩展内确认 |
+|---|---|---|---|---|
+| `project_read` / `build_status` | ✅ | — | ✅ | 不弹 |
+| `compiler list/info` | ✅ | — | ✅ | 不弹 |
+| `workspace info/deps/list` | ✅ | — | ✅ | 不弹 |
+| `debug state/stack/variables` | ✅ | — | ✅ | 不弹 |
+| `project_edit` | ✅ | 写 `.cbp` | ❌ | 非 `dryRun` 时确认 |
+| `project_file` / `project_target` | ✅ | 写 `.cbp` | ❌ | 确认 |
+| `build` | ✅ | 执行构建/脚本 | ❌ | 不弹（显式构建命令） |
+| `run` | ✅ | 执行程序 | ❌ | 确认 |
+| `debug start/stop/breakpoints/evaluate/continue/step/run` | ✅ | 控制进程 | ❌ | 确认 |
+| `export` | ✅ | 写导出文件 | ❌ | 确认 |
+| `workspace open/close/setActive` | ✅ | 改变打开工程 | ❌ | 确认 |
+
+> `build` 会执行工程里的 Makefile / 构建脚本；确认只覆盖工具调用，不能替代工作区信任与代码审查。
+> MCP 的 `readOnlyHint` 是**整个工具**级 annotation：只有 `project_read` / `build_status` 标为只读；`compiler` / `workspace` / `debug` 只有部分 action 只读，保守标为 `false`。
 
 ---
 
@@ -169,6 +190,21 @@ gdb 后端输出同一份形状，模型不必按传输切换字段：
 
 扩展自带打包版本：`<扩展目录>/bundle/cb-cli.js`。开发态可直接用 `node dist/cli/cb-cli.js`。
 
+安装后的扩展目录（Windows）：
+
+```powershell
+# 版本号以实际安装为准
+$ext = "$env:USERPROFILE\.vscode\extensions\robinmaomao.codeblocks-vscode-0.9.3"
+node "$ext\bundle\cb-cli.js" --help
+```
+
+macOS / Linux：
+
+```bash
+ext="$HOME/.vscode/extensions/robinmaomao.codeblocks-vscode-0.9.3"
+node "$ext/bundle/cb-cli.js" --help
+```
+
 ```bash
 # 读取
 node bundle/cb-cli.js show app.cbp --section summary --json
@@ -223,11 +259,14 @@ node bundle/cb-cli.js compiler info --compiler-id gcc --json
     "codeblocks": {
       "type": "stdio",
       "command": "node",
-      "args": ["<扩展目录>/bundle/cb-mcp.js"]
+      "args": ["C:/Users/<you>/.vscode/extensions/robinmaomao.codeblocks-vscode-0.9.3/bundle/cb-mcp.js"]
     }
   }
 }
 ```
+
+> Windows 路径建议用正斜杠或双反斜杠；`cwd` 应指向工程/工作区目录。macOS/Linux 把路径换成
+> `~/.vscode/extensions/robinmaomao.codeblocks-vscode-0.9.3/bundle/cb-mcp.js`。
 
 > 外部客户端启动时请把 **cwd 设为工程目录**（或在该目录下启动），否则工作区级设置读不到，
 > 只有用户级 `settings.json` 里的 `codeblocks.agent.*` 会生效。
@@ -252,18 +291,20 @@ Makefile / 构建脚本并启动调试器，都属于"运行工作区代码"。�
 
 ## 7. 开关与安全模式
 
-两个设置（`settings.json`，切换**即时生效、无需重载窗口**）：
+三个设置（`settings.json`，切换**即时生效、无需重载窗口**）：
 
 | 设置 | 默认 | 行为 |
 |---|---|---|
 | `codeblocks.agent.enabled` | `true` | 总闸。关闭后 11 个 Language Model Tools **不再注册**（Copilot 看不到也调不到），内嵌 MCP server 不再暴露；外部客户端直接启动的 `cb-mcp.js` 也会拒绝调用（`disabled`）。**未受信任的工作区一律按关闭处理**。独立的 `cb-cli` 不受影响。 |
 | `codeblocks.agent.readOnly` | `false` | 只读模式。只放行 `project_read` / `build_status` / `compiler list,info` / `workspace info,deps,list` / `debug state,stack,variables`；其余返回 `read-only`，工程文件字节不变。 |
+| `codeblocks.agent.allowScripts` | `false` | 脚本总闸。LM Tools / MCP 修改构建脚本、构建前后命令、自定义构建命令时，必须同时开启本设置并在调用里传 `allowScripts: true`；否则返回 `invalid-input`。`cb-cli` 仍只认单次开关。 |
 
 ```jsonc
 // .vscode/settings.json
 {
   "codeblocks.agent.enabled": true,
-  "codeblocks.agent.readOnly": false
+  "codeblocks.agent.readOnly": false,
+  "codeblocks.agent.allowScripts": false
 }
 ```
 
@@ -281,11 +322,12 @@ Makefile / 构建脚本并启动调试器，都属于"运行工作区代码"。�
 | 总闸 | `codeblocks.agent.enabled`（见上表）；未受信任工作区强制关闭 |
 | 工作区信任 | 扩展声明 `capabilities.untrustedWorkspaces.supported: false`（见第 6 节末），Restricted Mode 下扩展整体不激活，构建/运行/调试与 Agent 工具都不可用；信任工作区后按上面的总闸继续判定 |
 | 只读模式 | `codeblocks.agent.readOnly`（见上表），拦截在 `invokeTool` 统一入口；`debug` 只放行 `state` / `stack` / `variables`（`evaluate` 可能执行函数，仍拒绝） |
+| 脚本总闸 | `codeblocks.agent.allowScripts`（见上表）；脚本字段必须同时满足设置开启与单次 `allowScripts: true` |
 | 工具启用 | VS Code 的 **Tools** 选择器逐个开关；也可在自定义 agent 里固定工具集 |
 | 审批 | 由 VS Code 的权限等级决定；写操作返回 before/after，便于复核 |
 | `dryRun` | `project_edit` / `build` 支持只校验不落盘 |
 | 字段白名单 | 只能改文档化的字段；未知字段/越界值直接报错 |
-| `allowScripts` | 构建脚本、pre/post 命令、自定义构建命令必须显式开启才能改 |
+| `allowScripts` | 构建脚本、pre/post 命令、自定义构建命令必须显式开启才能改；还受 `codeblocks.agent.allowScripts` 总闸限制 |
 | `force` | 覆盖"外部已修改"的 `.cbp` 必须显式开启 |
 | 范围 | 默认只写工作区内已存在的 `.cbp`/`.workspace` |
 
@@ -306,12 +348,16 @@ Makefile / 构建脚本并启动调试器，都属于"运行工作区代码"。�
 
 | 现象 | 处理 |
 |---|---|
-| Chat 里看不到工具 | 确认 VS Code ≥ 1.102、Copilot Chat 已启用、Tools 选择器里已勾选；重载窗口 |
+| Chat 里看不到工具 | 确认 VS Code ≥ 1.102、Copilot Chat 已启用、**Chat 处于 Agent 模式**、Tools 选择器里已勾选；改设置后重载窗口（工具列表快照可能滞后） |
+| `/codeblocks` Skill 没出现 | 确认 VS Code 版本支持扩展贡献的 Agent Skill；执行 **Code::Blocks: Install Agent Skill…** 安装到工作区/用户目录，或在扩展目录手动复制 `skills/codeblocks-project/SKILL.md` |
+| `@codeblocks` 没有响应 | 确认扩展已激活、工作区受信任；`/status` 查看 Agent 表面是否开启 |
 | 工具返回 `invalid-input: Unknown field` | 先 `codeblocks_project_read { section: "schema" }` 看白名单 |
+| 工具返回 `invalid-input` 且提示脚本策略 | 打开 `codeblocks.agent.allowScripts`，并确认调用里传了 `allowScripts: true` |
 | 返回 `external-modified` | 先让 VS Code 重载工程，或确认后传 `force: true` |
 | `compiler-missing` / 构建跳过 | 检查 `codeblocks.compilerId`、`codeblocks.masterPath`、`codeblocks.compilerPrograms`；CLI 可用 `compiler info` |
 | CLI 找不到编译器 | CLI 会读工作区 `.vscode/settings.json`；也可用 `CB_MASTER_PATH` 覆盖 |
-| MCP 启动失败 | 确认 `<扩展目录>/bundle/cb-mcp.js` 存在；外部客户端改用 `node` 显式指定路径 |
+| CLI 找不到脚本 | 用 `codeblocks.agent.status` 查看 `bundle/cb-cli.js` 的实际路径，或检查扩展目录版本号 |
+| MCP 启动失败 | 确认 `<扩展目录>/bundle/cb-mcp.js` 存在；外部客户端改用 `node` 显式指定绝对路径，并把 cwd 设为工程目录 |
 | 调试拿不到变量 | `codeblocks_debug { action: "stack" }` 确认已停止（`state.stopped`）；`run` 模式会一次返回栈与局部变量 |
 
 ---
@@ -323,3 +369,31 @@ Makefile / 构建脚本并启动调试器，都属于"运行工作区代码"。�
 - `codeblocks_build_status` 在 CLI 里只反映**同一进程内**的最近一次构建；跨进程请直接读 `codeblocks_build` 的返回值。
 - web 扩展（`vscode.dev`）不支持 stdio MCP。
 - 调试的交互式子集（registers/内存/反汇编）只在扩展内提供。
+- `@codeblocks` 是确定性命令包装（`/read` `/build` `/fix` `/debug` `/status` `/help`），不做自主编辑；自主修改请用 Agent 模式。
+
+---
+
+## 12. Agent Skill 与 `@codeblocks`
+
+### 12.1 内置 Skill
+
+扩展随包提供 `skills/codeblocks-project/SKILL.md`，并在 `package.json` 里通过 `contributes.chatSkills` 注册。支持扩展贡献 Skill 的 VS Code 版本会自动发现它；当请求匹配“读取/修改 `.cbp`、构建、调试、排障”时，模型可按需加载。
+
+- 显式调用：在 Chat 输入 `/codeblocks-project`。
+- 内容只包含工作流与护栏（先读、schema、dryRun、构建失败循环、错误码恢复、脚本安全），不复制 11 个工具的完整参考。
+- 旧版 VS Code 或外部客户端：执行 **Code::Blocks: Install Agent Skill…**，选择工作区（`.github/skills/codeblocks-project/SKILL.md`）或用户目录（`~/.copilot/skills/codeblocks-project/SKILL.md`）；已存在时会先确认再覆盖。
+
+### 12.2 `@codeblocks` 命令
+
+| 命令 | 作用 |
+|---|---|
+| `/read [target]` | 读取活动工程摘要；可带目标名过滤 |
+| `/build [target] [--rebuild\|--clean]` | 构建 / 重建 / 清理 |
+| `/fix` | 显示最近一次构建的结构化错误 |
+| `/debug [state\|stack\|variables\|stop\|continue\|step [in\|out]]` | 查询或控制调试会话 |
+| `/status` | 显示总闸、只读、脚本策略、工具数、CLI/MCP/Skill 路径 |
+| `/help` | 用法 |
+
+> 这些命令不经过模型推理，适合快速操作；需要“读工程 → 改字段 → 构建 → 修复”的自主循环时，请在 Agent 模式里描述任务。
+
+更多可复制示例见 [Agent recipes](./agent-recipes.md)。

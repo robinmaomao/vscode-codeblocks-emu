@@ -2,7 +2,7 @@
   "name": "codeblocks-vscode",
   "displayName": "%extension.displayName%",
   "description": "%extension.description%",
-  "version": "0.9.2",
+  "version": "0.9.3",
   "icon": "resources/icon.png",
   "publisher": "robinmaomao",
   "author": {
@@ -50,7 +50,8 @@
     "onDebug",
     "onDebugResolve:codeblocks",
     "onDebugInitialConfigurations",
-    "onDebugDynamicConfigurations:codeblocks"
+    "onDebugDynamicConfigurations:codeblocks",
+    "onChatParticipant:codeblocks.agent"
   ],
   "main": "./bundle/extension.js",
   "contributes": {
@@ -668,6 +669,14 @@
         "command": "codeblocks.debug.infoSignals",
         "title": "%command.codeblocks.debug.infoSignals.title%",
         "icon": "$(bell)"
+      },
+      {
+        "command": "codeblocks.agent.status",
+        "title": "%command.codeblocks.agent.status.title%"
+      },
+      {
+        "command": "codeblocks.agent.installSkill",
+        "title": "%command.codeblocks.agent.installSkill.title%"
       }
     ],
     "languages": [
@@ -1606,6 +1615,12 @@
             "default": false,
             "description": "%configuration.codeblocks.agent.readOnly.description%",
             "markdownDescription": "%configuration.codeblocks.agent.readOnly.markdownDescription%"
+          },
+          "codeblocks.agent.allowScripts": {
+            "type": "boolean",
+            "default": false,
+            "description": "%configuration.codeblocks.agent.allowScripts.description%",
+            "markdownDescription": "%configuration.codeblocks.agent.allowScripts.markdownDescription%"
           }
         }
       }
@@ -2978,6 +2993,46 @@
       {
         "id": "codeblocks",
         "label": "%mcp.codeblocks.label%"
+      }
+    ],
+    "chatSkills": [
+      {
+        "path": "./skills/codeblocks-project/SKILL.md"
+      }
+    ],
+    "chatParticipants": [
+      {
+        "id": "codeblocks.agent",
+        "name": "codeblocks",
+        "fullName": "%chatParticipant.codeblocks.fullName%",
+        "description": "%chatParticipant.codeblocks.description%",
+        "isSticky": true,
+        "commands": [
+          {
+            "name": "read",
+            "description": "%chatParticipant.codeblocks.command.read%"
+          },
+          {
+            "name": "build",
+            "description": "%chatParticipant.codeblocks.command.build%"
+          },
+          {
+            "name": "fix",
+            "description": "%chatParticipant.codeblocks.command.fix%"
+          },
+          {
+            "name": "debug",
+            "description": "%chatParticipant.codeblocks.command.debug%"
+          },
+          {
+            "name": "status",
+            "description": "%chatParticipant.codeblocks.command.status%"
+          },
+          {
+            "name": "help",
+            "description": "%chatParticipant.codeblocks.command.help%"
+          }
+        ]
       }
     ]
   },
