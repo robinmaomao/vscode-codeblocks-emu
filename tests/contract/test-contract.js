@@ -42,6 +42,8 @@ const INTERNAL_RUNTIME_COMMANDS = new Set([
   'codeblocks.projectManager',
   // 跳转内部命令：由树节点 command 直接调用（纯标量参数），不需要出现在命令面板
   'codeblocks.openLocation',
+  // 诊断/宿主测试：返回历史存储根与条目，不修改文件，不贡献到命令面板
+  'codeblocks.agent.historyInfo',
 ]);
 
 /** 在 src 中检索命令字面量（覆盖循环注册：['codeblocks.x', ...] 也含字面量） */

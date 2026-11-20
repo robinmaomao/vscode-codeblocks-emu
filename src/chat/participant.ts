@@ -26,6 +26,8 @@ const HELP = [
   '- `/build [target] [--rebuild|--clean]` — build, rebuild or clean a target.',
   '- `/fix` — show structured errors from the latest build.',
   '- `/debug [state|stack|variables|stop|continue|step [in|out]]` — inspect or control the debug session.',
+  '- `/history` — open Agent change history and undo a recent project-file change.',
+  '- `/undo` — undo the latest Agent project-file change.',
   '- `/status` — show Agent control status and bundled paths.',
   '- `/help` — show this help.',
   '',
@@ -49,6 +51,16 @@ export function registerCodeblocksChatParticipant(
     }
     if (plan.kind === 'status') {
       response.markdown(opts.getStatus());
+      return;
+    }
+    if (plan.kind === 'history') {
+      await vscode.commands.executeCommand('codeblocks.agent.history');
+      response.markdown(i18n.t('Opened the Agent change history.'));
+      return;
+    }
+    if (plan.kind === 'undo') {
+      await vscode.commands.executeCommand('codeblocks.agent.undoLast');
+      response.markdown(i18n.t('Opened the Agent undo confirmation.'));
       return;
     }
     const toolContext = opts.getContext();

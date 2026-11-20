@@ -67,7 +67,7 @@ npm.cmd run compile
 npm.cmd run package
 
 # 安装（版本号以 package.json 为准）
-code --install-extension "codeblocks-vscode-0.9.3.vsix" --force
+code --install-extension "codeblocks-vscode-0.10.0.vsix" --force
 
 # 全量回归测试
 npm.cmd test
@@ -137,12 +137,15 @@ npm.cmd test
 | [0.9.1](../release/0.9.1.md) | clangd 重启路径修复：合并器改单飞（不并发叠加）、跳过留痕、客户端未就绪时有限重试、跳过文案对齐 |
 | [0.9.2](../release/0.9.2.md) | 合并后九轮复查：目标平台守卫与 `no-build`、构建不再被通知挂起、调试响应归一化 / 断点替换、编辑深拷贝、导出保护、CLI 退出码与 JSON、只读白名单补 debug |
 | [0.9.3](../release/0.9.3.md) | Agent 上手体验与安全护栏：内置 `codeblocks-project` Skill + 安装命令、`@codeblocks` participant、Agent Status、工具确认文案、`agent.allowScripts` 脚本总闸、Agent 文档/recipes |
+| [0.10.0](../release/0.10.0.md) | Agent 变更审计与一键撤销：工作区快照 / `audit.jsonl`、`Agent Change History`、`Undo Last Agent Change`、`@codeblocks /history` `/undo`、冲突保护与 `agent.history.*` 设置 |
 
-> 当前版本 **0.9.3**（功能版；发布说明见 [release/0.9.3.md](../release/0.9.3.md)，上一版见 [release/0.9.2.md](../release/0.9.2.md)）；测试报告见 [test-report-0.9.3.md](../testing/test-report-0.9.3.md)；无头回归见 `npm test`（另有契约 / E2E / 视觉 / 性能 / 打包 / 宿主分层，见 [测试方案](../testing/strategy.md)）。
+> 当前版本 **0.10.0**（功能版；发布说明见 [release/0.10.0.md](../release/0.10.0.md)，上一版见 [release/0.9.3.md](../release/0.9.3.md)）；测试报告见 [test-report-0.10.0.md](../testing/test-report-0.10.0.md)；无头回归见 `npm test`（另有契约 / E2E / 视觉 / 性能 / 打包 / 宿主分层，见 [测试方案](../testing/strategy.md)）。
 
 > **0.9.2 E3 GUI 验收**：Computer Use 不可用，改用便携 VS Code 1.102.0 + 独立 profile + 0.9.2 VSIX，通过 CDP/Playwright 驱动真实工作台完成工程树/9 大菜单/构建运行/属性与构建选项 WebView/快捷键面板/真实 GDB 断点/中英切换/工程搜索；记录 Rebuild 模态与外部修改检测两个待人工复核项。报告见 [e3-manual-report-0.9.2.md](../testing/e3-manual-report-0.9.2.md)。
 
 > **0.9.2 E3 修复轮**：用户确认后按“Rebuild 确认前置 / 外部修改先诊断 / 工程树保持现状”实施。构建入口新增 `runBuildPreflight()`，把停调试器与 Rebuild 确认移到构建互斥锁**之前**，确认期间 Stop 提示“等待构建确认”而不再谎报无构建；外部修改检测补 `.cbp` 事件、tracker、焦点、问询/处理诊断日志，并新增真实宿主 `tests/host/suite/external-change.tests.js`（外部改 `.cbp` → auto 重载）；工程树 target 层级确认为既有设计不实施。验证：无头 233/0/1、契约 3/0、宿主 38/0。
+
+> **0.10.0 Agent 变更审计与撤销**：`invokeTool()` 前后挂钩历史；`.cbp` / `.workspace` 写操作保存工作区字节快照，所有工具调用写 `audit.jsonl`；新增 `Agent Change History` / `Undo Last Agent Change` / `@codeblocks /history` `/undo`。每个文件仅撤销最新一条，外部修改默认拒绝、二次确认可强制覆盖；默认 50 条 / 14 天；CLI / 外部 MCP 不支持跨进程撤销。验证：无头 237/0/1、契约 3/0（44 + 6 + 777）、宿主 40/40、打包 17 断言、`test:all` 251/0/1；报告见 [test-report-0.10.0.md](../testing/test-report-0.10.0.md)。
 
 > **0.9.3 Agent 体验与安全**：内置 `codeblocks-project` Skill（`contributes.chatSkills` + Install Agent Skill 命令）、`@codeblocks` participant（`/read` `/build` `/fix` `/debug` `/status` `/help`）、Agent Status 命令、工具确认文案、`codeblocks.agent.allowScripts` 脚本总闸（默认 false）；文档补 5 分钟上手/权限矩阵/CLI·MCP 路径/排障与 recipes。验证：无头 236/0/1、契约 3/0、宿主 38/38、打包 17 断言。
 

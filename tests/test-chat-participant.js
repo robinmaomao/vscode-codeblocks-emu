@@ -35,6 +35,8 @@ check('P9 /status 返回 status', planParticipantCommand('status', '').kind === 
 check('P10 未给命令回退 help', planParticipantCommand(undefined, '').kind === 'help');
 check('P11 /help 返回 help', planParticipantCommand('help', '').kind === 'help');
 check('P12 未知命令报错', planParticipantCommand('nope', '').kind === 'error');
+check('P13 /history 返回 history', planParticipantCommand('history', '').kind === 'history');
+check('P14 /undo 返回 undo', planParticipantCommand('undo', '').kind === 'undo');
 
 console.log(`\n@codeblocks 命令解析回归: ${pass} pass, ${fail} fail`);
 process.exit(fail ? 1 : 0);

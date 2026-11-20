@@ -117,7 +117,27 @@ codeblocks_build     { target: "Release" }   // use the UI's Build Workspace for
 | `@codeblocks /build [target] --rebuild` | Build/rebuild |
 | `@codeblocks /fix` | Latest build errors |
 | `@codeblocks /debug stack` | Current stack |
+| `@codeblocks /history` | Open Agent change history |
+| `@codeblocks /undo` | Undo the latest Agent project-file change |
 | `@codeblocks /status` | Switches, tool count, CLI/MCP/skill paths |
 | `@codeblocks /help` | Help |
 
 > Use **Agent mode** for the autonomous read → edit → build → fix loop; `@codeblocks` is only a deterministic command wrapper.
+
+## 8. Undo a bad Agent edit
+
+```text
+The Agent just changed the Debug compiler options incorrectly. List the workspace's
+Agent change history, confirm the latest entry, undo it, and verify the project tree value is restored.
+```
+
+```text
+@codeblocks /history
+// select the latest entry → Undo This Change
+// or directly:
+@codeblocks /undo
+```
+
+> Only the latest change per file can be undone. If the file changed externally after the Agent,
+> undo is refused by default; force-undo requires a second confirmation. See
+> [Agent change history and undo](./agent-history.en.md).

@@ -6,7 +6,7 @@ An extension that natively ports the Code::Blocks core features to VS Code — a
 
 Open a `.cbp` / `.workspace` project directly in VS Code and get a build, debug, and project browsing experience aligned with Code::Blocks.
 
-> **Author**: Robinmaomao ｜ **Version**: 0.9.3
+> **Author**: Robinmaomao ｜ **Version**: 0.10.0
 
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](./LICENSE.md)
 
@@ -94,7 +94,8 @@ Open a `.cbp` / `.workspace` project directly in VS Code and get a build, debug,
 - 🤖 **Agent control** (since 0.9.0): 11 Language Model Tools + embedded MCP server + standalone `cb-cli`, so a Copilot agent / MCP client / CI can read and edit `.cbp`, build/clean, run, debug, export and probe compilers — all three transports share one implementation.
 - 🔒 **Switches**: `codeblocks.agent.enabled` (default on) turns every tool and the MCP exposure off; `codeblocks.agent.readOnly` (default off) allows inspection tools only. Untrusted workspaces are always treated as off, and changes apply immediately.
 - 🧩 **Onboarding and guardrails**: bundled `codeblocks-project` Agent Skill (**Code::Blocks: Install Agent Skill…** installs it into the workspace/user profile), `@codeblocks` shortcuts, confirmations before writes/execution, and the `codeblocks.agent.allowScripts` script gate.
-- See [Agent control (Copilot / MCP / CLI)](./docs/guide/agent-control.en.md) and [Agent recipes](./docs/guide/agent-recipes.en.md).
+- ↩️ **Undoable changes** (since 0.10.0): every Agent tool call has a local audit trail; writes to `.cbp` / `.workspace` keep snapshots, so **Code::Blocks: Agent Change History…** / **Undo Last Agent Change** can restore the latest change. External edits are refused by default.
+- See [Agent control (Copilot / MCP / CLI)](./docs/guide/agent-control.en.md), [Agent recipes](./docs/guide/agent-recipes.en.md) and [Agent change history](./docs/guide/agent-history.en.md).
 
 ## ⚠️ Known limitations (unsupported features)
 
@@ -126,10 +127,10 @@ code --install-extension robinmaomao.codeblocks-vscode
 
 ### Option 2: install from GitHub Releases
 
-Download `codeblocks-vscode-0.9.3.vsix` from [Releases](https://github.com/robinmaomao/vscode-codeblocks-emu/releases):
+Download `codeblocks-vscode-0.10.0.vsix` from [Releases](https://github.com/robinmaomao/vscode-codeblocks-emu/releases):
 
 ```powershell
-code --install-extension codeblocks-vscode-0.9.3.vsix --force
+code --install-extension codeblocks-vscode-0.10.0.vsix --force
 ```
 
 ### Option 3: build from source
@@ -137,7 +138,7 @@ code --install-extension codeblocks-vscode-0.9.3.vsix --force
 ```powershell
 npm install
 npm run package
-code --install-extension codeblocks-vscode-0.9.3.vsix --force
+code --install-extension codeblocks-vscode-0.10.0.vsix --force
 ```
 
 > `npm run package` = `vsce package` (packaging runs the `vscode:prepublish` hook automatically = `tsc` compile (`dist/`, for local tests) + esbuild single-file bundle (`bundle/extension.js`, the release entry)); running `npx vsce package` / `npx vsce publish` directly also builds automatically and never packs a stale or missing `bundle/`; on Windows, prefer `npm.cmd` / `npx.cmd` (PSReadLine execution policy).
@@ -224,7 +225,7 @@ Project tree operations (multi-project drag ordering / per-file compile·link to
 | `codeblocks.clangd.queryDriver` | `false` | When enabled, warns in the Output channel if `clangd.arguments` lacks `--query-driver` (the `Configure clangd --query-driver` command writes it in one click) |
 | `codeblocks.clangd.extraConfig` | `""` | Free-form YAML injected as a **trailing** fragment in the same scope (can override any key written by the extension; the extension adds `If.PathMatch` automatically) |
 
-> The complete set of 94 settings (10 sections, bilingual descriptions) is in [Settings reference](./docs/guide/settings.en.md) (Chinese [settings.md](./docs/guide/settings.md)). There are also two clangd commands: `Code::Blocks: Clean Stale clangd Config Fragments` (cleans stale fragments + orphan cache directories, with a preview before confirming) and `Code::Blocks: Configure clangd --query-driver` (cross-compiler fidelity).
+> The complete set of 96 settings (10 sections, bilingual descriptions) is in [Settings reference](./docs/guide/settings.en.md) (Chinese [settings.md](./docs/guide/settings.md)). There are also two clangd commands: `Code::Blocks: Clean Stale clangd Config Fragments` (cleans stale fragments + orphan cache directories, with a preview before confirming) and `Code::Blocks: Configure clangd --query-driver` (cross-compiler fidelity).
 
 ## Architecture
 

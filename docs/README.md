@@ -44,7 +44,8 @@ docs/
 | [guide/usage.md](./guide/usage.md) | 用户手册：安装、界面、构建、调试、快捷键、设置（§13）、FAQ、已知限制（§16）｜英文版 [guide/usage.en.md](./guide/usage.en.md) |
 | [guide/settings.md](./guide/settings.md) | **设置项完整参考**：10 个分区逐项说明类型、默认值、作用域、取值与生效时机｜英文版 [guide/settings.en.md](./guide/settings.en.md) |
 | [guide/agent-control.md](./guide/agent-control.md) | **Agent 控制**（Copilot / MCP / CLI）：11 个工具参考、典型工作流、开关与只读模式、排障｜英文版 [guide/agent-control.en.md](./guide/agent-control.en.md) |
-| [guide/agent-recipes.md](./guide/agent-recipes.md) | **Agent recipes**：构建修复、改选项、加文件/目标、调试、CI 导出、多工程的可复制示例｜英文版 [guide/agent-recipes.en.md](./guide/agent-recipes.en.md) |
+| [guide/agent-recipes.md](./guide/agent-recipes.md) | **Agent recipes**：构建修复、改选项、加文件/目标、调试、CI 导出、多工程、撤销的可复制示例｜英文版 [guide/agent-recipes.en.md](./guide/agent-recipes.en.md) |
+| [guide/agent-history.md](./guide/agent-history.md) | **Agent 变更历史与撤销**：快照/审计范围、QuickPick、冲突处理、存储与保留策略｜英文版 [guide/agent-history.en.md](./guide/agent-history.en.md) |
 | [guide/alignment.md](./guide/alignment.md) | 与 Code::Blocks 25.03 的逐项对齐依据（CB 源码位置 + 扩展实现 + 保护性差异） |
 | [dev/progress.md](./dev/progress.md) | 恢复开发进度用：总体进度、已完成能力、构建命令、关键踩坑、版本里程碑 |
 | [dev/backlog.md](./dev/backlog.md) | 功能对齐现状：剩余缺口、明确不移植清单、A–E 组完成摘要 |

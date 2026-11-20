@@ -79,6 +79,23 @@ codeblocks_debug  { action: "stop" }
 
 > `run` 不提供 stdin，交互式程序请用集成终端；调试的 start/stop/continue/step 在扩展内可能弹确认。
 
+## 5. 撤错改：查看历史 → 撤销
+
+```text
+刚才 Agent 改错了 Debug 目标的编译选项。先列出当前工作区的 Agent 变更历史，
+确认是最新一条后撤销，并检查工程树里的值已经恢复。
+```
+
+```text
+@codeblocks /history
+// 选择最新一条 → Undo This Change
+// 或直接：
+@codeblocks /undo
+```
+
+> 同一文件只能撤销最新一条；如果文件在 Agent 之后被外部修改，默认拒绝，二次确认才强制覆盖。
+> 详细规则见 [Agent 变更历史与撤销](./agent-history.md)。
+
 ## 5. CI 导出
 
 ```text

@@ -124,6 +124,8 @@ import { tidyCommentBlock } from './tools/tidyComments';
 import { registerToolCommands } from './features/toolCommands';
 import { registerAgentSkillCommand } from './features/agentSkill';
 import { registerCodeblocksChatParticipant } from './chat/participant';
+import { registerAgentHistoryCommands } from './agent/historyCommands';
+import { AgentHistoryStore } from './agent/historyStore';
 import { registerDebugInstructionCommands } from './features/debugCommands';
 import { useTaskTerminalForNoProjectCompile } from './features/noProjectCompileSettings';
 import { runCapture } from './tools/profiler';
@@ -422,6 +424,8 @@ async function migrateSettingsOnce(context: vscode.ExtensionContext): Promise<vo
 
 /** 扩展侧工具上下文（延迟到激活完成、provider 就绪后创建） */
 let agentToolContext: AgentToolContext | undefined;
+/** Agent 变更历史（工作区扩展存储；独立于 Agent 总闸，关闭 Agent 后仍可查看/撤销） */
+let agentHistoryStore: AgentHistoryStore | undefined;
 
 /** 已注册的 LM Tools 句柄（设置切换时整体注销后重建，无需重载窗口） */
 let agentToolsDisposables: vscode.Disposable[] = [];
@@ -472,6 +476,7 @@ function applyAgentSurface(reason: string): void {
     const ctx = createAgentToolContext();
     if (readOnly) ctx.readOnly = true;
     ctx.allowScripts = allowScripts;
+    ctx.history = agentHistoryStore;
     agentToolContext = ctx;
     // 审计日志：每次工具调用一行（工具名 / 结果 / 耗时）
     agentToolsDisposables = registerLanguageModelTools(ctx, { log: (line) => outputChannel.info(line) });
@@ -513,6 +518,7 @@ function agentStatusText(context: vscode.ExtensionContext): string {
   const mcp = path.join(context.extensionPath, 'bundle', 'cb-mcp.js');
   const skill = path.join(context.extensionPath, 'skills', 'codeblocks-project', 'SKILL.md');
   const exists = (p: string): string => (fs.existsSync(p) ? 'yes' : 'no');
+  const history = agentHistoryStore?.stats();
   return [
     `### Code::Blocks Agent Status`,
     '',
@@ -520,12 +526,60 @@ function agentStatusText(context: vscode.ExtensionContext): string {
     `- \`codeblocks.agent.enabled\`: **${cfg.get<boolean>('agent.enabled', true) ? 'true' : 'false'}**`,
     `- \`codeblocks.agent.readOnly\`: **${readOnly ? 'true' : 'false'}**`,
     `- \`codeblocks.agent.allowScripts\`: **${allowScripts ? 'true' : 'false'}**`,
+    `- \`codeblocks.agent.history.enabled\`: **${cfg.get<boolean>('agent.history.enabled', true) ? 'true' : 'false'}**`,
     `- Agent surface allowed: **${enabled ? 'yes' : 'no'}**`,
     `- Registered LM tools: **${agentToolsDisposables.length}**`,
+    `- Agent history: **${history ? `${history.entries} change(s), ${history.auditBytes} audit bytes` : 'unavailable'}**`,
+    `- History storage: \`${history?.rootDir ?? 'unavailable'}\``,
     `- CLI bundle: \`${cli}\` (exists: ${exists(cli)})`,
     `- MCP bundle: \`${mcp}\` (exists: ${exists(mcp)})`,
     `- Bundled skill: \`${skill}\` (exists: ${exists(skill)})`,
   ].join('\n');
+}
+
+/** Agent 历史是否应采集新记录：工作区受信任且设置开启 */
+function agentHistoryEnabled(): boolean {
+  if (!vscode.workspace.isTrusted) return false;
+  return vscode.workspace.getConfiguration('codeblocks').get<boolean>('agent.history.enabled', true);
+}
+
+/** 初始化工作区级 Agent 变更历史；无 storageUri（未打开文件夹）时保持不可用。 */
+function initAgentHistory(context: vscode.ExtensionContext): void {
+  const storage = context.storageUri;
+  if (!storage) {
+    outputChannel.info(logT('[Code::Blocks] Agent history unavailable: no workspace storage (open a folder first)'));
+    return;
+  }
+  const cfg = vscode.workspace.getConfiguration('codeblocks');
+  try {
+    const store = new AgentHistoryStore({
+      rootDir: path.join(storage.fsPath, 'agent-history'),
+      workspaceRoots: (vscode.workspace.workspaceFolders ?? []).map((f) => f.uri.fsPath),
+      maxEntries: cfg.get<number>('agent.history.maxEntries', 50),
+      onError: (message, err) => {
+        outputChannel.warn(`[Code::Blocks] ${message}: ${(err as Error)?.message ?? String(err)}`);
+      },
+    });
+    store.setEnabled(agentHistoryEnabled());
+    agentHistoryStore = store;
+    void store.prune().catch((err) => {
+      outputChannel.warn(logT('[Code::Blocks] Agent history prune failed: {0}', (err as Error).message));
+    });
+    context.subscriptions.push(new vscode.Disposable(() => {
+      if (agentHistoryStore === store) agentHistoryStore = undefined;
+    }));
+    context.subscriptions.push(vscode.workspace.onDidChangeConfiguration((e) => {
+      if (!e.affectsConfiguration('codeblocks.agent.history')) return;
+      store.setLimits(cfg.get<number>('agent.history.maxEntries', 50));
+      store.setEnabled(agentHistoryEnabled());
+    }));
+    if (typeof vscode.workspace.onDidGrantWorkspaceTrust === 'function') {
+      context.subscriptions.push(vscode.workspace.onDidGrantWorkspaceTrust(() => store.setEnabled(agentHistoryEnabled())));
+    }
+    outputChannel.info(logT('[Code::Blocks] Agent history initialized: {0}', path.join(storage.fsPath, 'agent-history')));
+  } catch (err) {
+    outputChannel.warn(logT('[Code::Blocks] Agent history unavailable: {0}', (err as Error).message));
+  }
 }
 
 /** 合成构建摘要（makefile 模式 / 清理路径没有 BuildEngine 统计时使用） */
@@ -2446,6 +2500,30 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       if (answer === copy) await vscode.env.clipboard.writeText(text);
     }),
   );
+  registerAgentHistoryCommands(context, {
+    getStore: () => agentHistoryStore,
+    isTrusted: () => vscode.workspace.isTrusted,
+    isBusy: () => buildInProgress || buildPreflightInProgress || !!vscode.debug.activeDebugSession || !!agentHistoryStore?.busy,
+    reloadAfterUndo: async (file) => {
+      if (path.extname(file).toLowerCase() === '.cbp') {
+        projectChangeTracker.remember(file);
+        await reloadProjectFromDisk(file, { notify: false });
+      } else if (path.extname(file).toLowerCase() === '.workspace') {
+        if (openedWorkspaceFile && normPath(openedWorkspaceFile) === normPath(file)) {
+          await reloadWorkspaceFromDisk(file);
+        }
+      }
+    },
+    log: (line) => outputChannel.info(line),
+  });
+  // 诊断/宿主测试：返回历史存储根与条目，不修改任何文件（不贡献到命令面板）。
+  context.subscriptions.push(
+    vscode.commands.registerCommand('codeblocks.agent.historyInfo', () => ({
+      available: !!agentHistoryStore,
+      root: agentHistoryStore?.root,
+      entries: agentHistoryStore?.list() ?? [],
+    })),
+  );
   registerCodeblocksChatParticipant(context, {
     getContext: () => agentToolContext,
     getStatus: () => agentStatusText(context),
@@ -2857,6 +2935,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   // Agent 控制层：LM Tools + MCP provider，受 codeblocks.agent.enabled / readOnly 与工作区信任门控。
   // 旧宿主 / 未安装 Copilot 时注册函数内部静默跳过，不影响扩展激活。
+  initAgentHistory(context);
   initAgentSurface(context);
 
   return;

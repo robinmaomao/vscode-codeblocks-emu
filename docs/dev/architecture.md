@@ -1,7 +1,7 @@
 # 架构与模块地图
 
 > 目的：给后续功能开发一个稳定的落点说明。本文只描述**当前实现**与**已规划的拆分边界**，不重复用户文档。
-> 基线：0.9.3（Agent Skill / participant / 脚本总闸后）。
+> 基线：0.10.0（Agent 变更审计 / 撤销后）。
 
 ## 1. 数据流
 
@@ -64,18 +64,21 @@ flowchart LR
   MCPServer --> Registry
   Runtime --> Registry
   Registry --> Policy["src/api/agentPolicy.ts"]
+  Registry --> History["src/api/agentHistory.ts + src/agent/historyStore.ts"]
   Registry --> BuildCore["src/build/buildProject.ts"]
   Registry --> Project["projectEdit / projectQuery / projectStore"]
   Registry --> Debug["debugService / debugShapes"]
   Policy --> Settings["codeblocks.agent.* + workspace trust"]
+  History --> Storage["workspaceStorage/agent-history"]
 ```
 
 - `src/api/*` 不依赖 vscode；三端（LM Tools / MCP / CLI）共用同一份参数校验、错误码与 handler。
 - 策略集中在 `src/api/agentPolicy.ts`：总闸、只读白名单、脚本总闸；`invokeTool()` 是唯一拦截点。
+- **变更历史**：`invokeTool()` 在 handler 前后调用 `ctx.history`（仅扩展注入）：`src/api/agentHistory.ts` 解析可能写入的 `.cbp` / `.workspace`，`src/agent/historyStore.ts` 保存快照 / `index.json` / `audit.jsonl`；历史写失败只记输出通道，不影响工具结果。CLI/MCP 不注入 history。
 - 工具编辑在深拷贝上执行，写回走 `projectStore` / `persistProjectAndReload`；构建内核与 UI 共用 `build/buildProject.ts`。
 - `src/mcp/provider.ts` 用 `process.execPath` 启动随包 `bundle/cb-mcp.js`，cwd = 首个工作区目录，因此工作区级开关生效；外部客户端需自行设置 cwd 并确认工作区可信。
-- `contributes.chatSkills` 注册 `skills/codeblocks-project/SKILL.md`；`src/chat/participant.ts` 只做确定性命令包装，不绕过 `invokeTool` 策略。
-- 回归：`test-agent-policy`（策略）、`test-ai-tools-contract`（清单）、`test-mcp-server`（协议/门控）、`test-cli`、`test-chat-participant`、`test-agent-skill`、`host/suite/agent.tests.js`。
+- `contributes.chatSkills` 注册 `skills/codeblocks-project/SKILL.md`；`src/chat/participant.ts` 只做确定性命令包装，不绕过 `invokeTool` 策略；`/history` `/undo` 只调用扩展命令。
+- 回归：`test-agent-policy`（策略）、`test-agent-history`（快照/撤销/审计）、`test-ai-tools-contract`（清单）、`test-mcp-server`（协议/门控）、`test-cli`、`test-chat-participant`、`test-agent-skill`、`host/suite/agent.tests.js`、`host/suite/agent-history.tests.js`。
 
 ## 4. 拆分路线（P3-1）
 

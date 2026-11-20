@@ -19,9 +19,10 @@ import { captureSignature, loadWorkspace, readProjectText, requireCbpPath, signa
 import type { CompilerProvider } from './compilerService';
 import type { CompilerSettingsLike } from '../compiler/compilerFactory';
 import type { CbOutput } from '../build/cbChannel';
-import { ControlError, EditChange, EditOp, fail, requireWriteFormat, WRITE_FORMATS } from './types';
+import { asControlError, ControlError, EditChange, EditOp, fail, requireWriteFormat, WRITE_FORMATS } from './types';
 import { normalizeDebugResult } from './debugShapes';
 import { isReadOnlyToolCall, READ_ONLY_HINT, SCRIPT_POLICY_HINT } from './agentPolicy';
+import { AgentHistoryCapture, AgentHistoryChangeInfo, AgentHistoryHooks, resolveWriteTargets } from './agentHistory';
 
 export interface OpenProjectInfo {
   filename: string;
@@ -71,6 +72,11 @@ export interface ToolContext {
   readOnly?: boolean;
   /** 全局脚本策略（LM Tools / MCP 注入；false = 禁止脚本字段，CLI 不注入） */
   allowScripts?: boolean;
+  /**
+   * 变更历史（扩展注入；CLI/MCP 不注入 ⇒ 不记录、不可撤销）。
+   * 历史实现失败不得影响工具本身。
+   */
+  history?: AgentHistoryHooks;
   /**
    * 编译器系统 include 路径（可选；扩展用 `queryCompilerSystemIncludes` 提供）。
    * 导出 compile_commands 时补齐 `-isystem`，与 UI 的「生成 compile_commands」保持一致；
@@ -741,14 +747,71 @@ export async function invokeTool(ctx: ToolContext, name: string, input: Record<s
   const tool = findTool(name);
   if (!tool) throw new ControlError('invalid-input', `Unknown tool: ${name}`, { tools: TOOL_DEFINITIONS.map((t) => t.name) });
   const args = input ?? {};
-  if (ctx.readOnly && !isReadOnlyToolCall(name, args)) {
-    fail('read-only', `${name} is not allowed in read-only mode`, { hint: READ_ONLY_HINT, tool: name, action: args.action });
+  const startedAt = Date.now();
+  const at = new Date(startedAt).toISOString();
+  const readOnlyBlocked = !!ctx.readOnly && !isReadOnlyToolCall(name, args);
+  const scriptsBlocked = ctx.allowScripts === false && name === 'codeblocks_project_edit' && args.allowScripts === true;
+
+  // 审计覆盖所有调用（包括策略拒绝）；只有真正可能写盘的调用才读取快照。
+  let capture: AgentHistoryCapture | undefined;
+  if (ctx.history) {
+    try {
+      capture = await ctx.history.capture({
+        tool: name,
+        input: args,
+        targets: readOnlyBlocked || scriptsBlocked ? [] : resolveWriteTargets(ctx, name, args),
+      });
+    } catch (err) {
+      ctx.output.warn(`[Code::Blocks] Agent history capture failed: ${(err as Error).message}`);
+    }
   }
-  if (ctx.allowScripts === false && name === 'codeblocks_project_edit' && args.allowScripts === true) {
-    fail('invalid-input', 'Script editing is disabled by the global agent policy', {
-      hint: SCRIPT_POLICY_HINT,
-      setting: 'codeblocks.agent.allowScripts',
-    });
+
+  let changes: AgentHistoryChangeInfo[] = [];
+  const finish = async (outcome: { ok: boolean; code?: string; error?: string }): Promise<void> => {
+    if (!ctx.history) return;
+    try {
+      changes = await ctx.history.finish(capture, outcome);
+    } catch (err) {
+      ctx.output.warn(`[Code::Blocks] Agent history finish failed: ${(err as Error).message}`);
+    }
+  };
+  const record = async (ok: boolean, code?: string, error?: string): Promise<void> => {
+    if (!ctx.history) return;
+    try {
+      await ctx.history.recordCall({
+        id: capture?.id,
+        at,
+        tool: name,
+        input: args,
+        ok,
+        code,
+        error,
+        durationMs: Date.now() - startedAt,
+        changedFiles: changes.map((c) => c.relativeFile ?? path.basename(c.file)),
+      });
+    } catch (err) {
+      ctx.output.warn(`[Code::Blocks] Agent audit failed: ${(err as Error).message}`);
+    }
+  };
+
+  try {
+    if (readOnlyBlocked) {
+      fail('read-only', `${name} is not allowed in read-only mode`, { hint: READ_ONLY_HINT, tool: name, action: args.action });
+    }
+    if (scriptsBlocked) {
+      fail('invalid-input', 'Script editing is disabled by the global agent policy', {
+        hint: SCRIPT_POLICY_HINT,
+        setting: 'codeblocks.agent.allowScripts',
+      });
+    }
+    const result = await tool!.handler(ctx, args);
+    await finish({ ok: true });
+    await record(true);
+    return result;
+  } catch (err) {
+    const control = asControlError(err);
+    await finish({ ok: false, code: control.code, error: control.message });
+    await record(false, control.code, control.message);
+    throw err;
   }
-  return tool!.handler(ctx, args);
 }

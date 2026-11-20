@@ -1,6 +1,6 @@
 # Agent Control (Copilot / MCP / CLI)
 
-> Version: **0.9.3** | Requires VS Code **1.102.0+**
+> Version: **0.10.0** | Requires VS Code **1.102.0+**
 >
 > This page explains how AI agents (GitHub Copilot Chat agent mode) and any MCP client or shell
 > can fully control Code::Blocks projects through this extension: read/edit `.cbp`, build, rebuild,
@@ -196,14 +196,14 @@ Installed extension directory (Windows):
 
 ```powershell
 # Version must match the installed extension
-$ext = "$env:USERPROFILE\.vscode\extensions\robinmaomao.codeblocks-vscode-0.9.3"
+$ext = "$env:USERPROFILE\.vscode\extensions\robinmaomao.codeblocks-vscode-0.10.0"
 node "$ext\bundle\cb-cli.js" --help
 ```
 
 macOS / Linux:
 
 ```bash
-ext="$HOME/.vscode/extensions/robinmaomao.codeblocks-vscode-0.9.3"
+ext="$HOME/.vscode/extensions/robinmaomao.codeblocks-vscode-0.10.0"
 node "$ext/bundle/cb-cli.js" --help
 ```
 
@@ -253,14 +253,14 @@ the tools become available in Chat.
     "codeblocks": {
       "type": "stdio",
       "command": "node",
-      "args": ["C:/Users/<you>/.vscode/extensions/robinmaomao.codeblocks-vscode-0.9.3/bundle/cb-mcp.js"]
+      "args": ["C:/Users/<you>/.vscode/extensions/robinmaomao.codeblocks-vscode-0.10.0/bundle/cb-mcp.js"]
     }
   }
 }
 ```
 
 > On Windows use forward slashes or escaped backslashes. Set `cwd` to the project/workspace directory.
-> On macOS/Linux use `~/.vscode/extensions/robinmaomao.codeblocks-vscode-0.9.3/bundle/cb-mcp.js`.
+> On macOS/Linux use `~/.vscode/extensions/robinmaomao.codeblocks-vscode-0.10.0/bundle/cb-mcp.js`.
 
 > Launch external clients **from the project directory** (or set their cwd to it), otherwise only the
 > user-level `codeblocks.agent.*` settings are visible. A standalone process also cannot query VS Code's
@@ -361,7 +361,8 @@ Three settings in `settings.json` (all apply **immediately, no reload**):
 - `codeblocks_build_status` in the CLI only reflects builds from the same process; use the return value of `codeblocks_build`.
 - Web extensions (`vscode.dev`) cannot use stdio MCP.
 - Registers / memory / disassembly debugging is only available inside the extension.
-- `@codeblocks` is a deterministic command wrapper (`/read` `/build` `/fix` `/debug` `/status` `/help`); it does not edit projects autonomously. Use Agent mode for autonomous edits.
+- `@codeblocks` is a deterministic command wrapper (`/read` `/build` `/fix` `/debug` `/history` `/undo` `/status` `/help`); it does not edit projects autonomously. Use Agent mode for autonomous edits.
+- Agent change history/undo is only available inside the VS Code extension; CLI / external MCP do not provide cross-process undo.
 
 ---
 
@@ -383,9 +384,23 @@ The extension ships `skills/codeblocks-project/SKILL.md` and registers it throug
 | `/build [target] [--rebuild\|--clean]` | Build, rebuild or clean |
 | `/fix` | Show structured errors from the latest build |
 | `/debug [state\|stack\|variables\|stop\|continue\|step [in\|out]]` | Inspect or control the debug session |
+| `/history` | Open Agent change history |
+| `/undo` | Undo the latest Agent project-file change |
 | `/status` | Show switches, tool count and CLI/MCP/skill paths |
 | `/help` | Usage |
 
 > These commands do not use model reasoning; use Agent mode for the autonomous read → edit → build → fix loop.
+
+### 12.3 Change history and undo
+
+Since 0.10.0, LM Tools / `@codeblocks` writes to `.cbp` / `.workspace` keep local snapshots:
+
+- **Code::Blocks: Agent Change History…** lists recent changes; only the latest change per file can be undone.
+- **Code::Blocks: Undo Last Agent Change** undoes the latest one; external edits are refused by default, with a second confirmation for force-undo.
+- `@codeblocks /history` and `@codeblocks /undo` open the same flows.
+- History lives in VS Code workspace extension storage, not the project. Defaults: 50 entries / 14 days; tune with `codeblocks.agent.history.*`.
+- The standalone `cb-cli` and external MCP clients have no workspace storage and **do not support cross-process undo**.
+
+See [Agent change history and undo](./agent-history.en.md).
 
 See [Agent recipes](./agent-recipes.en.md) for copy-paste examples.
