@@ -51,7 +51,7 @@ try {
   const cp = (pkg.contributes.chatParticipants || [])[0];
   check('K13 声明 @codeblocks participant',
     !!cp && cp.id === 'codeblocks.agent' && cp.name === 'codeblocks'
-    && ['read', 'build', 'fix', 'debug', 'status', 'help'].every((c) => (cp.commands || []).some((x) => x.name === c)),
+    && ['read', 'build', 'fix', 'debug', 'history', 'undo', 'status', 'help'].every((c) => (cp.commands || []).some((x) => x.name === c)),
     cp && { id: cp.id, name: cp.name, commands: (cp.commands || []).map((x) => x.name) });
   check('K14 participant 激活事件存在',
     (pkg.activationEvents || []).includes('onChatParticipant:codeblocks.agent'), pkg.activationEvents);

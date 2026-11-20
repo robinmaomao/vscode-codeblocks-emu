@@ -39,7 +39,7 @@ for (const b of cfg) {
     byKey[k] = v;
   }
 }
-check('设置项总数 = 94', keys.length === 94, keys.length);
+check('设置项总数 = 96', keys.length === 96, keys.length);
 check('已移除冗余设置 clangd.queryDriver', !keys.includes('codeblocks.clangd.queryDriver'), keys.filter((k) => /queryDriver$/.test(k)));
 check('无重复键', new Set(keys).size === keys.length, keys.length - new Set(keys).size);
 check('disableInit 默认 true（对齐 CB disable_init）', byKey['codeblocks.debug.disableInit']?.default === true, byKey['codeblocks.debug.disableInit']);

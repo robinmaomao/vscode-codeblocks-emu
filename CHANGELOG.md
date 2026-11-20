@@ -3,6 +3,19 @@
 本文件记录**正式版**里程碑；近期 dev 迭代的逐轮发布说明见 [`docs/release/`](./docs/release/)（`0.8.xx-dev.md`），
 `0.8.76`–`0.8.128` 的 dev 说明已合并归档到 [`docs/release/archive/`](./docs/release/archive/)；版本号与维护约定见 [`docs/release/00-index.md`](./docs/release/00-index.md)。
 
+## 0.10.0 — 2026-11-20
+
+> 功能版：Agent 变更审计与一键撤销（本地历史 / 字节级快照 / 冲突保护）。
+
+- **变更历史**：`invokeTool()` 统一记录所有工具调用到工作区 `audit.jsonl`；对 `.cbp` / `.workspace` 写入保存变更前字节快照（`agent-history/snapshots`），不写工程目录、不进 Git。
+- **撤销**：新增 **Code::Blocks: Agent Change History…** 与 **Code::Blocks: Undo Last Agent Change**；每个文件仅允许撤销最新一条；撤销前校验文件哈希，外部修改默认拒绝、二次确认可强制覆盖；构建/调试中拒绝。
+- **Chat**：`@codeblocks /history`、`@codeblocks /undo`。
+- **设置**：`codeblocks.agent.history.enabled`（默认 `true`）、`codeblocks.agent.history.maxEntries`（默认 `50`，5–200）；默认 14 天保留。
+- **安全**：未受信任工作区不采集；历史写入失败不影响工具结果；CLI / 外部 MCP 不提供跨进程撤销。
+- **文档**：新增 `docs/guide/agent-history.md` / `.en.md`；Agent 控制/recipes/settings/usage/architecture/decisions/progress 同步；新增 `test-agent-history` 与宿主 `agent-history.tests.js`。
+- 验证：契约 **3/3**（44 + 6 + 777 断言）、无头 **TOTAL=237 / FAIL=0 / SKIP=1**、宿主 **40/40**、打包 **17 断言**、`test:all` **251 / 0 失败 / 1 SKIP**。
+- 清单：命令 140 / 设置 96 / 视图 6 / 键位 34 / LM Tools 11 / MCP provider 1 / chat participant 1 / chat skill 1。
+
 ## 0.9.3 — 2026-11-20
 
 > 功能版：Agent 控制面上手体验与安全护栏（Agent Skill / `@codeblocks` / 确认文案 / 脚本总闸）。

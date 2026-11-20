@@ -1,7 +1,7 @@
 # Code::Blocks for VS Code — Usage Guide
 
 > Language: **English** ｜ [中文](./usage.md)
-> Version: 0.9.3 ｜ Native port of Code::Blocks core features to VS Code, driving GCC / GDB directly, **without** `tasks.json` / `launch.json`.
+> Version: 0.10.0 ｜ Native port of Code::Blocks core features to VS Code, driving GCC / GDB directly, **without** `tasks.json` / `launch.json`.
 
 ---
 
@@ -50,7 +50,7 @@ Code::Blocks for VS Code is a "mini IDE kernel": it parses `.cbp` / `.workspace`
 ### 2.1 Install from VSIX
 
 ```powershell
-code --install-extension codeblocks-vscode-0.9.3.vsix --force
+code --install-extension codeblocks-vscode-0.10.0.vsix --force
 ```
 
 ### 2.2 Build from source
@@ -58,7 +58,7 @@ code --install-extension codeblocks-vscode-0.9.3.vsix --force
 ```powershell
 npm install
 npm run package
-code --install-extension codeblocks-vscode-0.9.3.vsix --force
+code --install-extension codeblocks-vscode-0.10.0.vsix --force
 ```
 
 > `npm run package` = `vsce package` (before packaging, the `vscode:prepublish` hook runs `tsc` compilation (`dist/`, for local testing) + the **esbuild single-file bundle** (`bundle/extension.js`, the release entry));
@@ -781,6 +781,8 @@ Note: keybindings are **user-level** (shared across windows); combinations taken
 | `codeblocks.agent.enabled` | `true` | Master switch: when off, the 11 Language Model Tools are not registered and the embedded MCP server is not exposed; untrusted workspaces are always treated as off. Applies immediately (the standalone `cb-cli` is not affected) |
 | `codeblocks.agent.readOnly` | `false` | Read-only mode: only `project_read` / `build_status` / `compiler list,info` / `workspace info,deps,list` / `debug state,stack,variables` are allowed; everything else fails with `read-only` |
 | `codeblocks.agent.allowScripts` | `false` | Global script gate: LM Tools / MCP may edit `commandsBeforeBuild`, `buildScripts`, etc. only when this setting is on **and** the call passes `allowScripts: true`. `cb-cli` keeps its per-call flag. Applies immediately |
+| `codeblocks.agent.history.enabled` | `true` | Audits every Agent tool call and snapshots `.cbp` / `.workspace` writes; history lives in workspace extension storage, not the project. Turning it off stops new records; existing history remains undoable |
+| `codeblocks.agent.history.maxEntries` | `50` | Number of changes kept (5–200); oldest entries are pruned first, with a 14-day retention period |
 
 ---
 
@@ -1029,7 +1031,16 @@ The Code::Blocks features below were assessed as **not to be re-implemented in t
 > For details and the decision record, see the [unimplemented-feature backlog](../dev/backlog.md) §2 (not-ported list).
 > Reminder: the extensions above are community/vendor products; evaluate them before installing. This extension neither bundles nor ships them.
 
-## 16.1 What's new in 0.9.3 (Agent experience and safety)
+## 16.1 What's new in 0.10.0 (Agent audit and undo)
+
+- **Change history**: LM Tools / `@codeblocks` writes to `.cbp` / `.workspace` keep workspace-local byte snapshots; every tool call appends to `audit.jsonl` (no scripts/source).
+- **Undo**: **Code::Blocks: Agent Change History…** / **Undo Last Agent Change**; only the latest change per file can be undone, and external edits are refused by default with a second confirmation for force-undo.
+- **Chat entry points**: `@codeblocks /history`, `@codeblocks /undo`.
+- **Safety**: untrusted workspaces never record; undo is refused while building/debugging; CLI / external MCP do not provide cross-process undo.
+- **Settings**: `codeblocks.agent.history.enabled` (default `true`), `codeblocks.agent.history.maxEntries` (default `50`).
+- **Docs**: [Agent change history and undo](./agent-history.en.md).
+
+## 16.2 What's new in 0.9.3 (Agent experience and safety)
 
 - **Agent Skill**: ships `skills/codeblocks-project/SKILL.md` and registers it with `contributes.chatSkills`; **Code::Blocks: Install Agent Skill…** installs it into `.github/skills/` or `~/.copilot/skills/`, with overwrite confirmation.
 - **`@codeblocks` participant**: `/read` `/build` `/fix` `/debug` `/status` `/help` deterministic commands using the same `invokeTool` policy.

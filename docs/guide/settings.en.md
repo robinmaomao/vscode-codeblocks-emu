@@ -210,6 +210,8 @@ Example:
 | `codeblocks.agent.enabled` | boolean | `true` |  | Master switch for agent control: when off, the 11 Language Model Tools are not registered and the bundled MCP server is not exposed (an already-running MCP server refuses calls too). **Untrusted workspaces are always treated as off.** Applies immediately; the standalone `cb-cli` is not affected. |
 | `codeblocks.agent.readOnly` | boolean | `false` |  | Read-only mode: only `project_read`, `build_status`, `compiler list/info`, `workspace info/deps/list` and `debug state/stack/variables` are allowed; edits, builds, runs and debugging fail with `read-only`. Applies immediately. |
 | `codeblocks.agent.allowScripts` | boolean | `false` |  | Global script gate: LM Tools / MCP may edit `commandsBeforeBuild`, `commandsAfterBuild`, `buildScripts`, `makeCommands` and `customBuildCommands` only when this setting is on **and** the call passes `allowScripts: true`. `cb-cli` keeps its per-call flag. Applies immediately. |
+| `codeblocks.agent.history.enabled` | boolean | `true` |  | Agent change-history switch: when on, every tool call is audited and writes to `.cbp` / `.workspace` keep a byte snapshot for undo. History lives in VS Code workspace extension storage, not in the project. Turning it off stops new records; existing history can still be viewed and undone. Untrusted workspaces never record. |
+| `codeblocks.agent.history.maxEntries` | number | `50` |  | Maximum number of Agent project-file changes kept (5–200). Oldest entries are pruned first; history also expires after 14 days. Applies immediately. |
 
 Example:
 
@@ -217,7 +219,9 @@ Example:
 {
   "codeblocks.agent.enabled": true,
   "codeblocks.agent.readOnly": false,
-  "codeblocks.agent.allowScripts": false
+  "codeblocks.agent.allowScripts": false,
+  "codeblocks.agent.history.enabled": true,
+  "codeblocks.agent.history.maxEntries": 50
 }
 ```
 
@@ -237,3 +241,5 @@ See [Agent control (Copilot / MCP / CLI)](./agent-control.en.md).
 | `compilerId` / `masterPath` / `compilerPrograms` | Status bar refreshes immediately; clangd database regenerates as needed |
 | `editor.*` / `astyleOptions` / `todo.keywords` / `tools` | Immediately (tool menus refresh on next open) |
 | `agent.enabled` / `agent.readOnly` | Immediately (tool registration / read-only gating changes at once, no reload) |
+| `agent.allowScripts` | Immediately (the next tool call uses the new policy) |
+| `agent.history.enabled` / `agent.history.maxEntries` | Immediately (stops/resumes capture; the limit is applied on the next prune) |

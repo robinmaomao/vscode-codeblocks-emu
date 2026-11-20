@@ -55,6 +55,15 @@ Build scripts run with the user's permissions. Do not add or change scripts unle
 | `read-only` | Tell the user to turn off `codeblocks.agent.readOnly` if changes are intended. |
 | `disabled` | Tell the user to enable `codeblocks.agent.enabled` and trust the workspace. |
 
+## If your edit was wrong
+
+The VS Code extension keeps a local snapshot of each `.cbp` / `.workspace` write performed by Agent tools:
+
+- Tell the user they can run **Code::Blocks: Agent Change History…** (or `@codeblocks /history`) and **Undo Last Agent Change** (or `@codeblocks /undo`).
+- Only the latest change per file can be undone; if the user edited the file after the Agent, undo refuses by default.
+- Never claim a change was undone unless the undo command reports success. Do not try to hand-edit `.cbp` XML as a substitute.
+- CLI / external MCP calls do not have workspace history and cannot be undone this way.
+
 ## Safety
 
 - Do not modify build scripts, pre/post-build commands, or custom build commands without explicit approval.

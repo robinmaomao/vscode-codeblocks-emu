@@ -210,6 +210,8 @@
 | `codeblocks.agent.enabled` | boolean | `true` |  | Agent 控制总闸：关闭后 11 个 Language Model Tools 不再注册、内嵌 MCP server 不暴露（已在运行的 MCP server 也拒绝调用）。**未受信任的工作区一律按关闭处理**。切换即时生效，无需重载窗口；独立的 `cb-cli` 不受影响。 |
 | `codeblocks.agent.readOnly` | boolean | `false` |  | 只读模式：仅放行 `project_read`、`build_status`、`compiler list/info`、`workspace info/deps/list` 与 `debug state/stack/variables`；改工程、构建、运行、调试一律返回 `read-only`。即时生效。 |
 | `codeblocks.agent.allowScripts` | boolean | `false` |  | 全局脚本开关：LM Tools / MCP 修改 `commandsBeforeBuild`、`commandsAfterBuild`、`buildScripts`、`makeCommands`、`customBuildCommands` 时，除单次 `allowScripts: true` 外还必须开启本设置。`cb-cli` 仍只认单次开关。切换即时生效。 |
+| `codeblocks.agent.history.enabled` | boolean | `true` |  | Agent 变更历史总开关：开启后记录所有工具调用审计，并对 `.cbp` / `.workspace` 写入保存快照，便于撤销。历史存 VS Code 工作区扩展存储，不写工程目录；关闭后停止记录，已有历史仍可查看/撤销。未受信任工作区不记录。 |
+| `codeblocks.agent.history.maxEntries` | number | `50` |  | 保留的 Agent 工程文件变更条数（5–200）；超过后从最旧条目开始清理，另按 14 天保留期清理。即时生效。 |
 
 示例：
 
@@ -217,7 +219,9 @@
 {
   "codeblocks.agent.enabled": true,
   "codeblocks.agent.readOnly": false,
-  "codeblocks.agent.allowScripts": false
+  "codeblocks.agent.allowScripts": false,
+  "codeblocks.agent.history.enabled": true,
+  "codeblocks.agent.history.maxEntries": 50
 }
 ```
 
@@ -237,3 +241,5 @@
 | `compilerId` / `masterPath` / `compilerPrograms` | 即时刷新状态栏，并按需重新生成 clangd 编译数据库 |
 | `editor.*` / `astyleOptions` / `todo.keywords` / `tools` | 即时生效（工具菜单下次打开时刷新） |
 | `agent.enabled` / `agent.readOnly` | 即时生效（工具注册 / 只读拦截当场变化，无需重载窗口） |
+| `agent.allowScripts` | 即时生效（下一次工具调用按新策略门控） |
+| `agent.history.enabled` / `agent.history.maxEntries` | 即时生效（停止/恢复采集；上限在下次清理时生效） |

@@ -43,6 +43,7 @@
 | [0.9.1.md](./0.9.1.md) | 补丁版：clangd 重启路径修复（合并器单飞、跳过留痕、客户端未就绪有限重试、跳过文案对齐） |
 | [0.9.2.md](./0.9.2.md) | 补丁版：0.9.0 合并后九轮复查（目标平台守卫 / `no-build`、构建挂起、调试跨端归一化与断点替换、编辑深拷贝、导出保护、CLI 退出码与 JSON） |
 | [0.9.3.md](./0.9.3.md) | 功能版：Agent Skill、`@codeblocks`、Agent Status、工具确认文案、`agent.allowScripts` 脚本总闸、Agent 文档/recipes |
+| [0.10.0.md](./0.10.0.md) | 功能版：Agent 变更审计与一键撤销（工作区快照 / `audit.jsonl`、`Agent Change History`、`Undo Last Agent Change`、`@codeblocks /history` `/undo`、冲突保护） |
 
 ## 分支预发布版本（branch prerelease）
 

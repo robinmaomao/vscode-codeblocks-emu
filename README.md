@@ -6,7 +6,7 @@
 
 直接在 VS Code 中打开 `.cbp` / `.workspace` 工程，即可获得与 Code::Blocks 对齐的构建、调试与工程浏览体验。
 
-> **作者**：Robinmaomao ｜ **版本**：0.9.3
+> **作者**：Robinmaomao ｜ **版本**：0.10.0
 
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](./LICENSE.md)
 
@@ -97,7 +97,8 @@
 - 🤖 **Agent 全控制**（0.9.0 起）：11 个 Language Model Tools + 内嵌 MCP server + 独立 `cb-cli`，让 Copilot agent / MCP 客户端 / CI 读取与修改 `.cbp`、构建/清理、运行、调试、导出、探测编译器；三端共用同一份实现。
 - 🔒 **开关**：`codeblocks.agent.enabled`（默认开）一键关闭全部工具与 MCP 暴露；`codeblocks.agent.readOnly`（默认关）只放行查询类工具。未受信任工作区一律按关闭处理，切换即时生效。
 - 🧩 **上手与护栏**：内置 `codeblocks-project` Agent Skill（可用 **Code::Blocks: Install Agent Skill…** 安装到工作区/用户目录）、`@codeblocks` 快捷命令、写入/执行前确认、`codeblocks.agent.allowScripts` 脚本总闸。
-- 详见 [Agent 控制（Copilot / MCP / CLI）](./docs/guide/agent-control.md) 与 [Agent recipes](./docs/guide/agent-recipes.md)。
+- ↩️ **变更可撤销**（0.10.0 起）：所有 Agent 工具调用有本地审计；`.cbp` / `.workspace` 写入保存快照，可用 **Code::Blocks: Agent Change History…** / **Undo Last Agent Change** 撤销最新一条，外部修改默认拒绝覆盖。
+- 详见 [Agent 控制（Copilot / MCP / CLI）](./docs/guide/agent-control.md)、[Agent recipes](./docs/guide/agent-recipes.md) 与 [Agent 变更历史](./docs/guide/agent-history.md)。
 
 ## ⚠️ 已知限制（不支持的功能）
 
@@ -129,10 +130,10 @@ code --install-extension robinmaomao.codeblocks-vscode
 
 ### 方式二：从 GitHub Releases 安装
 
-从 [Releases](https://github.com/robinmaomao/vscode-codeblocks-emu/releases) 下载 `codeblocks-vscode-0.9.3.vsix`：
+从 [Releases](https://github.com/robinmaomao/vscode-codeblocks-emu/releases) 下载 `codeblocks-vscode-0.10.0.vsix`：
 
 ```powershell
-code --install-extension codeblocks-vscode-0.9.3.vsix --force
+code --install-extension codeblocks-vscode-0.10.0.vsix --force
 ```
 
 ### 方式三：从源码构建
@@ -140,7 +141,7 @@ code --install-extension codeblocks-vscode-0.9.3.vsix --force
 ```powershell
 npm install
 npm run package
-code --install-extension codeblocks-vscode-0.9.3.vsix --force
+code --install-extension codeblocks-vscode-0.10.0.vsix --force
 ```
 
 > `npm run package` = `vsce package`（打包前会自动执行 `vscode:prepublish` 钩子 = `tsc` 编译（`dist/`，本地测试用）+ esbuild 单文件打包（`bundle/extension.js`，发布入口））；直接运行 `npx vsce package` / `npx vsce publish` 同样会自动构建，不会打进过期或缺失的 `bundle/`；Windows 下建议使用 `npm.cmd` / `npx.cmd`（PSReadLine 执行策略）。
@@ -227,7 +228,7 @@ code --extensionDevelopmentPath="." --disable-extensions --new-window
 | `codeblocks.clangd.queryDriver` | `false` | 开启后若 `clangd.arguments` 缺 `--query-driver` 则在输出通道提示（命令 `Configure clangd --query-driver` 可一键写入） |
 | `codeblocks.clangd.extraConfig` | `""` | 自由 YAML，作为同作用域**后置**片段注入（可覆盖扩展写入的任意键；扩展自动补 `If.PathMatch`） |
 
-> 完整 94 项设置（10 个分区，中英双语描述）见 [docs/guide/settings.md](./docs/guide/settings.md)（英文版 [settings.en.md](./docs/guide/settings.en.md)）。另有两条 clangd 命令：`Code::Blocks: Clean Stale clangd Config Fragments`（清理失效片段 + 孤儿缓存目录，预览后确认）与 `Code::Blocks: Configure clangd --query-driver`（交叉编译器保真）。
+> 完整 96 项设置（10 个分区，中英双语描述）见 [docs/guide/settings.md](./docs/guide/settings.md)（英文版 [settings.en.md](./docs/guide/settings.en.md)）。另有两条 clangd 命令：`Code::Blocks: Clean Stale clangd Config Fragments`（清理失效片段 + 孤儿缓存目录，预览后确认）与 `Code::Blocks: Configure clangd --query-driver`（交叉编译器保真）。
 
 ## 架构
 

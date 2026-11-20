@@ -4,15 +4,15 @@
 > 判定口径：契约项 ID（命令/视图/设置键/键位/语言/语法/DAP 能力标记）在对应测试层源码中出现即计为命中；
 > 视觉层/性能层不引用命令 ID 字面量，按 `EXPLICIT_HITS`（面/引擎级覆盖）人工补充，明细见脚本内注释。
 > 列 `src` 表示实现存在（不算测试覆盖）；`契约/无头/E2E/视觉/性能/宿主` 为六个自动化测试层。
-> 数据来源：package.json v0.9.3 + tests/** + src/**
+> 数据来源：package.json v0.10.0 + tests/** + src/**
 
 ## 汇总
 
 | 契约项 | 总数 | 契约层 | 无头层 | E2E 层 | 视觉层 | 性能层 | 宿主层 | 未覆盖 | 覆盖率 |
 |--------|------|--------|--------|--------|--------|--------|--------|--------|--------|
-| 命令 | 138 | 3 | 130 | 4 | 12 | 5 | 40 | 0 | 100% |
+| 命令 | 140 | 4 | 130 | 4 | 12 | 5 | 42 | 0 | 100% |
 | 视图 | 6 | 2 | 6 | 1 | 1 | 0 | 5 | 0 | 100% |
-| 设置 | 94 | 94 | 88 | 15 | 0 | 1 | 7 | 0 | 100% |
+| 设置 | 96 | 96 | 88 | 15 | 0 | 1 | 7 | 0 | 100% |
 | 快捷键 | 34 | 3 | 32 | 2 | 4 | 2 | 12 | 0 | 100% |
 | 语言/语法 | 6 | 0 | 6 | 3 | 2 | 1 | 3 | 0 | 100% |
 | DAP 能力 | 30 | 0 | 1 | 30 | 0 | 0 | 5 | 0 | 100% |
@@ -159,6 +159,8 @@
 | 136 | `codeblocks.debug.infoSignals` | Code::Blocks: 调试信息 · 信号处理 | · | ✔ | · | · | · | · | ✅ |
 | 137 | `codeblocks.agent.status` | Code::Blocks: Agent 状态 | · | ✔ | · | · | · | · | ✅ |
 | 138 | `codeblocks.agent.installSkill` | Code::Blocks: 安装 Agent Skill… | · | ✔ | · | · | · | · | ✅ |
+| 139 | `codeblocks.agent.history` | Code::Blocks: Agent 变更历史… | ✔ | · | · | · | · | ✔ | ✅ |
+| 140 | `codeblocks.agent.undoLast` | Code::Blocks: 撤销最近一次 Agent 变更 | · | · | · | · | · | ✔ | ✅ |
 
 未覆盖 0 项
 
@@ -273,6 +275,8 @@
 | 92 | `codeblocks.agent.enabled` |  | ✔ | ✔ | · | · | · | · | ✅ |
 | 93 | `codeblocks.agent.readOnly` |  | ✔ | ✔ | · | · | · | ✔ | ✅ |
 | 94 | `codeblocks.agent.allowScripts` |  | ✔ | ✔ | · | · | · | · | ✅ |
+| 95 | `codeblocks.agent.history.enabled` |  | ✔ | · | · | · | · | · | ✅ |
+| 96 | `codeblocks.agent.history.maxEntries` |  | ✔ | · | · | · | · | · | ✅ |
 
 未覆盖 0 项
 

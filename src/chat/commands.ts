@@ -1,9 +1,9 @@
 /** @codeblocks Chat participant 的确定性命令解析（无 vscode 依赖，便于单测）。 */
 
-export type ParticipantCommand = 'read' | 'build' | 'fix' | 'debug' | 'status' | 'help';
+export type ParticipantCommand = 'read' | 'build' | 'fix' | 'debug' | 'status' | 'history' | 'undo' | 'help';
 
 export interface ParticipantPlan {
-  kind: 'tool' | 'status' | 'help' | 'error';
+  kind: 'tool' | 'status' | 'history' | 'undo' | 'help' | 'error';
   tool?: string;
   input?: Record<string, unknown>;
   message?: string;
@@ -65,6 +65,10 @@ export function planParticipantCommand(command: string | undefined, prompt: stri
       return debugPlan(prompt);
     case 'status':
       return { kind: 'status' };
+    case 'history':
+      return { kind: 'history' };
+    case 'undo':
+      return { kind: 'undo' };
     case 'help':
     case undefined:
       return { kind: 'help' };

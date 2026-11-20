@@ -2,7 +2,7 @@
   "name": "codeblocks-vscode",
   "displayName": "%extension.displayName%",
   "description": "%extension.description%",
-  "version": "0.9.3",
+  "version": "0.10.0",
   "icon": "resources/icon.png",
   "publisher": "robinmaomao",
   "author": {
@@ -677,6 +677,14 @@
       {
         "command": "codeblocks.agent.installSkill",
         "title": "%command.codeblocks.agent.installSkill.title%"
+      },
+      {
+        "command": "codeblocks.agent.history",
+        "title": "%command.codeblocks.agent.history.title%"
+      },
+      {
+        "command": "codeblocks.agent.undoLast",
+        "title": "%command.codeblocks.agent.undoLast.title%"
       }
     ],
     "languages": [
@@ -1621,6 +1629,22 @@
             "default": false,
             "description": "%configuration.codeblocks.agent.allowScripts.description%",
             "markdownDescription": "%configuration.codeblocks.agent.allowScripts.markdownDescription%"
+          },
+          "codeblocks.agent.history.enabled": {
+            "type": "boolean",
+            "default": true,
+            "scope": "resource",
+            "description": "%configuration.codeblocks.agent.history.enabled.description%",
+            "markdownDescription": "%configuration.codeblocks.agent.history.enabled.markdownDescription%"
+          },
+          "codeblocks.agent.history.maxEntries": {
+            "type": "number",
+            "default": 50,
+            "minimum": 5,
+            "maximum": 200,
+            "scope": "resource",
+            "description": "%configuration.codeblocks.agent.history.maxEntries.description%",
+            "markdownDescription": "%configuration.codeblocks.agent.history.maxEntries.markdownDescription%"
           }
         }
       }
@@ -3023,6 +3047,14 @@
           {
             "name": "debug",
             "description": "%chatParticipant.codeblocks.command.debug%"
+          },
+          {
+            "name": "history",
+            "description": "%chatParticipant.codeblocks.command.history%"
+          },
+          {
+            "name": "undo",
+            "description": "%chatParticipant.codeblocks.command.undo%"
           },
           {
             "name": "status",

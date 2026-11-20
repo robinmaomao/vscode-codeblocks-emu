@@ -1,6 +1,6 @@
 # Agent 控制（Copilot / MCP / CLI）
 
-> 版本：**0.9.3** ｜ 需要 VS Code **1.102.0+**
+> 版本：**0.10.0** ｜ 需要 VS Code **1.102.0+**
 >
 > 本页说明如何让 AI agent（GitHub Copilot Chat 的 Agent 模式）以及任意 MCP 客户端 / 命令行
 > 完整控制本扩展的 Code::Blocks 工程：读取与修改 `.cbp`、构建/重建/清理、运行、调试。
@@ -194,14 +194,14 @@ gdb 后端输出同一份形状，模型不必按传输切换字段：
 
 ```powershell
 # 版本号以实际安装为准
-$ext = "$env:USERPROFILE\.vscode\extensions\robinmaomao.codeblocks-vscode-0.9.3"
+$ext = "$env:USERPROFILE\.vscode\extensions\robinmaomao.codeblocks-vscode-0.10.0"
 node "$ext\bundle\cb-cli.js" --help
 ```
 
 macOS / Linux：
 
 ```bash
-ext="$HOME/.vscode/extensions/robinmaomao.codeblocks-vscode-0.9.3"
+ext="$HOME/.vscode/extensions/robinmaomao.codeblocks-vscode-0.10.0"
 node "$ext/bundle/cb-cli.js" --help
 ```
 
@@ -259,14 +259,14 @@ node bundle/cb-cli.js compiler info --compiler-id gcc --json
     "codeblocks": {
       "type": "stdio",
       "command": "node",
-      "args": ["C:/Users/<you>/.vscode/extensions/robinmaomao.codeblocks-vscode-0.9.3/bundle/cb-mcp.js"]
+      "args": ["C:/Users/<you>/.vscode/extensions/robinmaomao.codeblocks-vscode-0.10.0/bundle/cb-mcp.js"]
     }
   }
 }
 ```
 
 > Windows 路径建议用正斜杠或双反斜杠；`cwd` 应指向工程/工作区目录。macOS/Linux 把路径换成
-> `~/.vscode/extensions/robinmaomao.codeblocks-vscode-0.9.3/bundle/cb-mcp.js`。
+> `~/.vscode/extensions/robinmaomao.codeblocks-vscode-0.10.0/bundle/cb-mcp.js`。
 
 > 外部客户端启动时请把 **cwd 设为工程目录**（或在该目录下启动），否则工作区级设置读不到，
 > 只有用户级 `settings.json` 里的 `codeblocks.agent.*` 会生效。
@@ -369,7 +369,8 @@ Makefile / 构建脚本并启动调试器，都属于"运行工作区代码"。�
 - `codeblocks_build_status` 在 CLI 里只反映**同一进程内**的最近一次构建；跨进程请直接读 `codeblocks_build` 的返回值。
 - web 扩展（`vscode.dev`）不支持 stdio MCP。
 - 调试的交互式子集（registers/内存/反汇编）只在扩展内提供。
-- `@codeblocks` 是确定性命令包装（`/read` `/build` `/fix` `/debug` `/status` `/help`），不做自主编辑；自主修改请用 Agent 模式。
+- `@codeblocks` 是确定性命令包装（`/read` `/build` `/fix` `/debug` `/history` `/undo` `/status` `/help`），不做自主编辑；自主修改请用 Agent 模式。
+- Agent 变更历史/撤销只在 VS Code 扩展内可用；CLI / 外部 MCP 不提供跨进程撤销。
 
 ---
 
@@ -391,9 +392,23 @@ Makefile / 构建脚本并启动调试器，都属于"运行工作区代码"。�
 | `/build [target] [--rebuild\|--clean]` | 构建 / 重建 / 清理 |
 | `/fix` | 显示最近一次构建的结构化错误 |
 | `/debug [state\|stack\|variables\|stop\|continue\|step [in\|out]]` | 查询或控制调试会话 |
+| `/history` | 打开 Agent 变更历史 |
+| `/undo` | 撤销最近一次 Agent 工程文件变更 |
 | `/status` | 显示总闸、只读、脚本策略、工具数、CLI/MCP/Skill 路径 |
 | `/help` | 用法 |
 
 > 这些命令不经过模型推理，适合快速操作；需要“读工程 → 改字段 → 构建 → 修复”的自主循环时，请在 Agent 模式里描述任务。
+
+### 12.3 变更历史与撤销
+
+0.10.0 起，LM Tools / `@codeblocks` 的 `.cbp` / `.workspace` 写入会保存本地快照：
+
+- **Code::Blocks: Agent Change History…** 查看最近变更；同文件只允许撤销最新一条。
+- **Code::Blocks: Undo Last Agent Change** 撤销最近一次；外部修改默认拒绝，二次确认才强制覆盖。
+- `@codeblocks /history`、`@codeblocks /undo` 提供同一入口。
+- 历史存 VS Code 工作区扩展存储，不写工程目录；默认保留 50 条 / 14 天，可用 `codeblocks.agent.history.*` 调整。
+- 独立 `cb-cli` 和外部 MCP 客户端没有工作区存储，**不提供跨进程撤销**。
+
+详见 [Agent 变更历史与撤销](./agent-history.md)。
 
 更多可复制示例见 [Agent recipes](./agent-recipes.md)。

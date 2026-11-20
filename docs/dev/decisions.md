@@ -47,7 +47,8 @@
 | 决策 E3-5 | Agent 脚本权限 | 新增 `codeblocks.agent.allowScripts`（默认 false），与单次 `allowScripts: true` 双重门控；`cb-cli` 保持单次开关 | ✔ 已实施（0.9.3，行为变化） |
 | 决策 E3-6 | 是否新增 Chat participant | `@codeblocks` 只做确定性命令包装（`/read` `/build` `/fix` `/debug` `/status` `/help`），不替代 Agent 模式 | ✔ 已实施（0.9.3） |
 | 决策 E3-7 | 工具确认与 MCP hint | 写入/执行/调试/导出/工作区变更前确认；MCP `readOnlyHint` 只对整工具只读的 `project_read` / `build_status` 标 true | ✔ 已实施（0.9.3） |
-| 决策 E3-8 | Agent 变更审计/回滚 | 0.9.3 不做，拆到 0.10（需历史存储、恢复语义与安全边界设计） | ☐ 0.10 待排期 |
+| 决策 E3-8 | Agent 变更审计/回滚 | 0.10.0 实施：审计所有工具调用；`.cbp` / `.workspace` 写操作保存工作区别字节快照；每个文件仅允许撤销最新一条；历史存 `context.storageUri/agent-history`，不进仓库；外部修改默认拒绝、二次确认可强制覆盖 | ✔ 已实施（0.10.0） |
+| 决策 E3-9 | 变更历史边界 | CLI / 外部 MCP 无 VS Code 工作区存储，不提供跨进程撤销；不做 redo / 任意文件撤销 / 逐行 diff；`agent.history.enabled` 默认 true，未受信任工作区不采集 | ✔ 已实施（0.10.0） |
 
 > 其余审计 P1–P3 已于 0.8.97-dev 实施；F1/F1b（0.8.95-dev）、F5/F8（0.8.94-dev）、N1/N3（0.8.110-dev）、
 > N2（0.8.109-dev + 0.8.113-dev）、N6（0.8.111-dev + 0.8.112-dev）、P1–P8/G1/G3（0.8.114-dev）、

@@ -2,7 +2,7 @@
 
 > 语言：**中文** ｜ [English](./usage.en.md)
 >
-> 版本：0.9.3 ｜ 本扩展为 Code::Blocks 核心功能的原生移植，直接驱动 GCC / GDB，**不依赖** `tasks.json` / `launch.json`。
+> 版本：0.10.0 ｜ 本扩展为 Code::Blocks 核心功能的原生移植，直接驱动 GCC / GDB，**不依赖** `tasks.json` / `launch.json`。
 
 ---
 
@@ -51,7 +51,7 @@ Code::Blocks for VS Code 是一个「迷你 IDE 内核」：直接解析 `.cbp` 
 ### 2.1 从 VSIX 安装
 
 ```powershell
-code --install-extension codeblocks-vscode-0.9.3.vsix --force
+code --install-extension codeblocks-vscode-0.10.0.vsix --force
 ```
 
 ### 2.2 从源码构建
@@ -59,7 +59,7 @@ code --install-extension codeblocks-vscode-0.9.3.vsix --force
 ```powershell
 npm install
 npm run package
-code --install-extension codeblocks-vscode-0.9.3.vsix --force
+code --install-extension codeblocks-vscode-0.10.0.vsix --force
 ```
 
 > `npm run package` = `vsce package`（打包前自动执行 `vscode:prepublish` 钩子 = `tsc` 编译（`dist/`，本地测试用）+ **esbuild 单文件打包**（`bundle/extension.js`，发布入口））；
@@ -783,6 +783,8 @@ Build Log 视图位于**底部 Panel**（打开方式：`Ctrl+J` 后选择「Bui
 | `codeblocks.agent.enabled` | `true` | Agent 控制总闸：关闭后 11 个 Language Model Tools 不注册、内嵌 MCP server 不暴露；未受信任工作区一律按关闭处理。切换即时生效（独立的 `cb-cli` 不受影响） |
 | `codeblocks.agent.readOnly` | `false` | 只读模式：只放行 `project_read` / `build_status` / `compiler list,info` / `workspace info,deps,list` / `debug state,stack,variables`，其余返回 `read-only` |
 | `codeblocks.agent.allowScripts` | `false` | 全局脚本开关：LM Tools / MCP 修改 `commandsBeforeBuild`、`buildScripts` 等字段时，除单次 `allowScripts: true` 外还必须开启本设置。`cb-cli` 仍只认单次开关。即时生效 |
+| `codeblocks.agent.history.enabled` | `true` | 记录所有 Agent 工具调用审计，并为 `.cbp` / `.workspace` 写入保存快照；历史存工作区扩展存储，不写工程目录。关闭后停止记录，已有历史仍可撤销 |
+| `codeblocks.agent.history.maxEntries` | `50` | 保留的变更条数（5–200），超出后清理最旧条目；另按 14 天保留期清理 |
 
 ---
 
@@ -1031,7 +1033,16 @@ A：**已全覆盖**（0.8.132 批次 2，2026-11 菜单优化后同步）。构
 > 详情与决策见 [未实现功能待办](../dev/backlog.md) §2（明确不移植清单）。
 > 提醒：以上扩展为社区/厂商产品，请自行评估安装；本扩展不内置或捆绑它们。
 
-## 16.1 0.9.3 新增（Agent 体验与安全）
+## 16.1 0.10.0 新增（Agent 变更审计与撤销）
+
+- **变更历史**：LM Tools / `@codeblocks` 的 `.cbp` / `.workspace` 写入保存工作区级字节快照；所有工具调用写 `audit.jsonl`（不记录脚本/源码）。
+- **撤销**：**Code::Blocks: Agent Change History…** / **Undo Last Agent Change**；每个文件仅允许撤销最新一条，外部修改默认拒绝、二次确认可强制覆盖。
+- **Chat 入口**：`@codeblocks /history`、`@codeblocks /undo`。
+- **安全**：未受信任工作区不采集；构建/调试进行中拒绝撤销；CLI / 外部 MCP 不提供跨进程撤销。
+- **设置**：`codeblocks.agent.history.enabled`（默认 `true`）、`codeblocks.agent.history.maxEntries`（默认 `50`）。
+- **文档**：新增 [Agent 变更历史与撤销](./agent-history.md)。
+
+## 16.2 0.9.3 新增（Agent 体验与安全）
 
 - **Agent Skill**：随包 `skills/codeblocks-project/SKILL.md`，通过 `contributes.chatSkills` 注册；**Code::Blocks: Install Agent Skill…** 可安装到工作区 `.github/skills/` 或用户 `~/.copilot/skills/`，已存在时确认覆盖。
 - **`@codeblocks` participant**：`/read` `/build` `/fix` `/debug` `/status` `/help` 确定性命令，复用同一 `invokeTool` 策略。
