@@ -7,7 +7,7 @@ const path = require('path');
 const { spawnSync } = require('child_process');
 const vscode = require('vscode');
 
-const EXT_ID = 'robinmaomao.codeblocks-vscode';
+const EXT_ID = 'robinmaomao.originium-ide';
 
 const delay = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -164,7 +164,7 @@ function copyHelloProject(dstDir, titleOverride) {
 // ———— 扩展输出通道的落盘日志 ————
 // 启动器在 <user-data>/User/settings.json 预置 codeblocks.build.persistLog=true →
 // 扩展的「Code::Blocks」输出通道为 LogOutputChannel，内容实时写盘：
-//   <user-data>/logs/<会话>/window<N>/exthost/robinmaomao.codeblocks-vscode/CodeBlocks.log
+//   <user-data>/logs/<会话>/window<N>/exthost/robinmaomao.originium-ide/CodeBlocks.log
 // 这是宿主内**唯一**可读的输出通道文本（vscode API 不暴露 OutputChannel 内容），
 // 用于断言「构建成功」行 / 链接产物路径行 / 编译器诊断行。
 
@@ -183,7 +183,7 @@ function extensionLogPath() {
     for (const e of entries) {
       const p = path.join(dir, e.name);
       if (e.isDirectory()) walk(p, depth + 1);
-      else if (e.name === 'CodeBlocks.log' && p.includes('robinmaomao.codeblocks-vscode')) hits.push(p);
+      else if (e.name === 'CodeBlocks.log' && p.includes('robinmaomao.originium-ide')) hits.push(p);
     }
   };
   walk(path.join(ud, 'logs'), 0);

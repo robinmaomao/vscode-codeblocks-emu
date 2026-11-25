@@ -71,7 +71,7 @@ function check(name, cond, got, want) {
   fs.mkdirSync(srcDir, { recursive: true });
   fs.writeFileSync(path.join(srcDir, 'main.c'), 'int main(){return 0;}\n', 'utf-8');
   fs.writeFileSync(path.join(srcDir, 'tpl.cbp'), '<?xml version="1.0" encoding="UTF-8"?><CodeBlocks_project_file><Project><Option title="tpl" /></Project></CodeBlocks_project_file>\n', 'utf-8');
-  const tplRoot = path.join(tmp, 'User', 'globalStorage', 'robinmaomao.codeblocks-vscode', 'templates');
+  const tplRoot = path.join(tmp, 'User', 'globalStorage', 'robinmaomao.originium-ide', 'templates');
   const manifest = saveAsUserTemplate({ root: tplRoot, name: 'Demo', projectDir: srcDir, cbpPath: path.join(srcDir, 'tpl.cbp'), projectTitle: 'tpl', fileRels: ['main.c'] });
   const userOut = path.join(base, 'from-template');
   fs.mkdirSync(userOut, { recursive: true });

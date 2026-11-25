@@ -1,9 +1,13 @@
 {
-  "name": "codeblocks-vscode",
+  "name": "originium-ide",
   "displayName": "%extension.displayName%",
   "description": "%extension.description%",
   "version": "0.10.0",
   "icon": "resources/icon.png",
+  "galleryBanner": {
+    "color": "#0F2B5B",
+    "theme": "dark"
+  },
   "publisher": "robinmaomao",
   "author": {
     "name": "Robinmaomao"
@@ -34,12 +38,21 @@
   ],
   "keywords": [
     "codeblocks",
-    "c++",
+    "cbp",
+    "workspace",
     "c",
-    "build",
-    "compiler",
+    "c++",
     "gcc",
-    "gdb"
+    "gdb",
+    "mingw",
+    "makefile",
+    "build",
+    "debugger",
+    "ide",
+    "embedded",
+    "riscv",
+    "avr",
+    "cross-compile"
   ],
   "activationEvents": [
     "onLanguage:c",
@@ -1654,7 +1667,7 @@
         {
           "id": "codeblocks",
           "title": "%viewsContainer.codeblocks.title%",
-          "icon": "resources/codeblocks.svg"
+          "icon": "resources/originium.svg"
         }
       ],
       "panel": [

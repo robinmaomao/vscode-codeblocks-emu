@@ -96,8 +96,8 @@ const engine = new BuildEngine(project, compiler, out, resolver);
   check('消息含 Do you have a compiler installed? 行',
     !!err && err.includes('  Do you have a compiler installed?'),
     err, undefined);
-  check('产品名改为 Code::Blocks for VS Code',
-    !!err && err.includes('so Code::Blocks for VS Code cannot find/run the compiler.'),
+  check('产品名改为 Originium IDE for Code::Blocks',
+    !!err && err.includes('so Originium IDE for Code::Blocks cannot find/run the compiler.'),
     err, undefined);
   check('未注册编译器回退显示其 ID（(nosuch)）',
     !!err && err.includes("The compiler's setup (nosuch) is invalid"),

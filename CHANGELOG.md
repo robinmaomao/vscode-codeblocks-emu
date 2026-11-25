@@ -7,6 +7,7 @@
 
 > 功能版：Agent 变更审计与一键撤销（本地历史 / 字节级快照 / 冲突保护）。
 
+- **更名**：项目名改为 **Originium IDE for Code::Blocks**，扩展 ID 为 `robinmaomao.originium-ide`，VSIX 为 `originium-ide-0.10.0.vsix`；命令/设置前缀 `codeblocks.*` 不变，已有配置无需迁移。
 - **变更历史**：`invokeTool()` 统一记录所有工具调用到工作区 `audit.jsonl`；对 `.cbp` / `.workspace` 写入保存变更前字节快照（`agent-history/snapshots`），不写工程目录、不进 Git。
 - **撤销**：新增 **Code::Blocks: Agent Change History…** 与 **Code::Blocks: Undo Last Agent Change**；每个文件仅允许撤销最新一条；撤销前校验文件哈希，外部修改默认拒绝、二次确认可强制覆盖；构建/调试中拒绝。
 - **Chat**：`@codeblocks /history`、`@codeblocks /undo`。

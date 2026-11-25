@@ -332,7 +332,7 @@ function checkVersionMarkers(pkgVersion, docsByRel) {
   if (usage) {
     const ver = (usage.match(new RegExp(`^>\\s*版本：(${VERSION_RE})`, 'm')) || [])[1];
     if (ver !== pkgVersion) v.push(`docs/guide/usage.md:3 「版本：」 got=${ver} want=${pkgVersion}`);
-    for (const m of usage.matchAll(new RegExp(`codeblocks-vscode-(${VERSION_RE})\\.vsix`, 'g'))) {
+    for (const m of usage.matchAll(new RegExp(`(?:originium-ide|codeblocks-vscode)-(${VERSION_RE})\\.vsix`, 'g'))) {
       if (m[1] !== pkgVersion) v.push(`docs/guide/usage.md VSIX 文件名版本 got=${m[1]} want=${pkgVersion}`);
     }
   }
@@ -340,7 +340,7 @@ function checkVersionMarkers(pkgVersion, docsByRel) {
   if (progress) {
     const ver = (progress.match(new RegExp(`当前版本\\s*\\*\\*(${VERSION_RE})\\*\\*`)) || [])[1];
     if (ver !== pkgVersion) v.push(`docs/dev/progress.md 「当前版本」 got=${ver} want=${pkgVersion}`);
-    for (const m of progress.matchAll(new RegExp(`codeblocks-vscode-(${VERSION_RE})\\.vsix`, 'g'))) {
+    for (const m of progress.matchAll(new RegExp(`(?:originium-ide|codeblocks-vscode)-(${VERSION_RE})\\.vsix`, 'g'))) {
       if (m[1] !== pkgVersion) v.push(`docs/dev/progress.md VSIX 文件名版本 got=${m[1]} want=${pkgVersion}`);
     }
   }

@@ -11,7 +11,7 @@
 //   node tests/contract/gen-release-notes.js --check --stdout # 仅校验并把正文打到 stdout（不落盘）
 //
 // 发布页格式（与 0.8.127–0.8.131 一致）：
-//   # Code::Blocks for VS Code <ver>
+//   # Originium IDE for Code::Blocks <ver>   （0.10.0 起；历史页为 # Code::Blocks for VS Code <ver>）
 //   （空行）
 //   > 发布日期：YYYY-MM-DD ｜ 正式版（<上一版> → <ver> 里程碑汇总）
 //   （空行）
@@ -19,7 +19,7 @@
 //   ## <emoji> 主题分节 …
 //   ## ✅ 验证
 //   ## ⚠️ 行为变化与升级提示
-//   ## 📦 安装（含 codeblocks-vscode-<ver>.vsix）
+//   ## 📦 安装（含 originium-ide-<ver>.vsix；历史页为 codeblocks-vscode-<ver>.vsix）
 //   ## 📬 完整变更（里程碑说明 + 提交对比，链接绝对）
 const fs = require('fs');
 const path = require('path');
@@ -46,10 +46,10 @@ function checkPage(file, text) {
   if (!text.endsWith('\n')) v.push('文件末尾缺少换行');
   if (/[ \t]+$/m.test(text)) v.push('存在行尾空白');
 
-  // 1) H1
+  // 1) H1（0.10.0 起改名为 Originium IDE；历史页仍用旧产品名）
   const h1 = lines[0] || '';
-  const wantH1 = `# Code::Blocks for VS Code ${ver}`;
-  if (h1.trim() !== wantH1) v.push(`H1 got=${JSON.stringify(h1)} want=${JSON.stringify(wantH1)}`);
+  const wantH1s = [`# Originium IDE for Code::Blocks ${ver}`, `# Code::Blocks for VS Code ${ver}`];
+  if (!wantH1s.includes(h1.trim())) v.push(`H1 got=${JSON.stringify(h1)} want=${JSON.stringify(wantH1s[0])}`);
 
   // 2) 发布日期行（H1 之后第一个非空行）
   const dateLine = lines.find((l, i) => i > 0 && l.trim() !== '') || '';
@@ -63,9 +63,9 @@ function checkPage(file, text) {
     if (!lines.some((l) => l.trim() === sec)) v.push(`缺少章节 ${sec}`);
   }
 
-  // 4) 安装章节含本版 VSIX 名
-  const vsix = `codeblocks-vscode-${ver}.vsix`;
-  if (!text.includes(vsix)) v.push(`正文未出现附件名 ${vsix}`);
+  // 4) 安装章节含本版 VSIX 名（0.10.0 起改名为 originium-ide；历史页仍用旧前缀）
+  const vsixNames = [`originium-ide-${ver}.vsix`, `codeblocks-vscode-${ver}.vsix`];
+  if (!vsixNames.some((n) => text.includes(n))) v.push(`正文未出现附件名 ${vsixNames[0]}`);
 
   // 5) 链接必须绝对（相对链接在 GitHub Release 页面会 404）
   for (const m of text.matchAll(/\]\(([^)\s]+)\)/g)) {

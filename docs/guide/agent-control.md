@@ -194,14 +194,14 @@ gdb 后端输出同一份形状，模型不必按传输切换字段：
 
 ```powershell
 # 版本号以实际安装为准
-$ext = "$env:USERPROFILE\.vscode\extensions\robinmaomao.codeblocks-vscode-0.10.0"
+$ext = "$env:USERPROFILE\.vscode\extensions\robinmaomao.originium-ide-0.10.0"
 node "$ext\bundle\cb-cli.js" --help
 ```
 
 macOS / Linux：
 
 ```bash
-ext="$HOME/.vscode/extensions/robinmaomao.codeblocks-vscode-0.10.0"
+ext="$HOME/.vscode/extensions/robinmaomao.originium-ide-0.10.0"
 node "$ext/bundle/cb-cli.js" --help
 ```
 
@@ -259,14 +259,14 @@ node bundle/cb-cli.js compiler info --compiler-id gcc --json
     "codeblocks": {
       "type": "stdio",
       "command": "node",
-      "args": ["C:/Users/<you>/.vscode/extensions/robinmaomao.codeblocks-vscode-0.10.0/bundle/cb-mcp.js"]
+      "args": ["C:/Users/<you>/.vscode/extensions/robinmaomao.originium-ide-0.10.0/bundle/cb-mcp.js"]
     }
   }
 }
 ```
 
 > Windows 路径建议用正斜杠或双反斜杠；`cwd` 应指向工程/工作区目录。macOS/Linux 把路径换成
-> `~/.vscode/extensions/robinmaomao.codeblocks-vscode-0.10.0/bundle/cb-mcp.js`。
+> `~/.vscode/extensions/robinmaomao.originium-ide-0.10.0/bundle/cb-mcp.js`。
 
 > 外部客户端启动时请把 **cwd 设为工程目录**（或在该目录下启动），否则工作区级设置读不到，
 > 只有用户级 `settings.json` 里的 `codeblocks.agent.*` 会生效。

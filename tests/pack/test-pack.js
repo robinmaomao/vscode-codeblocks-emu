@@ -83,7 +83,7 @@ async function main() {
   }
 
   // ---------- P2 真正打包 ----------
-  let vsixPath = path.join(outDir, `codeblocks-vscode-${pkg.version}.vsix`);
+  let vsixPath = path.join(outDir, `${pkg.name}-${pkg.version}.vsix`);
   if (skipPackage) {
     skipCheck('P2 VSIX 打包', '--skip-package');
   } else {
@@ -116,9 +116,9 @@ async function main() {
     const list = run(codeCli, [...common, '--list-extensions', '--show-versions'], { timeout: 2 * 60 * 1000 });
     const installed = (list.stdout || '').split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
     check('P3 扩展出现在隔离实例的扩展列表中（含版本号）',
-      installed.some((e) => /^(robinmaomao\.codeblocks-vscode|codeblocks-vscode)@/.test(e)),
-      installed.slice(0, 5), `codeblocks-vscode@${pkg.version}`);
-    const uninst = run(codeCli, [...common, '--uninstall-extension', 'robinmaomao.codeblocks-vscode'], { timeout: 2 * 60 * 1000 });
+      installed.some((e) => /^(robinmaomao\.originium-ide|originium-ide)@/.test(e)),
+      installed.slice(0, 5), `originium-ide@${pkg.version}`);
+    const uninst = run(codeCli, [...common, '--uninstall-extension', 'robinmaomao.originium-ide'], { timeout: 2 * 60 * 1000 });
     check('P3 卸载成功（exit 0）', uninst.status === 0, (uninst.stderr || uninst.stdout || '').split('\n').filter(Boolean).slice(-3), 'exit 0');
   } finally {
     try { fs.rmSync(sandbox, { recursive: true, force: true }); } catch { /* ignore */ }

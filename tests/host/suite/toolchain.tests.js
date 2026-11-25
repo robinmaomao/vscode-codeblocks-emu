@@ -24,7 +24,7 @@
 //
 // 宿主层观测手段（沿用 hostUtil / build.tests.js 结论）：
 //  - 「构建成功」等输出通道文本只能经 `codeblocks.build.persistLog` 落盘读取
-//    （<user-data>/logs/**/exthost/robinmaomao.codeblocks-vscode/CodeBlocks.log，启动器已预置该设置）；
+//    （<user-data>/logs/**/exthost/robinmaomao.originium-ide/CodeBlocks.log，启动器已预置该设置）；
 //    注意 `outputChannel.clear()` **不截断**落盘日志 ⇒ 必须用「build 前 offset 切片 + 唯一标题/唯一产物名」
 //    排除历史构建行的假阳性（不伪造断言）。
 const assert = require('assert');

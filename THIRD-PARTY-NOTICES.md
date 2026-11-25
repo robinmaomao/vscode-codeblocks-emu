@@ -6,6 +6,11 @@
   <https://github.com/NaturalIntelligence/fast-xml-parser>
   用途：解析 Code::Blocks 工程文件（`.cbp` / `.workspace`）与编译器选项 XML。
 
+- **iconv-lite** v0.6 — MIT License
+  <https://github.com/ashtuchkin/iconv-lite>
+  Copyright (c) 2011 Alexander Shtuchkin
+  用途：按系统 ANSI 代码页读写 GBK 等非 UTF-8 工程文件与构建日志（`bundle/extension.js` 内联）。
+
 - **Seti UI 文件图标字体**（`resources/icons/seti.woff`，取自 VS Code 内置 `theme-seti`）— MIT License
   <https://github.com/jesseweed/seti-ui>
   Copyright (c) 2014 Jesse Weed

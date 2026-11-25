@@ -333,10 +333,10 @@ const settingsFilter = (label) => {
   return Array.isArray(args) ? String(args[0]) : '';
 };
 check('Settings：Editor/Compiler/Debugger/Build 过滤串定位扩展设置组',
-  settingsFilter('Editor…').includes('@ext:robinmaomao.codeblocks-vscode') && settingsFilter('Editor…').includes('codeblocks.editor')
-  && settingsFilter('Compiler…').includes('@ext:robinmaomao.codeblocks-vscode') && settingsFilter('Compiler…').includes('compiler')
-  && settingsFilter('Debugger…').includes('@ext:robinmaomao.codeblocks-vscode') && settingsFilter('Debugger…').includes('debug')
-  && settingsFilter('Build & Log…').includes('@ext:robinmaomao.codeblocks-vscode') && settingsFilter('Build & Log…').includes('build'),
+  settingsFilter('Editor…').includes('@ext:robinmaomao.originium-ide') && settingsFilter('Editor…').includes('codeblocks.editor')
+  && settingsFilter('Compiler…').includes('@ext:robinmaomao.originium-ide') && settingsFilter('Compiler…').includes('compiler')
+  && settingsFilter('Debugger…').includes('@ext:robinmaomao.originium-ide') && settingsFilter('Debugger…').includes('debug')
+  && settingsFilter('Build & Log…').includes('@ext:robinmaomao.originium-ide') && settingsFilter('Build & Log…').includes('build'),
   ['Editor…', 'Compiler…', 'Debugger…', 'Build & Log…'].map((l) => settingsFilter(l)));
 
 // 动态区命令（Recent Projects 二级列表 / Workspace 二级列表 / Tools 自定义工具）：不属于静态结构，但必须在 package.json 贡献

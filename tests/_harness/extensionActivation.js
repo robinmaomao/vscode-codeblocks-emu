@@ -217,7 +217,7 @@ async function activate(opts = {}) {
   vscode.debug.registerDebugAdapterDescriptorFactory = () => new MockDisposable();
   vscode.debug.onDidReceiveDebugSessionCustomEvent = () => new MockDisposable();
   // 自身扩展（版本号等）；其它 id 交给 mock 的安装表（clangd 扩展安装/卸载回归用）
-  const selfExtension = { id: 'robinmaomao.codeblocks-vscode', extensionPath: ROOT, packageJSON: require(path.join(ROOT, 'package.json')), exports: undefined };
+  const selfExtension = { id: 'robinmaomao.originium-ide', extensionPath: ROOT, packageJSON: require(path.join(ROOT, 'package.json')), exports: undefined };
   const mockGetExtension = vscode.extensions.getExtension;
   vscode.extensions.getExtension = (id) => (id === selfExtension.id ? selfExtension : mockGetExtension(id));
 
@@ -238,14 +238,14 @@ async function activate(opts = {}) {
       update(k, v) { this._m.set(k, v); return Promise.resolve(); },
       keys: () => [...ctx.workspaceState._m.keys()],
     },
-    globalStorageUri: Uri.file(path.join(userDir, 'globalStorage', 'robinmaomao.codeblocks-vscode')),
+    globalStorageUri: Uri.file(path.join(userDir, 'globalStorage', 'robinmaomao.originium-ide')),
     storageUri: Uri.file(path.join(tmpDir, 'wsStorage')),
     logUri: Uri.file(path.join(tmpDir, 'logs')),
     secrets: { get: () => Promise.resolve(undefined), store: () => Promise.resolve(), delete: () => Promise.resolve(), onDidChange: () => new MockDisposable() },
     extensionMode: 3,
     environmentVariableCollection: { replace: () => {}, append: () => {}, prepend: () => {}, clear: () => {}, forEach: () => {}, delete: () => {}, persistent: false },
     asAbsolutePath: (p) => path.join(ROOT, p),
-    extension: { id: 'robinmaomao.codeblocks-vscode', extensionPath: ROOT, packageJSON: require(path.join(ROOT, 'package.json')) },
+    extension: { id: 'robinmaomao.originium-ide', extensionPath: ROOT, packageJSON: require(path.join(ROOT, 'package.json')) },
   };
   fs.mkdirSync(ctx.globalStorageUri.fsPath, { recursive: true });
 

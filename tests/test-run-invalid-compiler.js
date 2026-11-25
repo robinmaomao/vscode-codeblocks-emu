@@ -14,7 +14,7 @@ function check(name, cond, got, want) {
 // 1) renderInvalidCompilerMessage：无名称 → 单空格 + 扩展适配文案 + 末尾换行（结构对齐 CB）
 const expectedNull =
   'Project/Target: "my-compiler - Debug":\n' +
-  "  The compiler's setup is invalid, so Code::Blocks for VS Code cannot find/run the compiler.\n" +
+  "  The compiler's setup is invalid, so Originium IDE for Code::Blocks cannot find/run the compiler.\n" +
   '  Probably the toolchain path within the compiler settings is not setup correctly?!\n' +
   '  Do you have a compiler installed?\n' +
   'Check the "codeblocks.masterPath" / "codeblocks.compilerPrograms" settings, or run "Code::Blocks: Detect Compilers" to fix the compiler\'s setup.\n';

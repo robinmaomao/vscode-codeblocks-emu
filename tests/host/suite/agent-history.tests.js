@@ -6,7 +6,7 @@ const vscode = require('vscode');
 const { suite } = require('./framework');
 const U = require('./hostUtil');
 
-const EXT_ID = 'robinmaomao.codeblocks-vscode';
+const EXT_ID = 'robinmaomao.originium-ide';
 
 async function callTool(name, input) {
   const result = await vscode.lm.invokeTool(name, { input }, undefined);

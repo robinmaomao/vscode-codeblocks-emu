@@ -211,7 +211,7 @@ const readmeVer = (readme.match(new RegExp(`版本\\*\\*[：:]\\s*(${VER})`)) ||
 check('G1 CHANGELOG 顶部版本 == package.json version', changelogTop === pkg.version, changelogTop, pkg.version);
 check('G2 README 标注版本 == package.json version', readmeVer === pkg.version, readmeVer, pkg.version);
 
-const vsix = fs.readdirSync(root).filter((f) => /^codeblocks-vscode-.*\.vsix$/.test(f));
+const vsix = fs.readdirSync(root).filter((f) => /^(originium-ide|codeblocks-vscode)-.*\.vsix$/.test(f));
 check('G3 根目录 VSIX 文件名版本与 package.json 一致（存在时）',
   vsix.every((f) => f.includes(pkg.version)), { vsix, version: pkg.version }, '版本一致');
 

@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <defs>
+    <path id="ringA" fill-rule="evenodd" d="M256 62 L450 256 L256 450 L62 256 Z M256 106 L406 256 L256 406 L106 256 Z"/>
+    <path id="ringB" fill-rule="evenodd" d="M256 136 L376 256 L256 376 L136 256 Z M256 180 L332 256 L256 332 L180 256 Z"/>
+    <linearGradient id="face" x1="80" y1="72" x2="432" y2="440" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#C9E5FA"/>
+      <stop offset="0.35" stop-color="#9CCBF0"/>
+      <stop offset="0.75" stop-color="#6AA6DC"/>
+      <stop offset="1" stop-color="#3F6FA8"/>
+    </linearGradient>
+    <filter id="sh" x="-25%" y="-25%" width="150%" height="150%">
+      <feDropShadow dx="0" dy="10" stdDeviation="11" flood-color="#3F6FA8" flood-opacity="0.22"/>
+    </filter>
+  </defs>
+  <rect width="512" height="512" fill="#FFFFFF"/>
+  <g filter="url(#sh)">
+    <g fill="#3F6FA8"><use href="#ringA" x="0.92" y="1.25"/><use href="#ringB" x="0.92" y="1.25"/><use href="#ringA" x="1.83" y="2.50"/><use href="#ringB" x="1.83" y="2.50"/><use href="#ringA" x="2.75" y="3.75"/><use href="#ringB" x="2.75" y="3.75"/><use href="#ringA" x="3.67" y="5.00"/><use href="#ringB" x="3.67" y="5.00"/><use href="#ringA" x="4.58" y="6.25"/><use href="#ringB" x="4.58" y="6.25"/><use href="#ringA" x="5.50" y="7.50"/><use href="#ringB" x="5.50" y="7.50"/><use href="#ringA" x="6.42" y="8.75"/><use href="#ringB" x="6.42" y="8.75"/><use href="#ringA" x="7.33" y="10.00"/><use href="#ringB" x="7.33" y="10.00"/><use href="#ringA" x="8.25" y="11.25"/><use href="#ringB" x="8.25" y="11.25"/><use href="#ringA" x="9.17" y="12.50"/><use href="#ringB" x="9.17" y="12.50"/><use href="#ringA" x="10.08" y="13.75"/><use href="#ringB" x="10.08" y="13.75"/><use href="#ringA" x="11.00" y="15.00"/><use href="#ringB" x="11.00" y="15.00"/></g>
+    <g fill="url(#face)"><use href="#ringA"/><use href="#ringB"/></g>
+  </g>
+</svg>

@@ -196,14 +196,14 @@ Installed extension directory (Windows):
 
 ```powershell
 # Version must match the installed extension
-$ext = "$env:USERPROFILE\.vscode\extensions\robinmaomao.codeblocks-vscode-0.10.0"
+$ext = "$env:USERPROFILE\.vscode\extensions\robinmaomao.originium-ide-0.10.0"
 node "$ext\bundle\cb-cli.js" --help
 ```
 
 macOS / Linux:
 
 ```bash
-ext="$HOME/.vscode/extensions/robinmaomao.codeblocks-vscode-0.10.0"
+ext="$HOME/.vscode/extensions/robinmaomao.originium-ide-0.10.0"
 node "$ext/bundle/cb-cli.js" --help
 ```
 
@@ -253,14 +253,14 @@ the tools become available in Chat.
     "codeblocks": {
       "type": "stdio",
       "command": "node",
-      "args": ["C:/Users/<you>/.vscode/extensions/robinmaomao.codeblocks-vscode-0.10.0/bundle/cb-mcp.js"]
+      "args": ["C:/Users/<you>/.vscode/extensions/robinmaomao.originium-ide-0.10.0/bundle/cb-mcp.js"]
     }
   }
 }
 ```
 
 > On Windows use forward slashes or escaped backslashes. Set `cwd` to the project/workspace directory.
-> On macOS/Linux use `~/.vscode/extensions/robinmaomao.codeblocks-vscode-0.10.0/bundle/cb-mcp.js`.
+> On macOS/Linux use `~/.vscode/extensions/robinmaomao.originium-ide-0.10.0/bundle/cb-mcp.js`.
 
 > Launch external clients **from the project directory** (or set their cwd to it), otherwise only the
 > user-level `codeblocks.agent.*` settings are visible. A standalone process also cannot query VS Code's

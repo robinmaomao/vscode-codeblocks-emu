@@ -7,7 +7,7 @@ const vscode = require('vscode');
 const { suite } = require('./framework');
 const U = require('./hostUtil');
 
-const EXT_ID = 'robinmaomao.codeblocks-vscode';
+const EXT_ID = 'robinmaomao.originium-ide';
 // suite 运行时被复制到临时目录，仓库根与隔离 user-data 由启动器通过 extensionTestsEnv 注入
 const extForRoot = vscode.extensions.getExtension(EXT_ID);
 const repoRoot = process.env.CB_REPO_ROOT || (extForRoot ? extForRoot.extensionPath : path.resolve(__dirname, '..', '..', '..'));

@@ -1,4 +1,4 @@
-# Code::Blocks for VS Code 使用说明
+# Originium IDE for Code::Blocks 使用说明
 
 > 语言：**中文** ｜ [English](./usage.en.md)
 >
@@ -29,7 +29,7 @@
 
 ## 1. 简介
 
-Code::Blocks for VS Code 是一个「迷你 IDE 内核」：直接解析 `.cbp` / `.workspace` 工程文件，内置 Code::Blocks 的命令模板与宏展开引擎，直接派生进程执行编译 / 链接 / 调试。它不是把 `.cbp` 翻译成 `tasks.json` 的桥接工具，因此行为与 Code::Blocks 高度一致：
+Originium IDE for Code::Blocks 是一个「迷你 IDE 内核」：直接解析 `.cbp` / `.workspace` 工程文件，内置 Code::Blocks 的命令模板与宏展开引擎，直接派生进程执行编译 / 链接 / 调试。它不是把 `.cbp` 翻译成 `tasks.json` 的桥接工具，因此行为与 Code::Blocks 高度一致：
 
 - 增量编译（源文件 + `#include` 头文件 + `.ld` 等链接输入文件 mtime 比对）
 - 文件类型判定对齐 Code::Blocks（`FileTypeOf`）：汇编源（`.S` / `.s` / `.asm`）正确编译并参与链接，链接脚本（`.ld`）等非源文件默认不编译不链接
@@ -51,7 +51,7 @@ Code::Blocks for VS Code 是一个「迷你 IDE 内核」：直接解析 `.cbp` 
 ### 2.1 从 VSIX 安装
 
 ```powershell
-code --install-extension codeblocks-vscode-0.10.0.vsix --force
+code --install-extension originium-ide-0.10.0.vsix --force
 ```
 
 ### 2.2 从源码构建
@@ -59,7 +59,7 @@ code --install-extension codeblocks-vscode-0.10.0.vsix --force
 ```powershell
 npm install
 npm run package
-code --install-extension codeblocks-vscode-0.10.0.vsix --force
+code --install-extension originium-ide-0.10.0.vsix --force
 ```
 
 > `npm run package` = `vsce package`（打包前自动执行 `vscode:prepublish` 钩子 = `tsc` 编译（`dist/`，本地测试用）+ **esbuild 单文件打包**（`bundle/extension.js`，发布入口））；

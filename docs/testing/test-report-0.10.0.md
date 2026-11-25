@@ -50,6 +50,7 @@
 | 主题 | 0.10.0：Agent 变更审计与一键撤销（本地历史 / 字节级快照 / 冲突保护） |
 | 代码 | 新增 `src/api/agentHistory.ts`、`src/agent/historyStore.ts`、`src/agent/historyCommands.ts`；修改 `src/api/toolRegistry.ts`、`src/extension.ts`、`src/chat/{commands,participant}.ts`、`package.json` / NLS / Skill |
 | 新增断言 | `test-agent-history` 51、宿主历史 2、`test-chat-participant` +2；设置结构/契约总数 94→96；命令 138→140 |
+| 更名 | 产品名 → `Originium IDE for Code::Blocks`；扩展 ID → `robinmaomao.originium-ide`；VSIX → `originium-ide-0.10.0.vsix`；`codeblocks.*` 命名空间与 clangd 片段标记保持不变 |
 | 词条 | 新增 Agent 历史/撤销/冲突提示词条；`strings.zh-cn.json` 同步 |
 | 文档 | 新增 `agent-history.md` / `.en.md`；更新 agent-control / recipes / settings / usage / README / architecture / decisions / progress / release 0.10.0 |
 

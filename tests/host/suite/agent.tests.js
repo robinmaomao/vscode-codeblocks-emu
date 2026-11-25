@@ -6,7 +6,7 @@ const vscode = require('vscode');
 const { suite } = require('./framework');
 const U = require('./hostUtil');
 
-const EXT_ID = 'robinmaomao.codeblocks-vscode';
+const EXT_ID = 'robinmaomao.originium-ide';
 const EXPECTED = [
   'codeblocks_project_read',
   'codeblocks_project_edit',

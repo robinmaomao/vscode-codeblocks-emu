@@ -9,7 +9,7 @@ import * as path from 'path';
 import * as vscode from 'vscode';
 
 export const MCP_PROVIDER_ID = 'codeblocks';
-export const MCP_SERVER_LABEL = 'Code::Blocks';
+export const MCP_SERVER_LABEL = 'Originium IDE';
 
 export function mcpServerScript(extensionPath: string): string {
   return path.join(extensionPath, 'bundle', 'cb-mcp.js');

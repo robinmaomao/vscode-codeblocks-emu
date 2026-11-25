@@ -9,7 +9,7 @@
 //     可观测代理 = 扩展输出通道落盘日志中的「已打开项目: <title>」行。
 //  2. 构建结束：`codeblocks.build` 命令内部 await build()，Promise resolve 即构建结束（外壳再套 170s 超时防挂死）。
 //  3. 「构建成功」行 / 链接产物路径行 / 编译器诊断行：读扩展输出通道的落盘日志
-//     （<user-data>/logs/**/exthost/robinmaomao.codeblocks-vscode/CodeBlocks.log）。
+//     （<user-data>/logs/**/exthost/robinmaomao.originium-ide/CodeBlocks.log）。
 //     vscode API 不暴露 OutputChannel 内容，这是宿主内**唯一**可读的输出通道文本；
 //     其存在性由启动器在 <user-data>/User/settings.json 预置 codeblocks.build.persistLog=true 保证
 //     （LogOutputChannel 落盘；构建开始时通道 clear() → 文件内容即本次构建输出）。

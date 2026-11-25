@@ -94,7 +94,7 @@ node tests/contract/gen-release-notes.js --all          # 批量输出
 发布页模板（对齐 `0.8.127`–`0.8.131`）：
 
 ```markdown
-# Code::Blocks for VS Code <ver>
+# Originium IDE for Code::Blocks <ver>
 
 > 发布日期：YYYY-MM-DD ｜ 正式版（<上一版> → <ver> 里程碑汇总）
 
@@ -117,6 +117,10 @@ gh release edit 0.8.142 --latest=true
 
 约定：**Release 标题 = 纯版本号**（不带主题、不带英文）；正文一律用 `--notes-file` 传入（避免中文 / 反引号转义）；
 `Latest` 只给最新一个版本；历史 tag（`v0.8.11-stable`）标题用纯版本号 `0.8.11`。
+
+> **更名说明（0.10.0 起）**：产品名由 `Code::Blocks for VS Code` 改为 `Originium IDE for Code::Blocks`，
+> 扩展 ID 由 `robinmaomao.codeblocks-vscode` 改为 `robinmaomao.originium-ide`，VSIX 前缀随之改为 `originium-ide-`。
+> `gen-release-notes.js` 的 H1 与附件名校验同时接受新旧两种写法，历史发布页无需改写。
 
 > 维护约定：新增发布说明用 `0.8.xx-dev.md`；发布后正式版里程碑同步进 [CHANGELOG](../../CHANGELOG.md)；
 > 同时补一份 `pages/<tag>.md` 并跑 `--check`；提交日志不写轮次编号。

@@ -7,7 +7,7 @@
  *  - `CompilerGCC::PrintInvalidCompiler`（compilergcc.cpp:1756-1786）：5 行消息（末尾换行留下空行）+ finalMessage 独立条目
  *    —— Build/Clean/Rebuild 用 "Skipping..."（PreprocessJob:2762），Run 用 "Run aborted..."（Run():1981）。
  *
- * 消息结构对齐 CB；文案为扩展适配（UI 差异）：产品名 Code::Blocks for VS Code、修复指引指向扩展设置与命令
+ * 消息结构对齐 CB；文案为扩展适配（UI 差异）：产品名 Originium IDE for Code::Blocks、修复指引指向扩展设置与命令
  * （CB 原文指向其 Settings 对话框，VS Code 无对应 UI）；未注册编译器在括号中显示其 ID。
  */
 import * as fs from 'fs';
@@ -54,7 +54,7 @@ export function renderInvalidCompilerMessage(targetFullTitle: string, compilerNa
   const name = compilerName ? ` (${compilerName})` : '';
   return (
     `Project/Target: "${targetFullTitle}":\n` +
-    `  The compiler's setup${name} is invalid, so Code::Blocks for VS Code cannot find/run the compiler.\n` +
+    `  The compiler's setup${name} is invalid, so Originium IDE for Code::Blocks cannot find/run the compiler.\n` +
     `  Probably the toolchain path within the compiler settings is not setup correctly?!\n` +
     `  Do you have a compiler installed?\n` +
     `Check the "codeblocks.masterPath" / "codeblocks.compilerPrograms" settings, or run "Code::Blocks: Detect Compilers" to fix the compiler's setup.\n`

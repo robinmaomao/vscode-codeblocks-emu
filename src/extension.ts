@@ -4906,7 +4906,7 @@ function readOtherExtensionKeybindings(): KeybindingDef[] {
         if (!fs.existsSync(manifest)) continue;
         try {
           const pkg = JSON.parse(fs.readFileSync(manifest, 'utf-8'));
-          if (pkg?.name === 'codeblocks-vscode') continue; // 跳过自身
+          if (pkg?.name === 'originium-ide' || pkg?.name === 'codeblocks-vscode') continue; // 跳过自身（含旧 ID）
           const list: any[] = pkg?.contributes?.keybindings ?? [];
           for (const b of list) {
             if (!b || typeof b.key !== 'string') continue;

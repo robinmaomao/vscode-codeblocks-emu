@@ -1,8 +1,8 @@
-# Code::Blocks for VS Code
+# Originium IDE for Code::Blocks
 
 > Language: **English** ｜ [中文](./README.md)
 
-An extension that natively ports the Code::Blocks core features to VS Code — a "mini IDE kernel" that drives GCC/GDB directly, **not** a `.cbp` → `tasks.json` bridge.
+Originium IDE is an extension that natively ports the Code::Blocks core features to VS Code — a "mini IDE kernel" that drives GCC/GDB directly, **not** a `.cbp` → `tasks.json` bridge.
 
 Open a `.cbp` / `.workspace` project directly in VS Code and get a build, debug, and project browsing experience aligned with Code::Blocks.
 
@@ -17,6 +17,8 @@ Open a `.cbp` / `.workspace` project directly in VS Code and get a build, debug,
 > **Unofficial notice**: This extension is an **independent rewrite and port** of Code::Blocks features by an individual community developer based on public information. It has **no affiliation, cooperation, or endorsement relationship** with the official Code::Blocks project or its authors / team, and does not represent their positions. The "Code::Blocks" name and logo are copyright their original authors; they are used here only to describe the feature set and compatibility target being modelled. Please report issues to [this repository](https://github.com/robinmaomao/vscode-codeblocks-emu/issues), **not** to the Code::Blocks team.
 >
 > **Disclaimer (unofficial)**: This is an unofficial, community-developed re-implementation of Code::Blocks features for VS Code. It is **not affiliated with, endorsed by, or sponsored by** the Code::Blocks project or its authors. "Code::Blocks" is used solely to describe the feature set it is modelled after. Please report issues to [this repository](https://github.com/robinmaomao/vscode-codeblocks-emu/issues), **not** to the Code::Blocks team.
+
+> **Name notice**: "Originium" is the English name of a fictional mineral from the game *Arknights*. It is used here as an homage only; this project is **not affiliated with, endorsed by, or sponsored by** Hypergryph or the Arknights team. "Code::Blocks" is a trademark of its authors; this is an unofficial, community re-implementation and is not affiliated with the Code::Blocks project.
 
 ## Screenshots
 
@@ -119,18 +121,18 @@ The following Code::Blocks features have not been ported yet; the extension warn
 
 ### Option 1: install from the VS Code Marketplace (recommended)
 
-Search for **Code::Blocks for VS Code** in the VS Code Extensions view, or:
+Search for **Originium IDE for Code::Blocks** in the VS Code Extensions view, or:
 
 ```powershell
-code --install-extension robinmaomao.codeblocks-vscode
+code --install-extension robinmaomao.originium-ide
 ```
 
 ### Option 2: install from GitHub Releases
 
-Download `codeblocks-vscode-0.10.0.vsix` from [Releases](https://github.com/robinmaomao/vscode-codeblocks-emu/releases):
+Download `originium-ide-0.10.0.vsix` from [Releases](https://github.com/robinmaomao/vscode-codeblocks-emu/releases):
 
 ```powershell
-code --install-extension codeblocks-vscode-0.10.0.vsix --force
+code --install-extension originium-ide-0.10.0.vsix --force
 ```
 
 ### Option 3: build from source
@@ -138,7 +140,7 @@ code --install-extension codeblocks-vscode-0.10.0.vsix --force
 ```powershell
 npm install
 npm run package
-code --install-extension codeblocks-vscode-0.10.0.vsix --force
+code --install-extension originium-ide-0.10.0.vsix --force
 ```
 
 > `npm run package` = `vsce package` (packaging runs the `vscode:prepublish` hook automatically = `tsc` compile (`dist/`, for local tests) + esbuild single-file bundle (`bundle/extension.js`, the release entry)); running `npx vsce package` / `npx vsce publish` directly also builds automatically and never packs a stale or missing `bundle/`; on Windows, prefer `npm.cmd` / `npx.cmd` (PSReadLine execution policy).

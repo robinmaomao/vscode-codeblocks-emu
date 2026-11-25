@@ -1,8 +1,8 @@
-# Code::Blocks for VS Code
+# Originium IDE for Code::Blocks
 
 > 语言：**中文** ｜ [English](./README.en.md)
 
-原生移植 Code::Blocks 核心功能到 VS Code 的扩展 —— 一个直接驱动 GCC/GDB 的「迷你 IDE 内核」，**不是** `.cbp` → `tasks.json` 的桥接。
+Originium IDE 是原生移植 Code::Blocks 核心功能到 VS Code 的扩展 —— 一个直接驱动 GCC/GDB 的「迷你 IDE 内核」，**不是** `.cbp` → `tasks.json` 的桥接。
 
 直接在 VS Code 中打开 `.cbp` / `.workspace` 工程，即可获得与 Code::Blocks 对齐的构建、调试与工程浏览体验。
 
@@ -17,6 +17,8 @@
 > **非官方声明**：本扩展是社区个人开发者基于公开资料对 Code::Blocks 功能的**独立重写与移植**，与 Code::Blocks 官方项目及其作者 / 团队**无任何隶属、合作或背书关系**，也不代表其立场；「Code::Blocks」名称与标识版权归其原作者所有，此处仅用于说明所对标的功能与兼容目标。问题反馈请提交到 [本仓库 Issues](https://github.com/robinmaomao/vscode-codeblocks-emu/issues)，**不要**提交给 Code::Blocks 官方。
 >
 > **Disclaimer (unofficial)**：This is an unofficial, community-developed re-implementation of Code::Blocks features for VS Code. It is **not affiliated with, endorsed by, or sponsored by** the Code::Blocks project or its authors. "Code::Blocks" is used solely to describe the feature set it is modelled after. Please report issues to [this repository](https://github.com/robinmaomao/vscode-codeblocks-emu/issues), **not** to the Code::Blocks team.
+
+> **名称说明**：`Originium`（源石）是游戏《明日方舟》中的虚构矿物名，此处仅作命名致敬，本扩展与鹰角网络（Hypergryph）及《明日方舟》团队**无任何隶属、合作或背书关系**；「Code::Blocks」名称归其原作者所有，本项目为社区独立重写，与 Code::Blocks 官方无关。
 
 ## 截图
 
@@ -122,18 +124,18 @@
 
 ### 方式一：从 VS Code Marketplace 安装（推荐）
 
-在 VS Code 扩展视图搜索 **Code::Blocks for VS Code**，或：
+在 VS Code 扩展视图搜索 **Originium IDE for Code::Blocks**，或：
 
 ```powershell
-code --install-extension robinmaomao.codeblocks-vscode
+code --install-extension robinmaomao.originium-ide
 ```
 
 ### 方式二：从 GitHub Releases 安装
 
-从 [Releases](https://github.com/robinmaomao/vscode-codeblocks-emu/releases) 下载 `codeblocks-vscode-0.10.0.vsix`：
+从 [Releases](https://github.com/robinmaomao/vscode-codeblocks-emu/releases) 下载 `originium-ide-0.10.0.vsix`：
 
 ```powershell
-code --install-extension codeblocks-vscode-0.10.0.vsix --force
+code --install-extension originium-ide-0.10.0.vsix --force
 ```
 
 ### 方式三：从源码构建
@@ -141,7 +143,7 @@ code --install-extension codeblocks-vscode-0.10.0.vsix --force
 ```powershell
 npm install
 npm run package
-code --install-extension codeblocks-vscode-0.10.0.vsix --force
+code --install-extension originium-ide-0.10.0.vsix --force
 ```
 
 > `npm run package` = `vsce package`（打包前会自动执行 `vscode:prepublish` 钩子 = `tsc` 编译（`dist/`，本地测试用）+ esbuild 单文件打包（`bundle/extension.js`，发布入口））；直接运行 `npx vsce package` / `npx vsce publish` 同样会自动构建，不会打进过期或缺失的 `bundle/`；Windows 下建议使用 `npm.cmd` / `npx.cmd`（PSReadLine 执行策略）。

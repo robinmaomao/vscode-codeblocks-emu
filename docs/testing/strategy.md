@@ -1,4 +1,4 @@
-# 测试方案（Code::Blocks for VS Code）
+# 测试方案（Originium IDE for Code::Blocks）
 
 > 面向本仓库的**分层自动化测试方案**：契约 → 无头单元 → 真实工程 E2E → 像素视觉 → 性能 → 打包 → 真实宿主。
 > 运行环境、门禁阈值与产物约定见下；覆盖台账见 [测试覆盖矩阵](./coverage-matrix.md)，性能数据见 [性能基准](./performance-baseline.md)。

@@ -67,7 +67,7 @@ npm.cmd run compile
 npm.cmd run package
 
 # 安装（版本号以 package.json 为准）
-code --install-extension "codeblocks-vscode-0.10.0.vsix" --force
+code --install-extension "originium-ide-0.10.0.vsix" --force
 
 # 全量回归测试
 npm.cmd test
@@ -137,7 +137,7 @@ npm.cmd test
 | [0.9.1](../release/0.9.1.md) | clangd 重启路径修复：合并器改单飞（不并发叠加）、跳过留痕、客户端未就绪时有限重试、跳过文案对齐 |
 | [0.9.2](../release/0.9.2.md) | 合并后九轮复查：目标平台守卫与 `no-build`、构建不再被通知挂起、调试响应归一化 / 断点替换、编辑深拷贝、导出保护、CLI 退出码与 JSON、只读白名单补 debug |
 | [0.9.3](../release/0.9.3.md) | Agent 上手体验与安全护栏：内置 `codeblocks-project` Skill + 安装命令、`@codeblocks` participant、Agent Status、工具确认文案、`agent.allowScripts` 脚本总闸、Agent 文档/recipes |
-| [0.10.0](../release/0.10.0.md) | Agent 变更审计与一键撤销：工作区快照 / `audit.jsonl`、`Agent Change History`、`Undo Last Agent Change`、`@codeblocks /history` `/undo`、冲突保护与 `agent.history.*` 设置 |
+| [0.10.0](../release/0.10.0.md) | 更名 **Originium IDE for Code::Blocks**（`robinmaomao.originium-ide`，`codeblocks.*` 命名空间不变）+ Agent 变更审计与一键撤销：工作区快照 / `audit.jsonl`、`Agent Change History`、`Undo Last Agent Change`、`@codeblocks /history` `/undo`、冲突保护与 `agent.history.*` 设置 |
 
 > 当前版本 **0.10.0**（功能版；发布说明见 [release/0.10.0.md](../release/0.10.0.md)，上一版见 [release/0.9.3.md](../release/0.9.3.md)）；测试报告见 [test-report-0.10.0.md](../testing/test-report-0.10.0.md)；无头回归见 `npm test`（另有契约 / E2E / 视觉 / 性能 / 打包 / 宿主分层，见 [测试方案](../testing/strategy.md)）。
 

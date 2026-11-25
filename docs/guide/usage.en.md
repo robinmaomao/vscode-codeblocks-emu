@@ -1,4 +1,4 @@
-# Code::Blocks for VS Code — Usage Guide
+# Originium IDE for Code::Blocks — Usage Guide
 
 > Language: **English** ｜ [中文](./usage.md)
 > Version: 0.10.0 ｜ Native port of Code::Blocks core features to VS Code, driving GCC / GDB directly, **without** `tasks.json` / `launch.json`.
@@ -28,7 +28,7 @@
 
 ## 1. Introduction
 
-Code::Blocks for VS Code is a "mini IDE kernel": it parses `.cbp` / `.workspace` project files directly, embeds the Code::Blocks command templates and macro expansion engine, and spawns processes to compile / link / debug. It is not a bridge that translates `.cbp` into `tasks.json`, so its behavior closely matches Code::Blocks:
+Originium IDE for Code::Blocks is a "mini IDE kernel": it parses `.cbp` / `.workspace` project files directly, embeds the Code::Blocks command templates and macro expansion engine, and spawns processes to compile / link / debug. It is not a bridge that translates `.cbp` into `tasks.json`, so its behavior closely matches Code::Blocks:
 
 - Incremental builds (source files + `#include` headers + link input files such as `.ld` compared by mtime)
 - File type detection aligned with Code::Blocks (`FileTypeOf`): assembly sources (`.S` / `.s` / `.asm`) are compiled and linked correctly; non-source files such as linker scripts (`.ld`) are neither compiled nor linked by default
@@ -50,7 +50,7 @@ Code::Blocks for VS Code is a "mini IDE kernel": it parses `.cbp` / `.workspace`
 ### 2.1 Install from VSIX
 
 ```powershell
-code --install-extension codeblocks-vscode-0.10.0.vsix --force
+code --install-extension originium-ide-0.10.0.vsix --force
 ```
 
 ### 2.2 Build from source
@@ -58,7 +58,7 @@ code --install-extension codeblocks-vscode-0.10.0.vsix --force
 ```powershell
 npm install
 npm run package
-code --install-extension codeblocks-vscode-0.10.0.vsix --force
+code --install-extension originium-ide-0.10.0.vsix --force
 ```
 
 > `npm run package` = `vsce package` (before packaging, the `vscode:prepublish` hook runs `tsc` compilation (`dist/`, for local testing) + the **esbuild single-file bundle** (`bundle/extension.js`, the release entry));

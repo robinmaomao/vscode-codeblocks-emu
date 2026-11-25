@@ -40,7 +40,7 @@ async function main(): Promise<void> {
   }, null, 2);
 
   const server = new Server(
-    { name: 'codeblocks-vscode', version: packageVersion() },
+    { name: 'originium-ide', version: packageVersion() },
     {
       capabilities: { tools: {} },
       instructions:
