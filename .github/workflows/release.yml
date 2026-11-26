@@ -1,0 +1,84 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to publish (e.g. v0.10.0)'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+  id-token: write
+
+jobs:
+  publish:
+    name: Publish Marketplace + GitHub Release
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run vscode:prepublish
+
+      - name: Contract tests
+        run: npm run test:contract
+
+      - name: Headless regression
+        run: npm test
+
+      - name: Package VSIX
+        run: npx --no-install @vscode/vsce package
+
+      - name: Package smoke test
+        run: npm run test:pack
+
+      - name: Publish to Marketplace (OIDC)
+        shell: pwsh
+        run: |
+          $vsix = Get-ChildItem -Path . -Filter 'originium-ide-*.vsix' | Select-Object -First 1
+          if (-not $vsix) { throw 'VSIX not found' }
+          npx --no-install @vscode/vsce publish --oidc --packagePath $vsix.FullName --skip-duplicate
+
+      - name: Generate release notes
+        shell: pwsh
+        env:
+          TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          $ver = $env:TAG -replace '^v', ''
+          node tests/contract/gen-release-notes.js --emit $ver
+
+      - name: Create or update GitHub Release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          $ver = $env:TAG -replace '^v', ''
+          $vsix = Get-ChildItem -Path . -Filter 'originium-ide-*.vsix' | Select-Object -First 1
+          if (-not $vsix) { throw 'VSIX not found' }
+          $notes = ".cb-tools/release-body/$ver.md"
+
+          gh release view $env:TAG --repo $env:GITHUB_REPOSITORY *> $null
+          if ($LASTEXITCODE -eq 0) {
+            gh release upload $env:TAG $vsix.FullName --clobber --repo $env:GITHUB_REPOSITORY
+            gh release edit $env:TAG --title $ver --notes-file $notes --latest --repo $env:GITHUB_REPOSITORY
+          } else {
+            gh release create $env:TAG $vsix.FullName --title $ver --notes-file $notes --latest --repo $env:GITHUB_REPOSITORY
+          }
