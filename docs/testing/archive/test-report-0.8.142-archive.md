@@ -1,8 +1,8 @@
-﻿# 测试执行报告（0.8.142 · 滚动更新）
+# 测试执行报告（0.8.142 · 滚动更新）
 
-> 生成时间：2026-11-06 ｜ 执行环境：Windows 10 x64 ｜ Node v24.19.0 ｜ CPU demo CPU ×8 ｜ 16GB ｜ ccache 4.14.1
-> 方案见 [测试方案](./strategy.md)；覆盖台账见 [测试覆盖矩阵](./coverage-matrix.md)；性能数据见 [性能基准](./performance-baseline.md)。
-> 上一版权威复核见 [0.8.139 完整报告](./test-report-0.8.139-full.md)；本版发布说明见 [release/0.8.142.md](../release/0.8.142.md)；上一版发布说明见 [release/0.8.141.md](../release/0.8.141.md)。
+> 生成时间：2026-11-06 ｜ 执行环境：Windows 10 x64 ｜ Node v24.19.0 ｜ CPU 8 逻辑核  ｜ ccache 4.14.1
+> 方案见 [测试方案](../strategy.md)；覆盖台账见 [测试覆盖矩阵](../coverage-matrix.md)；性能数据见 [性能基准](../performance-baseline.md)。
+> 上一版权威复核见 [0.8.139 完整报告](./test-report-0.8.139-full.md)；本版发布说明见 [release/0.8.142.md](../../release/0.8.142.md)；上一版发布说明见 [release/0.8.141.md](../../release/0.8.141.md)。
 
 ## 1. 分层结果
 
@@ -37,7 +37,7 @@
 | 语言/语法 | 6 | 6 | **100%** |
 | DAP 能力 | 30 | 30 | **100%** |
 
-> 完整清单见 [测试覆盖矩阵](./coverage-matrix.md)（`npm run coverage:matrix` 生成，逐项列出命中层与未覆盖项）。
+> 完整清单见 [测试覆盖矩阵](../coverage-matrix.md)（`npm run coverage:matrix` 生成，逐项列出命中层与未覆盖项）。
 > 剩余缺口 2 个命令：`codeblocks.detectCompilers`（已登记的可解释缺项：真实并行探测外部编译器，需交互环境）、`codeblocks.restartClangd`（排障转发命令，其重启链路由 `test-clangd-settings-sync.js` 覆盖）。
 
 ## 3. 本版变更与回归范围
@@ -48,7 +48,7 @@
 | 新增命令 | **无**（命令总数保持 111） |
 | 行为变更 | 链接期诊断（`undefined reference`：`obj:src:(section)` / `src:(section)` / `file:line`）在解析位置打不开时，按工程文件表落回真实源码并从段名或未定义符号补出行号；已正确（绝对路径 + 行号）的诊断原样透传 |
 | 新增测试 | `tests/test-diagnostic-path.js`（18 断言）、`tests/e2e/test-e2e-linker-diagnostic.js`（7 断言，真实 gcc） |
-| 文档 | 新增 [release/0.8.142.md](../release/0.8.142.md) 与 [release/pages/0.8.142.md](../release/pages/0.8.142.md)；滚动报告重命名为 `test-report-0.8.142-archive.md`；覆盖矩阵重新生成 |
+| 文档 | 新增 [release/0.8.142.md](../../release/0.8.142.md) 与 [release/pages/0.8.142.md](../../release/pages/0.8.142.md)；滚动报告重命名为 `test-report-0.8.142-archive.md`；覆盖矩阵重新生成 |
 | 行为边界 | 工程外文件（系统头 / 第三方库）不猜测；`.o/.obj` 仅在工程文件表内回退；构建命令与产物零变化 |
 
 ## 4. 缺陷与处置（本轮发现并修复）

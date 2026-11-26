@@ -1,9 +1,9 @@
 # 测试执行报告（0.9.0 · 滚动更新）
 
-> 生成时间：2026-11-19 ｜ 执行环境：Windows 11 x64 ｜ Node v24.22.3 ｜ CPU demo CPU ×16 ｜ 32GB ｜ w64devkit GCC 16.2 / GDB 18.1
-> 方案见 [测试方案](./strategy.md)；覆盖台账见 [测试覆盖矩阵](./coverage-matrix.md)；性能数据见 [性能基准](./performance-baseline.md)。
-> 上一版报告见 [0.8.160 测试报告](./test-report-0.8.160-archive.md)；本版发布说明见 [release/0.9.0.md](../release/0.9.0.md)。
-> Agent 控制面报告见 [0.8.143-agent-control](./test-report-0.8.143-agent-control-archive.md)；使用说明见 [guide/agent-control.md](../guide/agent-control.md)。
+> 生成时间：2026-11-19 ｜ 执行环境：Windows 11 x64 ｜ Node v24.22.3 ｜ w64devkit GCC 16.2 / GDB 18.1
+> 方案见 [测试方案](../strategy.md)；覆盖台账见 [测试覆盖矩阵](../coverage-matrix.md)；性能数据见 [性能基准](../performance-baseline.md)。
+> 上一版报告见 [0.8.160 测试报告](./test-report-0.8.160-archive.md)；本版发布说明见 [release/0.9.0.md](../../release/0.9.0.md)。
+> Agent 控制面报告见 [0.8.143-agent-control](./test-report-0.8.143-agent-control-archive.md)；使用说明见 [guide/agent-control.md](../../guide/agent-control.md)。
 
 ## 1. 分层结果
 
@@ -29,7 +29,7 @@
 | 语言/语法 | 6 | 6 | 100% |
 | DAP 能力 | 30 | 30 | 100% |
 
-> 完整清单见 [测试覆盖矩阵](./coverage-matrix.md)（`npm run coverage:matrix` 生成）。
+> 完整清单见 [测试覆盖矩阵](../coverage-matrix.md)（`npm run coverage:matrix` 生成）。
 > 命令缺口 0 个。
 
 ## 3. 本版变更与回归范围
@@ -40,7 +40,7 @@
 | 冲突解决 | `clangdRestart.ts` 双实现合并；`extension.ts` 以 main 为底嫁接；`package.json` 版本/引擎/依赖/脚本/贡献点并集 |
 | 语义移植 | 语言标志 → `compilerFactory.languageFlags`；缓存键含 `languageFlagsSignature`；自动版本号与 makefile 状态机 → `buildProject` 钩子；诊断可导航归一化 |
 | 新增测试 | `test-cli` / `test-mcp-server` / `test-api-*` / `test-agent-policy` / `test-ai-tools-contract` / `test-clangd-restart-decision` / `test-clangd-startup-restore` / `test-e2e-cli-build` / `host/suite/agent.tests.js` |
-| 文档 | [release/0.9.0.md](../release/0.9.0.md)、先生成的 [0.8.160](../release/0.8.160.md)、settings / usage / progress / README / decisions |
+| 文档 | [release/0.9.0.md](../../release/0.9.0.md)、先生成的 [0.8.160](../../release/0.8.160.md)、settings / usage / progress / README / decisions |
 
 ## 4. 缺陷与处置
 

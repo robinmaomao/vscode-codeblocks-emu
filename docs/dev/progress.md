@@ -1,4 +1,4 @@
-# CodeBlocks Power by VS Code —— 开发进度快照
+# Originium IDE for Code::Blocks —— 开发进度快照
 
 > 本文件用于**恢复开发进度**。改动大、需要中断时，更新此文件即可保证后续能快速续上。
 
@@ -94,94 +94,10 @@ npm.cmd test
 
 ## 九、版本历史
 
-> 逐版本明细见 [`release/`](../release/)：正式版说明 + 最近两份 dev 说明；0.8.76–0.8.128 的逐版说明已合并归档到
-> [`release/archive/0.8.76-0.8.99-dev.md`](../release/archive/0.8.76-0.8.99-dev.md) 与
-> [`release/archive/0.8.100-0.8.128-dev.md`](../release/archive/0.8.100-0.8.128-dev.md)。
-> 0.8.89 及以前的逐轮条目见 [`archive/progress-history-0.8.89.md`](../archive/progress-history-0.8.89.md)；正式版里程碑汇总见 [CHANGELOG](../../CHANGELOG.md)。
+逐版本里程碑与发布说明见 [release/00-index.md](../release/00-index.md)，正式版汇总见 [CHANGELOG](../../CHANGELOG.md)。
+当前版本 **0.10.0**（更名 Originium IDE for Code::Blocks + Agent 变更审计与一键撤销）。
 
-| 版本 | 主题 |
-|------|------|
-| [0.8.119](../release/0.8.119.md) | 0.8.12-dev → 0.8.119-dev 功能与文档汇入 main（正式版里程碑） |
-| [0.8.127](../release/0.8.127.md) | 编译缓存、惰性命令生成、打包瘦身、构建性能批次 |
-| [0.8.128](../release/0.8.128.md) | 汇编注释可配置 + 文档整理与 README 优化 |
-| [0.8.129](../release/0.8.129.md) | 测试分层体系（七层 + CI）+ 20 个缺陷与 1 项能力缺口收口 |
-| [0.8.130](../release/0.8.130.md) | post-build 脚本实时化/超时与杀树、并行上限 32、clangd 补全与配置治理 |
-| [0.8.131](../release/0.8.131.md) | 工作区检测开销治理 + clangd 设置即时生效 + 设置即时生效收口 |
-| [0.8.132](../release/0.8.132.md) | 中英文界面语言切换（i18n 运行时 + 静态贡献全量 nls + 运行时文案全覆盖） |
-| [0.8.133](../release/0.8.133.md) | 构建日志补齐 Code::Blocks 产物体积行 |
-| [0.8.134](../release/0.8.134.md) | 构建并发/CPU 守卫 + clangd 与 ccache 缺陷修复 |
-| [0.8.135](../release/0.8.135.md) | 构建期进程/CPU 收口 + 产物排除写入用户设置 |
-| [0.8.136](../release/0.8.136.md) | 工作区路径守卫 + AI 指令扫描治理 |
-| [0.8.137](../release/0.8.137.md) | `.cbp` 外部修改检测 + 编译输出编码 + 工程属性面板修复 |
-| [0.8.138](../release/0.8.138.md) | ccache 非 ASCII 路径修复（中文/特殊符号工程路径下缓存不生效） |
-| [0.8.139](../release/0.8.139.md) | 8.3 短路径拼接修复（windres / Use83Paths）+ CI 回归与全量复核 |
-| [0.8.140](../release/0.8.140.md) | 构建性能归因告警改为可选（`build.performanceAdvisor`，默认关闭） |
-| [0.8.141](../release/0.8.141.md) | 打开工程后 clangd 不重启（不分析）修复 + 编译错误自动跳转修复 |
-| [0.8.142](../release/0.8.142.md) | 链接期错误（undefined reference）定位与跳转修复 |
-| [0.8.143-agent-control](../release/0.8.143-agent-control.md) | 分支预发布版：Agent 全控制（LM Tools + MCP + CLI）+ 总闸 / 只读开关（已随 0.9.0 合入 main） |
-| [0.8.145](../release/0.8.145.md) | 工程内搜索（Project Search）：只搜索已打开 .cbp 工程，文件/内容双模式；UI 对齐 VS Code 内置搜索（字体/行高/codicon/Seti 文件图标、Aa/Ab/.* 输入框内选项），结果按工程分组并默认全展开，搜索后结果固定；搜索/Enter 即写历史且历史面板位于搜索框下方；清空历史走 VS Code 原生模态确认；修复视图 webview 类型、clangd 重启竞态（applyFix 重复注册）与 pre/post-build 同目录批处理解析 |
-| [0.8.146](../release/0.8.146.md) | clangd `#ifdef` 关闭区域（inactive regions）不再变暗修复：`LanguageClient.restart()` 复用同客户端/Feature，`clear()` 只 dispose 装饰类型不清空字段 ⇒ 永不重建；改为在客户端停止/启动过渡时清空、Running 时重建并重放区域 |
-| [0.8.147](../release/0.8.147.md) | 工程搜索体验：Text 结果排版对齐 VS Code 内置 Search（界面字体 / 22px 行高 / 行号右对齐定宽 / 预览 120 字符）、Files 模式补回 Search 按钮且四个控件同一行、切换 Explorer 后两种模式的搜索记录保持（Provider 回放缓存）、状态行按模式记忆、`Keep history` 开关对齐、Files 模式 `Aa`/`Ab`/`.*` 置灰 |
-| [0.8.148](../release/0.8.148.md) | Build Log 诊断跳转修复：链接期段名伪路径（`src/main.c:(.text+0x9)`）不再误判「无改善」、`.o/.obj` 只作源码线索、无源码位置条目不再显示为可点击；统一清理 ANSI 颜色输出（`-fdiagnostics-color=always`） |
-| [0.8.150](../release/0.8.150.md) | 工程右键 Build options… / Properties… 完整移植 Code::Blocks：共享 Build options 视图（Compiler / Linker / Search directories / Pre-post / Variables / Make）、Compiler Flags 右键菜单（新建/修改/删除/仅 C/仅 C++/展开折叠）+ 覆盖与自定义参数、Silent build 派生与 Dist-clean 只读、Selected compiler 自动匹配工程声明编译器 |
-| [0.8.151](../release/0.8.151.md) | 工程属性 / 构建选项 UI 二次精修：按 CB `project_options.xrc` 重排（Project settings 单张 2 列网格、PCH Strategy radio box、目标文件列表回右栏、脚本页 1:2）；按钮统一复用 Build options `.bo-*`；工程右键菜单按 CB 排序 + 保存/关闭/移除文件/展开折叠命令；Expand All 修复（发布后 main 追加的对齐内容随 0.8.152 发布） |
-| [0.8.152](../release/0.8.152.md) | 体验版：Build options / Properties 第二轮逐项对齐 Code::Blocks —— 启用联动规则、Build options 严格对齐（去 Extensions/自定义变量/Dist-clean/Silent）、additionalLibs 写入 Other linker options（整串 + 反向勾选 + 冲突询问）、工程级 Linker executable 隐藏、构建脚本红字、变量键值对话框、覆盖层 OK/Cancel、编译器切换三重询问、Set Programs' Arguments 换行归一、Selected file properties 三页重写与 customBuild 可用、类型切换改写扩展名/前缀（含宏名、不受自动勾选影响）、目标命名校验、列表点击修复、Import/Definition 占位符、脚本校验 CB 三行文案与换行、左对齐与文案/tooltip/红字分行/↑↓语义/双击入口 |
-| [0.8.154](../release/0.8.154.md) | 功能/健壮性批次：Workspace 生命周期（Save Project As / Save·Close·Open default workspace）、`.workspace` 外部修改检测、无工程编译 GBK 编码、原子写、单元路径 XML 转义、package.json 调试属性 i18n、New Build Target/File、指令级步进/Examine Memory、Backtick Cache 管理器、Copy Strings、Profiler (gprof)、SymTab 跨库符号、Makefile CompileFile/DistClean |
-| [0.8.155](../release/0.8.155.md) | P3 架构批次：WebView nonce CSP + 公共运行时（`src/ui/webview/common.ts`）、`.cbp` 未知节点/未知 Unit Option 透传、`detect.autoOpen=off` 跳过激活期全量扫描 + 激活耗时日志、compile/link 单节点增量刷新、`features/{toolCommands,workspaceCommands,newProjectCommands,debugCommands}.ts` 四批拆分、架构文档 |
-| [0.8.156](../release/0.8.156.md) | Profiler 完整化（call graph、`gprof -A` 源码注解、CSV/HTML 导出）、AutoVersioning（`.cbp` 配置 + `version.h` 构建钩子 + 三个命令）、TCC/BCC/DMC/ARM/PowerPC 编译器资源、推荐扩展双语文档 |
-| [0.8.157](../release/0.8.157.md) | AutoVersioning/Profiler 正确性（mtime 跳过、构建会话去重、do_auto_increment、SVN、旧 gmon 拒绝、`--separate-files` 回退）、编译器元数据加载与 CB 全量 XML、OpenWatcom/Cygwin/MSYS2/TDM/D/Fortran 探测 |
-| [0.8.158](../release/0.8.158.md) | Profiler 命令编排从 `extension.ts` 拆到 `features/profilerCommands.ts`，依赖注入 + 回归守卫；无用户可见行为变化 |
-| [0.8.159](../release/0.8.159.md) | 项目管理 QuickPick 从 `extension.ts` 拆到 `features/projectManager.ts`，依赖注入 + 回归守卫；无用户可见行为变化 |
-| [0.8.160](../release/0.8.160.md) | 功能审计修复轮：新建工程覆盖保护、HeaderGuard 仅头文件、`#include` 系统头跳转、TODO 扫描器按语言识别注释、构建日志/调试门控本地化、工程名校验；`test:contract` 通过且无头脚本补断言（F-02/F-03 按决定不执行） |
-| [0.9.0](../release/0.9.0.md) | 合入 Agent 控制面（LM Tools 11 + MCP provider + CLI）：构建内核下沉 `build/buildProject.ts` 由 UI/Agent 共用；`engines.vscode` → `^1.102.0`；设置 +2（第 10 分区 Agent） |
-| [0.9.1](../release/0.9.1.md) | clangd 重启路径修复：合并器改单飞（不并发叠加）、跳过留痕、客户端未就绪时有限重试、跳过文案对齐 |
-| [0.9.2](../release/0.9.2.md) | 合并后九轮复查：目标平台守卫与 `no-build`、构建不再被通知挂起、调试响应归一化 / 断点替换、编辑深拷贝、导出保护、CLI 退出码与 JSON、只读白名单补 debug |
-| [0.9.3](../release/0.9.3.md) | Agent 上手体验与安全护栏：内置 `codeblocks-project` Skill + 安装命令、`@codeblocks` participant、Agent Status、工具确认文案、`agent.allowScripts` 脚本总闸、Agent 文档/recipes |
-| [0.10.0](../release/0.10.0.md) | 更名 **Originium IDE for Code::Blocks**（`robinmaomao.originium-ide`，`codeblocks.*` 命名空间不变）+ Agent 变更审计与一键撤销：工作区快照 / `audit.jsonl`、`Agent Change History`、`Undo Last Agent Change`、`@codeblocks /history` `/undo`、冲突保护与 `agent.history.*` 设置 |
+## Agent 控制（0.9.0 起）
 
-> 当前版本 **0.10.0**（功能版；发布说明见 [release/0.10.0.md](../release/0.10.0.md)，上一版见 [release/0.9.3.md](../release/0.9.3.md)）；测试报告见 [test-report-0.10.0.md](../testing/test-report-0.10.0.md)；无头回归见 `npm test`（另有契约 / E2E / 视觉 / 性能 / 打包 / 宿主分层，见 [测试方案](../testing/strategy.md)）。
-
-> **0.9.2 E3 GUI 验收**：Computer Use 不可用，改用便携 VS Code 1.102.0 + 独立 profile + 0.9.2 VSIX，通过 CDP/Playwright 驱动真实工作台完成工程树/9 大菜单/构建运行/属性与构建选项 WebView/快捷键面板/真实 GDB 断点/中英切换/工程搜索；记录 Rebuild 模态与外部修改检测两个待人工复核项。报告见 [e3-manual-report-0.9.2.md](../testing/e3-manual-report-0.9.2.md)。
-
-> **0.9.2 E3 修复轮**：用户确认后按“Rebuild 确认前置 / 外部修改先诊断 / 工程树保持现状”实施。构建入口新增 `runBuildPreflight()`，把停调试器与 Rebuild 确认移到构建互斥锁**之前**，确认期间 Stop 提示“等待构建确认”而不再谎报无构建；外部修改检测补 `.cbp` 事件、tracker、焦点、问询/处理诊断日志，并新增真实宿主 `tests/host/suite/external-change.tests.js`（外部改 `.cbp` → auto 重载）；工程树 target 层级确认为既有设计不实施。验证：无头 233/0/1、契约 3/0、宿主 38/0。
-
-> **0.10.0 Agent 变更审计与撤销**：`invokeTool()` 前后挂钩历史；`.cbp` / `.workspace` 写操作保存工作区字节快照，所有工具调用写 `audit.jsonl`；新增 `Agent Change History` / `Undo Last Agent Change` / `@codeblocks /history` `/undo`。每个文件仅撤销最新一条，外部修改默认拒绝、二次确认可强制覆盖；默认 50 条 / 14 天；CLI / 外部 MCP 不支持跨进程撤销。验证：无头 237/0/1、契约 3/0（44 + 6 + 777）、宿主 40/40、打包 17 断言、`test:all` 251/0/1；报告见 [test-report-0.10.0.md](../testing/test-report-0.10.0.md)。
-
-> **0.9.3 Agent 体验与安全**：内置 `codeblocks-project` Skill（`contributes.chatSkills` + Install Agent Skill 命令）、`@codeblocks` participant（`/read` `/build` `/fix` `/debug` `/status` `/help`）、Agent Status 命令、工具确认文案、`codeblocks.agent.allowScripts` 脚本总闸（默认 false）；文档补 5 分钟上手/权限矩阵/CLI·MCP 路径/排障与 recipes。验证：无头 236/0/1、契约 3/0、宿主 38/38、打包 17 断言。
-
-> **0.9.2 全量逐项审计 + 修复轮**：E0–E4 证据分级覆盖 136 命令 / 93 设置 / 6 视图 / 34 键位 / 6 语言语法 / 30 DAP / 13 WebView 面 + Agent 11 工具 / CLI / MCP；命令入口冒烟 112→120 并新增分区守卫；发现并修复 D-01…D-13（P3 ×4 / P4 ×9，无 P1/P2）。修复含 Agent 三端运行期校验、`run` 退出码传播、`export out` 限定工程目录、mock Task/terminals，以及 36 条命令与 6 个设置的行为断言；无头 233/0/1、契约 3/0。报告见 [functional-audit-0.9.2.md](../testing/functional-audit-0.9.2.md)（§12 修复记录）。
-
-## 文档：GitHub Release 页面格式统一
-
-- **背景**：Release 页面标题漂移成「`0.8.NNN — 中文主题 / English theme`」，正文也从 0.8.133 起逐步变成英文 / 中英混排，与 `0.8.127`–`0.8.131` 的发布页格式不一致。
-- **统一后的格式**：标题 = **纯版本号**；正文 = `# Code::Blocks for VS Code <ver>` + `> 发布日期…｜ 正式版（上一版 → 本版 里程碑汇总）` + `## 概述`（要点 + 规模）+ 主题分节 + `## ✅ 验证` / `## ⚠️ 行为变化与升级提示` / `## 📦 安装` / `## 📬 完整变更`；链接一律绝对 URL。
-- **落地**：新增 [`release/pages/`](../release/pages/)（发布页，文件名 = tag；当前 19 条）与生成器/守卫 `tests/contract/gen-release-notes.js`（`--check` / `--emit` / `--all`）；`docs/release/*.md` 的 H1 统一为 `# <ver>`，原副标题保留为 `> **主题**：…`；`0.8.136`–`0.8.141` 的发布日期行补齐「里程碑汇总」；历史 GitHub Release 已按新格式更新（`Latest` 仅最新一版），原正文已备份到 `.cb-tools/releases-backup.json`。
-- **约定**：见 [release/00-index.md](../release/00-index.md#github-release-页面pages)（模板 + `gh` 发布步骤）与 [docs/README.md](../README.md) 维护约定。
-- **回归**：`npm run test:contract` 全绿（文档一致性 D3/D4/D5 覆盖 `release/pages/**` 的命令、链接与版本标记）；`node tests/contract/gen-release-notes.js --check` 19/19 通过。
-
-## Agent 全控制（feat/agent-control → 0.9.0）
-
-目标：让 Copilot agent / 任意 MCP 客户端 / CI 完整控制工程，并可用设置**一键关闭**。
-
-- **接入**：`engines.vscode` 抬到 `^1.102.0`；11 个 `contributes.languageModelTools`；
-  `contributes.mcpServerDefinitionProviders`；随包 `bundle/cb-cli.js` 与 `bundle/cb-mcp.js`。
-- **内核**：`src/api/*` 无顶层 vscode 依赖（i18n 惰性回退），承载工程读改、构建/清理、运行、导出、编译器、调试；
-  构建内核 `src/build/buildProject.ts` 与 UI 同源（含 main 的链接期诊断定位 `resolveFile`）。
-- **开关（本轮新增）**：
-  - `codeblocks.agent.enabled`（默认 `true`）：关闭后 LM Tools 不注册、内嵌 MCP 不暴露，
-    外部客户端直启的 `cb-mcp.js` 也拒绝调用（`disabled`）；**工作区未受信任一律按关闭处理**；切换即时生效。
-  - `codeblocks.agent.readOnly`（默认 `false`）：只放行 `project_read` / `build_status` /
-    `compiler list,info` / `workspace info,deps,list` / `debug state`，其余返回 `read-only`。
-  - 策略集中在 `src/api/agentPolicy.ts`，由 `invokeTool()` 统一拦截（LM Tools 与 MCP 共用；CLI 不接入）。
-  - 审计：每次工具调用向 Code::Blocks 输出通道写一行（工具名 / 结果 / 耗时）。
-- **工具（11）**：`project_read` / `project_edit` / `project_file` / `project_target` / `build` / `build_status` /
-  `run` / `debug` / `compiler` / `export` / `workspace`。
-- **测试**：`test-api-project-edit`（含 query / preserve）/ `test-api-settings-reader` / `test-api-tool-guards` /
-  `test-api-build-service` / `test-agent-policy`（开关与只读白名单）/ `test-ai-tools-contract` / `test-cli` /
-  `test-mcp-server`（含关闭与只读门控）/ `test-e2e-cli-build`（E2E）/ `host/suite/agent.tests.js`（宿主，含开关切换）。
-- **clangd 重载修复**：`withClangdBatch` 合并启动恢复/多选打开的 clangd 生成（不再按工程数重复）；
-  `Project opened` 日志补 `Project file:` 便于区分同名工程；`src/tools/clangdRestart.ts`（`decideClangdRestart`）
-  在**启动恢复期间仅配置变化**时跳过 `clangd.restart`（避免与 clangd 客户端初始化竞态导致的
-  `applyFix already exists` / 连接失败弹窗），回归见 `test-clangd-restart-decision`（16 断言）。
-- **文档**：`docs/guide/agent-control.md` / `.en.md`、`settings.md` / `.en.md`（第 10 分区 Agent）、
-  README / usage / strategy / decisions / 发布说明同步。
+LM Tools ×11、内嵌 MCP server、`cb-cli` 三端共用 `src/api/*`；开关 `codeblocks.agent.enabled` / `readOnly` / `allowScripts`，未受信任工作区按关闭处理。
+工具参考、工作流与排障见 [Agent 控制](../guide/agent-control.md)，架构与拆分见 [architecture.md](./architecture.md) §3.5。

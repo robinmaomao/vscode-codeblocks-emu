@@ -1,0 +1,13 @@
+{
+  "name": "originium-screenshots",
+  "private": true,
+  "version": "1.0.0",
+  "description": "README 截图/GIF 录制与编码工具（不随扩展发布）",
+  "scripts": {
+    "encode": "node encode-gif.js"
+  },
+  "dependencies": {
+    "gifenc": "^1.0.3",
+    "pngjs": "^7.0.0"
+  }
+}

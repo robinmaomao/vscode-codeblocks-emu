@@ -1,8 +1,8 @@
 # 测试执行报告（0.10.0 · 滚动更新）
 
-> 生成时间：2026-11-20 ｜ 执行环境：Windows 11 x64 ｜ Node v24.22.3 ｜ CPU demo CPU ×16 ｜ 32GB ｜ w64devkit GCC 16.2 / GDB 18.1
+> 生成时间：2026-11-20 ｜ 执行环境：Windows 11 x64 ｜ Node v24.22.3 ｜ w64devkit GCC 16.2 / GDB 18.1
 > 方案见 [测试方案](./strategy.md)；覆盖台账见 [测试覆盖矩阵](./coverage-matrix.md)；性能数据见 [性能基准](./performance-baseline.md)。
-> 本版发布说明见 [release/0.10.0.md](../release/0.10.0.md)；上一版报告见 [0.9.3 测试报告（归档）](./test-report-0.9.3-archive.md)。
+> 本版发布说明见 [release/0.10.0.md](../release/0.10.0.md)；上一版报告见 [0.9.3 测试报告（归档）](./archive/test-report-0.9.3-archive.md)。
 
 ## 1. 分层结果
 

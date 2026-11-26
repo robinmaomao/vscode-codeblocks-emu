@@ -1,6 +1,6 @@
 // 工作区路径守卫回归（src/build/workspacePathGuard.ts）：
 //  - 逐段复刻 VS Code `xgn()` 的 glob 元字符判定（* ? / 成对 [ ] / 成对 { } / 未闭合不算）；
-//  - 复刻 `Eao('instructions', <ws>/.github/instructions)` 的搜索根截断（含 `[demo]` 时放大到祖先目录）；
+//  - 复刻 `Eao('instructions', <ws>/.github/instructions)` 的搜索根截断（含 `[demo]project` 时放大到祖先目录）；
 //  - `countFilesCapped` 带上限与缺失目录语义；
 //  - `mergePromptScanLocations` 幂等、保留其它键、必须写显式 false（`{}` 无法关闭默认位置）。
 const fs = require('fs');
@@ -36,20 +36,20 @@ check('A7 普通目录名不命中', globKindOfSegment('SDK_DEMO_BOARD_TEST_2026
 check('A8 反斜杠转义后不命中', globKindOfSegment('a\\*b') === undefined, globKindOfSegment('a\\*b'));
 
 // ---------- B. 分段 ----------
-check('B1 盘符作为独立段', JSON.stringify(splitSegments('E:\\demo-workspace\\2026\\10')) === JSON.stringify(['E:', 'demo-workspace', '2026', '10']), splitSegments('E:\\demo-workspace\\2026\\10'));
+check('B1 盘符作为独立段', JSON.stringify(splitSegments('D:\\work\\demo-workspace')) === JSON.stringify(['D:', 'work', 'demo-workspace']), splitSegments('D:\\work\\demo-workspace'));
 check('B2 混合分隔符与空段', JSON.stringify(splitSegments('E:/a//b\\c')) === JSON.stringify(['E:', 'a', 'b', 'c']), splitSegments('E:/a//b\\c'));
 
 // ---------- C. 命中段定位 ----------
-const bad = 'E:\\demo-workspace\\2026\\10\\[demo]project\\SDK_DEMO_BOARD_TEST_20260101';
+const bad = 'D:\\work\\demo-workspace\\[demo]project\\SDK_DEMO_BOARD_TEST_20260101';
 const hits = findGlobSegments(bad);
 check('C1 坏路径只命中 1 段', hits.length === 1, hits);
-check('C2 命中段是 [demo]…', hits[0] && hits[0].segment === '[demo]project', hits[0] && hits[0].segment);
+check('C2 命中段是 [demo]project', hits[0] && hits[0].segment === '[demo]project', hits[0] && hits[0].segment);
 check('C3 命中类型为 bracket', hits[0] && hits[0].kind === 'bracket', hits[0] && hits[0].kind);
 check('C4 干净路径无命中', findGlobSegments('E:\\SDKs\\SDK_X').length === 0, findGlobSegments('E:\\SDKs\\SDK_X'));
 
 // ---------- D. 搜索根截断（复刻 Eao） ----------
 const splitBad = computeInstructionSearchRoot(bad);
-check('D1 坏路径搜索根放大到 2026\\10', splitBad.searchRoot.toLowerCase() === 'e:\\work_share\\2026\\10', splitBad.searchRoot);
+check('D1 坏路径搜索根放大到 demo-workspace', splitBad.searchRoot.toLowerCase() === 'd:\\work\\demo-workspace', splitBad.searchRoot);
 check('D2 坏路径带 filePattern（会启动 rg）', splitBad.filePattern === '[demo]project/SDK_DEMO_BOARD_TEST_20260101/.github/instructions', splitBad.filePattern);
 const splitGood = computeInstructionSearchRoot('E:\\SDKs\\SDK_X');
 check('D3 干净路径搜索根就是 instructions 目录本身', splitGood.searchRoot.toLowerCase() === 'e:\\sdks\\sdk_x\\.github\\instructions', splitGood.searchRoot);

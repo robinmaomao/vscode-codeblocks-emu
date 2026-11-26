@@ -1,4 +1,4 @@
-﻿# 更新日志（Changelog）
+# 更新日志（Changelog）
 
 本文件记录**正式版**里程碑；近期 dev 迭代的逐轮发布说明见 [`docs/release/`](./docs/release/)（`0.8.xx-dev.md`），
 `0.8.76`–`0.8.128` 的 dev 说明已合并归档到 [`docs/release/archive/`](./docs/release/archive/)；版本号与维护约定见 [`docs/release/00-index.md`](./docs/release/00-index.md)。
@@ -189,7 +189,7 @@
 - 程序参数换行保存时替换为空格（`TargetListData::SetExecParameters`）。
 
 - 验证：`npm test` **TOTAL=195 FAIL=0 SKIP=1**；契约 3/3；E2E 6/6；视觉 **26/26**；打包 15 断言；VSIX 0.8.152 打包 / 安装通过。
-- 发布说明见 [`docs/release/0.8.152.md`](./docs/release/0.8.152.md)；测试结果见 [`docs/testing/test-report-0.8.152-archive.md`](./docs/testing/test-report-0.8.152-archive.md)。
+- 发布说明见 [`docs/release/0.8.152.md`](./docs/release/0.8.152.md)；测试结果见 [`docs/testing/archive/test-report-0.8.152-archive.md`](./docs/testing/archive/test-report-0.8.152-archive.md)。
 
 ## 0.8.151 — 2026-11-12
 
@@ -220,7 +220,7 @@
 - 文档：usage(.en) §7.3/§7.5 更新面板版式与环境变量入口。
 
 - 验证：`npm test` **TOTAL=189 FAIL=0 SKIP=1**；`npm run test:contract` 3/3（44 + 6 + 707 断言）；`npm run test:e2e` 6/6；`npm run test:visual` 18/18（基线重生成）；`npm run test:pack` 1/1（15 断言）。
-- 发布说明见 [`docs/release/0.8.151.md`](./docs/release/0.8.151.md)；测试结果见 [`docs/testing/test-report-0.8.151.md`](./docs/testing/test-report-0.8.151.md)。
+- 发布说明见 [`docs/release/0.8.151.md`](./docs/release/0.8.151.md)；测试结果归档见 [`docs/testing/archive/`](./docs/testing/archive/README.md)（0.8.151 无独立报告）。
 
 ### main 分支追加（2026-11-14，未单独发版）
 
@@ -253,7 +253,7 @@
 - **Properties**：6 个页签（工程设置 / 构建目标 / 脚本 / 备注 / C/C++ 解析器选项 / 调试器）；文件属性改为模态并支持工程树文件右键直达（选中 + 滚入可视区）；脚本页签对 `<Script file>` 做 Squirrel 语法校验（不执行）；解析器页签读写 `<code_completion><search_path add>`。
 - **解析/写回修复**：`<ExtraCommands>` 无 `Add` 时不再提前返回（`<MakeCommands>` 得以解析）；写回保留未建模字段与 legacy `<Build><Option>` 子节点、显式空串视为清空；`listCompilers` 排除 `options_common_*.xml`；过期目标快照先整体校验再落字段（`Target not found`）并在工程重载时关闭面板；Squirrel 校验器不再把字符串字面量当运算符。
 - 验证：`npm test` **TOTAL=188 FAIL=0 SKIP=1**；`npm run test:contract` 3/3；`npm run test:e2e` 6/6；`npm run test:visual` 18/18（基线按新 UI 重生成）；`npm run test:pack` 1/1。
-- 发布说明见 [`docs/release/0.8.150.md`](./docs/release/0.8.150.md)；测试结果见 [`docs/testing/test-report-0.8.150-archive.md`](./docs/testing/test-report-0.8.150-archive.md)。
+- 发布说明见 [`docs/release/0.8.150.md`](./docs/release/0.8.150.md)；测试结果见 [`docs/testing/archive/test-report-0.8.150-archive.md`](./docs/testing/archive/test-report-0.8.150-archive.md)。
 
 ## 0.8.148 — 2026-11-11
 
@@ -266,7 +266,7 @@
 - **修复**：`resolveDiagnosticLocation` 改用原始 token 比较；`.o/.obj` 只作为「找同名源码」的线索（工程索引 + 同目录源码回退），绝不返回对象文件；Build Log / Problems 统一过滤不可导航位置（伪工具名、构建产物、残留段名、不存在的文件），无源码位置条目显示「无源码位置（链接器/工具输出）」且不挂跳转命令；`codeblocks.openLocation` 失败弹出可见警告。
 - **ANSI**：统一清理子进程行输出中的颜色转义（CSI/OSC），`-fdiagnostics-color=always` 的工程不再因颜色码导致整行解析失败。
 - 验证：`npm test` **TOTAL=188 FAIL=0 SKIP=1**；`npm run test:contract` 3/3；`npm run test:e2e` 6/6（链接期诊断 9 断言）；`npm run test:pack` 1/1。
-- 发布说明见 [`docs/release/0.8.148.md`](./docs/release/0.8.148.md)；测试结果见 [`docs/testing/test-report-0.8.148-archive.md`](./docs/testing/test-report-0.8.148-archive.md)。
+- 发布说明见 [`docs/release/0.8.148.md`](./docs/release/0.8.148.md)；测试结果见 [`docs/testing/archive/test-report-0.8.148-archive.md`](./docs/testing/archive/test-report-0.8.148-archive.md)。
 
 ## 0.8.147 — 2026-11-11
 
@@ -282,8 +282,8 @@
 - **`Keep history` 开关修正**：`.switch` 加 `box-sizing: border-box`（外框此前被边框撑成 30×18，滑块底边多 1px、开启态右侧少走 2px），`border-radius` 9px → 8px，滑块四周留白对称。
 - **Files 模式选项置灰**：文件搜索恒不区分大小写、不支持正则/全字匹配，`Aa` / `Ab` / `.*` 在 Files 模式 `disabled` 并提示「仅内容模式有效」，Text 模式恢复原 tooltip。
 - 验证：`npm test` **TOTAL=188 FAIL=0 SKIP=1**；`npm run test:contract` 3/3；`test-project-search-view-html.js` 24/24、`test-project-search-view-provider.js` 24/24、`test-i18n-webview.js` 21/21。
-- 发布说明见 [`docs/release/0.8.147.md`](./docs/release/0.8.147.md)；测试结果见
-  [`docs/testing/test-report-0.8.147.md`](./docs/testing/test-report-0.8.147.md)。
+- 发布说明见 [`docs/release/0.8.147.md`](./docs/release/0.8.147.md)；测试结果归档见
+  [`docs/testing/archive/`](./docs/testing/archive/README.md)（0.8.147 无独立报告）。
 
 ## 0.8.146 — 2026-11-10
 
@@ -319,8 +319,8 @@
 - **修复**：`codeblocks.search` 补 `"type": "webview"`，并提前注册 provider；新版 VS Code 默认按 TreeView 解析，缺省会显示“no data provider registered”而没有搜索栏。
 - **修复（clangd）**：打开工程/切换工程/改编译器时同一秒内多次请求重启 clangd，会让 clangd 扩展在旧客户端命令注销前重新注册 `clangd.applyFix`，抛 `command 'clangd.applyFix' already exists` 并导致语言服务器启动失败。现改为：合并重启请求（1.5s 窗口 + 5s 最小间隔）、等客户端 `Running` 后再留 2s 稳定期、优先调用 `LanguageClient.restart()`（内部串行 stop→start）、失败时回退命令重启并重试一次；clangd 扩展未激活时跳过（打开源文件会自然加载新配置）。
 - 新增回归：`test-project-search.js`、`test-search-history.js`、`test-project-search-tasks.js`、`test-search-worker.js`、`test-project-search-view-html.js`、`test-project-search-view-provider.js`、`test-project-search-commands.js`；覆盖矩阵重新生成（命令 **113**、设置 **85**、视图 **6**、快捷键 **34**）。
-- 发布说明见 [`docs/release/0.8.145.md`](./docs/release/0.8.145.md)；测试结果见
-  [`docs/testing/test-report-0.8.145.md`](./docs/testing/test-report-0.8.145.md)。
+- 发布说明见 [`docs/release/0.8.145.md`](./docs/release/0.8.145.md)；测试结果归档见
+  [`docs/testing/archive/`](./docs/testing/archive/README.md)（0.8.145 无独立报告）。
 ## 0.8.143-agent-control — 2026-11-06
 
 **分支预发布版：Agent 全控制（LM Tools + MCP + CLI），带总闸与只读开关**
@@ -361,7 +361,7 @@
 - **兼容**：绝对路径 + 行号已正确的诊断原样透传（resolver 返回 `undefined`）；工程外文件不猜测；`.o/.obj` 仅在工程文件表内回退；无新增设置项/命令。
 - 新增回归：`tests/test-diagnostic-path.js`（18 断言）、`tests/e2e/test-e2e-linker-diagnostic.js`（7 断言，真实 gcc 链接失败 → 诊断指向真实源文件与调用行）。
 - 发布说明见 [`docs/release/0.8.142.md`](./docs/release/0.8.142.md)；测试结果见
-  [`docs/testing/test-report-0.8.143-agent-control-archive.md`](./docs/testing/test-report-0.8.143-agent-control-archive.md)。
+  [`docs/testing/archive/test-report-0.8.143-agent-control-archive.md`](./docs/testing/archive/test-report-0.8.143-agent-control-archive.md)。
 - 规模（0.8.142 时点）：命令 **111**、设置 **83**、视图 5 个（均不变）；`contract 3/3`、`unit 179 FAIL=0 SKIP=1`、
   `e2e 6/6`、`visual 24/24`、`pack 1/1`。
 
@@ -391,7 +391,7 @@
 - 新增回归：`tests/test-error-navigation.js`（15 断言，含行为级导航）、`test-clangd-settings-sync.js` 第 13 步
   （复现"弹窗取消 → 状态栏打开"，`restartOnActiveProjectSwitch=false` + 无可见源文件仍重启）。
 - 发布说明见 [`docs/release/0.8.141.md`](./docs/release/0.8.141.md)；测试结果见
-  [`docs/testing/test-report-0.8.143-agent-control-archive.md`](./docs/testing/test-report-0.8.143-agent-control-archive.md)。
+  [`docs/testing/archive/test-report-0.8.143-agent-control-archive.md`](./docs/testing/archive/test-report-0.8.143-agent-control-archive.md)。
 - 规模（0.8.141 时点）：`contract 3/3`（契约 44 + 文档一致性 6 + 设置契约 665 断言）、`unit 178 FAIL=0 SKIP=1`、
   `e2e 5/5`（288 pass / 8 skip）、`pack 1/1`、`visual 24/24`、`all 189 FAIL=0`；
   `perf` 13 项本轮受本机负载影响（B10 真实单文件编译硬预算失败，同一时刻手工 `gcc -c` 也需 1.5 s，基线 0.14 s）。
@@ -431,8 +431,8 @@
   UTF-8/GBK 与原路径；资源文件断言兼容 8.3 短路径；`test-drive-case.js` 新增 4 条 `shortPathWin` 回归；
   新增 `tests/e2e/test-e2e-ccache.js`（21 断言，真实 ccache + 中文路径）。
 - 发布说明见 [`docs/release/0.8.139.md`](./docs/release/0.8.139.md)；测试结果见
-  [`docs/testing/test-report-0.8.143-agent-control-archive.md`](./docs/testing/test-report-0.8.143-agent-control-archive.md)，完整复核见
-  [`docs/testing/test-report-0.8.139-full.md`](./docs/testing/test-report-0.8.139-full.md)。
+  [`docs/testing/archive/test-report-0.8.143-agent-control-archive.md`](./docs/testing/archive/test-report-0.8.143-agent-control-archive.md)，完整复核见
+  [`docs/testing/archive/test-report-0.8.139-full.md`](./docs/testing/archive/test-report-0.8.139-full.md)。
 - 规模（0.8.139 时点）：`contract 3/3`、`unit 176 FAIL=0 SKIP=1`、`visual 24/24`、`e2e 5/5`（288 pass / 8 skip）、
   `perf 13 pass / 0 warn`、`pack 1/1`、`host 24/24`；全量 `188 FAIL=0 SKIP=1`。
 
@@ -452,7 +452,7 @@
   正常，仅 `.debug_info` 有细微差异；资源文件（windres）/ `sccache` / `cache=none` 行为不变；新增设置项 **无**。
 - 实测效果：中文路径工程 `Cacheable calls` 0% → **100%**，二次构建 **4 次 Direct HIT**，Release 单文件 2.5 s → 0.1 s。
 - 发布说明见 [`docs/release/0.8.138.md`](./docs/release/0.8.138.md)；测试结果见
-  [`docs/testing/test-report-0.8.143-agent-control-archive.md`](./docs/testing/test-report-0.8.143-agent-control-archive.md)。
+  [`docs/testing/archive/test-report-0.8.143-agent-control-archive.md`](./docs/testing/archive/test-report-0.8.143-agent-control-archive.md)。
 - 规模（0.8.138 时点）：`contract 3/3`、`unit 176 FAIL=0 SKIP=1`、`visual 24/24`、`e2e 4/4`、`perf 12 pass / 1 warn`、
   `pack 1/1`（新增 29 条编译缓存断言）。
 
@@ -473,7 +473,7 @@
 - **编译选项面板**：「应用」改为**立即写回 `.cbp`** 并重绑重解析后的工程/目标；只管理 `options_<id>.xml` 内的选项
   （手写自定义选项保留）；应用失败在面板可见，目标已被外部改名/删除时报错而不误写工程级选项。
 - 发布说明见 [`docs/release/0.8.137.md`](./docs/release/0.8.137.md)；测试结果见
-  [`docs/testing/test-report-0.8.143-agent-control-archive.md`](./docs/testing/test-report-0.8.143-agent-control-archive.md)。
+  [`docs/testing/archive/test-report-0.8.143-agent-control-archive.md`](./docs/testing/archive/test-report-0.8.143-agent-control-archive.md)。
 - 规模（0.8.137 时点）：`contract 2/2`、`unit 175 FAIL=0 SKIP=1`（新增 4 个脚本 / 93 断言；
   `test-webview-panels` +21、`test-i18n-webview` +1）。
 

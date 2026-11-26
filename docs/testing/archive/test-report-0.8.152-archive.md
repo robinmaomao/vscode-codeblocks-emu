@@ -1,8 +1,8 @@
 # 测试执行报告（0.8.152 · 滚动更新）
 
-> 生成时间：2026-11-16（2026-11-18 在新开发机复跑七层并更新 §1 / §5）｜ 执行环境：Windows 11 x64 ｜ Node v24.22.3 ｜ CPU demo CPU ×16 ｜ 32GB ｜ w64devkit GCC 16.2 / GDB 18.1
-> 方案见 [测试方案](./strategy.md)；覆盖台账见 [测试覆盖矩阵](./coverage-matrix.md)；性能数据见 [性能基准](./performance-baseline.md)。
-> 上一版权威复核见 [0.8.139 完整报告](./test-report-0.8.139-full.md)；本版发布说明见 [release/0.8.152.md](../release/0.8.152.md)；上一版发布说明见 [release/0.8.151.md](../release/0.8.151.md)。
+> 生成时间：2026-11-16（2026-11-18 在新开发机复跑七层并更新 §1 / §5）｜ 执行环境：Windows 11 x64 ｜ Node v24.22.3 ｜ w64devkit GCC 16.2 / GDB 18.1
+> 方案见 [测试方案](../strategy.md)；覆盖台账见 [测试覆盖矩阵](../coverage-matrix.md)；性能数据见 [性能基准](../performance-baseline.md)。
+> 上一版权威复核见 [0.8.139 完整报告](./test-report-0.8.139-full.md)；本版发布说明见 [release/0.8.152.md](../../release/0.8.152.md)；上一版发布说明见 [release/0.8.151.md](../../release/0.8.151.md)。
 
 ## 1. 分层结果
 
@@ -43,7 +43,7 @@
 | 语言/语法 | 6 | 6 | **100%** |
 | DAP 能力 | 30 | 30 | **100%** |
 
-> 完整清单见 [测试覆盖矩阵](./coverage-matrix.md)（`npm run coverage:matrix` 生成，逐项列出命中层与未覆盖项）。
+> 完整清单见 [测试覆盖矩阵](../coverage-matrix.md)（`npm run coverage:matrix` 生成，逐项列出命中层与未覆盖项）。
 > 命令缺口 2 个：`codeblocks.detectCompilers`（交互式并行探测）、`codeblocks.restartClangd`（排障转发）。
 
 ## 3. 本版变更与回归范围
@@ -62,7 +62,7 @@
 | 0.8.151 修复 | Expand All 展不开（VS Code 仅对新元素采用 `collapsibleState`）：清空节点/目录缓存重建实例 + `reveal({expand:true})` 兜底；该请求为一次性，`setProjects`/`setCategorize` 复位，避免重载后把折叠节点重新顶开 |
 | 代码评审批次 | 修复 3 项：Debugger 搜索目录 `window.prompt`、还原设置 `window.confirm`（WebView 沙箱无 `allow-modals`，均静默失效）→ 改用 `askText`/`confirmBox`；Expand All 粘滞 → 一次性复位 |
 | 新增/扩展测试 | `test-project-context-menu.js`（17 断言）；`test-file-properties.js`（36 断言）；`test-run-targets-panel.js`（18 断言）；`test-properties-enable-rules.js`（39）/ `test-build-options-enable-rules.js`（32）；`test-build-options-interactions.js`（15）/ `test-properties-interactions.js`（17）；`test-webview-panels.js` 65 断言；i18n 词条表清理 27 条旧 UI 孤儿键并补文件属性/第二轮词条 |
-| 文档 | 新增 [release/0.8.152.md](../release/0.8.152.md) 与本报告；usage(.en) 更新面板版式、占位符与脚本校验说明；progress / CHANGELOG / release/00-index 同步；覆盖矩阵重新生成 |
+| 文档 | 新增 [release/0.8.152.md](../../release/0.8.152.md) 与本报告；usage(.en) 更新面板版式、占位符与脚本校验说明；progress / CHANGELOG / release/00-index 同步；覆盖矩阵重新生成 |
 | 行为边界 | 不改数据模型与保存协议（元素 id/name 全部保留）；保留扩展独有能力（顶部目标选择器、目标 ↑/↓、高级分组）；不执行 Squirrel 构建脚本 |
 
 ## 4. 缺陷与处置（本轮发现并修复）

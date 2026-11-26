@@ -442,7 +442,7 @@
 
 | 动作 | 扩展实测（0.8.85-dev） | CB 25.03 期望（源码推导）[^1] | 结论 |
 |---|---|---|---|
-| Debug 编译 `main.c` | `gcc.exe -g -Wall  -c "D:\work\demo-workspace\…\test-project\main.c" -o obj\Debug\main.o` | `gcc.exe -g -Wall  -c "E:\…\main.c" -o obj\Debug\main.o` | ✔（含双空格） |
+| Debug 编译 `main.c` | `gcc.exe -g -Wall  -c "D:\work\…\test-project\main.c" -o obj\Debug\main.o` | `gcc.exe -g -Wall  -c "E:\…\main.c" -o obj\Debug\main.o` | ✔（含双空格） |
 | Debug 链接 | `gcc.exe  -o bin\Debug\hello obj\Debug\main.o obj\Debug\util.o   ` | `gcc.exe  -o bin\Debug\hello obj\Debug\main.o obj\Debug\util.o` | ✔ |
 | Release 编译 | `gcc.exe -O2  -c "…\main.c" -o obj\Release\main.o` | 同结构 | ✔ |
 | Release 链接 | `gcc.exe  -o bin\Release\hello obj\Release\main.o obj\Release\util.o` | 同结构 | ✔ |

@@ -1,8 +1,8 @@
 # 测试执行报告（0.9.1 · 滚动更新）
 
-> 生成时间：2026-11-19 ｜ 执行环境：Windows 11 x64 ｜ Node v24.22.3 ｜ CPU demo CPU ×16 ｜ 32GB ｜ w64devkit GCC 16.2 / GDB 18.1
-> 方案见 [测试方案](./strategy.md)；覆盖台账见 [测试覆盖矩阵](./coverage-matrix.md)；性能数据见 [性能基准](./performance-baseline.md)。
-> 上一版报告见 [0.9.0 测试报告](./test-report-0.9.0-archive.md)；本版发布说明见 [release/0.9.1.md](../release/0.9.1.md)。
+> 生成时间：2026-11-19 ｜ 执行环境：Windows 11 x64 ｜ Node v24.22.3 ｜ w64devkit GCC 16.2 / GDB 18.1
+> 方案见 [测试方案](../strategy.md)；覆盖台账见 [测试覆盖矩阵](../coverage-matrix.md)；性能数据见 [性能基准](../performance-baseline.md)。
+> 上一版报告见 [0.9.0 测试报告](./test-report-0.9.0-archive.md)；本版发布说明见 [release/0.9.1.md](../../release/0.9.1.md)。
 
 ## 1. 分层结果
 
@@ -37,7 +37,7 @@
 | 语言/语法 | 6 | 6 | 100% |
 | DAP 能力 | 30 | 30 | 100% |
 
-> 完整清单见 [测试覆盖矩阵](./coverage-matrix.md)（`npm run coverage:matrix` 生成）。
+> 完整清单见 [测试覆盖矩阵](../coverage-matrix.md)（`npm run coverage:matrix` 生成）。
 > 命令缺口 0 个。
 
 ## 3. 本版变更与回归范围

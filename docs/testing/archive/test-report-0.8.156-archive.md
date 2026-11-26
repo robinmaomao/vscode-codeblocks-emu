@@ -1,8 +1,8 @@
 # 测试执行报告（0.8.156 · 滚动更新）
 
-> 生成时间：2026-11-19 ｜ 执行环境：Windows 11 x64 ｜ Node v24.22.3 ｜ CPU demo CPU ×16 ｜ 32GB ｜ w64devkit GCC 16.2 / GDB 18.1
-> 方案见 [测试方案](./strategy.md)；覆盖台账见 [测试覆盖矩阵](./coverage-matrix.md)；性能数据见 [性能基准](./performance-baseline.md)。
-> 上一版权威复核见 [0.8.152 测试报告](./test-report-0.8.152-archive.md)；本版发布说明见 [release/0.8.156.md](../release/0.8.156.md)。
+> 生成时间：2026-11-19 ｜ 执行环境：Windows 11 x64 ｜ Node v24.22.3 ｜ w64devkit GCC 16.2 / GDB 18.1
+> 方案见 [测试方案](../strategy.md)；覆盖台账见 [测试覆盖矩阵](../coverage-matrix.md)；性能数据见 [性能基准](../performance-baseline.md)。
+> 上一版权威复核见 [0.8.152 测试报告](./test-report-0.8.152-archive.md)；本版发布说明见 [release/0.8.156.md](../../release/0.8.156.md)。
 
 ## 1. 分层结果
 
@@ -38,7 +38,7 @@
 | 语言/语法 | 6 | 6 | 100% |
 | DAP 能力 | 30 | 30 | 100% |
 
-> 完整清单见 [测试覆盖矩阵](./coverage-matrix.md)（`npm run coverage:matrix` 生成，数据来源 package.json v0.8.156）。
+> 完整清单见 [测试覆盖矩阵](../coverage-matrix.md)（`npm run coverage:matrix` 生成，数据来源 package.json v0.8.156）。
 > 命令缺口 0 个。
 
 ## 3. 本版变更与回归范围
@@ -51,7 +51,7 @@
 | 编译器 | `options_{tcc,bcc,dmc,arm-elf-gcc,powerpc-eabi}.xml` + 对应 `compiler_*.xml`；PATH/常见目录探测 |
 | 命令/设置规模 | 新增 3 个命令与 1 个设置项（136 / 91 / 6 / 34） |
 | 新增测试 | `test-profiler-parse.js` 扩展、`test-autoversioning.js`、`test-autoversioning-commands.js`、`test-more-compilers.js` |
-| 文档 | [release/0.8.156.md](../release/0.8.156.md)、发布页、推荐扩展双语文档、README / usage / progress / CHANGELOG / backlog 同步 |
+| 文档 | [release/0.8.156.md](../../release/0.8.156.md)、发布页、推荐扩展双语文档、README / usage / progress / CHANGELOG / backlog 同步 |
 
 ## 4. 缺陷与处置
 
@@ -66,4 +66,4 @@
 
 - 单元 **210** / 契约 **3/3** / E2E **6/6** / 视觉 **26/26** / 性能 **13/13** / 打包 **15 断言** / 宿主 **25/25** 全部通过，无遗留失败。
 - 命令 136 / 设置 91 / 视图 6 / 快捷键 34，覆盖率 100%。
-- 有成熟替代的 Doxygen/打印/Fortran/环境变量/单库 nm/Valgrind 不内置，见 [推荐扩展](../guide/recommended-extensions.md)。
+- 有成熟替代的 Doxygen/打印/Fortran/环境变量/单库 nm/Valgrind 不内置，见 [推荐扩展](../../guide/recommended-extensions.md)。

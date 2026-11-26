@@ -1,6 +1,6 @@
 # Settings reference
 
-> For the Code::Blocks extension (`codeblocks-vscode`). This page documents every setting in the **9 settings sections**, including type, default, scope, allowed values and when changes take effect.
+> For Originium IDE for Code::Blocks (command/setting prefix remains `codeblocks`). This page documents every setting in the **10 settings sections**, including type, default, scope, allowed values and when changes take effect.
 > Chinese version: [settings.md](./settings.md)｜Features and workflows: [User manual](./usage.en.md).
 
 ## 0. General

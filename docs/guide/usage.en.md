@@ -885,7 +885,7 @@ my-project/
 ## 15. FAQ
 
 **Q: Task Manager shows hundreds of `rg.exe` / `conhost.exe` while building, and CPU is pegged at 100%?**
-A: Most often the **workspace path contains glob metacharacters** (`[ ] { } * ?`). VS Code's AI instruction locator joins `.github/instructions` / `.claude/rules` into an absolute path and then splits it as a glob: the first segment containing a metacharacter (e.g. `[internal]demo_project`) **truncates the search root to an ancestor directory**, after which every file change runs `rg --files` (with no `-g` filter at all) over that whole tree — a build writing dozens of object files then stacks up hundreds of enumerations. What to do: (1) run `Code::Blocks: Check Workspace Path` to see the offending segment and the real search root; (2) rename the offending folder to remove `[ ] { } * ?` (most thorough); or (3) let `codeblocks.workspace.pathGuard` (default `prompt`) disable those two scan locations after asking — it writes `chat.instructionsFilesLocations=false` into your **USER settings** (never the workspace `.vscode/settings.json`).
+A: Most often the **workspace path contains glob metacharacters** (`[ ] { } * ?`). VS Code's AI instruction locator joins `.github/instructions` / `.claude/rules` into an absolute path and then splits it as a glob: the first segment containing a metacharacter (e.g. `[demo]project`) **truncates the search root to an ancestor directory**, after which every file change runs `rg --files` (with no `-g` filter at all) over that whole tree — a build writing dozens of object files then stacks up hundreds of enumerations. What to do: (1) run `Code::Blocks: Check Workspace Path` to see the offending segment and the real search root; (2) rename the offending folder to remove `[ ] { } * ?` (most thorough); or (3) let `codeblocks.workspace.pathGuard` (default `prompt`) disable those two scan locations after asking — it writes `chat.instructionsFilesLocations=false` into your **USER settings** (never the workspace `.vscode/settings.json`).
 
 
 **Q: Why does an incremental build still relink / recompile?**
@@ -1026,103 +1026,14 @@ The Code::Blocks features below were assessed as **not to be re-implemented in t
 | Regex test bench (T4) | **Regex Previewer** (`chrmarti.regex`, for JS/TS/PHP/Haxe) · **Regexp Explain** (`louiswt.regexp-preview`) · RegExp Preview and Editor | General regex validation; the regex mode of the VS Code search box also does basic validation |
 | Symbol table nm viewer (single library/file) | **Nm tool** (`wibren-wiersma.nm-tool`) · **vscode-binutils** (`sqlpassion.vscode-binutils`) | nm / objdump for a single library; cross-library symbol search is provided by this extension's **Tools → Find Symbol in Libraries…** |
 
-> Profiler (gprof), Copy Strings and cross-library symbol search are now implemented (0.8.156, see “What’s new” below).
-> T5 cross-library symbol search. Export Makefile now lives in the Build menu (matching CB `compiler_menu.xrc`).
+> Profiler (gprof), Copy Strings and cross-library symbol search are now implemented (0.8.156, see [version history](#162-version-history)).
+> Export Makefile now lives in the Build menu (matching CB `compiler_menu.xrc`).
 > For details and the decision record, see the [unimplemented-feature backlog](../dev/backlog.md) §2 (not-ported list).
 > Reminder: the extensions above are community/vendor products; evaluate them before installing. This extension neither bundles nor ships them.
 
-## 16.1 What's new in 0.10.0 (Agent audit and undo)
+### 16.2 Version history
 
-- **Change history**: LM Tools / `@codeblocks` writes to `.cbp` / `.workspace` keep workspace-local byte snapshots; every tool call appends to `audit.jsonl` (no scripts/source).
-- **Undo**: **Code::Blocks: Agent Change History…** / **Undo Last Agent Change**; only the latest change per file can be undone, and external edits are refused by default with a second confirmation for force-undo.
-- **Chat entry points**: `@codeblocks /history`, `@codeblocks /undo`.
-- **Safety**: untrusted workspaces never record; undo is refused while building/debugging; CLI / external MCP do not provide cross-process undo.
-- **Settings**: `codeblocks.agent.history.enabled` (default `true`), `codeblocks.agent.history.maxEntries` (default `50`).
-- **Docs**: [Agent change history and undo](./agent-history.en.md).
-
-## 16.2 What's new in 0.9.3 (Agent experience and safety)
-
-- **Agent Skill**: ships `skills/codeblocks-project/SKILL.md` and registers it with `contributes.chatSkills`; **Code::Blocks: Install Agent Skill…** installs it into `.github/skills/` or `~/.copilot/skills/`, with overwrite confirmation.
-- **`@codeblocks` participant**: `/read` `/build` `/fix` `/debug` `/status` `/help` deterministic commands using the same `invokeTool` policy.
-- **Agent Status**: **Code::Blocks: Agent Status** shows trust/switches/tool count/CLI/MCP/skill paths.
-- **Confirmations**: writes, runs, debug mutations, exports and workspace open/close/setActive ask before running; read-only and `dryRun` calls do not.
-- **Script gate**: `codeblocks.agent.allowScripts` (default `false`) plus per-call `allowScripts: true`; `cb-cli` is unaffected.
-- **Docs**: Agent guide now covers five-minute onboarding, permission matrix, CLI/MCP paths, troubleshooting and the skill; new [Agent recipes](./agent-recipes.en.md).
-- **Inventory**: 138 commands / 94 settings / 6 views / 34 keybindings / 11 LM Tools / 1 MCP provider / 1 chat participant / 1 chat skill.
-
-## 17. Bug fixes in 0.9.2
-
-- **Build targets**: explicitly selecting a target the current platform does not support now fails with `unsupported` instead of silently "succeeding"; `build_status` returns `no-build` when no build has run.
-- **No more hung builds**: Agent / CLI builds no longer wait for the "exclude build outputs?" notification, which could hang forever when nobody answered (and defeat `timeoutMs`).
-- **Run directory**: a relative `cwd` for `run` resolves against the project directory, not the VS Code process working directory.
-- **Debug consistency**: `state` / `stack` / `variables` responses share one shape across Copilot / MCP / CLI; frames expose both `level` and `id`, `variables` / `evaluate` accept `frameId`; `setBreakpoints` replaces the previous set; `stop` clears breakpoints and waiters; a failed gdb start reaps the process and reports `compiler-missing`.
-- **Stricter project edits**: `buildTargets` referencing an unknown target, `weight` outside 0–100, duplicate targets / files and conflicting renames are rejected with `invalid-input`; a failed edit no longer leaves a half-applied in-memory model.
-- **Safer export**: `makefile` defaults to `Makefile.cb` (never overwrites the project's own `Makefile`); relative `out` paths resolve against the project directory; `compile_commands.json` defaults to `.cb-tools/` inside the project.
-- **CLI**: `--json` also prints JSON on failure; exit codes cover `invalid-input` / `unsupported` / `compiler-missing` / `no-build`; `debug` honours `--timeout`.
-- **Unchanged inventory**: 136 commands / 93 settings / 6 views / 34 keybindings.
-
-## 18. What's new in 0.9.0
-
-- **Agent control (Copilot / MCP / CLI)**: 11 Language Model Tools (`project_read` / `project_edit` / `project_file` / `project_target` / `build` / `build_status` / `run` / `debug` / `compiler` / `export` / `workspace`) + a bundled MCP server (`bundle/cb-mcp.js`) + a standalone CLI (`bundle/cb-cli.js`), all sharing one implementation with the UI. See [Agent control](./agent-control.en.md).
-- **Switches**: `codeblocks.agent.enabled` (on by default; when off the tools are not registered, the MCP server is not exposed and an already-running MCP server refuses calls) and `codeblocks.agent.readOnly` (off by default; only query tools/actions are allowed). **Untrusted workspaces are always treated as off**; changes apply immediately.
-- **Shared build kernel**: `src/build/buildProject.ts` is now the single build implementation, keeping the audit-round linker-diagnostic resolution, `maxReportedErrors` truncation, auto-versioning and makefile semantics.
-- **clangd**: session restore of multiple projects is coalesced into one generation; during startup restore a config-only change skips the restart (`decideClangdRestart`), coexisting with the restart coalescer and avoiding the `clangd.applyFix already exists` popup.
-- **Breaking change**: `engines.vscode` raised from `^1.85.0` to `^1.102.0` (the Language Model Tools / MCP provider APIs need 1.102).
-- **Inventory**: 136 commands / **93** settings (+10th section Agent) / 6 views / 34 keybindings / 11 LM Tools / 1 MCP provider.
-
-## 19. Bug fixes in 0.8.160
-
-- **New-project overwrite guard**: when the target folder already has same-named files, confirm per file and keep them by default (no more whole-folder overwrite).
-- **HeaderGuard**: include guards are generated/updated for header files only; sources are left untouched.
-- **Open Include File**: resolves system headers (`<vector>` …) and project-suffix candidates so `#include` navigation no longer dead-ends.
-- **TODO scanner comment languages**: comment markers are detected per language (`#` / `REM` / `::` / `.S` preprocessor guard) instead of treating code as comments.
-- **Build-log and debug-gate localization**: `Target up to date`, `Make:` and the “build before debugging” prompt now go through the dictionary (no Chinese in an English UI, no English in a Chinese UI).
-- **i18n consistency**: WebView / run-target panel strings completed, plus an English-UI guard test to prevent regressions.
-- **Project name validation**: rejects `.` / `..` / trailing dot or space / Windows reserved names.
-- **Docs and test system**: keybinding/dictionary/menu counts corrected; 10 print-only scripts gained assertions and exit codes; new 112-command entry smoke test and TODO-scanner language cases.
-
-- **Not executed (by decision)**: F-02 (`.ld` line comments) and F-03 (TODO comment-language scope) keep the current behavior.
-- **Unchanged inventory**: 136 commands / 91 settings / 6 views / 34 keybindings.
-
-## 20. What's new in 0.8.159
-
-- **Project manager extraction**: `showProjectManager` / `buildManagerItems` moved to `src/features/projectManager.ts`, with open-project/active-project/remove/scan callbacks injected through `ProjectManagerDeps`; QuickPick behavior is unchanged.
-- **Regression guard**: `test-project-manager-feature.js` verifies the feature module, active-project marker, action items and that the old implementation has not returned.
-- **No user-visible feature/setting changes**: commands 136 / settings 91 / views 6 remain unchanged.
-
-## 21. What's new in 0.8.158
-
-- **Profiler command extraction**: `profileTarget` and report export moved from `extension.ts` to `src/features/profilerCommands.ts`, with project/compiler/working-directory/output-channel dependencies injected through `ProfilerCommandDeps`; behavior is unchanged.
-- **Architecture**: `extension.ts` continues to shrink under the Strangler pattern; `test-profiler-commands.js` guards against duplicate registration or regression back into the giant module.
-- **No feature/setting changes**: commands 136 / settings 91 / views 6 remain unchanged.
-
-## 22. What's new in 0.8.157
-
-- **AutoVersioning correctness**: `version.h` is no longer rewritten when its content is unchanged (avoiding mtime churn/full rebuilds); build sessions are deduplicated so `BUILDS_COUNT` advances once per build; `do_auto_increment` / `ask_to_increment` now work; Bump/Generate update `manifest.xml`; added SVN fields, a Changes Log entry and "Add version.h to Project".
-- **Profiler runtime**: records `gmon.out` timestamps before running and only analyzes fresh output; falls back to `gprof -A --separate-files` and collects `.annotated` files; CSV/HTML export uses atomic writes.
-- **Compiler metadata/resources**: reads real display names and master paths from `compiler_*.xml`; bundles the full Code::Blocks `options_*.xml` / `compiler_*.xml` set; fixes `extends` inheritance; adds conservative detection for OpenWatcom, Cygwin, MSYS2 MinGW64, TDM64, LCC, DMD, GDC and gfortran.
-- **Behavior notes**: `do_auto_increment` remains off by default; when enabled, a build may prompt for version increment. Scripts relying on date constants being refreshed on every build should run Generate Version Header explicitly.
-
-## 23. What's new in 0.8.156
-
-- **Profiler completion**: gprof **call graph** parsing/output; `gprof -A` annotated source in a separate output channel (setting `codeblocks.profiler.annotatedSource`, default on); **CSV / HTML report export** after profiling.
-- **AutoVersioning**: reads/writes `.cbp <Extensions><AutoVersioning>`; commands **AutoVersioning…** (configure/edit values/toggle autoincrement/set header path), **Bump Version**, **Generate Version Header**. When configured, `version.h` is generated before a build and `BUILDS_COUNT` is incremented and atomically written back after a successful build.
-- **More compilers**: **TCC**, **Borland C++ 5.5/5.82**, **Digital Mars**, **ARM ELF GCC** and **PowerPC EABI GCC** option/detection resources.
-- **Recommended extensions**: new [recommended extensions](./recommended-extensions.en.md) page covering Doxygen, printing, Modern Fortran, environment variables, single-library nm and Valgrind/Callgrind; these are no longer re-implemented here.
-- **Behavior notes**: AutoVersioning rewrites `version.h` before builds — back it up or disable the project configuration if you maintain it by hand; `gprof -A` can be slow on large projects and can be turned off.
-
-## 24. What's new in 0.8.155
-
-- **Workspace lifecycle**: File → Save Project As… / Save Workspace / Save Workspace As… / Close Workspace / Open default workspace; closing the last project clears workspace state, saving writes project order, `active` and `<Depends>`.
-- **`.workspace` external change detection**: external edits to the project list/dependencies/active project prompt Reload / Ignore; only projects whose disk signature changed are reloaded.
-- **No-project compile encoding**: extension-managed process + UTF-8/GBK line decoder by default; `codeblocks.noProjectCompile.useTaskTerminal` restores the legacy task terminal.
-- **Robustness**: atomic `.cbp`/`.workspace` writes (temp file + rename); unit paths containing `&`/`<`/`>`/`"` now work for add/rename/toggle compile/link.
-- **New submenu**: New Build Target… (GUI/Console/Static/Dynamic/CommandsOnly) and New File… (C/C++/Header/Empty templates).
-- **Debug**: Next Instruction / Step Into Instruction; Examine Memory… prints 16 bytes per line as hex + ASCII.
-- **Tools**: Backtick Cache… (Expression/Value list, copy value, clear and close); Copy Strings; Profile Target (gprof flat profile); Find Symbol in Libraries… (`nm -C -A` over the project's linked libraries).
-- **Makefile projects**: CompileFile and Dist Clean wired through `<MakeCommands>`.
-- **i18n**: launch.json debug attributes, the Registers view title and custom-tool setting descriptions now use `package.nls.*`; English UI no longer shows Chinese static text.
-
+This manual describes the **current** behavior only. Per-version changes and upgrade notes live in [CHANGELOG](../../CHANGELOG.md) and the [release notes index](../release/00-index.md); 0.10.0 focuses on the rename to **Originium IDE for Code::Blocks** and Agent change audit/undo.
 ## License
 
 [GPL v3](../../LICENSE.md). The TypeScript code is an independent rewrite; `resources/compilers/*.xml` is derived from GPL v3 sources.

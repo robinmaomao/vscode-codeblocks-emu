@@ -1,8 +1,8 @@
 # 测试执行报告（0.8.143-agent-control · 滚动更新）
 
-> 生成时间：2026-11-06 ｜ 执行环境：Windows 10 x64 ｜ Node v24.19.0 ｜ CPU demo CPU ×8 ｜ 16GB ｜ ccache 4.14.1
-> 方案见 [测试方案](./strategy.md)；覆盖台账见 [测试覆盖矩阵](./coverage-matrix.md)；性能数据见 [性能基准](./performance-baseline.md)。
-> 上一版权威复核见 [0.8.139 完整报告](./test-report-0.8.139-full.md)；本版发布说明见 [release/0.8.143-agent-control.md](../release/0.8.143-agent-control.md)；上游正式版见 [release/0.8.142.md](../release/0.8.142.md)。
+> 生成时间：2026-11-06 ｜ 执行环境：Windows 10 x64 ｜ Node v24.19.0 ｜ CPU 8 逻辑核  ｜ ccache 4.14.1
+> 方案见 [测试方案](../strategy.md)；覆盖台账见 [测试覆盖矩阵](../coverage-matrix.md)；性能数据见 [性能基准](../performance-baseline.md)。
+> 上一版权威复核见 [0.8.139 完整报告](./test-report-0.8.139-full.md)；本版发布说明见 [release/0.8.143-agent-control.md](../../release/0.8.143-agent-control.md)；上游正式版见 [release/0.8.142.md](../../release/0.8.142.md)。
 > 本版为 `feat/agent-control` **分支预发布版**（不合并 main），测试口径按分支内容实测。
 
 ## 1. 分层结果
@@ -40,7 +40,7 @@
 | 语言/语法 | 6 | 6 | **100%** |
 | DAP 能力 | 30 | 30 | **100%** |
 
-> 完整清单见 [测试覆盖矩阵](./coverage-matrix.md)（`npm run coverage:matrix` 生成，逐项列出命中层与未覆盖项）。
+> 完整清单见 [测试覆盖矩阵](../coverage-matrix.md)（`npm run coverage:matrix` 生成，逐项列出命中层与未覆盖项）。
 > 剩余缺口 2 个命令：`codeblocks.detectCompilers`（已登记的可解释缺项：真实并行探测外部编译器，需交互环境）、`codeblocks.restartClangd`（排障转发命令，其重启链路由 `test-clangd-settings-sync.js` 覆盖）。
 
 ## 3. 本版变更与回归范围
@@ -52,7 +52,7 @@
 | 新增能力 | 11 个 Language Model Tools + MCP provider（`bundle/cb-mcp.js`）+ 独立 CLI（`bundle/cb-cli.js`）；控制内核 `src/api/*`；构建内核 `src/build/buildProject.ts` 与 UI 同源（含 main 的链接期诊断 `resolveFile`） |
 | 行为变更 | `engines.vscode` → `^1.102.0`；关闭总闸后 LM Tools 不注册、内嵌 MCP 返回空定义、外部客户端直启的 server 拒绝调用（`disabled`）；只读模式白名单外返回 `read-only`；**未受信任工作区强制关闭**；每次工具调用写一行审计日志；切换**即时生效** |
 | 新增测试 | `test-agent-policy.js`（34 断言）、`test-mcp-server` 关闭/只读门控（M7–M10）、`test-cli` C16（CLI 不受开关影响）、宿主开关切换与只读拦截 2 项；另有分支既有的 `test-api-project-edit` / `test-api-settings-reader` / `test-api-tool-guards` / `test-api-build-service` / `test-ai-tools-contract` / `test-e2e-cli-build` |
-| 文档 | 新增 [release/0.8.143-agent-control.md](../release/0.8.143-agent-control.md) 与 [agent-control.md](../guide/agent-control.md) / `.en.md`；`settings.md(.en)` 第 10 分区；README / usage / progress / CHANGELOG / decisions / strategy 同步；滚动报告重命名、覆盖矩阵重生成 |
+| 文档 | 新增 [release/0.8.143-agent-control.md](../../release/0.8.143-agent-control.md) 与 [agent-control.md](../../guide/agent-control.md) / `.en.md`；`settings.md(.en)` 第 10 分区；README / usage / progress / CHANGELOG / decisions / strategy 同步；滚动报告重命名、覆盖矩阵重生成 |
 | 行为边界 | 默认行为与 0.8.142 一致（开关默认开启）；`cb-cli` 不受开关影响；工具**列表快照**可能滞后到重载窗口（调用即时受控）；命令数不变 |
 
 ## 4. 缺陷与处置（本轮发现并修复）

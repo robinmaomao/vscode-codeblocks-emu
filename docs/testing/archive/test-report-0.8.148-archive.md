@@ -1,8 +1,8 @@
 # 测试执行报告（0.8.148 · 滚动更新）
 
-> 生成时间：2026-11-11 ｜ 执行环境：Windows 10 x64 ｜ Node v24.19.0 ｜ CPU demo CPU ×8 ｜ 16GB
-> 方案见 [测试方案](./strategy.md)；覆盖台账见 [测试覆盖矩阵](./coverage-matrix.md)；性能数据见 [性能基准](./performance-baseline.md)。
-> 上一版权威复核见 [0.8.139 完整报告](./test-report-0.8.139-full.md)；本版发布说明见 [release/0.8.148.md](../release/0.8.148.md)；上一版发布说明见 [release/0.8.147.md](../release/0.8.147.md)。
+> 生成时间：2026-11-11 ｜ 执行环境：Windows 10 x64 ｜ Node v24.19.0 ｜ CPU 8 逻辑核
+> 方案见 [测试方案](../strategy.md)；覆盖台账见 [测试覆盖矩阵](../coverage-matrix.md)；性能数据见 [性能基准](../performance-baseline.md)。
+> 上一版权威复核见 [0.8.139 完整报告](./test-report-0.8.139-full.md)；本版发布说明见 [release/0.8.148.md](../../release/0.8.148.md)；上一版发布说明见 [release/0.8.147.md](../../release/0.8.147.md)。
 
 ## 1. 分层结果
 
@@ -39,7 +39,7 @@
 | 语言/语法 | 6 | 6 | **100%** |
 | DAP 能力 | 30 | 30 | **100%** |
 
-> 完整清单见 [测试覆盖矩阵](./coverage-matrix.md)（`npm run coverage:matrix` 生成，逐项列出命中层与未覆盖项）。
+> 完整清单见 [测试覆盖矩阵](../coverage-matrix.md)（`npm run coverage:matrix` 生成，逐项列出命中层与未覆盖项）。
 > 命令缺口 2 个：`codeblocks.detectCompilers`（交互式并行探测）、`codeblocks.restartClangd`（排障转发）。新增的两个搜索命令由 Provider/HTML/纯逻辑/命令注册测试覆盖。
 
 ## 3. 本版变更与回归范围
@@ -54,7 +54,7 @@
 | 0.8.148 修复 | 诊断定位的「无改善」判断改用原始 token；对象文件只作「找同名源码」线索（工程索引 + 同目录源码）；新增 `isNavigableDiagnosticFile` 统一门控 Build Log 树与 Problems |
 | 0.8.148 ANSI | 子进程行输出统一 `stripAnsi`（构建 / 脚本 / GDB）；`-fdiagnostics-color=always` 不再破坏诊断正则 |
 | 新增/扩展测试 | `test-diagnostic-path.js` **26 断言**、`test-error-navigation.js` **19 断言**、`test-encoding-lines.js` **29 断言**、e2e 链接期诊断 **9 断言** |
-| 文档 | 新增 [release/0.8.148.md](../release/0.8.148.md) 与 [release/pages/0.8.148.md](../release/pages/0.8.148.md)；usage(.en) §10、manual-acceptance、progress、CHANGELOG 同步；覆盖矩阵重新生成 |
+| 文档 | 新增 [release/0.8.148.md](../../release/0.8.148.md) 与 [release/pages/0.8.148.md](../../release/pages/0.8.148.md)；usage(.en) §10、manual-acceptance、progress、CHANGELOG 同步；覆盖矩阵重新生成 |
 | 行为边界 | 工程外对象无同名源码时不猜测（保持不可导航）；clangd 模式诊断来源与行为不变 |
 
 ## 4. 缺陷与处置（本轮发现并修复）
@@ -68,5 +68,5 @@
 
 ## 5. 待办与已知限制
 
-- **人工验收**：按 [手工验收清单](./manual-acceptance.md) §3 构建交互执行链接期跳转、无源码位置提示、ANSI 输出、失效路径警告。
+- **人工验收**：按 [手工验收清单](../manual-acceptance.md) §3 构建交互执行链接期跳转、无源码位置提示、ANSI 输出、失效路径警告。
 - **已记录限制**：工程外对象且找不到同名源码时不猜测跳转目标（条目保留消息、无跳转）；`make` 自定义工程仍不经构建引擎解析诊断。

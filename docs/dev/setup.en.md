@@ -161,8 +161,8 @@ Manual smoke test:
 
 ```powershell
 npm.cmd run package                                   # = vsce package (auto compile + bundle + bundle:search)
-code.cmd --install-extension codeblocks-vscode-0.9.2.vsix --force
-code.cmd --list-extensions --show-versions | Select-String codeblocks
+code.cmd --install-extension originium-ide-0.10.0.vsix --force
+code.cmd --list-extensions --show-versions | Select-String originium
 ```
 
 - `.vscodeignore` excludes `src/`, `tests/`, `test-project/`, `docs/`, `.github/`, `.vscode/`, `.nvmrc`, `*.map`, and `package-lock.json`; the only VSIX entry point is `bundle/extension.js`.

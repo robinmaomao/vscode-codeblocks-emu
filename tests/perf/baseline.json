@@ -4,8 +4,6 @@
     "node": "v24.19.0",
     "platform": "win32-x64",
     "cpus": 8,
-    "cpuModel": "demo CPU",
-    "totalMemGB": 15.8,
     "date": "2026-10-13"
   },
   "benches": {

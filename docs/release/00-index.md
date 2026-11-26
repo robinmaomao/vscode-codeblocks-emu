@@ -70,8 +70,10 @@
 - [archive/0.8.2-0.8.46.md](./archive/0.8.2-0.8.46.md)：`0.8.2`–`0.8.46-dev` 逐版说明（原文保留）。
 - [archive/0.8.76-0.8.99-dev.md](./archive/0.8.76-0.8.99-dev.md)：`0.8.76-dev`–`0.8.99-dev` 逐版说明（合并归档）。
 - [archive/0.8.100-0.8.128-dev.md](./archive/0.8.100-0.8.128-dev.md)：`0.8.100-dev`–`0.8.128-dev` 逐版说明（合并归档）。
-- `0.8.47-dev`–`0.8.75-dev` 未单独出发布说明，逐轮记录见 [`docs/dev/progress.md`](../dev/progress.md) 与
-  [`docs/archive/progress-history-0.8.89.md`](../archive/progress-history-0.8.89.md)。
+- [archive/2026-11-04-rg-storm-root-cause.md](./archive/2026-11-04-rg-storm-root-cause.md)：0.8.136 工作区路径守卫的根因取证。
+- [archive/compile-link-alignment-round4.md](./archive/compile-link-alignment-round4.md)：命令快照测试的期望值来源。
+- [archive/progress-history-0.8.89.md](./archive/progress-history-0.8.89.md)：0.8.89 及以前的逐轮开发记录。
+- `0.8.47-dev`–`0.8.75-dev` 未单独出发布说明，逐轮记录见 [`docs/dev/progress.md`](../dev/progress.md)。
 
 ## GitHub Release 页面（pages/）
 
@@ -98,25 +100,26 @@ node tests/contract/gen-release-notes.js --all          # 批量输出
 
 > 发布日期：YYYY-MM-DD ｜ 正式版（<上一版> → <ver> 里程碑汇总）
 
-## 概述            ← 1 段定位 + 3–6 条 emoji 要点 + 「同时包含：…」
+## 概述            ← 1 段定位 + 3–6 条要点 + 「同时包含：…」；详细内容留在 release/<ver>.md
 ## <emoji> <主题>   ← 按主线分节，问题 / 根因 / 修复
 ## ✅ 验证          ← 分层回归数字 + 真机实测
 ## ⚠️ 行为变化与升级提示
-## 📦 安装          ← 附件名 codeblocks-vscode-<ver>.vsix + VS Code 1.102.0+
+## 📦 安装          ← 附件名 originium-ide-<ver>.vsix + VS Code 1.102.0+
 ## 📬 完整变更      ← 里程碑说明 + 提交对比（绝对链接）
 ```
 
 发布步骤（`gh` 从仓库根执行）：
 
 ```powershell
-node tests/contract/gen-release-notes.js --emit 0.8.142
-gh release create 0.8.142 "release/codeblocks-vscode-0.8.142.vsix" `
-  --title "0.8.142" --notes-file ".cb-tools/release-body/0.8.142.md"
-gh release edit 0.8.142 --latest=true
+node tests/contract/gen-release-notes.js --emit 0.10.0
+gh release create v0.10.0 "release/originium-ide-0.10.0.vsix" `
+  --title "0.10.0" --notes-file ".cb-tools/release-body/0.10.0.md"
+gh release edit v0.10.0 --latest=true
 ```
 
 约定：**Release 标题 = 纯版本号**（不带主题、不带英文）；正文一律用 `--notes-file` 传入（避免中文 / 反引号转义）；
 `Latest` 只给最新一个版本；历史 tag（`v0.8.11-stable`）标题用纯版本号 `0.8.11`。
+**pages 只放发布页摘要（建议 ≤80 行）**，逐项细节留在 `release/<ver>.md`，避免两处重复维护。
 
 > **更名说明（0.10.0 起）**：产品名由 `Code::Blocks for VS Code` 改为 `Originium IDE for Code::Blocks`，
 > 扩展 ID 由 `robinmaomao.codeblocks-vscode` 改为 `robinmaomao.originium-ide`，VSIX 前缀随之改为 `originium-ide-`。

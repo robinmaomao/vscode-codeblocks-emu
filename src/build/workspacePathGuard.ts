@@ -10,7 +10,7 @@
  *   location   = D:\work\demo-workspace\[demo]project\SDK_...\.github\instructions
  *   searchRoot = D:\work\demo-workspace          ← 被放大到祖先目录
  *   filePattern= [demo]project/SDK_.../.github/instructions
- * 因为 glob 在 JS 侧匹配，ripgrep 拿不到任何 `-g` ⇒ 每次文件变更都把 `2026\10` 整棵树列一遍
+ * 因为 glob 在 JS 侧匹配，ripgrep 拿不到任何 `-g` ⇒ 每次文件变更都把整个父目录树列一遍
  * （`rg.exe` + `conhost.exe` 风暴、CPU 100%）。路径干净时 `Eao()` 直接返回整条 location 作为
  * searchRoot、不带 filePattern ⇒ 调用方走 `fileStat` 分支，**不会启动 rg**。
  *

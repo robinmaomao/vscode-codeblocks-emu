@@ -4,7 +4,7 @@
 > 一句话结论：**工作区路径里成对的 `[ ]` 被 VS Code 当成 glob**，AI 指令发现的搜索根因此从工程目录被截断到祖先目录，
 > 之后每次文件变更都用 `rg --files`（无任何 `-g` 过滤）枚举整棵树 ⇒ `rg.exe` + `conhost.exe` 洪水、CPU 100%。
 
-相关实现：[`src/build/workspacePathGuard.ts`](../../src/build/workspacePathGuard.ts) ｜ 发布说明：[`docs/release/0.8.136.md`](../release/0.8.136.md) ｜ 测试：[`docs/testing/test-report-0.9.2-archive.md`](../testing/test-report-0.9.2-archive.md)
+相关实现：[`src/build/workspacePathGuard.ts`](../../../src/build/workspacePathGuard.ts) ｜ 发布说明：[`docs/release/0.8.136.md`](../0.8.136.md) ｜ 测试：[`docs/testing/test-report-0.9.2-archive.md`](../../testing/archive/test-report-0.9.2-archive.md)
 
 ---
 
@@ -15,9 +15,9 @@
 | 路径 | 构建表现 |
 |---|---|
 | `D:\work\demo-workspace\[demo]project\SDK_DEMO_BOARD_TEST_20260101` | 任务管理器里 VS Code 一组多出上百个 `rg.exe` / `conhost.exe`，CPU 打满，构建墙钟翻倍 |
-| `D:\work\demo-workspace\test_sdks\SDK_DEMO_BOARD_TEST_20260101` | 正常 |
+| `D:\work\demo workspace\test_sdks\SDK_DEMO_BOARD_TEST_20260101` | 正常 |
 
-复现与工程内容无关：**往 `D:\work\demo-workspace` 下增删一批文件**（例如复制一份工程）即可触发；在 `D:\work\demo-workspace\2026`、`D:\work\demo-workspace\2026\11` 下同样的操作不触发。
+复现与工程内容无关：**往 `D:\work\demo-workspace` 下增删一批文件**（例如复制一份工程）即可触发；在 `D:\work`、`D:\work\demo-other` 下同样的操作不触发。
 
 ---
 
@@ -37,8 +37,8 @@
 |---|---:|---:|
 | `D:\work\demo-workspace`（被放大的搜索根） | 19 | 9 |
 | `D:\work\demo-workspace\test_sdks`（其子孙目录） | 6 | 6 |
-| `D:\work\demo-workspace\2026\test`（兄弟目录） | 0 | 0 |
-| `D:\work\demo-workspace\2026\11`（兄弟目录） | 0 | 0 |
+| `D:\work\demo-test`（兄弟目录） | 0 | 0 |
+| `D:\work\demo-other`（兄弟目录） | 0 | 0 |
 
 修复前后（同一工作区，写 10 个文件）：
 
@@ -91,7 +91,7 @@ filePattern = [demo]project/SDK_.../.github/instructions
 一次 10 文件写入共抓到 36 次 `rg` 派发，全部一致：
 
 ```text
-cwd  = D:\work\demo-workspace
+cwd  = d:\work\demo-workspace
 argv = rg.exe --files --hidden --case-sensitive --no-require-git
        --glob-case-insensitive --ignore-file-case-insensitive
        --no-ignore-parent --follow --no-config          ← 没有任何 -g
@@ -101,7 +101,7 @@ caller = spawnRipgrep → async cmdTraversal (FileSearchEngine, extensionHostPro
 ### 4.2 请求内容（断点于 `FileSearchEngine.cmdTraversal`，25 s 采样）
 
 ```json
-{ "folderQueries": [{ "folder": "e:\\demo-workspace\\2026\\10" }],
+{ "folderQueries": [{ "folder": "e:\\work\\2026\\10" }],
   "type": 1, "shouldGlobMatchFilePattern": true, "ignoreGlobCase": true, "sortByScore": true,
   "filePattern": "[demo]project/SDK_.../.github/instructions", "extraFileResources": [] }
 ```
@@ -156,7 +156,7 @@ caller = spawnRipgrep → async cmdTraversal (FileSearchEngine, extensionHostPro
 
 | 方案 | 做法 | 代价 |
 |---|---|---|
-| **改名（最彻底）** | 把命中目录改成不含 `[ ] { } * ?` 的名字，如 `[demo]xxx` → `内部_xxx` | 只改目录名；`.cbp` 用相对路径，构建/调试不受影响；指令发现功能保留 |
+| **改名（最彻底）** | 把命中目录改成不含 `[ ] { } * ?` 的名字，如 `[demo]xxx` → `demo_xxx` | 只改目录名；`.cbp` 用相对路径，构建/调试不受影响；指令发现功能保留 |
 | **关闭两处扫描** | 设置里点「关闭这两处扫描」（或把 `pathGuard` 设为 `auto`） | 这两处的指令自动发现关闭（工程里本来没有这些目录），其它 AI 功能不受影响；改回 `true` 即恢复 |
 
 ### 5.3 边界与已知限制

@@ -58,6 +58,12 @@ function loadBaseline(file = path.join(__dirname, 'baseline.json')) {
   try { return JSON.parse(fs.readFileSync(file, 'utf-8')); } catch { return { benches: {} }; }
 }
 
+function scrubNote(note) {
+  if (!note) return undefined;
+  const home = require('os').homedir();
+  return home ? note.split(home).join('%USERPROFILE%') : note;
+}
+
 function saveBaseline(results, env, file = path.join(__dirname, 'baseline.json')) {
   const prev = loadBaseline(file);
   const benches = {};
@@ -68,10 +74,11 @@ function saveBaseline(results, env, file = path.join(__dirname, 'baseline.json')
       budget: old?.budget ?? Math.max(Number((r.result.median * 3).toFixed(2)), r.minBudget ?? 1),
       median: r.result.median,
       p95: r.result.p95,
-      note: r.note || undefined,
+      note: scrubNote(r.note),
     };
   }
-  fs.writeFileSync(file, JSON.stringify({ updatedAt: new Date().toISOString(), env, benches }, null, 2) + '\n', 'utf-8');
+  const safeEnv = { node: env.node, platform: env.platform, cpus: env.cpus, date: env.date };
+  fs.writeFileSync(file, JSON.stringify({ updatedAt: new Date().toISOString(), env: safeEnv, benches }, null, 2) + '\n', 'utf-8');
   return benches;
 }
 

@@ -1,8 +1,8 @@
 # 测试执行报告（0.8.159 · 滚动更新）
 
-> 生成时间：2026-11-19 ｜ 执行环境：Windows 11 x64 ｜ Node v24.22.3 ｜ CPU demo CPU ×16 ｜ 32GB ｜ w64devkit GCC 16.2 / GDB 18.1
-> 方案见 [测试方案](./strategy.md)；覆盖台账见 [测试覆盖矩阵](./coverage-matrix.md)；性能数据见 [性能基准](./performance-baseline.md)。
-> 上一版权威复核见 [0.8.152 测试报告](./test-report-0.8.152-archive.md)；本版发布说明见 [release/0.8.159.md](../release/0.8.159.md)。
+> 生成时间：2026-11-19 ｜ 执行环境：Windows 11 x64 ｜ Node v24.22.3 ｜ w64devkit GCC 16.2 / GDB 18.1
+> 方案见 [测试方案](../strategy.md)；覆盖台账见 [测试覆盖矩阵](../coverage-matrix.md)；性能数据见 [性能基准](../performance-baseline.md)。
+> 上一版权威复核见 [0.8.152 测试报告](./test-report-0.8.152-archive.md)；本版发布说明见 [release/0.8.159.md](../../release/0.8.159.md)。
 > 独立功能审计（逐项证据 / 覆盖真实性 / 缺陷与修复建议）见 [functional-audit-0.8.159.md](./functional-audit-0.8.159.md)。
 
 ## 1. 分层结果
@@ -39,7 +39,7 @@
 | 语言/语法 | 6 | 6 | 100% |
 | DAP 能力 | 30 | 30 | 100% |
 
-> 完整清单见 [测试覆盖矩阵](./coverage-matrix.md)（`npm run coverage:matrix` 生成，数据来源 package.json v0.8.159）。
+> 完整清单见 [测试覆盖矩阵](../coverage-matrix.md)（`npm run coverage:matrix` 生成，数据来源 package.json v0.8.159）。
 > 命令缺口 0 个。
 
 ## 3. 本版变更与回归范围
@@ -51,7 +51,7 @@
 | 保持不变 | 打开/新建/检测/切换/移除语义；命令/设置计数不变 |
 | 功能审计修复 | F-01 覆盖保护、F-04 HeaderGuard、F-05 Open Include、F-07…F-10 i18n、F-11 文档计数、F-12 测试体系、F-13 工程名校验；F-06 TODO 扫描器语言识别 |
 | 新增测试 | `tests/test-project-manager-feature.js`、`test-project-overwrite-command.js`、`test-open-include-command.js`、`test-debug-build-guard.js`、`test-command-entry-smoke.js`、`test-todo-scanner-languages.js` |
-| 文档 | [release/0.8.159.md](../release/0.8.159.md)、发布页、architecture / progress / CHANGELOG / release index、[功能审计报告](./functional-audit-0.8.159.md) 同步 |
+| 文档 | [release/0.8.159.md](../../release/0.8.159.md)、发布页、architecture / progress / CHANGELOG / release index、[功能审计报告](./functional-audit-0.8.159.md) 同步 |
 
 ## 4. 缺陷与处置
 

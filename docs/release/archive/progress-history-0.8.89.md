@@ -1,7 +1,7 @@
 # 开发进度 · 版本历史归档（0.8.89 及以前）
 
 > 由 `docs/dev/progress.md` 第九节历史条目整理而来（正文原文保留，按版本升序重排）。
-> 最新版本记录见 [`docs/dev/progress.md`](../dev/progress.md)；逐版明细见 `docs/release/`。
+> 最新版本记录见 [`docs/dev/progress.md`](../../dev/progress.md)；逐版明细见 `docs/release/`。
 
 ---
 
@@ -86,7 +86,7 @@
 > - 测试：新增 `tests/test-debug-protocol.js`（20 断言：反汇编两种模式/窗口语义/寄存器/内存往返/catchpoint/进程列表/指针判定）→ 全量 **61 pass**；headless EXIT 0；文档同步 0.8.76-dev。
 > - **修复**：运行/调试的可执行文件存在性检查未做 Windows `.exe` 回退（如 test-project 的 `output="bin/Debug/hello"` 实际产出 `hello.exe`）→ 新增共用解析 `src/build/outputPath.ts`（链接时间戳检查同源）+ `tests/test-output-path.js`（8 断言），错误提示附实际查找路径。
 > - **P1 调试缺陷修复（D1–D11）**：`terminate` 回收 GDB（停止后不再残留进程）/ 程序退出发 `exited`+`terminated` 结束会话 / **栈帧改逐 tuple 解析（修复 file/line 丢失，fullname 优先）** / **日志断点真正生效**（`{expr}` 求值输出后自动继续）/ 停止原因按 DAP 枚举映射（watchpoint→data breakpoint、signal→pause/exception）/ 调试工作目录对齐 `runWorkingDir` / 库目标 F8 走宿主程序 / **本地变量按帧作用域**（`-stack-select-frame`）/ 新增 `codeblocks.debug.gdbPath` + 定位优先级与尝试路径提示 / `initialized` 移至会话就绪后 + 启动失败清理 / 求值失败可见；测试 `test-debug-protocol.js` 扩至 29 断言 + 新增 `tests/test-debug-locate.js`（7 断言）。
-> - **修复 2（GDB 启动方式）**：程序不再作为命令行位置参数传给 GDB —— MinGW GDB（已实证）会把含空格路径按空格二次切分（`D:\work\demo-workspace\VSCode` + `workspace\...\hello.exe` 两段 → `No executable specified`）；改为会话建立后 MI 注入 `-file-exec-and-symbols` / `-exec-arguments`（attach 同源，符号文件可选加载）。
+> - **修复 2（GDB 启动方式）**：程序不再作为命令行位置参数传给 GDB —— MinGW GDB（已实证）会把含空格路径按空格二次切分（`D:\work\VSCode` + `workspace\...\hello.exe` 两段 → `No executable specified`）；改为会话建立后 MI 注入 `-file-exec-and-symbols` / `-exec-arguments`（attach 同源，符号文件可选加载）。
 > - **修复 3（行断点从未插入）**：旧 `-break-insert -f <文件> -l <行号>` 为非法 MI（实测 `Garbage following <location>`）→ 改为位置串 `<文件>:<行号>`（实测可命中）；条件断点改为插入后 `-break-condition`（`-c` 即时求值报 `No symbol`）；`pending="..."` 识别为未验证并回传提示；函数断点条件同源处理。测试 `test-debug-protocol.js` 增至 32 断言。
 > - **修复 4（F8 语义）**：F8 键位去 `!inDebugMode` 门控（`editorTextFocus`），命令内改为 **Start / Continue**：有活动调试会话 → `workbench.action.debug.continue`，否则启动调试——对齐 CB debugger_menu 的 Start / Continue 单项（旧行为在调试中按 F8 回落到 VS Code「下一错误」）。
 > - **修复 5（协议违规 + 跟踪开关）**：停顿时不再伪造 `threads` 响应（request_seq=0，属 DAP 协议违规，可能被新版 VS Code 提前终止会话）——改为依赖客户端 stopped 后的正常请求；新增设置 **`codeblocks.debug.trace`**：把 DAP 请求/响应/事件写入 Code::Blocks 输出通道（排查「会话异常结束」的定位工具）。用 mock-vscode 驱动真实适配器+GDB 全流程验证：停顿后静置 3 秒无自发 terminated，continue 后才 exited+terminated（预期）。

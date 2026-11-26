@@ -111,16 +111,16 @@ Originium IDE 是原生移植 Code::Blocks 核心功能到 VS Code 的扩展 —
 | **Squirrel 构建脚本**（`<Script file="*.script"/>`） | Squirrel 脚本引擎未移植，构建时输出警告并跳过 |
 | **makefile 项目模式（部分）** | Build / Rebuild / Clean / CompileFile / DistClean 已按 `<MakeCommands>` 执行（含 `execution_dir`）；其余 Make 子命令未单独暴露 |
 | **Profiler / SymTab 子集** | gprof flat profile 与工程链接库符号搜索已支持；call graph 交互树、源码注解、任意目录批量扫描未实现 |
-| **编译器 XML 的 `<if exec>` 条件** | 运行外部程序判定未实现（简化返回 default；内置 gcc / clang XML 未使用该分支） |
-| **console runner** | Code::Blocks 的 cb_console_runner 未移植（集成终端等价） |
 | **default.conf 全局设置编辑**（B1/B2/C4） | 评估后不做：default.conf 为 Code::Blocks 本体私有配置（CB 退出/打开设置时整文件覆写，写入竞态无法消除）；全局目录/选项/库/变量已被完整读取生效。替代：`Settings → Default Config…` 打开文件手工编辑 |
 
-> 完整限制清单、行为差异与替代方案见 [docs/guide/usage.md](./docs/guide/usage.md) §16 与 [docs/guide/alignment.md](./docs/guide/alignment.md)。
-> 部分 Code::Blocks 工具（CppCheck / 正则测试台 / nm 查看等）不在本扩展重复实现，推荐使用成熟 VS Code 扩展替代（见使用说明 §16.1）。
+> 完整限制清单（含 `<if exec>`、console runner 等）见 [docs/guide/usage.md](./docs/guide/usage.md) §16 与 [docs/guide/alignment.md](./docs/guide/alignment.md)。
+> 部分 Code::Blocks 工具（CppCheck / 正则测试台 / nm 查看等）不在本扩展重复实现，推荐使用成熟 VS Code 扩展替代（见使用说明 §16）。
 
 ## 安装
 
 > 要求 VS Code **1.102.0+**（Agent 控制使用的 Language Model Tools / MCP provider API 需 1.102）；安装或更新后如功能未生效，请执行 **Reload Window**。
+>
+> Agent Skill 的**自动发现**（`contributes.chatSkills`）需 VS Code **1.108.0+**；1.102–1.107 可用 **Code::Blocks: Install Agent Skill…** 把 `SKILL.md` 安装到工作区 `.github/skills/` 或用户 `~/.copilot/skills/`，低版本不保证自动加载。
 
 ### 方式一：从 VS Code Marketplace 安装（推荐）
 

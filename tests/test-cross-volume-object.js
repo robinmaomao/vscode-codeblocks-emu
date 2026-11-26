@@ -77,7 +77,7 @@ const engine = new BuildEngine(p, c, out, (id) => (id === 'gcc' ? c : undefined)
 const t = engine.collectMakefileData('Debug')[0];
 
 // 期望相对路径：由**当前机器**的源文件路径推导（obj/<target>/<卷名>/<去卷路径>），不写死本机目录层级
-const srcRel = path.relative(path.parse(srcAbs).root, srcAbs); // demo-workspace\...\test-project\main.c
+const srcRel = path.relative(path.parse(srcAbs).root, srcAbs); // work\...\test-project\main.c
 const expectedRel = path.join('obj', 'Debug', srcVol, path.dirname(srcRel), 'main.o');
 const expectedObjAbs = path.join(dir, expectedRel);
 // 引号规则：仅当路径含空白才加引号（与引擎一致）⇒ 无空格环境（如 CI runner）下同样可比

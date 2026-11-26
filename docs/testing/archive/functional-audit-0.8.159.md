@@ -1,7 +1,7 @@
 # 0.8.159 全量逐项功能验证与缺陷分析报告
 
 > 生成日期：2026-11-19 ｜ 目标版本：`0.8.159`（commit `b38dc0c`）｜ 范围：136 命令 / 6 视图 / 91 设置 / 34 键位 / 3 语言 + 3 语法 / 30 DAP / 9 菜单 + Code::Blocks 25.03 源码对照
-> 方案：本轮审计计划（会话工作区，未入库）；逐项台账见 [功能审计逐项台账](./functional-audit-0.8.159-ledger.md)；测试方案见 [测试方案](./strategy.md)。
+> 方案：本轮审计计划（会话工作区，未入库）；逐项台账见 [功能审计逐项台账](./functional-audit-0.8.159-ledger.md)；测试方案见 [测试方案](../strategy.md)。
 > 本轮只做验证与报告，**未修改产品代码**；缺陷修复需你确认后实施。
 
 ## 1. 结论摘要
@@ -91,7 +91,6 @@
 | 项 | 值 |
 |----|----|
 | OS | Windows 11 Home 10.0.26120 x64 |
-| CPU / 内存 | AMD demo CPU w/ Radeon 780M ×16 / 32 GB |
 | Node / npm | v24.22.3 / 11.19.1（PowerShell 执行策略禁用 `npm.ps1`，使用 `npm.cmd`） |
 | PowerShell | 5.1.26100.6682（CurrentUser ExecutionPolicy = Undefined） |
 | gcc / g++ | w64devkit GCC 16.2.0 |
@@ -192,7 +191,7 @@
 - **0** 条菜单项引用未声明/未注册命令；**0** 条重复冲突。
 - Code::Blocks `main_menu.xrc` 叶子 **130** 条；按标签归一化精确匹配 **60** 条。其余差异为：
   - 重命名/等价项（如 `Save everything` ↔ `Save All Files`、`&Close file` ↔ `Close Editor`、`S&wap header/source` ↔ `Swap Header / Source`）；
-  - 有意不移植（Print、New Custom、Perspectives、Toolbars、Special commands、Plugins、Help、Scripting 等，见 [backlog](../dev/backlog.md) 与 [alignment](../guide/alignment.md)）；
+  - 有意不移植（Print、New Custom、Perspectives、Toolbars、Special commands、Plugins、Help、Scripting 等，见 [backlog](../../dev/backlog.md) 与 [alignment](../../guide/alignment.md)）；
   - 扩展特有项（状态栏菜单、VS Code 视图/终端/Problems、Project Search 等）。
 - 结论：菜单结构无功能性缺口；`168` 项计数是过期文档（实际 186），见 F-11。
 
@@ -467,7 +466,7 @@
 | `src/extension.ts:8955` | `[Code::Blocks] Make: ${command}` |
 | `src/extension.ts:9391` | `Run aborted...` |
 
-**影响**：`codeblocks.log.english=false`（默认）且 `ui.language=zh-cn` 时，这些行仍为英文，与 [i18n.md](../dev/i18n.md) 的“构建日志跟随语言”承诺不一致。
+**影响**：`codeblocks.log.english=false`（默认）且 `ui.language=zh-cn` 时，这些行仍为英文，与 [i18n.md](../../dev/i18n.md) 的“构建日志跟随语言”承诺不一致。
 **修复方案**：改用 `logT(...)`；在 `strings.zh-cn.json` 补词条；`log.english=true` 时仍输出英文（`logT` 已有该语义）。
 **回归测试**：`test-i18n-logT` 增加这些键；可加静态守卫：`build/**` 与 `extension.ts` 的输出通道日志字符串必须走 `logT`（`plainCbLog` 的 CB 原文行可白名单）。
 **工作量**：S。

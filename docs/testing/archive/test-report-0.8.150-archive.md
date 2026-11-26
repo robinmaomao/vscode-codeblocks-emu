@@ -1,8 +1,8 @@
 # 测试执行报告（0.8.150 · 滚动更新）
 
-> 生成时间：2026-11-12 ｜ 执行环境：Windows 10 x64 ｜ Node v24.19.0 ｜ CPU demo CPU ×8 ｜ 16GB
-> 方案见 [测试方案](./strategy.md)；覆盖台账见 [测试覆盖矩阵](./coverage-matrix.md)；性能数据见 [性能基准](./performance-baseline.md)。
-> 上一版权威复核见 [0.8.139 完整报告](./test-report-0.8.139-full.md)；本版发布说明见 [release/0.8.150.md](../release/0.8.150.md)；上一版发布说明见 [release/0.8.148.md](../release/0.8.148.md)。
+> 生成时间：2026-11-12 ｜ 执行环境：Windows 10 x64 ｜ Node v24.19.0 ｜ CPU 8 逻辑核
+> 方案见 [测试方案](../strategy.md)；覆盖台账见 [测试覆盖矩阵](../coverage-matrix.md)；性能数据见 [性能基准](../performance-baseline.md)。
+> 上一版权威复核见 [0.8.139 完整报告](./test-report-0.8.139-full.md)；本版发布说明见 [release/0.8.150.md](../../release/0.8.150.md)；上一版发布说明见 [release/0.8.148.md](../../release/0.8.148.md)。
 
 ## 1. 分层结果
 
@@ -12,7 +12,7 @@
 | 无头层（unit） | `npm test` | **TOTAL=188 FAIL=0 SKIP=1** | SKIP=`tests/test-writer.js`（需 `<cbp>` 参数的手工工具）；本版重写 `test-compiler-options-apply.js`（22 断言）到新 `save` 协议，并更新 `test-webview-panels.js`（42）、`test-i18n-webview.js`（21）、`test-file-properties-focus.js`（10）、`test-settings-coverage.js`（104）、`test-settings-structure.js`（38） |
 | L3 视觉 | `npm run test:visual` | **18/18** | 面定义随面板重构更新：6 个属性页签（settings/targets/scripts/notes/parser/debugger）+ `build-options` 独立面板 + keybindings + buildlog；移除已不存在的 `props-vtargets/props-files/props-options/props-dirs/compiler-options` 五个面并重生成基线 |
 | L1 端到端 | `npm run test:e2e` | **6/6** | 边界 38（3 skip）/ 构建矩阵 48 / ccache 21 / 调试 143（1 skip）/ 链接期诊断 9 / 工具链 42（4 skip）；构建、链接与调试链未受面板改动影响 |
-| L4 性能 | `npm run test:perf` | 未复跑 | 本版未触碰构建执行路径；沿用 [性能基准](./performance-baseline.md) 的 0.8.148 结论 |
+| L4 性能 | `npm run test:perf` | 未复跑 | 本版未触碰构建执行路径；沿用 [性能基准](../performance-baseline.md) 的 0.8.148 结论 |
 | L5 打包 | `npm run test:pack` | **1/1（15 断言）** | VSIX 0.8.150 打包 / 安装冒烟通过，含 `bundle/search-worker.js` 检查 |
 | 产物 | `npm run bundle` + `npm run bundle:search` | 通过 | esbuild 无告警；worker 单独产物已生成 |
 | L2 宿主 | `npm run test:host` | 未复跑 | 沿用 0.8.140 复核；本版未改动视图声明 |
@@ -41,7 +41,7 @@
 | 语言/语法 | 6 | 6 | **100%** |
 | DAP 能力 | 30 | 30 | **100%** |
 
-> 完整清单见 [测试覆盖矩阵](./coverage-matrix.md)（`npm run coverage:matrix` 生成，逐项列出命中层与未覆盖项）。
+> 完整清单见 [测试覆盖矩阵](../coverage-matrix.md)（`npm run coverage:matrix` 生成，逐项列出命中层与未覆盖项）。
 > 命令缺口 2 个：`codeblocks.detectCompilers`（交互式并行探测）、`codeblocks.restartClangd`（排障转发）。
 
 ## 3. 本版变更与回归范围
@@ -55,7 +55,7 @@
 | 行为变更 | 工程/目标右键 `Build options…` 打开 Code::Blocks 风格对话框（独立面板 + 属性面板覆盖层共用视图）；`Properties…` 改为 6 个页签 + 文件属性/虚拟目标以模态呈现；Silent build 为只读派生值（Build + ` > $(CMD_NULL)`），Dist-clean 仅在非默认值时只读显示 |
 | 0.8.150 修复 | MakeCommands 在 `<ExtraCommands>` 无 `Add` 时被提前 `return` 跳过；写回丢失未建模字段/legacy `<Build><Option>`；`listCompilers` 把 `options_common_*.xml` 当编译器；覆盖层重开丢失参数目录；过期面板按索引写到别的目标；Squirrel 校验器把字符串字面量当运算符 |
 | 新增/扩展测试 | `test-compiler-options-apply.js` 重写（22 断言）、`test-webview-panels.js` 42、`test-i18n-webview.js` 21、`test-file-properties-focus.js` 10、`test-settings-coverage.js` 104、`test-settings-structure.js` 38；视觉面重构（18 面） |
-| 文档 | 新增 [release/0.8.150.md](../release/0.8.150.md)；settings(.en) 增补 3 个设置；usage(.en)、progress、CHANGELOG、release/00-index 同步；覆盖矩阵重新生成；0.8.148 测试报告归档为 `test-report-0.8.148-archive.md` |
+| 文档 | 新增 [release/0.8.150.md](../../release/0.8.150.md)；settings(.en) 增补 3 个设置；usage(.en)、progress、CHANGELOG、release/00-index 同步；覆盖矩阵重新生成；0.8.148 测试报告归档为 `test-report-0.8.148-archive.md` |
 | 行为边界 | 不执行 Squirrel 构建脚本（仅语法校验后给出「暂不支持」警告）；不改变构建命令生成与产物路径 |
 
 ## 4. 缺陷与处置（本轮发现并修复）
@@ -75,4 +75,4 @@
 
 - 五层自动化中已执行的四层（契约 / 无头 / 视觉 / 打包）与 E2E 全绿；性能与宿主层沿用既有结论（本版未触碰对应路径）。
 - 人工审核项（UI 与 Code::Blocks 对齐、右键菜单交互、Silent/Dist-clean 只读提示）已按前几轮反馈迭代完成，本版基线即为审核后的界面。
-- 发布说明见 [release/0.8.150.md](../release/0.8.150.md)。
+- 发布说明见 [release/0.8.150.md](../../release/0.8.150.md)。

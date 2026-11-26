@@ -1028,103 +1028,15 @@ A：**已全覆盖**（0.8.132 批次 2，2026-11 菜单优化后同步）。构
 | 正则测试台（T4） | **Regex Previewer**（`chrmarti.regex`，面向 JS/TS/PHP/Haxe）· **Regexp Explain**（`louiswt.regexp-preview`）· RegExp Preview and Editor | 通用正则验证；VS Code 搜索框的正则模式也可做基础验证 |
 | 符号表 nm 查看（单库/单文件） | **Nm tool**（`wibren-wiersma.nm-tool`）· **vscode-binutils**（`sqlpassion.vscode-binutils`） | 单库 nm / objdump 查看；跨多个链接库的符号搜索已由本扩展 **Tools → Find Symbol in Libraries…** 提供 |
 
-> Profiler（gprof）、Copy strings、跨库符号搜索已在本扩展实现（0.8.156，见 §17）；
+> Profiler（gprof）、Copy strings、跨库符号搜索已在本扩展实现（0.8.156，见 [版本变更](#162-版本变更记录)）；
 > Export Makefile 已移入 Build 菜单（对齐 CB `compiler_menu.xrc`）。
 > 详情与决策见 [未实现功能待办](../dev/backlog.md) §2（明确不移植清单）。
 > 提醒：以上扩展为社区/厂商产品，请自行评估安装；本扩展不内置或捆绑它们。
 
-## 16.1 0.10.0 新增（Agent 变更审计与撤销）
+### 16.2 版本变更记录
 
-- **变更历史**：LM Tools / `@codeblocks` 的 `.cbp` / `.workspace` 写入保存工作区级字节快照；所有工具调用写 `audit.jsonl`（不记录脚本/源码）。
-- **撤销**：**Code::Blocks: Agent Change History…** / **Undo Last Agent Change**；每个文件仅允许撤销最新一条，外部修改默认拒绝、二次确认可强制覆盖。
-- **Chat 入口**：`@codeblocks /history`、`@codeblocks /undo`。
-- **安全**：未受信任工作区不采集；构建/调试进行中拒绝撤销；CLI / 外部 MCP 不提供跨进程撤销。
-- **设置**：`codeblocks.agent.history.enabled`（默认 `true`）、`codeblocks.agent.history.maxEntries`（默认 `50`）。
-- **文档**：新增 [Agent 变更历史与撤销](./agent-history.md)。
-
-## 16.2 0.9.3 新增（Agent 体验与安全）
-
-- **Agent Skill**：随包 `skills/codeblocks-project/SKILL.md`，通过 `contributes.chatSkills` 注册；**Code::Blocks: Install Agent Skill…** 可安装到工作区 `.github/skills/` 或用户 `~/.copilot/skills/`，已存在时确认覆盖。
-- **`@codeblocks` participant**：`/read` `/build` `/fix` `/debug` `/status` `/help` 确定性命令，复用同一 `invokeTool` 策略。
-- **Agent Status**：**Code::Blocks: Agent Status** 显示信任/总闸/只读/脚本策略/工具数/CLI/MCP/Skill 路径。
-- **确认文案**：写入、运行、调试变更、导出、工作区 open/close/setActive 前确认；只读与 `dryRun` 不打扰。
-- **脚本总闸**：`codeblocks.agent.allowScripts`（默认 `false`）与单次 `allowScripts: true` 同时满足才可改脚本字段；`cb-cli` 不受影响。
-- **文档**：Agent 指南补 5 分钟上手、权限矩阵、CLI/MCP 路径、排障与 Skill；新增 [Agent recipes](./agent-recipes.md)。
-- **清单**：命令 138 / 设置 94 / 视图 6 / 键位 34 / LM Tools 11 / MCP provider 1 / chat participant 1 / chat skill 1。
-
-## 17. 0.9.2 缺陷修复
-
-- **构建目标**：显式指定当前平台不支持的目标现在直接报错（`unsupported`），不再「静默成功」；`build_status` 无构建记录时返回 `no-build`。
-- **构建不再挂起**：Agent / CLI 构建不再等待「是否排除构建产物」的通知（无人应答会让构建永久挂起、`timeoutMs` 失效）。
-- **运行目录**：`run` 的 `cwd` 相对路径按工程目录解析，不再受 VS Code 进程工作目录影响。
-- **调试一致性**：Copilot / MCP / CLI 三端的 `state` / `stack` / `variables` 响应统一形状；帧同时给出 `level` 与 `id`，`variables` / `evaluate` 支持 `frameId`；`setBreakpoints` 为替换语义；`stop` 后断点与等待器清理干净；gdb 启动失败会回收进程并报 `compiler-missing`。
-- **工程编辑更严格**：`buildTargets` 引用未知目标、`weight` 超出 0–100、重名目标 / 文件、重命名冲突均报 `invalid-input`；编辑失败不再留下「改了一半」的内存状态。
-- **导出安全**：`makefile` 默认输出 `Makefile.cb`（不会覆盖工程自带 `Makefile`）；`out` 相对路径按工程目录解析；`compile_commands.json` 默认写入工程内 `.cb-tools/`。
-- **CLI**：`--json` 下失败也输出 JSON；退出码覆盖 `invalid-input` / `unsupported` / `compiler-missing` / `no-build` 等；`debug` 支持 `--timeout`。
-- **清单不变**：命令 136 / 设置 93 / 视图 6 / 键位 34。
-
-## 18. 0.9.0 新增与行为变更
-
-- **Agent 控制（Copilot / MCP / CLI）**：11 个 Language Model Tools（`project_read` / `project_edit` / `project_file` / `project_target` / `build` / `build_status` / `run` / `debug` / `compiler` / `export` / `workspace`）+ 内嵌 MCP server（`bundle/cb-mcp.js`）+ 独立 CLI（`bundle/cb-cli.js`），三端与 UI 共用同一份实现。详见 [Agent 控制](./agent-control.md)。
-- **开关**：`codeblocks.agent.enabled`（默认开，关闭后不注册工具、不暴露 MCP，已在运行的 MCP server 也拒绝调用）、`codeblocks.agent.readOnly`（默认关，只放行查询类工具与动作）；**未受信任工作区一律按关闭处理**，切换即时生效。
-- **共享构建内核**：`src/build/buildProject.ts` 成为唯一构建实现，保留审计轮的链接期诊断定位、`maxReportedErrors` 截断、自动版本号与 makefile 语义。
-- **clangd**：窗口重载恢复多工程时合并为一次生成；启动恢复期间「仅配置变化」跳过重启（`decideClangdRestart`），与既有重启合并器共存，避免 `clangd.applyFix already exists` 弹窗。
-- **破坏性变更**：`engines.vscode` 由 `^1.85.0` 抬到 `^1.102.0`（Language Model Tools / MCP provider API 需 1.102）。
-- **清单**：命令 136 / 设置 **93**（+第 10 分区 Agent）/ 视图 6 / 键位 34 / LM Tools 11 / MCP provider 1。
-
-## 19. 0.8.160 缺陷修复
-
-- **新建工程覆盖保护**：新建工程时若目标目录已有同名文件，逐文件确认并默认保留（不再整目录覆盖）。
-- **HeaderGuard**：只为头文件生成/更新 include guard，源文件不再插入。
-- **Open Include File**：支持系统头（`<vector>` 等）与工程内后缀补全，`#include` 跳转不再落空。
-- **TODO 扫描器注释语言**：按语言识别注释起始符（`#` / `REM` / `::` / `.S` 预处理守卫），不再把代码当注释文本。
-- **构建日志与调试门控本地化**：`Target up to date`、`Make:` 等构建日志行与「先构建再调试」提示改走词条（英文 UI 下不再混入中文，中文 UI 下不再出现英文）。
-- **i18n 一致性**：补齐 WebView / 运行目标面板词条，新增英文 UI 守卫测试防止回退。
-- **工程名校验**：拒绝 `.` / `..` / 结尾点或空格 / Windows 保留名。
-- **文档与测试体系**：修正键位/词条/菜单计数；10 个 print-only 脚本补断言与退出码；新增 112 命令入口冒烟与 TODO 扫描器语言用例。
-
-- **未执行（按用户决定）**：F-02（`.ld` 行注释）、F-03（TODO 注释语言口径扩展）保留现状。
-- **清单不变**：命令 136 / 设置 91 / 视图 6 / 键位 34。
-
-## 20. 0.8.159 新增与行为变更
-
-- **项目管理菜单拆分**：`showProjectManager` / `buildManagerItems` 移至 `src/features/projectManager.ts`，通过 `ProjectManagerDeps` 注入打开工程、活动工程、移除与扫描回调；QuickPick 行为不变。
-- **回归守卫**：新增 `test-project-manager-feature.js`，检查功能模块注册、活动工程标记、动作项与旧实现不再回退。
-- **无用户可见功能/设置变更**：命令 136 / 设置 91 / 视图 6 保持不变。
-
-## 21. 0.8.158 新增与行为变更
-
-- **Profiler 命令拆分**：`profileTarget` 与报告导出从 `extension.ts` 移至 `src/features/profilerCommands.ts`，通过 `ProfilerCommandDeps` 注入工程、编译器、工作目录和输出通道；行为不变。
-- **架构**：`extension.ts` 继续按 Strangler 模式收缩；新增 `test-profiler-commands.js` 防止命令双注册/回退到巨型模块。
-- **无功能/设置变更**：命令 136 / 设置 91 / 视图 6 保持不变。
-
-## 22. 0.8.157 新增与行为变更
-
-- **AutoVersioning 正确性**：`version.h` 内容不变时不再重写（避免 mtime 抖动触发全量重编译）；构建会话去重，一次构建只递增一次 `BUILDS_COUNT`；`do_auto_increment` / `ask_to_increment` 真正生效；Bump/Generate 统一更新 `manifest.xml`；新增 SVN 字段、Changes Log 入口和“将 version.h 加入工程”。
-- **Profiler 运行时**：运行前记录 `gmon.out` 时间戳，只分析本次新生成文件；`gprof -A` 无 stdout 时回退 `--separate-files` 并收集 `.annotated`；CSV/HTML 导出改为原子写。
-- **编译器元数据/资源**：读取 `compiler_*.xml` 的真实显示名与 master 路径；补齐 Code::Blocks 全量 `options_*.xml` / `compiler_*.xml`；修正 `extends` 继承；新增 OpenWatcom、Cygwin、MSYS2 MinGW64、TDM64、LCC、DMD、GDC、gfortran 的保守探测。
-- **行为提示**：`do_auto_increment` 默认关闭；开启后构建前可能弹版本递增确认。依赖“每次构建刷新日期常量”的脚本需显式执行 Generate Version Header。
-
-## 23. 0.8.156 新增与行为变更
-
-- **Profiler 完整化**：gprof **call graph** 解析与输出；`gprof -A` 源码注解写入独立输出通道（设置 `codeblocks.profiler.annotatedSource`，默认开启）；分析完成后可 **导出 CSV / HTML** 报告。
-- **AutoVersioning**：读写 `.cbp` 的 `<Extensions><AutoVersioning>`；命令 **AutoVersioning…**（配置/编辑版本/切换自动递增/设置头文件路径）、**Bump Version**、**Generate Version Header**。配置存在时构建前生成 `version.h`，构建成功后递增 `BUILDS_COUNT` 并原子写回。
-- **更多编译器**：新增 **TCC**、**Borland C++ 5.5/5.82**、**Digital Mars**、**ARM ELF GCC**、**PowerPC EABI GCC** 的选项与探测资源。
-- **推荐扩展**：新增 [推荐扩展](./recommended-extensions.md)：Doxygen、打印、Modern Fortran、环境变量、单库 nm、Valgrind/Callgrind；这些能力不再由本扩展重复实现。
-- **行为提示**：AutoVersioning 构建前会重写 `version.h`，手工维护该文件时请先备份或关闭工程配置；`gprof -A` 在大工程上可能较慢，可关闭。
-
-## 24. 0.8.155 新增与行为变更
-
-- **Workspace 生命周期**：File → Save Project As… / Save Workspace / Save Workspace As… / Close Workspace / Open default workspace；关闭最后一个工程会清理工作区状态，保存工作区会写回工程顺序、`active` 与 `<Depends>`。
-- **`.workspace` 外部修改检测**：外部修改工程列表/依赖/active 后，窗口焦点或文件事件会提示 Reload / Ignore；重载只刷新磁盘签名变化的工程。
-- **无工程编译编码**：默认改用扩展自管进程 + UTF-8/GBK 逐行解码；设置 `codeblocks.noProjectCompile.useTaskTerminal` 可回退旧任务终端。
-- **健壮性**：`.cbp`/`.workspace` 改为原子写（临时文件 + rename）；含 `&`/`<`/`>`/`"` 的单元路径可正常添加、改名、切换 compile/link。
-- **New 子菜单**：New Build Target…（GUI/Console/Static/Dynamic/CommandsOnly）与 New File…（C/C++/Header/Empty 模板）。
-- **调试**：Next Instruction / Step Into Instruction；Examine Memory… 输出 16 字节/行 hex + ASCII。
-- **工具**：Backtick Cache…（Expression/Value 列表、复制值、清空并关闭）；Copy Strings；Profile Target（gprof flat profile）；Find Symbol in Libraries…（工程链接库 `nm -C -A`）。
-- **Makefile 项目**：CompileFile 与 Dist Clean 接入 `<MakeCommands>`。
-- **i18n**：launch.json 调试属性、寄存器视图标题、自定义工具设置说明全部走 `package.nls.*`，英文界面不再出现中文静态文案。
-
+本手册只描述**当前版本**的行为。逐版本新增、修复与升级提示见 [CHANGELOG](../../CHANGELOG.md) 与 [逐版本发布说明](../release/00-index.md)；
+0.10.0 的重点是更名 **Originium IDE for Code::Blocks** 与 Agent 变更审计/一键撤销。
 ## 许可证
 
 [GPL v3](../../LICENSE.md)。TypeScript 代码为独立重写；`resources/compilers/*.xml` 派生自 GPL v3 源码。

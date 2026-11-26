@@ -378,7 +378,7 @@ async function buildBenches() {
 async function main() {
   installGlobalMock();
   const env = envInfo();
-  console.log(`性能基准环境: node=${env.node} ${env.platform} cpu=${env.cpuModel}×${env.cpus} mem=${env.totalMemGB}GB gcc=${HAS_GCC ? 'yes' : 'no'}`);
+  console.log(`性能基准环境: node=${env.node} ${env.platform} cpu=${env.cpus} 逻辑核 gcc=${HAS_GCC ? 'yes' : 'no'}`);
   if (only) console.log(`筛选: ${only}`);
 
   let benches = await buildBenches();
@@ -474,8 +474,8 @@ async function main() {
   lines.push('|----|----|');
   lines.push(`| Node | ${env.node} |`);
   lines.push(`| 平台 | ${env.platform} |`);
-  lines.push(`| CPU | ${env.cpuModel} × ${env.cpus} |`);
-  lines.push(`| 内存 | ${env.totalMemGB} GB |`);
+  lines.push(`| CPU | ${env.cpus} 逻辑核 |`);
+  lines.push('| 内存 | 本机物理内存（未记录） |');
   lines.push(`| gcc 可用 | ${HAS_GCC ? '是' : '否（B7–B10 跳过）'} |`);
   lines.push(`| 时间 | ${new Date().toISOString().slice(0, 16).replace('T', ' ')} |`);
   lines.push('');

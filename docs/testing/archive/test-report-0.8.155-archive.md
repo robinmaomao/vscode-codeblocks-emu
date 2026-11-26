@@ -1,8 +1,8 @@
 # 测试执行报告（0.8.155 · 滚动更新）
 
-> 生成时间：2026-11-18 ｜ 执行环境：Windows 11 x64 ｜ Node v24.22.3 ｜ CPU demo CPU ×16 ｜ 32GB ｜ w64devkit GCC 16.2 / GDB 18.1
-> 方案见 [测试方案](./strategy.md)；覆盖台账见 [测试覆盖矩阵](./coverage-matrix.md)；性能数据见 [性能基准](./performance-baseline.md)。
-> 上一版权威复核见 [0.8.152 测试报告](./test-report-0.8.152-archive.md)；本版发布说明见 [release/0.8.155.md](../release/0.8.155.md)。
+> 生成时间：2026-11-18 ｜ 执行环境：Windows 11 x64 ｜ Node v24.22.3 ｜ w64devkit GCC 16.2 / GDB 18.1
+> 方案见 [测试方案](../strategy.md)；覆盖台账见 [测试覆盖矩阵](../coverage-matrix.md)；性能数据见 [性能基准](../performance-baseline.md)。
+> 上一版权威复核见 [0.8.152 测试报告](./test-report-0.8.152-archive.md)；本版发布说明见 [release/0.8.155.md](../../release/0.8.155.md)。
 
 ## 1. 分层结果
 
@@ -38,7 +38,7 @@
 | 语言/语法 | 6 | 6 | 100% |
 | DAP 能力 | 30 | 30 | 100% |
 
-> 完整清单见 [测试覆盖矩阵](./coverage-matrix.md)（`npm run coverage:matrix` 生成，数据来源 package.json v0.8.153）。
+> 完整清单见 [测试覆盖矩阵](../coverage-matrix.md)（`npm run coverage:matrix` 生成，数据来源 package.json v0.8.153）。
 > 命令缺口 0 个（`codeblocks.detectCompilers` / `codeblocks.restartClangd` 已由宿主层覆盖）。
 
 ## 3. 本版变更与回归范围
@@ -53,7 +53,7 @@
 | 命令/设置规模 | 新增 15 个命令与 2 个设置项（133 / 90 / 6 / 34） |
 | 新增测试 | `tests/test-menu-presentation.js`（13 断言）；`tests/fixtures/codicons.json`（VS Code 1.85 白名单） |
 | 扩展测试 | `test-menu-structure.js` 39、`test-statusbar-menu-astyle.js` 30、`test-i18n-dict.js` 11 |
-| 文档 | 新增 [release/0.8.153.md](../release/0.8.153.md)、发布页 `pages/0.8.153.md` 与本报告；README / usage / progress / CHANGELOG / release 索引同步；覆盖矩阵重新生成 |
+| 文档 | 新增 [release/0.8.153.md](../../release/0.8.153.md)、发布页 `pages/0.8.153.md` 与本报告；README / usage / progress / CHANGELOG / release 索引同步；覆盖矩阵重新生成 |
 
 ## 4. 缺陷与处置
 
@@ -70,4 +70,4 @@
 
 - 单元 **207** / 契约 **3/3** / E2E **6/6** / 视觉 **26/26** / 性能 **13/13** / 打包 **15 断言** / 宿主 **25/25** 全部通过，无遗留失败。
 - 菜单项 168 项全部有图标；命令/设置规模不变；未修改 `.cbp` 数据模型与保存协议。
-- 剩余 CB 菜单缺口（M2–M7）已记录在 [未实现功能待办](../dev/backlog.md)，不在本版范围内。
+- 剩余 CB 菜单缺口（M2–M7）已记录在 [未实现功能待办](../../dev/backlog.md)，不在本版范围内。

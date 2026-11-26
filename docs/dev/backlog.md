@@ -1,15 +1,18 @@
 # 未实现功能待办（功能对齐现状）
 
 > 对照 Code::Blocks 25.03（`codeblocks-src/`）的功能盘点结论与剩余事项。
-> 首轮盘点：2026-09-26（基线 0.8.74-dev，A–E 组 33 项）；最近复核：2026-11-18（0.8.154，P0/P1/P2 批次实施后）。
+> 首轮盘点：2026-09-26（基线 0.8.74-dev，A–E 组 33 项）；最近复核：2026-11-26（0.10.0，Agent 控制/历史与更名后）。
 > 状态约定：`☐ 待确认` ｜ `◐ 已确认待实施` ｜ `✔ 已实施` ｜ `✖ 不实施` ｜ `▣ 记录`。
 > 已实施项的逐项取证与实施方案见归档 [0.8.76-0.8.99-dev](../release/archive/0.8.76-0.8.99-dev.md)、
 > [0.8.100-0.8.128-dev](../release/archive/0.8.100-0.8.128-dev.md)。
 
-## 1. 缺口状态（2026-11-18 更新）
+## 1. 缺口状态（2026-11-26 更新）
 
 | 编号 | 缺口 | 状态 | 说明 |
 |---|---|---|---|
+| A1 | Agent 控制面（LM Tools / MCP / CLI） | ✔ 0.9.0 | 11 个工具三端共用 `src/api/*`；`agent.enabled` / `readOnly` / `allowScripts` 总闸；未受信任工作区按关闭处理 |
+| A2 | Agent 上手与安全护栏 | ✔ 0.9.3 | 内置 `codeblocks-project` Skill + 安装命令、`@codeblocks` participant、Agent Status、写前确认 |
+| A3 | Agent 变更审计与撤销 | ✔ 0.10.0 | `.cbp` / `.workspace` 字节快照 + `audit.jsonl`；`Agent Change History` / `Undo Last Agent Change`；每文件仅撤销最新一条，外部修改默认拒绝 |
 | G1 | `.workspace` 外部修改检测 | ✔ 0.8.154 | 独立 tracker + `**/*.workspace` watcher + 焦点兜底；改 `<Depends>`/active 后提示 Reload/Ignore；重载只刷新变化工程 |
 | G2 | `Compile File (Without Project)` 输出编码 | ✔ 0.8.154 | 默认改扩展自管进程 + `OutputLineDecoder`（UTF-8/GBK 逐行）；`noProjectCompile.useTaskTerminal` 可回退旧任务终端 |
 | T2 | Profiler（gprof） | ✔ 0.8.156 | 运行目标 → 定位 `gmon.out` → `gprof` → flat profile + call graph；`gprof -A` 源码注解独立输出通道；CSV/HTML 导出 |

@@ -14,8 +14,8 @@ const check = (name, cond, extra) => {
 };
 
 // 1. upperDrive 单元行为
-check('小写盘符转大写', upperDrive('d:/demo-workspace/x.c') === 'D:/demo-workspace/x.c');
-check('反斜杠小写盘符转大写', upperDrive('d:\\demo-workspace\\x.c') === 'D:\\demo-workspace\\x.c');
+check('小写盘符转大写', upperDrive('d:/work/x.c') === 'D:/work/x.c');
+check('反斜杠小写盘符转大写', upperDrive('d:\\work\\x.c') === 'D:\\work\\x.c');
 check('大写盘符不变', upperDrive('D:/x') === 'D:/x');
 check('相对路径不变', upperDrive('relative/path') === 'relative/path');
 check('UNC 路径不变', upperDrive('\\\\server\\share\\x') === '\\\\server\\share\\x');
@@ -62,7 +62,7 @@ const project = {
 };
 const gen = new CommandGenerator(project, compiler);
 
-const file = 'd:/demo-workspace/demo workspace/src/main.c';
+const file = 'd:/work/demo workspace/src/main.c';
 const base = {
   target: null,
   pf: { compilerVar: 'CC' },
@@ -76,10 +76,10 @@ const base = {
 const build = gen.generate(CommandType.CompileObjectCmd, { ...base });
 const clangd = gen.generate(CommandType.CompileObjectCmd, { ...base, nativeSep: false });
 
-check('构建命令 $file 盘符大写 + 反斜杠', build.includes('D:\\demo-workspace\\demo workspace\\src\\main.c'));
-check('构建命令不含小写盘符路径', !build.includes('d:/demo-workspace/demo workspace/src/main.c') && !build.includes('d:\\demo-workspace'));
-check('clangd 命令 $file 保持小写正斜杠', clangd.includes('d:/demo-workspace/demo workspace/src/main.c'));
-check('clangd 命令不含大写盘符', !clangd.includes('D:\\demo-workspace'));
+check('构建命令 $file 盘符大写 + 反斜杠', build.includes('D:\\work\\demo workspace\\src\\main.c'));
+check('构建命令不含小写盘符路径', !build.includes('d:/work/demo workspace/src/main.c') && !build.includes('d:\\work'));
+check('clangd 命令 $file 保持小写正斜杠', clangd.includes('d:/work/demo workspace/src/main.c'));
+check('clangd 命令不含大写盘符', !clangd.includes('D:\\work'));
 
 console.log('--- build ---');
 console.log(build);

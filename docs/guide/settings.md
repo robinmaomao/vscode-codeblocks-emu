@@ -1,6 +1,6 @@
 # 设置项完整参考
 
-> 适用于 Code::Blocks 扩展（`codeblocks-vscode`）。本页按设置页的 **10 个分区**逐项说明类型、默认值、作用域、取值与生效时机。
+> 适用于 Originium IDE for Code::Blocks（命令/设置前缀仍为 `codeblocks`）。本页按设置页的 **10 个分区**逐项说明类型、默认值、作用域、取值与生效时机。
 > 英文版：[settings.en.md](./settings.en.md)｜功能与操作见 [用户手册](./usage.md)。
 
 ## 0. 通用说明

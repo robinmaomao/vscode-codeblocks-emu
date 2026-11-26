@@ -108,16 +108,16 @@ The following Code::Blocks features have not been ported yet; the extension warn
 | **Squirrel build scripts** (`<Script file="*.script"/>`) | The Squirrel script engine is not ported; the build prints a warning and skips them |
 | **makefile project mode (partial)** | Build / Rebuild / Clean / CompileFile / DistClean run `<MakeCommands>` (including `execution_dir`); other Make subcommands are not exposed separately |
 | **Profiler / SymTab subset** | gprof flat profile and project-linked library symbol search are supported; call-graph tree, source annotation and arbitrary-directory scans are not implemented |
-| **`<if exec>` conditions in compiler XML** | Evaluation by running an external program is not implemented (simplified to return default; the built-in gcc / clang XML do not use this branch) |
-| **console runner** | The Code::Blocks cb_console_runner is not ported (the integrated terminal is equivalent) |
 | **default.conf global settings editing** (B1/B2/C4) | Decided against after evaluation: default.conf is Code::Blocks' own private configuration (CB rewrites the whole file on exit/when opening settings, so write races cannot be eliminated); global directories/options/libraries/variables are already read and applied in full. Alternative: `Settings → Default Config…` to open the file and edit it by hand |
 
-> The complete limitation list, behavior differences, and alternatives are in [Usage guide](./docs/guide/usage.md) §16 and [Code::Blocks alignment reference](./docs/guide/alignment.md).
-> Some Code::Blocks tools (CppCheck / regex test bench / nm viewer, etc.) are not re-implemented in this extension; use mature VS Code extensions instead (see §16.1 of the user guide).
+> The complete limitation list (including `<if exec>` and console runner) is in [Usage guide](./docs/guide/usage.md) §16 and [Code::Blocks alignment reference](./docs/guide/alignment.md).
+> Some Code::Blocks tools (CppCheck / regex test bench / nm viewer, etc.) are not re-implemented in this extension; use mature VS Code extensions instead (see §16 of the user guide).
 
 ## Installation
 
 > Requires VS Code **1.102.0+** (the Language Model Tools / MCP provider APIs used by agent control need 1.102); if features do not work after installing or updating, run **Reload Window**.
+>
+> **Automatic discovery** of the Agent Skill (`contributes.chatSkills`) requires VS Code **1.108.0+**; on 1.102–1.107, use **Code::Blocks: Install Agent Skill…** to install `SKILL.md` into the workspace `.github/skills/` or user `~/.copilot/skills/` — older versions do not guarantee auto-loading.
 
 ### Option 1: install from the VS Code Marketplace (recommended)
 

@@ -28,4 +28,7 @@ package-lock.json
 .cb-*.txt
 .cbpkg.txt
 .cb-tools/**
+# 本地日志与截图工具不进 VSIX
+**/*.log
+tools/**
 

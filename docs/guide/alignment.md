@@ -90,20 +90,9 @@
 
 ## 4. 尚未实现（已知限制）
 
-> 功能级剩余项、不移植清单与决策见 [未实现功能待办](../dev/backlog.md) §1/§2。本表只列扩展特有的实现限制。
+完整的缺口、不移植清单与决策见 [未实现功能待办](../dev/backlog.md) §1/§2；用户手册里的简表见 [usage §16](./usage.md)。
 
-| 功能 | 说明 |
-|---|---|
-| Squirrel 构建脚本 | `<Script file="*.script"/>` 未支持（警告跳过；已决策维持现状） |
-| console runner | `cb_console_runner` 未移植（集成终端等价） |
-| `forceCompilerUseQuotes` / `forceLinkerUseQuotes` | CB 命令生成本身未使用该开关（仅读写/UI），不实现 |
-| EvalXMLCondition exec 分支 | CB 编译器 XML 条件 `<if exec="程序">` 会运行外部程序判定分支；扩展简化返回 default（gcc/clang XML 未使用） |
-| default.conf 全局设置编辑（B1/B2/C4） | 评估后不做（2026-09-27 方案 A）：CB 本体退出/打开设置时会整文件覆写，竞态不可消；全局目录/选项/库/变量已被完整读取生效。替代：Settings → Default Config… 手工编辑 |
-| Profiler 子集 | 已实现运行目标 → `gmon.out` → `gprof` → flat profile + call graph；`gprof -A` 源码注解独立输出通道；CSV/HTML 导出；Valgrind/Callgrind 建议用推荐扩展 |
-| SymTab 范围 | 只搜索当前工程/目标链接的库（含 libDirs 下的 `.a`/`.lib`）；任意目录批量扫描与动态库运行时符号未实现 |
-| Print | VS Code 无原生打印；建议市场打印扩展 |
-| Global variables 编辑 | 维持只读（default.conf 写回竞态，见上） |
-| WebView CSP / 模块拆分 | 0.8.155 起五个面板使用 nonce CSP + 公共运行时；`extension.ts` 已首批拆出 `features/toolCommands.ts`，剩余域按 [architecture.md](../dev/architecture.md) §4 分批 |
+用户可见的典型限制：Squirrel 脚本警告跳过、console runner 未移植（集成终端等价）、`default.conf` 全局设置只读、Profiler / SymTab 为子集、`<if exec>` 条件简化返回 default。
 
 ## 5. 菜单对齐（Code::Blocks 菜单栏 → 状态栏 Menu）
 

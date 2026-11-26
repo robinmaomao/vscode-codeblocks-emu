@@ -1,39 +1,41 @@
 # docs 目录索引
 
-> 文档导航、命名规范与维护约定。目录按用途分组，文件名统一使用 **英文 kebab-case**（正文保持中文）。
+> 文档导航、命名规范与维护约定。目录按用途分组，文件名统一使用 **英文 kebab-case**，正文保持中文；英文版以 `.en.md` 结尾。
+> 当前版本：**0.10.0**（Originium IDE for Code::Blocks）。
 
 ## 目录结构
 
 ```text
 docs/
   README.md                目录索引（本文件）
-  guide/                   用户与对齐参考
-    usage.md               用户手册（中文）
-    usage.en.md            用户手册（英文）
-    settings.md            设置项完整参考（中文）
-    settings.en.md         设置项完整参考（英文）
+  guide/                   面向使用者
+    usage.md / .en.md      用户手册
+    settings.md / .en.md   设置项完整参考
     alignment.md           与 Code::Blocks 对齐对照
-  dev/                     开发过程文档
-    progress.md            开发进度快照
-    backlog.md             未实现功能与决策
-    decisions.md           遗留问题决策清单
-    cb-porting-lessons.md  Code::Blocks 对话框移植经验（方法/事实/踩坑/清单）
-    architecture.md        模块地图、数据流、Feature 拆分约定与 P3 路线
-    setup.md               开发环境配置（Windows/Node/MinGW/测试）
-    setup.en.md            开发环境配置（英文）
-    i18n.md                国际化约定与实现
-    i18n.en.md             国际化（英文）
+    agent-control.md        Agent 控制（Copilot / MCP / CLI）
+    agent-recipes.md        Agent 可复制示例
+    agent-history.md        Agent 变更历史与撤销
+    recommended-extensions.md 推荐替代扩展
+  dev/                     面向贡献者
+    architecture.md        模块地图、数据流、Feature 约定
+    setup.md / .en.md      开发环境配置
+    i18n.md / .en.md       国际化约定
+    cb-porting-lessons.md  对话框移植经验
+    backlog.md             未实现功能与不移植清单
+    decisions.md           遗留问题决策
+    progress.md            当前开发快照
   testing/                 测试与验收
     strategy.md            分层测试方案
-    coverage-matrix.md     测试覆盖矩阵（自动生成）
-    test-report-<ver>.md   当前版本测试报告（滚动更新）
-    functional-audit-<ver>.md 独立功能审计报告（逐项证据/缺陷/修复建议）
-    functional-audit-<ver>-ledger.md 功能审计逐项台账（命令/设置/键位/DAP/菜单）
-    manual-acceptance.md   手工验收清单
+    coverage-matrix.md     覆盖矩阵（自动生成）
     performance-baseline.md 性能基准（自动生成）
-  release/                 逐版本发布说明（见 00-index.md）
-    pages/<tag>.md         GitHub Release 页面正文（绝对链接，固定模板）
-  archive/                 仍有取证价值的历史报告
+    manual-acceptance.md   手工验收清单
+    test-report-0.10.0.md  当前版本测试报告
+    archive/               历史报告 / 审计 / E3（含 README 索引）
+  release/                 逐版本发布说明
+    00-index.md            版本索引与 Release 页面模板
+    <ver>.md               里程碑说明（详细）
+    pages/<tag>.md         GitHub Release 正文（摘要，链接绝对）
+    archive/               合并后的旧 dev 说明与根因报告
   images/                  文档截图与 GIF
 ```
 
@@ -41,64 +43,62 @@ docs/
 
 | 文档 | 用途 |
 |------|------|
-| [guide/usage.md](./guide/usage.md) | 用户手册：安装、界面、构建、调试、快捷键、设置（§13）、FAQ、已知限制（§16）｜英文版 [guide/usage.en.md](./guide/usage.en.md) |
-| [guide/settings.md](./guide/settings.md) | **设置项完整参考**：10 个分区逐项说明类型、默认值、作用域、取值与生效时机｜英文版 [guide/settings.en.md](./guide/settings.en.md) |
-| [guide/agent-control.md](./guide/agent-control.md) | **Agent 控制**（Copilot / MCP / CLI）：11 个工具参考、典型工作流、开关与只读模式、排障｜英文版 [guide/agent-control.en.md](./guide/agent-control.en.md) |
-| [guide/agent-recipes.md](./guide/agent-recipes.md) | **Agent recipes**：构建修复、改选项、加文件/目标、调试、CI 导出、多工程、撤销的可复制示例｜英文版 [guide/agent-recipes.en.md](./guide/agent-recipes.en.md) |
-| [guide/agent-history.md](./guide/agent-history.md) | **Agent 变更历史与撤销**：快照/审计范围、QuickPick、冲突处理、存储与保留策略｜英文版 [guide/agent-history.en.md](./guide/agent-history.en.md) |
-| [guide/alignment.md](./guide/alignment.md) | 与 Code::Blocks 25.03 的逐项对齐依据（CB 源码位置 + 扩展实现 + 保护性差异） |
-| [dev/progress.md](./dev/progress.md) | 恢复开发进度用：总体进度、已完成能力、构建命令、关键踩坑、版本里程碑 |
-| [dev/backlog.md](./dev/backlog.md) | 功能对齐现状：剩余缺口、明确不移植清单、A–E 组完成摘要 |
-| [dev/decisions.md](./dev/decisions.md) | 历次核查待确认项的处置结论（状态表 + 缺陷一览 + 决策记录） |
-| [dev/cb-porting-lessons.md](./dev/cb-porting-lessons.md) | **Code::Blocks 对话框移植经验**：源码地图、已确认的 CB 语义（Build options / Properties / 通用控件）、有意保留差异、实现踩坑、测试分层与对齐清单 |
-| [dev/architecture.md](./dev/architecture.md) | **架构与模块地图**：数据流、目录职责、Feature 模块约定、WebView nonce/CSP 约定、P3 拆分路线 |
-| [dev/setup.md](./dev/setup.md) | **开发环境配置**：Node 24 LTS、w64devkit（gcc/g++/gdb）、依赖构建、分层测试、VS Code 调试与排错｜英文版 [dev/setup.en.md](./dev/setup.en.md) |
-| [dev/i18n.md](./dev/i18n.md) | 中英双语约定与实现：nls 静态贡献 / `ui.language` 运行时、`i18n.t()` 用法、批次台账、已知限制｜英文版 [dev/i18n.en.md](./dev/i18n.en.md) |
+| [guide/usage.md](./guide/usage.md) | 用户手册：安装、界面、构建、调试、快捷键、设置、FAQ、已知限制｜[English](./guide/usage.en.md) |
+| [guide/settings.md](./guide/settings.md) | 设置项完整参考（10 个分区）｜[English](./guide/settings.en.md) |
+| [guide/alignment.md](./guide/alignment.md) | 与 Code::Blocks 25.03 的逐项对齐依据与有意差异 |
+| [guide/agent-control.md](./guide/agent-control.md) | Agent 控制：工具参考、工作流、开关与排障｜[English](./guide/agent-control.en.md) |
+| [guide/agent-recipes.md](./guide/agent-recipes.md) | Agent 可复制示例｜[English](./guide/agent-recipes.en.md) |
+| [guide/agent-history.md](./guide/agent-history.md) | Agent 变更历史与撤销｜[English](./guide/agent-history.en.md) |
+| [guide/recommended-extensions.md](./guide/recommended-extensions.md) | 推荐替代扩展（打印、Doxygen、Fortran 等）｜[English](./guide/recommended-extensions.en.md) |
+
+## 开发文档
+
+| 文档 | 用途 |
+|------|------|
+| [dev/architecture.md](./dev/architecture.md) | 架构、模块地图、Feature 拆分约定 |
+| [dev/setup.md](./dev/setup.md) | 开发环境（Node / w64devkit / 分层测试）｜[English](./dev/setup.en.md) |
+| [dev/i18n.md](./dev/i18n.md) | 双语约定与实现｜[English](./dev/i18n.en.md) |
+| [dev/cb-porting-lessons.md](./dev/cb-porting-lessons.md) | Build options / Properties 移植经验与踩坑 |
+| [dev/backlog.md](./dev/backlog.md) | 唯一“未实现 / 不移植”清单 |
+| [dev/decisions.md](./dev/decisions.md) | 历史核查项的处置结论 |
+| [dev/progress.md](./dev/progress.md) | 当前进度快照、构建命令、关键踩坑 |
 
 ## 测试与验收
 
 | 文档 | 用途 |
 |------|------|
-| [testing/strategy.md](./testing/strategy.md) | 分层测试体系（L-1…L5 + CI）：覆盖范围、运行方式、环境约束、工具链安装 |
-| [testing/coverage-matrix.md](./testing/coverage-matrix.md) | 命令/视图/设置/键位/语言语法/DAP 能力逐项覆盖台账（`npm run coverage:matrix` 生成） |
-| [testing/test-report-0.9.2-archive.md](./testing/test-report-0.9.2-archive.md) | 当前版本的测试执行报告（滚动更新）：分层结果、覆盖台账、本版变更与缺陷处置 |
-| [testing/e3-manual-report-0.9.2.md](./testing/e3-manual-report-0.9.2.md) | **0.9.2 E3 GUI 验收记录**：便携 VS Code + CDP 驱动真实工作台，覆盖工程树/菜单/构建/WebView/GDB/语言/搜索，附观察项与截图目录 |
-| [testing/functional-audit-0.9.2.md](./testing/functional-audit-0.9.2.md) | **0.9.2 全量逐项审计与修复**：命令/设置/视图/键位/语言/DAP/WebView + Agent 三端逐项证据、覆盖真实性、D-01…D-13 缺陷与修复（E0–E4 分级；§12 修复轮记录） |
-| [testing/functional-audit-0.8.159.md](./testing/functional-audit-0.8.159.md) | **独立功能审计报告**：136 命令 / 91 设置（0.9.0 起 93）/ 34 键位 / 30 DAP 的逐项证据、覆盖真实性、S1–S3 缺陷与修复建议（附录 [台账](./testing/functional-audit-0.8.159-ledger.md)；§13 记录 0.9.0 合并轮） |
-| [testing/test-report-0.8.139-full.md](./testing/test-report-0.8.139-full.md) | 0.8.139 完整独立复核：七层结果、失败/SKIP 取证、ccache 与短路径专项、性能明细 |
-| [testing/manual-acceptance.md](./testing/manual-acceptance.md) | 需人工 GUI 会话执行的验收项与留档要求（自动化不可覆盖的交互） |
-| [testing/performance-baseline.md](./testing/performance-baseline.md) | 微基准 + 真实构建的性能数据与预算（`npm run perf:report` 更新，含趋势） |
+| [testing/test-report-0.10.0.md](./testing/test-report-0.10.0.md) | 当前版本测试报告（滚动更新） |
+| [testing/strategy.md](./testing/strategy.md) | 分层测试体系（L-1…L5 + CI） |
+| [testing/coverage-matrix.md](./testing/coverage-matrix.md) | 命令/视图/设置/键位/语法/DAP 覆盖台账（自动生成） |
+| [testing/performance-baseline.md](./testing/performance-baseline.md) | 性能基准与趋势（自动生成） |
+| [testing/manual-acceptance.md](./testing/manual-acceptance.md) | 不可自动化的手工验收项 |
+| [testing/archive/README.md](./testing/archive/README.md) | 历史测试报告、功能审计、E3 验收索引 |
 
-## 历史归档
+## 发布说明
 
-- [`release/`](./release/)：逐版本发布说明。保留全部正式版说明与最近两份 dev 说明（`0.8.129-dev`、`0.8.135-dev`）；
-  `0.8.76`–`0.8.128` 的 dev 说明已合并为 [`0.8.76-0.8.99-dev.md`](./release/archive/0.8.76-0.8.99-dev.md)、
-  [`0.8.100-0.8.128-dev.md`](./release/archive/0.8.100-0.8.128-dev.md)；`0.8.2`–`0.8.46` 见
-  [`0.8.2-0.8.46.md`](./release/archive/0.8.2-0.8.46.md)。索引见 [release/00-index.md](./release/00-index.md)。
-- [`archive/`](./archive/)：仅保留仍有持续取证价值的报告：
-  - [2026-11-04-rg-storm-root-cause.md](./archive/2026-11-04-rg-storm-root-cause.md)（0.8.136 工作区路径守卫根因）
-  - [compile-link-alignment-round4.md](./archive/compile-link-alignment-round4.md)（命令快照测试的期望值来源）
-  - [progress-history-0.8.89.md](./archive/progress-history-0.8.89.md)（0.8.89 及以前逐轮条目）
-- 其余一次性盘点/核查报告已被 release 说明与决策清单取代，不再保留。
+- 索引与发布流程：[release/00-index.md](./release/00-index.md)。
+- 当前版本：[release/0.10.0.md](./release/0.10.0.md)；GitHub 页面：[release/pages/0.10.0.md](./release/pages/0.10.0.md)。
+- 历史 dev 说明合并归档：[release/archive/](./release/archive/)。
+- 更名：0.10.0 起产品名为 **Originium IDE for Code::Blocks**，扩展 ID `robinmaomao.originium-ide`，VSIX 前缀 `originium-ide-`；`codeblocks.*` 命名空间不变。
 
-## 命名规范
+## 命名与归档规范
 
-- 文件名统一 **小写英文 kebab-case**，扩展名 `.md`；英文版以 `.en.md` 结尾。
-- 版本号原样保留（`0.8.137.md`、`0.8.129-dev.md`）；版本区间用 `-`（`0.8.76-0.8.99-dev.md`），不再使用 `~`。
-- 带日期的归档以 `YYYY-MM-DD-` 前缀开头（`2026-11-04-rg-storm-root-cause.md`）。
-- 目录职责：`guide/` 面向使用者，`dev/` 面向开发过程，`testing/` 面向测试与验收，`release/` 只放发布说明，`archive/` 只放仍有取证价值的历史报告。
-
-## 归档与保留策略
-
-- **常读文档**随版本更新；自动生成文档（覆盖矩阵、性能基准）不手工编辑。
-- **release**：每个版本新增 `0.8.xx-dev.md`；正式版里程碑汇总进 [CHANGELOG](../CHANGELOG.md)。旧 dev 说明按版本段合并归档，正文保留。
-- **archive**：只保留仍被引用或仍具取证价值的报告；一次性报告在结论并入决策清单/release 后删除。
-- 提交/推送日志不写轮次编号；新增核查报告用主题命名，实施完毕后归档到 `archive/`，待决项同步并入 [dev/decisions.md](./dev/decisions.md)。
+- 文件名小写英文 kebab-case；英文版 `.en.md`；版本号原样保留（`0.8.137.md`、`0.8.129-dev.md`）。
+- 带日期的归档用 `YYYY-MM-DD-` 前缀（`2026-11-04-rg-storm-root-cause.md`）。
+- 目录职责：`guide/` 用户，`dev/` 开发过程，`testing/` 测试与验收（历史进 `archive/`），`release/` 发布说明（`pages/` 只放摘要，`archive/` 放合并历史）。
+- 新报告在结论并入 release / decisions 后移入对应 `archive/`，不再堆在顶层。
 
 ## 维护约定
 
-- 测试类文档维护时机：**视觉基线**在 UI/WebView 变更后刷新（`npm run visual:baseline`，随 PR 附基线 PNG）；**性能基准**在构建链路或依赖变化后刷新（`npm run perf:baseline`）并同步 [testing/performance-baseline.md](./testing/performance-baseline.md)（`npm run perf:report`）；**覆盖矩阵**在新增/调整用例后刷新（`npm run coverage:matrix`），并与当版 [测试报告](./testing/test-report-0.9.2-archive.md) §2 台账保持一致。
-- **文档一致性巡检**：`tests/contract/test-doc-consistency.js`（随 `npm run test:contract` 自动跑）校验「文档里的命令/相对链接真实存在」「覆盖矩阵与性能基准的计数与产物一致」「版本标记与 `package.json` 一致」；改文档后可单独跑一次，`--self-test` 自检规则本身。
-- **GitHub Release 页面**：正文放 [release/pages/](./release/pages/)（文件名 = tag，链接必须绝对），模板与发布步骤见 [release/00-index.md](./release/00-index.md#github-release-页面pages)；新增/修改后跑 `node tests/contract/gen-release-notes.js --check`，发布时用 `gh release edit <tag> --title <纯版本号> --notes-file …`（Release 标题不带主题与英文）。
-- **CB 移植经验**：每轮对齐 Code::Blocks 对话框后，把新确认的语义补进 [dev/cb-porting-lessons.md](./dev/cb-porting-lessons.md) §3（事实）、§4（有意差异）、§5（踩坑），避免下一轮重新翻源码或把已决策的差异改回去。
-- 代码约定（空 catch 需注释、无 `console.*`、无 `@ts-ignore`、**已迁移 i18n 的文件 UI 语境禁中文字面量**）由 `tests/test-code-conventions.js` 自动检查；i18n 三条守卫 `tests/test-i18n-{nls,dict}.js` + `tests/test-i18n-runtime.js` 约定见 [dev/i18n.md](./dev/i18n.md) §6。
+- **文档一致性**：`tests/contract/test-doc-consistency.js`（随 `npm run test:contract`）校验命令存在、相对链接有效、覆盖矩阵/性能基准计数与版本标记（D1–D5）。
+- **覆盖矩阵**：新增/调整用例后 `npm run coverage:matrix`，并与当版测试报告 §2 台账一致。
+- **性能基准**：构建链路变化后 `npm run perf:baseline`，再用 `npm run perf:report` 更新文档。
+- **视觉基线**：UI/WebView 变化后 `npm run visual:baseline`，随 PR 附基线 PNG。
+- **Release 页面**：新增/修改 `pages/<tag>.md` 后跑 `node tests/contract/gen-release-notes.js --check`；正文用 `--notes-file` 发布，标题只用纯版本号。
+
+## 敏感信息约定
+
+- 文档、注释、测试夹具中**禁止**出现真实个人目录（如 `E:\<私人目录>\...`）、内部项目/SDK 代号、个人机器名或硬件指纹。
+- 统一占位符：`D:\work\demo-workspace`、`[demo]project`、`SDK_DEMO_BOARD_TEST_20260101`、`D:\tools`、`demo workspace`。
+- 测试需要覆盖空格/方括号/盘符等语义时，用上述占位符构造，不要复制真实工程路径。
+- 提交前用 `git grep -n "\[内部\]"` 查内部标记；示例路径只使用上方占位符，出现真实盘符目录或机器名即需替换。

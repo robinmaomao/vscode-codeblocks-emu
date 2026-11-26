@@ -1,8 +1,8 @@
 # 测试执行报告（0.8.157 · 滚动更新）
 
-> 生成时间：2026-11-19 ｜ 执行环境：Windows 11 x64 ｜ Node v24.22.3 ｜ CPU demo CPU ×16 ｜ 32GB ｜ w64devkit GCC 16.2 / GDB 18.1
-> 方案见 [测试方案](./strategy.md)；覆盖台账见 [测试覆盖矩阵](./coverage-matrix.md)；性能数据见 [性能基准](./performance-baseline.md)。
-> 上一版权威复核见 [0.8.152 测试报告](./test-report-0.8.152-archive.md)；本版发布说明见 [release/0.8.157.md](../release/0.8.157.md)。
+> 生成时间：2026-11-19 ｜ 执行环境：Windows 11 x64 ｜ Node v24.22.3 ｜ w64devkit GCC 16.2 / GDB 18.1
+> 方案见 [测试方案](../strategy.md)；覆盖台账见 [测试覆盖矩阵](../coverage-matrix.md)；性能数据见 [性能基准](../performance-baseline.md)。
+> 上一版权威复核见 [0.8.152 测试报告](./test-report-0.8.152-archive.md)；本版发布说明见 [release/0.8.157.md](../../release/0.8.157.md)。
 
 ## 1. 分层结果
 
@@ -38,7 +38,7 @@
 | 语言/语法 | 6 | 6 | 100% |
 | DAP 能力 | 30 | 30 | 100% |
 
-> 完整清单见 [测试覆盖矩阵](./coverage-matrix.md)（`npm run coverage:matrix` 生成，数据来源 package.json v0.8.157）。
+> 完整清单见 [测试覆盖矩阵](../coverage-matrix.md)（`npm run coverage:matrix` 生成，数据来源 package.json v0.8.157）。
 > 命令缺口 0 个。
 
 ## 3. 本版变更与回归范围
@@ -51,7 +51,7 @@
 | 编译器 | `compiler_*.xml` 显示名/路径元数据、Code::Blocks 全量 options/metadata、OpenWatcom/Cygwin/MSYS2/TDM/LCC/DMD/GDC/gfortran 探测 |
 | 命令/设置规模 | 不变（136 / 91 / 6 / 34） |
 | 新增测试 | `test-autoversioning*.js`、`test-profiler-parse.js`、`test-more-compilers.js` 扩展 |
-| 文档 | [release/0.8.157.md](../release/0.8.157.md)、发布页、README / usage / progress / CHANGELOG / backlog / alignment 同步 |
+| 文档 | [release/0.8.157.md](../../release/0.8.157.md)、发布页、README / usage / progress / CHANGELOG / backlog / alignment 同步 |
 
 ## 4. 缺陷与处置
 

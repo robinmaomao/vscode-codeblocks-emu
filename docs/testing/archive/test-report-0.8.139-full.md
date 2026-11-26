@@ -1,8 +1,8 @@
 # 完整测试验证报告（0.8.139 · 独立复核）
 
-> 生成时间：2026-11-05 ｜ 执行环境：Windows 10 x64 ｜ Node v24.19.0 / npm 11.17.0 ｜ CPU demo CPU ×8 @ 3.70GHz ｜ 16GB
+> 生成时间：2026-11-05 ｜ 执行环境：Windows 10 x64 ｜ Node v24.19.0 / npm 11.17.0 ｜ CPU 8 逻辑核
 > 代码版本：`0.8.139`（0.8.138 + 8.3 短路径修复），发布提交见仓库历史
-> 方案见 [测试方案](./strategy.md)；覆盖台账见 [测试覆盖矩阵](./coverage-matrix.md)；性能数据见 [性能基准](./performance-baseline.md)。
+> 方案见 [测试方案](../strategy.md)；覆盖台账见 [测试覆盖矩阵](../coverage-matrix.md)；性能数据见 [性能基准](../performance-baseline.md)。
 > 本报告为**独立复核**，不改动滚动报告 [test-report-0.9.2-archive.md](./test-report-0.9.2-archive.md)，也不刷新视觉/性能基线。
 
 ## 1. 结论摘要
@@ -11,7 +11,7 @@
 - **补齐空白**：滚动报告标注「未执行」的 **L2 宿主层**本轮实际执行，**24 用例全部通过（0 fail / 0 skip）**，靶点 VS Code **1.85.0**。
 - **ccache 修复独立复现**：中文路径下「绝对源路径 + 仅开关」仍 **0/1 可缓存**；改为「工程相对源路径 + `-fno-working-directory`」后 **2/2 可缓存、1 次 Direct HIT**；`.text` 与 ASCII 对照逐字节一致，`DW_AT_comp_dir` 保留完整中文路径。
 - **8.3 短路径修复**：`shortPathWin` 原实现返回 `E:\"C:\...\"` / `D:\"...\"` 畸形路径（CI run `41836259345` 暴露）；改为 `windowsVerbatimArguments + cmd /u` + UTF-16LE 解码 + `existsSync` 校验后，真实 `windres` 以 `CB-RC-~1\中文资~1\res.rc` 成功生成 `.res`。
-- **新增回归**：新增 [tests/e2e/test-e2e-ccache.js](../../tests/e2e/test-e2e-ccache.js)（21 断言）与 `tests/test-drive-case.js` 4 条短路径断言；无 ccache 时按约定 SKIP（已单独验证）。
+- **新增回归**：新增 [tests/e2e/test-e2e-ccache.js](../../../tests/e2e/test-e2e-ccache.js)（21 断言）与 `tests/test-drive-case.js` 4 条短路径断言；无 ccache 时按约定 SKIP（已单独验证）。
 
 ## 2. 环境与版本
 
@@ -74,7 +74,7 @@
 | C | 完整规避 | **工程相对** `main.c` | 是 | **2 / 2** | **1（Direct）** | 0 |
 | D | ASCII 对照 | 相对 `main.c` | 否 | 2 / 2 | 1（Direct） | 0 |
 
-> 结论：只有 B 的「仅追加开关」不足以恢复缓存，必须同时把编译单元改为工程相对源路径——与 [release/0.8.138.md](../release/0.8.138.md) 缺陷 #1 的记录一致。
+> 结论：只有 B 的「仅追加开关」不足以恢复缓存，必须同时把编译单元改为工程相对源路径——与 [release/0.8.138.md](../../release/0.8.138.md) 缺陷 #1 的记录一致。
 
 ### 5.2 产物一致性
 
@@ -86,7 +86,7 @@
 
 ### 5.3 新增自动化回归
 
-- 文件：[tests/e2e/test-e2e-ccache.js](../../tests/e2e/test-e2e-ccache.js)，**21 断言，0 fail**。
+- 文件：[tests/e2e/test-e2e-ccache.js](../../../tests/e2e/test-e2e-ccache.js)，**21 断言，0 fail**。
 - 覆盖：中文路径构建成功、命令含 ccache 前缀、以 `-fno-working-directory` 结尾、源文件为相对路径、链接命令不加开关、info 说明恰好一次、无「仍无法缓存」告警、真实 ccache `Cacheable calls > 0` 且 `Uncacheable = 0`、二次构建 `Hits > 0`。
 - 负例：ASCII 工程仍用绝对源路径且不加开关；`compilerCache=none` 不前置 ccache、不加开关、仍用绝对路径。
 - SKIP 验证：把 ccache 从 PATH 移除后执行 → `SKIP ... 未找到 ccache`，退出码 0（不伪造通过）。
@@ -143,7 +143,7 @@
 
 - **外部修改 `.cbp` 提示**：真实编辑器改 `test-project/hello-cb.cbp` 后切回 VS Code，应弹「已在磁盘上被修改」（`重新加载` / `全部重新加载` / `忽略`）。
 - **8.3 短路径手验**：在含空格/中文的工程路径构建带 `.rc` 的工程，确认 windres 命令 `-i` 路径存在且能生成 `.res`；`Use83Paths` 的 include/lib 目录可解析。
-- **面板手工交互**：[手工验收清单](./manual-acceptance.md) §4（窄面板 520 px、英文界面、未切 tab 直接保存等）。
+- **面板手工交互**：[手工验收清单](../manual-acceptance.md) §4（窄面板 520 px、英文界面、未切 tab 直接保存等）。
 - **`sccache` 非 ASCII 行为**：本机未安装 sccache，未做实测；产品保持原行为。
 - **`Compile File (Without Project)` 编码限制**：走 VS Code 任务终端（固定 UTF-8），无法解码编译器 GBK 输出（已记录不修）。
 - **`codeblocks.detectCompilers`**：真实并行探测外部编译器需交互环境（覆盖矩阵登记的可解释缺项）。

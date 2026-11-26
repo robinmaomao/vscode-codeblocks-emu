@@ -18,7 +18,7 @@ const project = {
 };
 const gen = new CommandGenerator(project, compiler);
 
-const file = 'E:/demo-workspace/demo workspace/src/main.c';
+const file = 'D:/work/demo workspace/src/main.c';
 const base = {
   target: null,
   pf: { compilerVar: 'CC' },
@@ -38,10 +38,10 @@ const check = (name, cond) => {
 const build = gen.generate(CommandType.CompileObjectCmd, { ...base });
 const clangd = gen.generate(CommandType.CompileObjectCmd, { ...base, nativeSep: false });
 
-check('构建命令 $file 为反斜杠', build.includes('E:\\demo-workspace\\demo workspace\\src\\main.c'));
-check('构建命令不含正斜杠文件路径', !build.includes('E:/demo-workspace/demo workspace/src/main.c'));
-check('clangd 命令 $file 保持正斜杠', clangd.includes('E:/demo-workspace/demo workspace/src/main.c'));
-check('clangd 命令不含反斜杠文件路径', !clangd.includes('E:\\demo-workspace\\demo workspace\\src\\main.c'));
+check('构建命令 $file 为反斜杠', build.includes('D:\\work\\demo workspace\\src\\main.c'));
+check('构建命令不含正斜杠文件路径', !build.includes('D:/work/demo workspace/src/main.c'));
+check('clangd 命令 $file 保持正斜杠', clangd.includes('D:/work/demo workspace/src/main.c'));
+check('clangd 命令不含反斜杠文件路径', !clangd.includes('D:\\work\\demo workspace\\src\\main.c'));
 
 console.log('--- build ---');
 console.log(build);
