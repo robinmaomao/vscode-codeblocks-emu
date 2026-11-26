@@ -3,7 +3,7 @@
 本文件记录**正式版**里程碑；近期 dev 迭代的逐轮发布说明见 [`docs/release/`](./docs/release/)（`0.8.xx-dev.md`），
 `0.8.76`–`0.8.128` 的 dev 说明已合并归档到 [`docs/release/archive/`](./docs/release/archive/)；版本号与维护约定见 [`docs/release/00-index.md`](./docs/release/00-index.md)。
 
-## 0.10.0 — 2026-11-20
+## 0.10.0 — 2026-11-26
 
 > 功能版：Agent 变更审计与一键撤销（本地历史 / 字节级快照 / 冲突保护）。
 

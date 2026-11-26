@@ -32,6 +32,9 @@ try {
   // 同长度修改也必须能检测（mtime + size 口径）
   const before = fs.readFileSync(ws, 'utf8');
   fs.writeFileSync(ws, before.replace('title="A"', 'title="B"'));
+  // CI 上连续写入可能落在同一 mtime 时间片；显式推进 mtime，验证 signature 变化路径
+  const bumped = new Date(Date.now() + 1000);
+  fs.utimesSync(ws, bumped, bumped);
   check('同长度内容修改仍能检测', tracker.hasChanged(ws) === true, tracker.hasChanged(ws), true);
 
   tracker.forget(ws);
